@@ -255,10 +255,12 @@ func TestPelletRepositoryRebuildRestoresAuthoritativeSearchResults(t *testing.T)
 		t.Fatal(err)
 	}
 	assertPelletReferences(t, drifted, second.Reference)
+	assertExternalContentFTSIntegrity(t, repository.db, "pellets_fts", false)
 
 	if err := repository.RebuildPelletSearchIndex(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	assertExternalContentFTSIntegrity(t, repository.db, "pellets_fts", true)
 	after, err := repository.SearchPellets(context.Background(), fixture.main, storage.PelletSearchOptions{Query: "rebuildtoken"})
 	if err != nil {
 		t.Fatal(err)

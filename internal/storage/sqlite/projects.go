@@ -456,5 +456,8 @@ func workspaceIdentityConflict(registration storage.ProjectRegistration, byRoot,
 }
 
 func projectStorageError(operation string, err error) error {
+	if stable := stableDatabaseError(operation, err); stable != nil {
+		return stable
+	}
 	return domain.WrapError(domain.Storage, "project_storage_failed", "could not access project registrations", map[string]any{"operation": operation}, err)
 }

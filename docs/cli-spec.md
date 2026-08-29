@@ -288,6 +288,8 @@ Errors emit one compact object to stderr and nothing to stdout:
 
 `code` and the types of documented `details` fields are stable. `message` is diagnostic text and may improve without a schema-version change.
 
+SQLite lock contention is `database_busy` with exit code 4 and a stable string `details.operation`; this includes migration writer-lock acquisition and ordinary mutations. A malformed SQLite image is `database_corrupt`, while a non-SQLite or unsupported file format is `database_incompatible`; both use exit code 5, emit no success object, perform no recovery write, and expose only a stable operation name rather than raw SQL or SQLite diagnostics. Schema-version failures remain distinct as `schema_version_invalid`, `schema_version_unsupported`, and `schema_too_new`.
+
 ## Human-readable output
 
 `--human` is intended for inspection, not scripting. It may use tables for lists and labeled fields for `show`, but must remain concise. Human formatting is not stable across releases.

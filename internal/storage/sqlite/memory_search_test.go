@@ -195,10 +195,12 @@ func TestMemoryRepositoryRebuildRestoresAuthoritativeSearchResults(t *testing.T)
 		t.Fatal(err)
 	}
 	assertMemoryIDs(t, drifted, second.ID)
+	assertExternalContentFTSIntegrity(t, repository.db, "memories_fts", false)
 
 	if err := repository.RebuildMemorySearchIndex(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	assertExternalContentFTSIntegrity(t, repository.db, "memories_fts", true)
 	after, err := repository.SearchMemories(context.Background(), fixture.main.Project, storage.MemorySearchOptions{Query: "rebuildtoken"})
 	if err != nil {
 		t.Fatal(err)

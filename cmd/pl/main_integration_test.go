@@ -56,12 +56,114 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		if err := os.WriteFile(discovery.DatabasePath(root), []byte("not a SQLite database"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+		incompatibleBefore, err := os.ReadFile(discovery.DatabasePath(root))
+		if err != nil {
+			t.Fatal(err)
+		}
 		result = runFoundationCLI(t, executable, root, "project", "list")
 		assertFoundationResult(t, result, 5, "", foundationErrorJSON(
-			"database_open_failed",
-			"could not open database",
-			nil,
+			"database_incompatible",
+			"the file is not a compatible Pellets SQLite database",
+			map[string]any{"operation": "open database connection"},
 		))
+		incompatibleAfter, err := os.ReadFile(discovery.DatabasePath(root))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(incompatibleAfter, incompatibleBefore) {
+			t.Fatal("compiled incompatible-database failure mutated the database file")
+		}
+		for _, suffix := range []string{"-journal", "-wal", "-shm"} {
+			if _, err := os.Stat(discovery.DatabasePath(root) + suffix); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("compiled incompatible-database failure left sidecar %q: %v", suffix, err)
+			}
+		}
+
+		if err := os.Remove(discovery.DatabasePath(root)); err != nil {
+			t.Fatal(err)
+		}
+		createFoundationCorruptDatabase(t, discovery.DatabasePath(root))
+		corruptBefore, err := os.ReadFile(discovery.DatabasePath(root))
+		if err != nil {
+			t.Fatal(err)
+		}
+		result = runFoundationCLI(t, executable, root, "project", "list")
+		assertFoundationResult(t, result, 5, "", foundationErrorJSON(
+			"database_corrupt",
+			"the Pellets database is corrupt",
+			map[string]any{"operation": "verify database integrity"},
+		))
+		corruptAfter, err := os.ReadFile(discovery.DatabasePath(root))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(corruptAfter, corruptBefore) {
+			t.Fatal("compiled corrupt-database failure mutated the database file")
+		}
+		for _, suffix := range []string{"-journal", "-wal", "-shm"} {
+			if _, err := os.Stat(discovery.DatabasePath(root) + suffix); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("compiled corrupt-database failure left sidecar %q: %v", suffix, err)
+			}
+		}
+	})
+
+	t.Run("migration busy contract", func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), "compiled migration busy")
+		metadataPath := filepath.Join(root, discovery.MetadataDirectory)
+		if err := os.MkdirAll(metadataPath, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		fixture, err := os.ReadFile(filepath.Join("..", "..", "internal", "storage", "sqlite", "testdata", "released-v1.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		databasePath := discovery.DatabasePath(root)
+		if err := os.WriteFile(databasePath, fixture, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		locker, err := sql.Open("sqlite", databasePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer locker.Close()
+		locker.SetMaxOpenConns(1)
+		locker.SetMaxIdleConns(1)
+		var journalMode string
+		if err := locker.QueryRow("PRAGMA journal_mode = WAL").Scan(&journalMode); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.EqualFold(journalMode, "wal") {
+			t.Fatalf("migration busy fixture journal mode = %q", journalMode)
+		}
+		if _, err := locker.Exec("BEGIN IMMEDIATE"); err != nil {
+			t.Fatal(err)
+		}
+		locked := true
+		defer func() {
+			if locked {
+				_, _ = locker.Exec("ROLLBACK")
+			}
+		}()
+
+		started := time.Now()
+		result := runFoundationCLI(t, executable, root, "project", "list")
+		elapsed := time.Since(started)
+		assertFoundationResult(t, result, 4, "", foundationErrorJSON(
+			"database_busy",
+			"the Pellets database is busy",
+			map[string]any{"operation": "migrate database"},
+		))
+		if elapsed < 4*time.Second || elapsed > 10*time.Second {
+			t.Fatalf("compiled migration busy wait elapsed %s, want bounded wait near configured five seconds", elapsed)
+		}
+		assertFoundationQueryInt(t, locker, "PRAGMA user_version", 1)
+		assertFoundationQueryInt(t, locker, "SELECT COUNT(*) FROM sqlite_schema WHERE name = 'project_workspaces'", 0)
+		assertFoundationQueryInt(t, locker, "SELECT COUNT(*) FROM application_metadata WHERE key = 'database_id'", 0)
+		if _, err := locker.Exec("ROLLBACK"); err != nil {
+			t.Fatal(err)
+		}
+		locked = false
 	})
 
 	t.Run("compiled pellet queue workflow", func(t *testing.T) {
@@ -1376,6 +1478,51 @@ func assertFoundationDatabase(t *testing.T, databasePath string, projectCount in
 		t.Fatal(err)
 	}
 	assertFoundationMetadataEntries(t, databasePath)
+}
+
+func createFoundationCorruptDatabase(t *testing.T, databasePath string) {
+	t.Helper()
+	database, err := sqlite.Open(context.Background(), databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE corruption_probe (
+			id INTEGER PRIMARY KEY,
+			payload BLOB NOT NULL
+		) STRICT;
+		INSERT INTO corruption_probe(payload) VALUES (randomblob(2048));`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	var rootPage, pageSize int64
+	if err := database.QueryRow("SELECT rootpage FROM sqlite_schema WHERE name = 'corruption_probe'").Scan(&rootPage); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.QueryRow("PRAGMA page_size").Scan(&pageSize); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if rootPage <= 1 || pageSize <= 0 {
+		database.Close()
+		t.Fatalf("corruption fixture root page/page size = %d/%d", rootPage, pageSize)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	file, err := os.OpenFile(databasePath, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteAt([]byte{0xff}, (rootPage-1)*pageSize); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func captureFoundationDatabaseState(t *testing.T, databasePath string) foundationDatabaseState {

@@ -218,7 +218,7 @@ func (repository *MemoryRepository) RebuildMemorySearchIndex(ctx context.Context
 	if _, err := connection.ExecContext(ctx, "INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')"); err != nil {
 		return memoryFTSError("rebuild memory search index", err)
 	}
-	if _, err := connection.ExecContext(ctx, "INSERT INTO memories_fts(memories_fts) VALUES ('integrity-check')"); err != nil {
+	if err := verifyExternalContentFTSIndex(ctx, connection, "memories_fts"); err != nil {
 		return memoryFTSError("verify rebuilt memory search index", err)
 	}
 	if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
@@ -536,15 +536,8 @@ func memoryNotFound(memoryID int64) error {
 }
 
 func memoryStorageError(operation string, err error) error {
-	var sqliteError interface{ Code() int }
-	if errors.As(err, &sqliteError) {
-		primaryCode := sqliteError.Code() & 0xff
-		if primaryCode == 5 || primaryCode == 6 {
-			return domain.WrapError(
-				domain.Conflict, "database_busy", "the Pellets database is busy",
-				map[string]any{"operation": operation}, err,
-			)
-		}
+	if stable := stableDatabaseError(operation, err); stable != nil {
+		return stable
 	}
 	return domain.WrapError(
 		domain.Storage,
@@ -556,12 +549,8 @@ func memoryStorageError(operation string, err error) error {
 }
 
 func memoryFTSError(operation string, err error) error {
-	var sqliteError interface{ Code() int }
-	if errors.As(err, &sqliteError) {
-		primaryCode := sqliteError.Code() & 0xff
-		if primaryCode == 5 || primaryCode == 6 {
-			return memoryStorageError(operation, err)
-		}
+	if stable := stableDatabaseError(operation, err); stable != nil {
+		return stable
 	}
 	return domain.WrapError(
 		domain.Storage,

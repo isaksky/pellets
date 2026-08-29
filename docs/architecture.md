@@ -147,12 +147,13 @@ The embedded sequence must begin at version 1 and have no duplicate, missing, or
 On database open:
 
 1. Read `PRAGMA user_version` before any persistent write. Reject a negative version as invalid, a version-0 database with persistent schema as unsupported, and a version newer than the executable understands, all with stable typed errors and without changing the database.
-2. If the version is already current, perform no migration transaction and no schema-version write.
-3. If the version is older, use the same connection to acquire SQLite's writer lock with [`BEGIN IMMEDIATE`](https://sqlite.org/lang_transaction.html#deferred_immediate_and_exclusive_transactions), then re-read and revalidate `user_version`. This re-read prevents a second process that waited for the lock from applying migrations already committed by the first.
-4. Apply every missing migration in strict consecutive order in that transaction. Run each migration's assertions after its SQL succeeds, then set `PRAGMA user_version` to that migration's version before continuing.
-5. Run `PRAGMA foreign_key_check` after all pending migrations and before `COMMIT`.
+2. Run the read-only `PRAGMA integrity_check` and the declared read-only schema preflight for that supported version before changing journal mode or beginning a migration. A malformed SQLite image is `database_corrupt`; a non-SQLite or unsupported file format is `database_incompatible`; a valid SQLite file whose declared supported version does not match its required schema is `schema_version_unsupported`. These failures are write-free and expose no raw SQLite diagnostics.
+3. If the version is already current, perform no migration transaction and no schema-version write.
+4. If the version is older, use the same connection to acquire SQLite's writer lock with [`BEGIN IMMEDIATE`](https://sqlite.org/lang_transaction.html#deferred_immediate_and_exclusive_transactions), then re-read and revalidate `user_version`. This re-read prevents a second process that waited for the lock from applying migrations already committed by the first.
+5. Apply every missing migration in strict consecutive order in that transaction. Run each migration's assertions after its SQL succeeds, then set `PRAGMA user_version` to that migration's version before continuing.
+6. Run `PRAGMA foreign_key_check`, verify every declared external-content FTS index against its authoritative content with FTS5 `integrity-check` rank 1, and rerun `PRAGMA integrity_check` after all pending migrations and before `COMMIT`.
 
-Any SQL, migration assertion, `user_version`, foreign-key check, or commit failure causes an explicit rollback. Schema changes and every `user_version` advance therefore commit together or the database retains its preceding schema and version.
+Any SQL, migration assertion, `user_version`, foreign-key, FTS, database-integrity, or commit failure causes an explicit rollback. Schema changes and every `user_version` advance therefore commit together or the database retains its preceding schema and version. A migration writer-lock timeout uses the same bounded five-second policy and stable `database_busy` response as ordinary mutations.
 
 Migrations are forward-only and are applied exactly once according to the locked `user_version`; they need not be independently idempotent. Destructive table rewrites should use SQLite’s create-copy-validate-swap pattern. FTS indexes are derived and may be dropped and rebuilt from authoritative tables during migration.
 
@@ -185,6 +186,11 @@ Use typed errors with stable machine codes, for example:
 - `priority_conflict`
 - `fts_unavailable`
 - `database_busy`
+- `database_corrupt`
+- `database_incompatible`
+- `database_migration_failed`
+- `schema_version_invalid`
+- `schema_version_unsupported`
 - `schema_too_new`
 - `confirmation_required`
 

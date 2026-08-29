@@ -385,7 +385,7 @@ func (repository *PelletRepository) RebuildPelletSearchIndex(ctx context.Context
 	if _, err := connection.ExecContext(ctx, "INSERT INTO pellets_fts(pellets_fts) VALUES ('rebuild')"); err != nil {
 		return pelletFTSError("rebuild pellet search index", err)
 	}
-	if _, err := connection.ExecContext(ctx, "INSERT INTO pellets_fts(pellets_fts) VALUES ('integrity-check')"); err != nil {
+	if err := verifyExternalContentFTSIndex(ctx, connection, "pellets_fts"); err != nil {
 		return pelletFTSError("verify rebuilt pellet search index", err)
 	}
 	if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
@@ -1632,15 +1632,8 @@ func pelletNotFound(reference domain.PelletReference) error {
 }
 
 func pelletStorageError(operation string, err error) error {
-	var sqliteError interface{ Code() int }
-	if errors.As(err, &sqliteError) {
-		primaryCode := sqliteError.Code() & 0xff
-		if primaryCode == 5 || primaryCode == 6 {
-			return domain.WrapError(
-				domain.Conflict, "database_busy", "the Pellets database is busy",
-				map[string]any{"operation": operation}, err,
-			)
-		}
+	if stable := stableDatabaseError(operation, err); stable != nil {
+		return stable
 	}
 	return domain.WrapError(
 		domain.Storage,
@@ -1652,12 +1645,8 @@ func pelletStorageError(operation string, err error) error {
 }
 
 func pelletFTSError(operation string, err error) error {
-	var sqliteError interface{ Code() int }
-	if errors.As(err, &sqliteError) {
-		primaryCode := sqliteError.Code() & 0xff
-		if primaryCode == 5 || primaryCode == 6 {
-			return pelletStorageError(operation, err)
-		}
+	if stable := stableDatabaseError(operation, err); stable != nil {
+		return stable
 	}
 	return domain.WrapError(
 		domain.Storage,

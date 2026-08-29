@@ -18,8 +18,9 @@ import (
 
 const (
 	// LatestSchemaVersion is the newest schema understood by this executable.
-	LatestSchemaVersion = 3
-	driverName          = "sqlite"
+	LatestSchemaVersion     = 3
+	driverName              = "sqlite"
+	busyTimeoutMilliseconds = 5000
 )
 
 //go:embed migrations/0001_initial.sql
@@ -32,10 +33,12 @@ var migration2SQL string
 var migration3SQL string
 
 type migration struct {
-	version int
-	name    string
-	sql     string
-	assert  func(context.Context, *sql.Conn) error
+	version    int
+	name       string
+	sql        string
+	assert     func(context.Context, *sql.Conn) error
+	preflight  func(context.Context, *sql.Conn) error
+	ftsIndexes []string
 }
 
 type migrationHooks struct {
@@ -45,9 +48,9 @@ type migrationHooks struct {
 // Shipped migration SQL is immutable. Compatibility is verified from released
 // database fixtures rather than by storing migration metadata in the database.
 var migrations = []migration{
-	{version: 1, name: "initial", sql: migration1SQL, assert: assertMigration1},
-	{version: 2, name: "database-identity", sql: migration2SQL, assert: assertMigration2},
-	{version: 3, name: "project-workspaces", sql: migration3SQL, assert: assertMigration3},
+	{version: 1, name: "initial", sql: migration1SQL, assert: assertMigration1, preflight: preflightMigration1, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
+	{version: 2, name: "database-identity", sql: migration2SQL, assert: assertMigration2, preflight: preflightMigration2, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
+	{version: 3, name: "project-workspaces", sql: migration3SQL, assert: assertMigration3, preflight: preflightMigration3, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
 }
 
 // Open opens path with the required hardened runtime settings and applies all
@@ -103,7 +106,7 @@ func dataSourceName(path string) (string, error) {
 	query := u.Query()
 	// These settings are connection-local, so the driver reapplies them if
 	// database/sql ever has to replace the single idle connection.
-	query.Add("_pragma", "busy_timeout(5000)")
+	query.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", busyTimeoutMilliseconds))
 	query.Add("_pragma", "foreign_keys(ON)")
 	query.Add("_pragma", "synchronous(FULL)")
 	query.Add("_pragma", "trusted_schema(OFF)")
@@ -119,6 +122,9 @@ func prepare(ctx context.Context, db *sql.DB, sequence []migration, hooks migrat
 
 	conn, err := db.Conn(ctx)
 	if err != nil {
+		if stable := stableDatabaseError("open database connection", err); stable != nil {
+			return stable
+		}
 		return domain.WrapError(domain.Storage, "database_open_failed", "could not open database", nil, err)
 	}
 	defer conn.Close()
@@ -133,6 +139,15 @@ func prepare(ctx context.Context, db *sql.DB, sequence []migration, hooks migrat
 		return err
 	}
 	if err := validateUninitializedDatabase(ctx, conn, version, latest); err != nil {
+		return err
+	}
+	// Run the read-only on-disk diagnostic before journal_mode or migration can
+	// make a persistent change. A corrupt compatible-looking file is therefore
+	// rejected without a partial configuration or migration success.
+	if err := verifyDatabaseIntegrity(ctx, conn); err != nil {
+		return err
+	}
+	if err := verifyCurrentSchema(ctx, conn, sequence, version, latest); err != nil {
 		return err
 	}
 
@@ -181,11 +196,20 @@ func prepare(ctx context.Context, db *sql.DB, sequence []migration, hooks migrat
 	if err := validateUninitializedDatabase(ctx, conn, version, latest); err != nil {
 		return err
 	}
+	if err := verifyCurrentSchema(ctx, conn, sequence, version, latest); err != nil {
+		return err
+	}
 	if err := applyMigrations(ctx, conn, sequence, version); err != nil {
 		return migrationError(err)
 	}
 	if err := verifyForeignKeys(ctx, conn); err != nil {
 		return migrationError(err)
+	}
+	if err := verifyMigrationSearchIndexes(ctx, conn, sequence); err != nil {
+		return migrationError(err)
+	}
+	if err := verifyDatabaseIntegrity(ctx, conn); err != nil {
+		return err
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return migrationError(fmt.Errorf("commit: %w", err))
@@ -293,14 +317,10 @@ func setSchemaVersion(ctx context.Context, conn *sql.Conn, version int) error {
 }
 
 func assertMigration1(ctx context.Context, conn *sql.Conn) error {
-	for _, name := range []string{
-		"application_metadata",
-		"projects",
-		"pellets",
-		"memories",
-		"pellets_fts",
-		"memories_fts",
-	} {
+	if err := preflightMigration1(ctx, conn); err != nil {
+		return err
+	}
+	for _, name := range []string{"pellets_fts", "memories_fts"} {
 		var count int
 		if err := conn.QueryRowContext(ctx, `
 			SELECT COUNT(*)
@@ -315,7 +335,47 @@ func assertMigration1(ctx context.Context, conn *sql.Conn) error {
 	return nil
 }
 
+func preflightMigration1(ctx context.Context, conn *sql.Conn) error {
+	for _, name := range []string{"application_metadata", "projects", "pellets", "memories"} {
+		if err := assertConnectionRowCount(ctx, conn, `
+			SELECT COUNT(*) FROM sqlite_schema
+			WHERE type = 'table' AND name = ?`, 1, name); err != nil {
+			return fmt.Errorf("inspect required table %q: %w", name, err)
+		}
+	}
+	if err := assertConnectionRowCount(ctx, conn, `
+		SELECT COUNT(*) FROM pragma_table_info('projects')
+		WHERE name = 'root_path'`, 1); err != nil {
+		return fmt.Errorf("verify legacy project root column: %w", err)
+	}
+	if err := assertConnectionRowCount(ctx, conn, `
+		SELECT COUNT(*) FROM pragma_table_info('pellets')
+		WHERE name = 'workspace_id'`, 0); err != nil {
+		return fmt.Errorf("verify legacy pellet ownership columns: %w", err)
+	}
+	if err := assertConnectionRowCount(ctx, conn, `
+		SELECT COUNT(*) FROM sqlite_schema
+		WHERE name = 'project_workspaces'`, 0); err != nil {
+		return fmt.Errorf("verify legacy workspace table absence: %w", err)
+	}
+	return nil
+}
+
 func assertMigration2(ctx context.Context, conn *sql.Conn) error {
+	if err := assertMigration1(ctx, conn); err != nil {
+		return err
+	}
+	return assertMigration2Metadata(ctx, conn)
+}
+
+func preflightMigration2(ctx context.Context, conn *sql.Conn) error {
+	if err := preflightMigration1(ctx, conn); err != nil {
+		return err
+	}
+	return assertMigration2Metadata(ctx, conn)
+}
+
+func assertMigration2Metadata(ctx context.Context, conn *sql.Conn) error {
 	return assertConnectionRowCount(ctx, conn, `
 		SELECT COUNT(*)
 		FROM application_metadata
@@ -323,7 +383,19 @@ func assertMigration2(ctx context.Context, conn *sql.Conn) error {
 }
 
 func assertMigration3(ctx context.Context, conn *sql.Conn) error {
-	for _, name := range []string{"projects", "project_workspaces", "pellets", "memories", "pellets_fts", "memories_fts"} {
+	return assertMigration3Schema(ctx, conn, true)
+}
+
+func preflightMigration3(ctx context.Context, conn *sql.Conn) error {
+	return assertMigration3Schema(ctx, conn, false)
+}
+
+func assertMigration3Schema(ctx context.Context, conn *sql.Conn, includeFTS bool) error {
+	tables := []string{"application_metadata", "projects", "project_workspaces", "pellets", "memories"}
+	if includeFTS {
+		tables = append(tables, "pellets_fts", "memories_fts")
+	}
+	for _, name := range tables {
 		if err := assertConnectionRowCount(ctx, conn, `
 			SELECT COUNT(*) FROM sqlite_schema
 			WHERE type = 'table' AND name = ?`, 1, name); err != nil {
@@ -346,11 +418,20 @@ func assertMigration3(ctx context.Context, conn *sql.Conn) error {
 		WHERE name IN ('pellets_one_in_progress_idx', 'projects_v2', 'pellets_v2', 'memories_v2', 'migration_0003_state')`, 0); err != nil {
 		return fmt.Errorf("verify removed migration-3 objects: %w", err)
 	}
-	if _, err := conn.ExecContext(ctx, "INSERT INTO pellets_fts(pellets_fts) VALUES ('integrity-check')"); err != nil {
-		return fmt.Errorf("verify pellet FTS after rebuild: %w", err)
+	if err := assertConnectionRowCount(ctx, conn, `
+		SELECT COUNT(*) FROM pragma_table_info('projects')
+		WHERE name = 'git_common_dir'`, 1); err != nil {
+		return fmt.Errorf("verify project Git identity columns: %w", err)
 	}
-	if _, err := conn.ExecContext(ctx, "INSERT INTO memories_fts(memories_fts) VALUES ('integrity-check')"); err != nil {
-		return fmt.Errorf("verify memory FTS after rebuild: %w", err)
+	if err := assertConnectionRowCount(ctx, conn, `
+		SELECT COUNT(*) FROM pragma_table_info('pellets')
+		WHERE name = 'workspace_id'`, 1); err != nil {
+		return fmt.Errorf("verify pellet workspace ownership column: %w", err)
+	}
+	if err := assertConnectionRowCount(ctx, conn, `
+		SELECT COUNT(*) FROM application_metadata
+		WHERE key IN ('database_id', 'created_at_julian', 'product')`, 3); err != nil {
+		return fmt.Errorf("verify database identity metadata: %w", err)
 	}
 	return nil
 }
@@ -387,6 +468,97 @@ func verifyForeignKeys(ctx context.Context, conn *sql.Conn) error {
 	return nil
 }
 
+func verifyDatabaseIntegrity(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, "PRAGMA integrity_check")
+	if err != nil {
+		if stable := stableDatabaseError("verify database integrity", err); stable != nil {
+			return stable
+		}
+		return databaseIntegrityError(err)
+	}
+	defer rows.Close()
+
+	var diagnostics []string
+	for rows.Next() {
+		var diagnostic string
+		if err := rows.Scan(&diagnostic); err != nil {
+			return databaseIntegrityError(err)
+		}
+		diagnostics = append(diagnostics, diagnostic)
+	}
+	if err := rows.Err(); err != nil {
+		if stable := stableDatabaseError("verify database integrity", err); stable != nil {
+			return stable
+		}
+		return databaseIntegrityError(err)
+	}
+	if len(diagnostics) != 1 || !strings.EqualFold(diagnostics[0], "ok") {
+		return databaseCorruptError(
+			"verify database integrity",
+			fmt.Errorf("PRAGMA integrity_check reported: %s", strings.Join(diagnostics, "; ")),
+		)
+	}
+	return nil
+}
+
+func verifyCurrentSchema(ctx context.Context, conn *sql.Conn, sequence []migration, version, latest int) error {
+	if version == 0 {
+		return nil
+	}
+	if version > len(sequence) || sequence[version-1].version != version {
+		return domain.NewError(
+			domain.Storage,
+			"schema_version_unsupported",
+			"database schema version is unsupported",
+			map[string]any{"database_version": version, "supported_version": latest},
+		)
+	}
+	preflight := sequence[version-1].preflight
+	if preflight == nil {
+		return nil
+	}
+	if err := preflight(ctx, conn); err != nil {
+		if stable := stableDatabaseError("validate database schema", err); stable != nil {
+			return stable
+		}
+		return domain.WrapError(
+			domain.Storage,
+			"schema_version_unsupported",
+			"database schema version is unsupported",
+			map[string]any{"database_version": version, "supported_version": latest},
+			err,
+		)
+	}
+	return nil
+}
+
+func verifyMigrationSearchIndexes(ctx context.Context, conn *sql.Conn, sequence []migration) error {
+	if len(sequence) == 0 {
+		return errors.New("cannot verify search indexes for an empty migration sequence")
+	}
+	for _, name := range sequence[len(sequence)-1].ftsIndexes {
+		if err := verifyExternalContentFTSIndex(ctx, conn, name); err != nil {
+			return fmt.Errorf("verify migrated FTS index %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func verifyExternalContentFTSIndex(ctx context.Context, conn *sql.Conn, name string) error {
+	if name == "" || strings.IndexFunc(name, func(value rune) bool {
+		return value != '_' && (value < 'a' || value > 'z') && (value < 'A' || value > 'Z') && (value < '0' || value > '9')
+	}) >= 0 {
+		return fmt.Errorf("invalid FTS table name %q", name)
+	}
+	statement := fmt.Sprintf(
+		"INSERT INTO %s(%s, rank) VALUES ('integrity-check', 1)",
+		name,
+		name,
+	)
+	_, err := conn.ExecContext(ctx, statement)
+	return err
+}
+
 func verifyFTS5(ctx context.Context, conn *sql.Conn) error {
 	var sourceID string
 	if err := conn.QueryRowContext(ctx, "SELECT fts5_source_id()").Scan(&sourceID); err != nil {
@@ -406,7 +578,7 @@ func verifyRuntime(ctx context.Context, conn *sql.Conn) error {
 		{pragma: "foreign_keys", want: 1},
 		{pragma: "trusted_schema", want: 0},
 		{pragma: "synchronous", want: 2},
-		{pragma: "busy_timeout", want: 5000},
+		{pragma: "busy_timeout", want: busyTimeoutMilliseconds},
 	}
 	for _, check := range checks {
 		var got int
@@ -438,9 +610,15 @@ func schemaTooNew(version, latest int) error {
 }
 
 func migrationError(err error) error {
+	if stable := stableDatabaseError("migrate database", err); stable != nil {
+		return stable
+	}
 	return domain.WrapError(domain.Storage, "database_migration_failed", "could not migrate database", nil, err)
 }
 
 func runtimeError(action string, err error) error {
+	if stable := stableDatabaseError(action, err); stable != nil {
+		return stable
+	}
 	return domain.WrapError(domain.Storage, "database_configuration_failed", "could not configure database", nil, fmt.Errorf("%s: %w", action, err))
 }

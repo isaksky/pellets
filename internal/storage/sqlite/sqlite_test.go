@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -334,6 +335,37 @@ func TestUnsupportedSchemaVersionsAreRejectedWithoutWrites(t *testing.T) {
 	}
 }
 
+func TestIncompatibleAndCorruptDatabasesAreRejectedWithoutWrites(t *testing.T) {
+	t.Run("incompatible file", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "not-sqlite.db")
+		if err := os.WriteFile(path, []byte("this is not a SQLite database"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		assertOpenFailureLeavesFileUnchanged(t, path, "database_incompatible")
+	})
+
+	t.Run("corrupt btree", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "corrupt.db")
+		createCorruptDatabaseFixture(t, path)
+		assertOpenFailureLeavesFileUnchanged(t, path, "database_corrupt")
+	})
+}
+
+func TestSupportedVersionOnIncompatibleSchemaIsRejectedWithoutWrites(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "wrong-current-schema.db")
+	raw := openRawDatabase(t, path)
+	mustExec(t, raw, fmt.Sprintf(`
+		CREATE TABLE unrelated (value TEXT NOT NULL) STRICT;
+		INSERT INTO unrelated VALUES ('unchanged');
+		PRAGMA user_version = %d;`, LatestSchemaVersion))
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	assertOpenFailureLeavesFileUnchanged(t, path, "schema_version_unsupported")
+}
+
 func TestOpeningLatestVersionPerformsNoPersistentWrite(t *testing.T) {
 	t.Parallel()
 
@@ -383,6 +415,47 @@ func TestMigrationSequenceValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEveryProductionMigrationFinishesWithForeignKeyAndFTSVerification(t *testing.T) {
+	for version := 1; version <= len(migrations); version++ {
+		t.Run(fmt.Sprintf("version-%d", version), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), fmt.Sprintf("version-%d.db", version))
+			db, err := openWithMigrations(context.Background(), path, migrations[:version])
+			if err != nil {
+				t.Fatalf("apply production migrations through version %d: %v", version, err)
+			}
+			defer db.Close()
+
+			assertPragmaInt(t, db, "user_version", version)
+			assertQueryInt(t, db, "SELECT COUNT(*) FROM pragma_foreign_key_check", 0)
+			assertExternalContentFTSIntegrity(t, db, "pellets_fts", true)
+			assertExternalContentFTSIntegrity(t, db, "memories_fts", true)
+		})
+	}
+}
+
+func TestMigrationFTSVerificationFailureRollsBackSchemaAndVersion(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "fts-verification-rollback.db")
+	sequence := []migration{{
+		version: 1,
+		name:    "unindexed-external-content",
+		sql: `
+			CREATE TABLE docs (id INTEGER PRIMARY KEY, text TEXT NOT NULL) STRICT;
+			CREATE VIRTUAL TABLE docs_fts USING fts5(text, content = 'docs', content_rowid = 'id');
+			INSERT INTO docs VALUES (1, 'missing from the derived index');`,
+		ftsIndexes: []string{"docs_fts"},
+	}}
+
+	db, err := openWithMigrations(context.Background(), path, sequence)
+	if db != nil {
+		db.Close()
+		t.Fatal("migration with a drifted FTS index unexpectedly succeeded")
+	}
+	assertDomainErrorCode(t, err, "database_corrupt")
+	assertMigrationRolledBack(t, path, "docs", 0)
 }
 
 func TestRunnerAppliesTwoStepTestSequenceExactlyOnce(t *testing.T) {
@@ -657,6 +730,57 @@ func TestTwoProcessProductionMigrationRace(t *testing.T) {
 	defer raw.Close()
 	assertPragmaInt(t, raw, "user_version", LatestSchemaVersion)
 	assertFreshIdentityMetadata(t, raw, started, finished)
+}
+
+func TestMigrationBusyTimeoutIsBoundedTypedAndWriteFree(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "migration-busy.db")
+	database, err := openWithMigrations(context.Background(), path, migrations[:2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	locker, err := database.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer locker.Close()
+	if _, err := locker.ExecContext(context.Background(), "BEGIN IMMEDIATE"); err != nil {
+		t.Fatal(err)
+	}
+	locked := true
+	defer func() {
+		if locked {
+			_, _ = locker.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+
+	started := time.Now()
+	opened, openErr := Open(context.Background(), path)
+	elapsed := time.Since(started)
+	if opened != nil {
+		opened.Close()
+		t.Fatal("migration unexpectedly acquired a held writer lock")
+	}
+	assertDomainErrorCode(t, openErr, "database_busy")
+	public := domain.PublicError(openErr)
+	if public.Kind != domain.Conflict || !reflect.DeepEqual(public.Details, map[string]any{"operation": "migrate database"}) {
+		t.Fatalf("migration busy error = %#v", public)
+	}
+	if elapsed < 4*time.Second || elapsed > 10*time.Second {
+		t.Fatalf("migration busy wait elapsed %s, want bounded wait near configured five seconds", elapsed)
+	}
+
+	if _, err := locker.ExecContext(context.Background(), "ROLLBACK"); err != nil {
+		t.Fatal(err)
+	}
+	locked = false
+	if err := locker.Close(); err != nil {
+		t.Fatal(err)
+	}
+	assertPragmaInt(t, database, "user_version", 2)
+	assertQueryInt(t, database, `SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name = 'root_path'`, 1)
+	assertQueryInt(t, database, `SELECT COUNT(*) FROM sqlite_schema WHERE name = 'project_workspaces'`, 0)
 }
 
 func TestMigrationRaceProcess(t *testing.T) {
@@ -1027,6 +1151,92 @@ func assertDomainErrorCode(t *testing.T, err error, want string) {
 	var public *domain.Error
 	if !errors.As(err, &public) || public.Code != want {
 		t.Fatalf("error = %v, want domain error %q", err, want)
+	}
+}
+
+func assertOpenFailureLeavesFileUnchanged(t *testing.T, path, wantCode string) {
+	t.Helper()
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db, openErr := Open(context.Background(), path)
+	if db != nil {
+		db.Close()
+		t.Fatalf("Open(%q) unexpectedly returned a database", path)
+	}
+	assertDomainErrorCode(t, openErr, wantCode)
+	if domain.PublicError(openErr).Kind != domain.Storage {
+		t.Fatalf("Open(%q) error kind = %d, want storage", path, domain.PublicError(openErr).Kind)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("Open(%q) mutated a rejected database", path)
+	}
+	for _, suffix := range []string{"-journal", "-wal", "-shm"} {
+		if _, err := os.Stat(path + suffix); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("Open(%q) left unexpected sidecar %q: %v", path, path+suffix, err)
+		}
+	}
+}
+
+func createCorruptDatabaseFixture(t *testing.T, path string) {
+	t.Helper()
+	db := openTestDatabase(t, path)
+	mustExec(t, db, `
+		CREATE TABLE corruption_probe (
+			id INTEGER PRIMARY KEY,
+			payload BLOB NOT NULL
+		) STRICT;
+		INSERT INTO corruption_probe(payload) VALUES (randomblob(2048));`)
+	var rootPage, pageSize int64
+	if err := db.QueryRow("SELECT rootpage FROM sqlite_schema WHERE name = 'corruption_probe'").Scan(&rootPage); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.QueryRow("PRAGMA page_size").Scan(&pageSize); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if rootPage <= 1 || pageSize <= 0 {
+		db.Close()
+		t.Fatalf("corruption fixture root page/page size = %d/%d", rootPage, pageSize)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	file, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteAt([]byte{0xff}, (rootPage-1)*pageSize); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertExternalContentFTSIntegrity(t *testing.T, db *sql.DB, table string, wantOK bool) {
+	t.Helper()
+	connection, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	err = verifyExternalContentFTSIndex(context.Background(), connection, table)
+	if wantOK && err != nil {
+		t.Fatalf("FTS integrity check for %s: %v", table, err)
+	}
+	if !wantOK && err == nil {
+		t.Fatalf("FTS integrity check for %s unexpectedly passed", table)
 	}
 }
 

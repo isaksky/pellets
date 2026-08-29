@@ -155,8 +155,9 @@ Acceptance criteria:
 - Embedded migration versions begin at 1, are unique and consecutive, and released migration files are immutable.
 - Negative `user_version` values, version 0 with persistent schema, and newer versions are rejected with stable typed errors before persistent writes; opening the latest version performs no schema-version write.
 - An older `user_version` is re-read after `BEGIN IMMEDIATE`; two processes racing to migrate apply every missing migration exactly once.
-- Migration SQL, assertions, consecutive `user_version` advances, and `foreign_key_check` share one transaction and roll back together on failure. FTS rebuild checks pass after migrations.
-- Busy errors are bounded and mapped to a stable error response.
+- Migration SQL, assertions, consecutive `user_version` advances, `foreign_key_check`, external-content FTS verification, and final database integrity diagnostics share one transaction and roll back together on failure. FTS rebuild checks pass after every supported migration endpoint.
+- A read-only integrity diagnostic rejects corrupt and incompatible files before journal-mode or migration writes and emits no partial success.
+- Busy errors, including migration-lock contention, stop within the configured five-second bound and map to the stable `database_busy` response.
 
 ## Milestone 8: release hardening
 
@@ -190,6 +191,7 @@ Run against temporary real SQLite files, not a mocked SQL interface:
 - all migrations from an empty database;
 - an injected two-step migration sequence, upgrade from an older released fixture, latest-version no-op open, and negative/unsupported/newer write-free rejection;
 - SQL, assertion, `user_version`, and `foreign_key_check` failure rollback with the preceding schema and version intact;
+- corrupt and incompatible file rejection before writes, deterministic SQLite-result-code mapping, and external-content FTS drift detection/rebuild verification;
 - workspace ownership constraints and indexes, including direct invalid SQL;
 - transaction rollback and busy behavior;
 - project-local number allocation;
