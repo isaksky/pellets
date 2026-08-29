@@ -36,8 +36,33 @@ jobs:
           if ((go env GOHOSTOS) -ne "windows" -or (go env GOHOSTARCH) -ne "amd64") {
             throw "foundation tests require a native Windows AMD64 runner"
           }
-      - name: Run complete unit and compiled integration suite
-        run: go test ./...
+          $git = Get-Command git -CommandType Application -ErrorAction Stop
+          if ([IO.Path]::GetExtension($git.Source) -ne ".exe") {
+            throw "foundation tests require native Git for Windows, found $($git.Source)"
+          }
+      - name: Run complete unit and compiled integration suite on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -json ./... | tee test-results.jsonl
+      - name: Run complete unit and compiled integration suite under PowerShell
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          go test -count=1 -json ./... | Tee-Object -FilePath test-results.jsonl
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) {
+            exit $testExit
+          }
+      - name: Retain native test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: foundation-test-results-${{ runner.os }}-${{ runner.arch }}
+          path: test-results.jsonl
+          if-no-files-found: warn
+          retention-days: 14
       - name: Run static analysis
         run: go vet ./...
 
@@ -55,3 +80,19 @@ jobs:
           cache-dependency-path: go.sum
       - name: Build and verify target metadata
         run: bash scripts/verify-cross-builds.sh
+
+  release-platform-gate:
+    name: Release gate (supported platforms)
+    if: always()
+    needs:
+      - foundation-tests
+      - cgo-free-cross-builds
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require native tests and CGo-free cross-builds
+        env:
+          NATIVE_TEST_RESULT: ${{ needs.foundation-tests.result }}
+          CROSS_BUILD_RESULT: ${{ needs.cgo-free-cross-builds.result }}
+        run: |
+          test "$NATIVE_TEST_RESULT" = success
+          test "$CROSS_BUILD_RESULT" = success

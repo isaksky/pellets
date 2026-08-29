@@ -235,11 +235,16 @@ Wrap internal causes for diagnostics, but never expose stack traces or raw SQL i
 
 ## Cross-platform distribution
 
-Build one executable per supported target with `CGO_ENABLED=0`:
+Build one executable per supported target with `CGO_ENABLED=0`. The first-release support matrix is:
 
-- macOS AMD64 and ARM64;
-- Windows AMD64;
-- Windows ARM64 after CI and hardware/VM validation establish support.
+| Target | Status | Required validation |
+|---|---|---|
+| macOS AMD64 | Supported | CGo-free cross-build plus the current native macOS CI suite |
+| macOS ARM64 | Supported | CGo-free cross-build plus the current native macOS CI suite |
+| Windows AMD64 | Supported | CGo-free cross-build plus the native Windows PowerShell CI suite |
+| Windows ARM64 | Excluded | Requires native ARM64 CI and hardware/VM validation before support or release |
+
+A successful Windows ARM64 cross-build alone does not establish support, so the first release does not build, test, or release that target.
 
 Release archives contain only `pl` (or `pl.exe`) plus license information and checksums. No SQLite DLL, model, configuration file, or installer is required.
 
