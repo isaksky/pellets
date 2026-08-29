@@ -9,10 +9,10 @@ The product boundary is in [project-goals.md](project-goals.md), architecture in
 The first release includes:
 
 - CGo-free Go executable for macOS and Windows;
-- upward database discovery and nearest Git-root project resolution;
-- one database containing one or more registered projects;
+- upward database discovery plus Git common-directory project and worktree/Git-directory workspace resolution;
+- one database containing one or more logical projects, each with one or more registered workspaces;
 - project codes and project-local pellet numbers;
-- add, list, next, show, edit, move, start, close, reopen, and defer;
+- add, list, next, show, edit, move, start, start-next, release, close, reopen, defer, and confirmed stale-worktree recovery;
 - exact external-ID and group filtering;
 - sparse project-scoped integer priority for the active queue, with transactional rebalancing;
 - FTS5 pellet search;
@@ -38,22 +38,24 @@ Acceptance criteria:
 
 ## Milestone 1: database and project initialization
 
-Implement SQLite connection setup, embedded migration 1, `init-db`, upward discovery, Git-root discovery, `init --code`, `project list`, and `project show`.
+Implement SQLite connection setup, embedded migrations, `init-db`, upward discovery, Git repository/worktree identity, `init --code`, `project list`, and `project show`.
 
 Acceptance criteria:
 
 - `init-db` creates exactly `.pellets/pellets.db`, rejects symlink escapes and pre-existing SQLite companions, and does not overwrite or delete any existing path.
-- `init --code foo` registers a normalized relative Git-root path.
+- `init --code foo` registers one logical repository plus its current worktree workspace, using normalized relative paths where possible.
 - With no ancestor database, `init` creates one at the Git root.
-- With a database at a common parent, two sibling repositories register in that database with different codes.
-- Repeating project initialization with the same root and code is idempotent; changing the code is a conflict.
+- With a database at a common parent, the main work tree and at least two linked worktrees register as three workspaces of one project/code; unrelated sibling repositories register as separate projects with different codes.
+- Repeating initialization is idempotent. Repository/code reuse, duplicate live worktree identity, cross-project attachment, and inconsistent Git identities are write-free typed conflicts. Moved, removed, and stale paths have the documented behavior.
 - The nearest ancestor database wins when databases are nested.
-- Duplicate paths, duplicate codes, invalid codes, and projects outside the discovered database root fail cleanly.
+- Duplicate identities and invalid codes fail cleanly; Git locations outside the database root use explicit normalized absolute storage.
 - When either initialization command places `.pellets` inside a Git work tree, it is added to the local Git exclude and not to `.gitignore`.
 - Initialization detects and rejects an already tracked database.
 - Foreign keys, trusted-schema hardening, WAL, synchronous mode, busy timeout, and FTS5 capability are verified.
 - `PRAGMA user_version` is the only persisted schema version; a new version-0 database reaches version 1 through embedded migration 1 and contains no migration bookkeeping table.
 - Integration tests pass for paths containing spaces and Unicode on macOS and Windows CI.
+- Migration 3 upgrades the frozen v1 schema without editing it, creates an initial workspace per project, assigns legacy in-progress rows, preserves authoritative/FTS/application state, and rolls back schema and `user_version` on injected failure.
+- Real-SQLite constraints reject cross-project owners, ownerless in-progress rows, owned non-in-progress rows, and two in-progress rows in one workspace while permitting distinct workspace owners in one project.
 
 ## Milestone 2: basic pellet queue
 
@@ -68,26 +70,27 @@ Acceptance criteria:
 - `--all`, status, exact external-ID, and exact group filters behave as specified.
 - A pellet has at most one group; groups are opaque project-scoped strings with no separate table.
 - Editing cannot change project, number, status, or priority.
-- `next` returns the lowest-priority open pellet and does not mutate it.
+- `next` resumes only the current workspace's in-progress pellet, otherwise returns the lowest-priority matching open pellet, and does not mutate or register anything.
 - Empty list and next results are successful typed empty values.
 - Timestamps round-trip from Julian storage to UTC RFC 3339 JSON.
 - JSON golden tests lock all object and list shapes.
 
 ## Milestone 3: lifecycle and resumption
 
-Implement `start`, `close`, `reopen`, and `defer`, including the database-level one-in-progress constraint.
+Implement workspace-aware `start`, atomic `start-next`, `release`, `close`, `reopen`, `defer`, and explicit confirmed recovery.
 
 Acceptance criteria:
 
 - The documented transition table is enforced.
-- A project can never commit two in-progress pellets, including under concurrent starts.
-- Different projects in the same database may each have one in-progress pellet.
-- `next` returns the in-progress pellet before open pellets.
-- An in-progress pellet wins even when it does not match an external-ID or group focus.
+- A workspace can never commit two in-progress pellets, while different workspaces in one project may each own one.
+- `start-next` atomically resumes or starts distinct eligible pellets across concurrent worktrees with deterministic bounded retry and typed exhaustion.
+- `next` returns only the current workspace's in-progress pellet before open pellets, even when that pellet lies outside a filter.
+- `workspace_already_in_progress` and `pellet_in_progress_elsewhere` are stable conflicts with no partial write.
 - Closing sets `completed_at` and clears priority; reopening clears `completed_at` and appends to the active queue. Idempotent repeats preserve the completion timestamp on an already closed pellet and the queue position of an already open pellet.
-- Deferring an in-progress pellet clears priority and frees the project to start another.
+- Owner release retains priority and clears workspace ownership. Cross-workspace release/close/defer rejects by default and requires the exact explicit confirmed recovery override.
+- Deferring or closing in-progress work clears workspace ownership; reopening never restores an owner.
 - Closed and deferred pellets have `NULL` priority and are absent from the active-priority index.
-- No owner, PID, claim, assignment, or event row is stored.
+- No agent, PID, session, claim, lease, heartbeat, expiry, assignment-history, or event row is stored.
 
 ## Milestone 4: relative ordering and rebalance
 
@@ -177,7 +180,7 @@ Acceptance criteria:
 - status transition matrix;
 - FTS query escaping;
 - JSON rendering and stable error mapping;
-- relative-path normalization;
+- relative/absolute platform path normalization and Git repository/workspace identity;
 - midpoint and overflow arithmetic.
 
 ### SQLite integration tests
@@ -187,24 +190,24 @@ Run against temporary real SQLite files, not a mocked SQL interface:
 - all migrations from an empty database;
 - an injected two-step migration sequence, upgrade from an older released fixture, latest-version no-op open, and negative/unsupported/newer write-free rejection;
 - SQL, assertion, `user_version`, and `foreign_key_check` failure rollback with the preceding schema and version intact;
-- constraints and indexes;
+- workspace ownership constraints and indexes, including direct invalid SQL;
 - transaction rollback and busy behavior;
 - project-local number allocation;
 - sparse ordering and rebalance;
 - transactional FTS maintenance, ranking, and rebuild;
 - purge cascades into derived FTS only;
-- multiple projects sharing one database.
+- multiple workspaces sharing one project and unrelated projects sharing one database.
 
 ### Command integration tests
 
-Invoke the compiled executable in temporary Git repositories and assert stdout, stderr, exit code, database location, local Git exclude changes, and final rows. Cover nested directories, sibling repositories, Git worktrees, and filenames with spaces.
+Invoke the compiled executable in temporary Git repositories and assert stdout, stderr, exit code, database location, local Git exclude changes, and final rows. Cover nested directories, sibling repositories, a main work tree plus two linked worktrees, worktree move/removal/duplicate/stale registration, and filenames with spaces/Unicode.
 
 ### Property and concurrency tests
 
 - Randomized ordering operations against a simple slice model.
 - Combined project, external-ID, and group filters across list, next, and search.
 - Concurrent `add` calls within one project.
-- Concurrent `start` calls attempting to violate the partial unique index.
+- Concurrent `start-next` calls from distinct linked worktrees selecting distinct pellets; same-pellet and same-workspace races return stable conflict/exhaustion without partial writes.
 - Reads during a write and bounded busy-timeout behavior.
 - Two independent processes racing from the same old schema version, with the lock waiter applying nothing twice.
 - Independent activity in different projects sharing the same SQLite file.
@@ -237,6 +240,7 @@ Because hands-on Windows testing is unavailable, Windows-specific integration te
 | Agent output changes break automation. | Version JSON, use golden fixtures, and treat it as public API. |
 | Immediate SQLite uniqueness checks break in-place normalization. | Materialize the old order, preflight overflow, and assign unique values in a fresh band above the old maximum with one CTE update. |
 | Several projects contend for SQLite’s single writer. | Keep writes short, use WAL/busy timeout, and perform no Git/filesystem work inside transactions. |
+| A moved, copied, or removed worktree presents stale local paths. | Treat Git directory as workspace identity, update only after outside-transaction stale checks, reject live duplicates, retain removed registrations, and require explicit lifecycle recovery. |
 | Windows-only path or locking failures go unnoticed. | Make native Windows CI integration tests release-blocking. |
 | Database is accidentally committed. | Use local Git exclude, check tracking during init, document local-only storage. |
 | FTS derived rows drift. | Explicit same-transaction maintenance plus a tested rebuild command/path. |
@@ -248,7 +252,7 @@ Because hands-on Windows testing is unavailable, Windows-specific integration te
 ## Features deliberately deferred
 
 - dependencies, blocking, graphs, epics, subtasks, and milestones;
-- multi-agent ownership, claiming, leases, and orchestration;
+- agent accounts, PID/session ownership, claiming, leases, heartbeats, expiry, assignment history, and orchestration;
 - tags, separate notes, and automatic task history;
 - multiple groups per pellet or a group entity;
 - archive state and arbitrary task deletion;
@@ -270,9 +274,10 @@ Before each release, verify:
 - non-null priority remains unique per project, not per database or external ID; only open/in-progress pellets have it;
 - closed and deferred pellets have `NULL` priority and are not reprocessed by active-queue rebalance;
 - group is one optional exact-filter value per pellet, not a tag set, entity, hierarchy, or ordering input;
-- `next` is read-only and resumes in-progress work first;
+- `next` is read-only and resumes only the current workspace; `start-next` is the atomic begin-work path;
 - the database supports several projects but pellet numbers are project-local;
-- there is no more than one active agent assumption and one in-progress pellet per project;
+- one logical repository has shared project state across worktrees, at most one worker is assumed per worktree, and each workspace owns at most one in-progress pellet;
+- no schema or prose invents an agent/PID/session/lease/heartbeat/expiry ownership model;
 - memory has no task foreign key and uses FTS5 only;
 - no core behavior needs network access or a vector capability;
 - the database is never part of a Git synchronization workflow;

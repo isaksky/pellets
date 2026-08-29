@@ -1,6 +1,6 @@
 # Project Memory
 
-Project memory is an optional keyword-searchable text store made available to an agent. The agent may use it or ignore it. Memory does not change task selection and is not a second task system.
+Project memory is an optional keyword-searchable text store shared by every registered worktree workspace of one logical project. A worker may use it or ignore it. Memory does not change task selection and is not a second task system.
 
 The authoritative schema is in [data-model.md](data-model.md); command-wide JSON and error rules are in [cli-spec.md](cli-spec.md).
 
@@ -20,7 +20,7 @@ Pellets and memories are independent authoritative records:
 
 - A pellet represents executable work with status and priority.
 - A memory represents searchable knowledge with provenance and approval.
-- A memory has a `project_id`, but no pellet number, task foreign key, status, priority, external ID, or group field.
+- A memory has a logical `project_id`, but no workspace owner, pellet number, task foreign key, status, priority, external ID, or group field.
 - References such as `foo-123` are ordinary text and may refer to a current, closed, or purged pellet.
 - Closing or purging a pellet never creates, changes, or deletes memory.
 - Memory search never affects `pl next`.
@@ -74,7 +74,7 @@ SQLite FTS5 indexes memory text with the `unicode61` tokenizer. Hyphen and under
 
 Default search behavior:
 
-1. Restrict results to the selected project.
+1. Restrict results to the selected logical project; all of its worktrees see the same rows.
 2. Escape ordinary input into safe FTS terms rather than treating it as raw FTS syntax.
 3. Rank with FTS5 `bm25`.
 4. Break equal ranks by newest memory first.
@@ -164,7 +164,7 @@ Do not implement these in v1:
 - automatic extraction from pellets, diffs, or conversations;
 - task foreign keys;
 - structured task-group links;
-- approval identities or histories;
+- workspace/agent ownership, approval identities, or histories;
 - expiration policies;
 - vector or hybrid search;
 - cloud or cross-machine synchronization.

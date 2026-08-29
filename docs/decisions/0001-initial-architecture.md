@@ -3,6 +3,8 @@
 - Status: Accepted
 - Date: 2026-08-28
 
+> [ADR 0002](0002-worktree-scoped-workspaces.md) supersedes this record's one-active-agent-per-project, project-as-one-root, project-wide-in-progress, and project-wide `next` decisions. The remaining product, ordering, storage, FTS, memory, JSON, and PID/lease rejection decisions stay accepted.
+
 ## Context
 
 Coding agents need to split long-running work into a durable, trackable sequence. Markdown task lists work, but repeatedly locating, parsing, and editing them consumes tokens and makes concurrent or partial updates fragile.
@@ -16,14 +18,14 @@ The product is named Pellets and the executable is `pl`.
 ### Product model
 
 - Pellets is a local task queue for coding agents.
-- The initial assumption is one active agent per registered project.
+- Worktree-scoped worker coordination is defined by ADR 0002; it adds no agent identity or orchestration.
 - A database may contain several Git projects.
 - A project has a unique code of at most 12 characters and project-local pellet numbers. Public references look like `foo-123`.
 - Pellets have title, description, optional opaque external ID, one optional opaque group, status, nullable priority, and timestamps.
 - A group is a project-scoped exact-filter value that can span several external IDs. It has no table, hierarchy, metadata, or effect on priority.
 - Statuses are `open`, `in_progress`, `closed`, and `maybe_later`.
-- Each project has at most one in-progress pellet.
-- `pl next` is read-only. It returns the in-progress pellet first, otherwise the highest-priority eligible open pellet.
+- Each registered workspace has at most one in-progress pellet; several workspaces may progress independently in one project.
+- `pl next` is read-only. It returns the current workspace's in-progress pellet first, otherwise the highest-priority eligible open pellet.
 
 ### Ordering
 
@@ -43,7 +45,7 @@ The product is named Pellets and the executable is `pl`.
 - Prefer a pinned CGo-free SQLite driver to produce self-contained macOS and Windows executables.
 - Store one database at `.pellets/pellets.db` under a database root.
 - Discover the nearest database by walking upward, even across Git boundaries.
-- Store each registered Git root as a normalized path relative to the database root.
+- Store Git common-directory project identity and worktree-root/Git-directory workspace identity as normalized local paths, relative to the database root where possible.
 - Store timestamps as SQLite Julian day `REAL` values and render them as UTC RFC 3339 in JSON.
 - Embed forward migrations in the executable.
 - Use transactions for every mutation and immediate transactions for allocation, lifecycle uniqueness, reorder, migration, and purge.
@@ -79,7 +81,7 @@ Do not implement:
 ### Positive
 
 - Agents use small structured commands instead of repeatedly rewriting Markdown.
-- One in-progress row gives deterministic resumption without ownership machinery.
+- One in-progress row per workspace gives deterministic worktree-specific resumption without agent/PID/lease machinery.
 - Project-scoped external IDs support splitting one external issue into many pellets; a project-scoped group can collect pellets from several external issues without introducing an epic.
 - A shared ancestor database supports several repositories without making IDs globally verbose.
 - SQLite provides transactions, constraints, FTS5, and migrations in one local file.
@@ -88,7 +90,7 @@ Do not implement:
 
 ### Negative
 
-- One active agent per project is a real limitation; Pellets will not prevent two independent agents from duplicating work.
+- Two workers using the same worktree are not isolated; distinct registered worktrees coordinate through workspace ownership.
 - SQLite allows only one writer at a time across projects sharing a database, although writes should be short.
 - Project codes cannot be renamed safely while textual references exist, so v1 treats them as immutable.
 - Keyword memory search cannot find purely semantic matches.
@@ -122,7 +124,7 @@ Rejected because the required behavior is one exact filter that may span several
 
 ### PID-based claiming or leases
 
-Rejected because the `pl` subprocess PID is short-lived, caller identity is awkward to establish portably, PID reuse needs additional state, and the product assumes one active agent per project.
+Rejected because the `pl` subprocess PID is short-lived, caller identity is awkward to establish portably, PID reuse needs additional state, and worktree-scoped coordination does not require process ownership, heartbeats, expiry, or background cleanup. See ADR 0002.
 
 ### SQLite vector extension and offline embedding model
 
@@ -138,7 +140,7 @@ Rejected because SQLite files and WAL companions are not a merge format. The dat
 
 ## Follow-up decisions
 
-New decision records are required before adding multi-agent behavior, vector retrieval, synchronization, custom statuses, project-code rename, or any dependency-like relationship.
+ADR 0002 supplies the accepted multi-worktree coordination model. New decision records are still required before adding agent identity/authentication, PID/session ownership, leases, vector retrieval, synchronization, custom statuses, project-code rename, or any dependency-like relationship.
 
 Related documents:
 

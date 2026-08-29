@@ -11,31 +11,39 @@ import (
 	"pellets/internal/storage"
 )
 
-func TestProjectManagerInitUsesInjectedDatabaseNotFoundAndInitialization(t *testing.T) {
+func TestProjectManagerInitResolvesAllGitIdentityBeforeRegistration(t *testing.T) {
 	t.Parallel()
 
 	var calls []string
 	wantProject := storage.Project{
-		Code:      "demo",
-		RootPath:  "repos/demo",
-		CreatedAt: time.Unix(1, 0),
-		UpdatedAt: time.Unix(1, 0),
+		ID: 1, Code: "demo", GitCommonDir: relative("repos/demo/.git"),
+		Workspaces: []storage.Workspace{{ID: 1, ProjectID: 1, RootPath: relative("repos/demo"), GitDir: relative("repos/demo/.git")}},
+		CreatedAt:  time.Unix(1, 0), UpdatedAt: time.Unix(1, 0),
 	}
 	database := &fakeProjectDatabase{registerProject: wantProject, registerCreated: true, calls: &calls}
 	manager := ProjectManager{
 		Discover: ProjectDiscovery{
-			FindGitRoot: func(_ context.Context, workingDirectory string) (string, error) {
-				calls = append(calls, "find Git root "+workingDirectory)
-				return "/workspace/repos/demo", nil
+			FindGitIdentity: func(_ context.Context, workingDirectory string) (domain.GitIdentity, error) {
+				calls = append(calls, "find Git identity "+workingDirectory)
+				return domain.GitIdentity{WorkTreeRoot: "/workspace/repos/demo", GitCommonDir: "/workspace/repos/demo/.git", GitDir: "/workspace/repos/demo/.git"}, nil
 			},
 			FindDatabase: func(workingDirectory string) (Database, error) {
 				calls = append(calls, "find database "+workingDirectory)
 				return Database{}, domain.NewError(domain.NotFound, "database_not_found", "not found", nil)
 			},
-			RelativeProjectPath: func(databaseRoot, projectRoot string) (string, error) {
-				calls = append(calls, "relative path "+databaseRoot+" "+projectRoot)
-				return "repos/demo", nil
+			NormalizePath: func(databaseRoot, localPath string) (domain.LocalPath, error) {
+				calls = append(calls, "normalize "+databaseRoot+" "+localPath)
+				switch localPath {
+				case "/workspace/repos/demo":
+					return relative("repos/demo"), nil
+				case "/workspace/repos/demo/.git":
+					return relative("repos/demo/.git"), nil
+				default:
+					return domain.LocalPath{}, errors.New("unexpected path")
+				}
 			},
+			ResolvePath: func(string, domain.LocalPath) (string, error) { return "", errors.New("unexpected resolve") },
+			PathExists:  func(string) (bool, error) { return false, errors.New("unexpected exists") },
 		},
 		Initialize: func(_ context.Context, root string) (InitializedDatabase, error) {
 			calls = append(calls, "initialize "+root)
@@ -52,18 +60,21 @@ func TestProjectManagerInitUsesInjectedDatabaseNotFoundAndInitialization(t *test
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
-	if project != wantProject {
+	if !reflect.DeepEqual(project, wantProject) {
 		t.Fatalf("Init() project = %#v, want %#v", project, wantProject)
 	}
 	wantCalls := []string{
-		"find Git root /workspace/repos/demo/nested",
+		"find Git identity /workspace/repos/demo/nested",
 		"find database /workspace/repos/demo/nested",
 		"initialize /workspace/repos/demo",
-		"relative path /workspace /workspace/repos/demo",
+		"normalize /workspace /workspace/repos/demo/.git",
+		"normalize /workspace /workspace/repos/demo",
+		"normalize /workspace /workspace/repos/demo/.git",
 		"reject tracked /workspace /workspace/.pellets/pellets.db",
 		"ensure excluded /workspace /workspace/.pellets/pellets.db",
 		"open /workspace/.pellets/pellets.db",
-		"register demo repos/demo",
+		"find workspace repos/demo/.git",
+		"register demo repos/demo/.git repos/demo repos/demo/.git move=false",
 		"close",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
@@ -71,254 +82,207 @@ func TestProjectManagerInitUsesInjectedDatabaseNotFoundAndInitialization(t *test
 	}
 }
 
-func TestProjectManagerInitStopsAtInjectedDiscoveryFailures(t *testing.T) {
+func TestProjectManagerAllowsMovedWorkspaceOnlyWhenOldPathIsGone(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
+	for _, test := range []struct {
 		name      string
-		configure func(*ProjectManager)
+		oldExists bool
+		allowMove bool
 		wantCode  string
 	}{
-		{
-			name: "Git not found",
-			configure: func(manager *ProjectManager) {
-				manager.Discover.FindGitRoot = func(context.Context, string) (string, error) {
-					return "", domain.NewError(domain.NotFound, "git_repository_not_found", "not found", nil)
-				}
-			},
-			wantCode: "git_repository_not_found",
-		},
-		{
-			name: "project outside database root",
-			configure: func(manager *ProjectManager) {
-				manager.Discover.RelativeProjectPath = func(string, string) (string, error) {
-					return "", domain.NewError(domain.Conflict, "project_outside_database_root", "outside", nil)
-				}
-			},
-			wantCode: "project_outside_database_root",
-		},
-	}
-
-	for _, test := range tests {
-		test := test
+		{name: "stale old path permits move", allowMove: true},
+		{name: "duplicate live path conflicts", oldExists: true, wantCode: "workspace_identity_conflict"},
+	} {
 		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-
-			crossedSideEffectBoundary := false
-			manager := successfulProjectManager(&fakeProjectDatabase{})
-			manager.Initialize = func(context.Context, string) (InitializedDatabase, error) {
-				crossedSideEffectBoundary = true
-				return InitializedDatabase{}, errors.New("unexpected initialization")
+			database := &fakeProjectDatabase{
+				resolved:        storage.ResolvedProject{Workspace: storage.Workspace{ID: 9, RootPath: relative("old")}},
+				registerProject: storage.Project{ID: 1, Code: "demo"},
 			}
-			manager.Open = func(context.Context, string) (storage.ProjectDatabase, error) {
-				crossedSideEffectBoundary = true
-				return nil, errors.New("unexpected open")
+			if test.wantCode != "" {
+				database.registerErr = domain.NewError(domain.Conflict, test.wantCode, "conflict", nil)
 			}
-			manager.GitSafety = failingIfCalledProjectGitSafety{called: &crossedSideEffectBoundary}
-			test.configure(&manager)
+			manager := successfulProjectManager(database)
+			manager.Discover.ResolvePath = func(_ string, got domain.LocalPath) (string, error) {
+				if got != relative("old") {
+					t.Fatalf("old path = %#v", got)
+				}
+				return "/database/old", nil
+			}
+			manager.Discover.PathExists = func(path string) (bool, error) {
+				if path != "/database/old" {
+					t.Fatalf("resolved path = %q", path)
+				}
+				return test.oldExists, nil
+			}
 
 			_, err := manager.Init(context.Background(), "/working", "demo")
-			if err == nil || domain.PublicError(err).Code != test.wantCode {
+			if test.wantCode == "" && err != nil {
+				t.Fatal(err)
+			}
+			if test.wantCode != "" && (err == nil || domain.PublicError(err).Code != test.wantCode) {
 				t.Fatalf("Init() error = %v, want %s", err, test.wantCode)
 			}
-			if crossedSideEffectBoundary {
-				t.Fatal("discovery failure crossed an initialization, Git-safety, or storage boundary")
+			if database.lastRegistration.AllowWorkspaceMove != test.allowMove {
+				t.Fatalf("AllowWorkspaceMove = %v, want %v", database.lastRegistration.AllowWorkspaceMove, test.allowMove)
 			}
 		})
 	}
 }
 
-func TestProjectManagerInitPropagatesInjectedInitializationFailure(t *testing.T) {
+func TestResolveCurrentIsReadOnlyAndReturnsProjectAndWorkspace(t *testing.T) {
 	t.Parallel()
 
-	initializationCalls := 0
-	crossedLaterBoundary := false
-	manager := successfulProjectManager(&fakeProjectDatabase{})
-	manager.Discover.FindDatabase = func(string) (Database, error) {
-		return Database{}, domain.NewError(domain.NotFound, "database_not_found", "not found", nil)
+	want := storage.ResolvedProject{
+		Project:   storage.Project{ID: 2, Code: "demo"},
+		Workspace: storage.Workspace{ID: 7, ProjectID: 2, RootPath: relative("repository")},
 	}
-	manager.Initialize = func(_ context.Context, root string) (InitializedDatabase, error) {
-		initializationCalls++
-		if root != "/database/repository" {
-			t.Fatalf("initialization root = %q", root)
-		}
-		return InitializedDatabase{}, domain.NewError(domain.Storage, "database_creation_failed", "creation failed", nil)
+	database := &fakeProjectDatabase{resolved: want}
+	manager := successfulProjectManager(database)
+	got, err := manager.ResolveCurrent(context.Background(), Database{Root: "/database", Path: "/database/.pellets/pellets.db"}, "/working/nested")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ResolveCurrent() = %#v, want %#v", got, want)
+	}
+	if database.registerCalls != 0 || database.resolveCalls != 1 {
+		t.Fatalf("register calls = %d, resolve calls = %d", database.registerCalls, database.resolveCalls)
+	}
+}
+
+func TestProjectManagerInitStopsBeforeSideEffectsOnIdentityFailure(t *testing.T) {
+	t.Parallel()
+	crossed := false
+	manager := successfulProjectManager(&fakeProjectDatabase{})
+	manager.Discover.FindGitIdentity = func(context.Context, string) (domain.GitIdentity, error) {
+		return domain.GitIdentity{}, domain.NewError(domain.NotFound, "git_repository_not_found", "not found", nil)
+	}
+	manager.Initialize = func(context.Context, string) (InitializedDatabase, error) {
+		crossed = true
+		return InitializedDatabase{}, nil
 	}
 	manager.Open = func(context.Context, string) (storage.ProjectDatabase, error) {
-		crossedLaterBoundary = true
-		return nil, errors.New("unexpected open")
+		crossed = true
+		return nil, nil
 	}
-	manager.GitSafety = failingIfCalledProjectGitSafety{called: &crossedLaterBoundary}
-
+	manager.GitSafety = failingIfCalledProjectGitSafety{called: &crossed}
 	_, err := manager.Init(context.Background(), "/working", "demo")
-	if err == nil || domain.PublicError(err).Code != "database_creation_failed" {
-		t.Fatalf("Init() error = %v, want database_creation_failed", err)
-	}
-	if initializationCalls != 1 {
-		t.Fatalf("initialization calls = %d, want 1", initializationCalls)
-	}
-	if crossedLaterBoundary {
-		t.Fatal("initialization failure crossed a Git-safety or storage boundary")
-	}
-}
-
-func TestProjectManagerInitPropagatesRegistrationAndCloseOutcomes(t *testing.T) {
-	t.Parallel()
-
-	wantProject := storage.Project{Code: "demo", RootPath: "."}
-	tests := []struct {
-		name        string
-		database    fakeProjectDatabase
-		wantProject storage.Project
-		wantCode    string
-	}{
-		{
-			name:        "idempotent registration",
-			database:    fakeProjectDatabase{registerProject: wantProject, registerCreated: false},
-			wantProject: wantProject,
-		},
-		{
-			name: "duplicate code",
-			database: fakeProjectDatabase{registerErr: domain.NewError(
-				domain.Conflict,
-				"project_code_already_registered",
-				"duplicate code",
-				nil,
-			)},
-			wantCode: "project_code_already_registered",
-		},
-		{
-			name: "duplicate path",
-			database: fakeProjectDatabase{registerErr: domain.NewError(
-				domain.Conflict,
-				"project_path_already_registered",
-				"duplicate path",
-				nil,
-			)},
-			wantCode: "project_path_already_registered",
-		},
-		{
-			name:        "close failure",
-			database:    fakeProjectDatabase{registerProject: wantProject, registerCreated: true, closeErr: errors.New("close failed")},
-			wantProject: wantProject,
-			wantCode:    "database_close_failed",
-		},
-	}
-
-	for _, test := range tests {
-		test := test
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-
-			database := test.database
-			manager := successfulProjectManager(&database)
-			project, err := manager.Init(context.Background(), "/working", "demo")
-			if test.wantCode == "" {
-				if err != nil {
-					t.Fatalf("Init() error = %v", err)
-				}
-			} else if err == nil || domain.PublicError(err).Code != test.wantCode {
-				t.Fatalf("Init() error = %v, want %s", err, test.wantCode)
-			}
-			if project != test.wantProject {
-				t.Fatalf("Init() project = %#v, want %#v", project, test.wantProject)
-			}
-			if database.registerCalls != 1 || database.closeCalls != 1 {
-				t.Fatalf("registration calls = %d, close calls = %d, want 1 each", database.registerCalls, database.closeCalls)
-			}
-		})
+	if err == nil || domain.PublicError(err).Code != "git_repository_not_found" || crossed {
+		t.Fatalf("Init() error = %v, crossed=%v", err, crossed)
 	}
 }
 
 func successfulProjectManager(database storage.ProjectDatabase) ProjectManager {
 	return ProjectManager{
 		Discover: ProjectDiscovery{
-			FindGitRoot: func(context.Context, string) (string, error) {
-				return "/database/repository", nil
+			FindGitIdentity: func(context.Context, string) (domain.GitIdentity, error) {
+				return domain.GitIdentity{WorkTreeRoot: "/database/repository", GitCommonDir: "/database/repository/.git", GitDir: "/database/repository/.git/worktrees/current"}, nil
 			},
 			FindDatabase: func(string) (Database, error) {
 				return Database{Root: "/database", Path: "/database/.pellets/pellets.db"}, nil
 			},
-			RelativeProjectPath: func(string, string) (string, error) {
-				return ".", nil
+			NormalizePath: func(_ string, value string) (domain.LocalPath, error) {
+				switch value {
+				case "/database/repository":
+					return relative("repository"), nil
+				case "/database/repository/.git":
+					return relative("repository/.git"), nil
+				case "/database/repository/.git/worktrees/current":
+					return relative("repository/.git/worktrees/current"), nil
+				default:
+					return domain.LocalPath{}, errors.New("unexpected path")
+				}
 			},
+			ResolvePath: func(string, domain.LocalPath) (string, error) { return "", nil },
+			PathExists:  func(string) (bool, error) { return false, nil },
 		},
 		Initialize: func(context.Context, string) (InitializedDatabase, error) {
 			return InitializedDatabase{}, errors.New("unexpected initialization")
 		},
-		Open: func(context.Context, string) (storage.ProjectDatabase, error) {
-			return database, nil
-		},
+		Open:      func(context.Context, string) (storage.ProjectDatabase, error) { return database, nil },
 		GitSafety: recordingProjectGitSafety{},
 	}
 }
 
-type recordingProjectGitSafety struct {
-	calls *[]string
+func relative(value string) domain.LocalPath {
+	return domain.LocalPath{Value: value, Relative: true}
 }
 
-func (safety recordingProjectGitSafety) RejectTracked(_ context.Context, root, path string) error {
-	if safety.calls != nil {
-		*safety.calls = append(*safety.calls, "reject tracked "+root+" "+path)
+type recordingProjectGitSafety struct{ calls *[]string }
+
+func (s recordingProjectGitSafety) RejectTracked(_ context.Context, root, path string) error {
+	if s.calls != nil {
+		*s.calls = append(*s.calls, "reject tracked "+root+" "+path)
+	}
+	return nil
+}
+func (s recordingProjectGitSafety) EnsureExcluded(_ context.Context, root, path string) error {
+	if s.calls != nil {
+		*s.calls = append(*s.calls, "ensure excluded "+root+" "+path)
 	}
 	return nil
 }
 
-func (safety recordingProjectGitSafety) EnsureExcluded(_ context.Context, root, path string) error {
-	if safety.calls != nil {
-		*safety.calls = append(*safety.calls, "ensure excluded "+root+" "+path)
-	}
-	return nil
-}
+type failingIfCalledProjectGitSafety struct{ called *bool }
 
-type failingIfCalledProjectGitSafety struct {
-	called *bool
+func (s failingIfCalledProjectGitSafety) RejectTracked(context.Context, string, string) error {
+	*s.called = true
+	return errors.New("unexpected")
 }
-
-func (safety failingIfCalledProjectGitSafety) RejectTracked(context.Context, string, string) error {
-	*safety.called = true
-	return errors.New("unexpected Git safety call")
-}
-
-func (safety failingIfCalledProjectGitSafety) EnsureExcluded(context.Context, string, string) error {
-	*safety.called = true
-	return errors.New("unexpected Git safety call")
+func (s failingIfCalledProjectGitSafety) EnsureExcluded(context.Context, string, string) error {
+	*s.called = true
+	return errors.New("unexpected")
 }
 
 type fakeProjectDatabase struct {
-	registerProject storage.Project
-	registerCreated bool
-	registerErr     error
-	closeErr        error
-	registerCalls   int
-	closeCalls      int
-	calls           *[]string
+	registerProject  storage.Project
+	registerCreated  bool
+	registerErr      error
+	resolved         storage.ResolvedProject
+	lookupErr        error
+	closeErr         error
+	registerCalls    int
+	resolveCalls     int
+	closeCalls       int
+	lastRegistration storage.ProjectRegistration
+	calls            *[]string
 }
 
-func (database *fakeProjectDatabase) RegisterProject(_ context.Context, code, rootPath string) (storage.Project, bool, error) {
-	database.registerCalls++
-	if database.calls != nil {
-		*database.calls = append(*database.calls, "register "+code+" "+rootPath)
+func (d *fakeProjectDatabase) RegisterProject(_ context.Context, registration storage.ProjectRegistration) (storage.Project, bool, error) {
+	d.registerCalls++
+	d.lastRegistration = registration
+	if d.calls != nil {
+		*d.calls = append(*d.calls, "register "+registration.Code+" "+registration.GitCommonDir.Value+" "+registration.WorkspaceRoot.Value+" "+registration.GitDir.Value+" move="+map[bool]string{true: "true", false: "false"}[registration.AllowWorkspaceMove])
 	}
-	return database.registerProject, database.registerCreated, database.registerErr
+	return d.registerProject, d.registerCreated, d.registerErr
 }
-
 func (*fakeProjectDatabase) ListProjects(context.Context) ([]storage.Project, error) {
-	return nil, errors.New("unexpected ListProjects call")
+	return nil, errors.New("unexpected")
 }
-
 func (*fakeProjectDatabase) FindProjectByCode(context.Context, string) (storage.Project, error) {
-	return storage.Project{}, errors.New("unexpected FindProjectByCode call")
+	return storage.Project{}, errors.New("unexpected")
 }
-
-func (*fakeProjectDatabase) FindProjectByRootPath(context.Context, string) (storage.Project, error) {
-	return storage.Project{}, errors.New("unexpected FindProjectByRootPath call")
-}
-
-func (database *fakeProjectDatabase) Close() error {
-	database.closeCalls++
-	if database.calls != nil {
-		*database.calls = append(*database.calls, "close")
+func (d *fakeProjectDatabase) FindWorkspaceByGitDir(_ context.Context, gitDir domain.LocalPath) (storage.ResolvedProject, error) {
+	if d.calls != nil {
+		*d.calls = append(*d.calls, "find workspace "+gitDir.Value)
 	}
-	return database.closeErr
+	if d.lookupErr != nil {
+		return storage.ResolvedProject{}, d.lookupErr
+	}
+	if d.resolved.Workspace.ID == 0 {
+		return storage.ResolvedProject{}, domain.NewError(domain.NotFound, "workspace_not_registered", "missing", nil)
+	}
+	return d.resolved, nil
+}
+func (d *fakeProjectDatabase) ResolveProjectWorkspace(context.Context, domain.LocalPath, domain.LocalPath, domain.LocalPath) (storage.ResolvedProject, error) {
+	d.resolveCalls++
+	return d.resolved, d.lookupErr
+}
+func (d *fakeProjectDatabase) Close() error {
+	d.closeCalls++
+	if d.calls != nil {
+		*d.calls = append(*d.calls, "close")
+	}
+	return d.closeErr
 }

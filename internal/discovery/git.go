@@ -25,56 +25,122 @@ type GitSafety struct{}
 // FindGitRoot resolves the nearest non-bare Git work-tree root using Git's own
 // discovery rules. This supports linked worktrees and .git indirection.
 func FindGitRoot(ctx context.Context, directory string) (string, error) {
-	workTree, ok, err := findWorkTree(ctx, directory)
+	identity, err := FindGitIdentity(ctx, directory)
+	return identity.WorkTreeRoot, err
+}
+
+// FindGitIdentity resolves the logical repository and current workspace with
+// Git's own common-directory, Git-directory, and worktree-root semantics.
+func FindGitIdentity(ctx context.Context, directory string) (domain.GitIdentity, error) {
+	inside, err := runGit(ctx, directory, "rev-parse", "--is-inside-work-tree")
 	if err != nil {
-		return "", err
-	}
-	if !ok {
-		absolute, absoluteErr := filepath.Abs(directory)
-		if absoluteErr != nil {
-			absolute = directory
+		var exitError *exec.ExitError
+		if errors.As(err, &exitError) && exitError.ExitCode() == 128 && bytes.Contains(inside, []byte("not a git repository")) {
+			absolute, absoluteErr := filepath.Abs(directory)
+			if absoluteErr != nil {
+				absolute = directory
+			}
+			return domain.GitIdentity{}, domain.NewError(
+				domain.NotFound,
+				"git_repository_not_found",
+				"the current directory is not inside a Git work tree",
+				map[string]any{"start_path": filepath.Clean(absolute)},
+			)
 		}
-		return "", domain.NewError(
+		return domain.GitIdentity{}, gitInspectionFailure(directory, err)
+	}
+	if strings.TrimSpace(string(inside)) != "true" {
+		return domain.GitIdentity{}, domain.NewError(
 			domain.NotFound,
 			"git_repository_not_found",
 			"the current directory is not inside a Git work tree",
-			map[string]any{"start_path": filepath.Clean(absolute)},
+			map[string]any{"start_path": filepath.Clean(directory)},
 		)
 	}
-	canonical, err := resolveExistingPrefix(workTree)
+
+	output, err := runGit(ctx, directory,
+		"rev-parse", "--path-format=absolute", "--show-toplevel", "--absolute-git-dir", "--git-common-dir")
 	if err != nil {
-		return "", gitInspectionFailure(workTree, err)
+		return domain.GitIdentity{}, gitInspectionFailure(directory, err)
 	}
-	return canonical, nil
+	lines := strings.Split(strings.TrimSuffix(strings.ReplaceAll(string(output), "\r\n", "\n"), "\n"), "\n")
+	if len(lines) != 3 || lines[0] == "" || lines[1] == "" || lines[2] == "" {
+		return domain.GitIdentity{}, gitInspectionFailure(directory, fmt.Errorf("Git returned %d identity paths, want 3", len(lines)))
+	}
+	paths := make([]string, 3)
+	for index, value := range lines {
+		canonical, canonicalErr := resolveExistingPrefix(value)
+		if canonicalErr != nil {
+			return domain.GitIdentity{}, gitInspectionFailure(value, canonicalErr)
+		}
+		paths[index] = canonical
+	}
+	return domain.GitIdentity{WorkTreeRoot: paths[0], GitDir: paths[1], GitCommonDir: paths[2]}, nil
 }
 
-// RelativeProjectPath returns the canonical, slash-normalized project root
-// relative to the database root. Projects outside that root are rejected.
-func RelativeProjectPath(databaseRoot, projectRoot string) (string, error) {
-	canonicalDatabaseRoot, err := resolveExistingPrefix(databaseRoot)
+// NormalizeLocalPath canonicalizes a local path for database storage. Paths
+// beneath databaseRoot are relative; other valid Git paths remain absolute.
+func NormalizeLocalPath(databaseRoot, localPath string) (domain.LocalPath, error) {
+	canonicalRoot, err := resolveExistingPrefix(databaseRoot)
 	if err != nil {
-		return "", projectPathFailure(databaseRoot, projectRoot, err)
+		return domain.LocalPath{}, projectPathFailure(databaseRoot, localPath, err)
 	}
-	canonicalProjectRoot, err := resolveExistingPrefix(projectRoot)
+	canonicalPath, err := resolveExistingPrefix(localPath)
 	if err != nil {
-		return "", projectPathFailure(databaseRoot, projectRoot, err)
+		return domain.LocalPath{}, projectPathFailure(databaseRoot, localPath, err)
 	}
-	relative, err := filepath.Rel(canonicalDatabaseRoot, canonicalProjectRoot)
+	caseInsensitive, err := isCaseInsensitiveFilesystem(canonicalRoot)
 	if err != nil {
-		return "", projectPathFailure(databaseRoot, projectRoot, err)
+		return domain.LocalPath{}, projectPathFailure(databaseRoot, localPath, err)
 	}
-	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
-		return "", domain.NewError(
-			domain.Conflict,
-			"project_outside_database_root",
-			"the Git work tree is outside the selected Pellets database root",
-			map[string]any{
-				"database_root": canonicalDatabaseRoot,
-				"project_root":  canonicalProjectRoot,
-			},
-		)
+	relative, err := filepath.Rel(canonicalRoot, canonicalPath)
+	if err == nil && !pathEscapesRoot(relative) {
+		return domain.LocalPath{Value: normalizePlatformStoragePath(relative, caseInsensitive), Relative: true}, nil
 	}
-	return filepath.ToSlash(relative), nil
+	return domain.LocalPath{Value: normalizePlatformStoragePath(canonicalPath, caseInsensitive), Relative: false}, nil
+}
+
+// ResolveLocalPath expands a stored path without requiring the target to
+// exist. Callers use it only for diagnostics and pre-transaction stale checks.
+func ResolveLocalPath(databaseRoot string, stored domain.LocalPath) (string, error) {
+	if stored.Value == "" {
+		return "", projectPathFailure(databaseRoot, stored.Value, errors.New("stored path is empty"))
+	}
+	value := filepath.FromSlash(stored.Value)
+	if stored.Relative {
+		if filepath.IsAbs(value) || pathEscapesRoot(value) || filepath.Clean(value) != value {
+			return "", projectPathFailure(databaseRoot, stored.Value, errors.New("stored relative path is invalid"))
+		}
+		canonicalRoot, err := resolveExistingPrefix(databaseRoot)
+		if err != nil {
+			return "", projectPathFailure(databaseRoot, stored.Value, err)
+		}
+		return filepath.Clean(filepath.Join(canonicalRoot, value)), nil
+	}
+	if !filepath.IsAbs(value) {
+		return "", projectPathFailure(databaseRoot, stored.Value, errors.New("stored absolute path is not absolute"))
+	}
+	return filepath.Clean(value), nil
+}
+
+// PathExists checks one already-resolved path without mutating it.
+func PathExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, gitInspectionFailure(path, err)
+}
+
+func normalizePlatformStoragePath(value string, caseInsensitive bool) string {
+	value = filepath.ToSlash(filepath.Clean(value))
+	if caseInsensitive {
+		value = strings.ToLower(value)
+	}
+	return value
 }
 
 // RejectTracked rejects the database or any SQLite companion when the

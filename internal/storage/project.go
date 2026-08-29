@@ -5,22 +5,54 @@ package storage
 import (
 	"context"
 	"time"
+
+	"pellets/internal/domain"
 )
 
-// Project is the storage representation of one registered Git work tree.
-type Project struct {
-	Code      string
-	RootPath  string
+// Workspace is one registered checkout of a logical project's Git repository.
+type Workspace struct {
+	ID        int64
+	ProjectID int64
+	RootPath  domain.LocalPath
+	GitDir    domain.LocalPath
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// Project is one logical Git repository and all of its registered workspaces.
+type Project struct {
+	ID           int64
+	Code         string
+	GitCommonDir domain.LocalPath
+	Workspaces   []Workspace
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// ResolvedProject identifies both the shared logical project and the current
+// Git-worktree workspace.
+type ResolvedProject struct {
+	Project   Project
+	Workspace Workspace
+}
+
+// ProjectRegistration contains identities resolved by Git and normalized by
+// the application before the storage write transaction begins.
+type ProjectRegistration struct {
+	Code               string
+	GitCommonDir       domain.LocalPath
+	WorkspaceRoot      domain.LocalPath
+	GitDir             domain.LocalPath
+	AllowWorkspaceMove bool
 }
 
 // ProjectDatabase is the project persistence boundary for one selected
 // database. Registration returns created=false for an idempotent repeat.
 type ProjectDatabase interface {
-	RegisterProject(ctx context.Context, code, rootPath string) (project Project, created bool, err error)
+	RegisterProject(ctx context.Context, registration ProjectRegistration) (project Project, created bool, err error)
 	ListProjects(ctx context.Context) ([]Project, error)
 	FindProjectByCode(ctx context.Context, code string) (Project, error)
-	FindProjectByRootPath(ctx context.Context, rootPath string) (Project, error)
+	FindWorkspaceByGitDir(ctx context.Context, gitDir domain.LocalPath) (ResolvedProject, error)
+	ResolveProjectWorkspace(ctx context.Context, commonDir, rootPath, gitDir domain.LocalPath) (ResolvedProject, error)
 	Close() error
 }

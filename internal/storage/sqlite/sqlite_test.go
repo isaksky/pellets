@@ -100,9 +100,7 @@ func TestMemoryIDsAreNeverReusedAfterRemoval(t *testing.T) {
 	db := openTestDatabase(t, filepath.Join(t.TempDir(), "memory-ids.db"))
 	defer db.Close()
 
-	mustExec(t, db, `
-		INSERT INTO projects(project_id, code, root_path, created_at, updated_at)
-		VALUES (1, 'memory', 'memory', 1, 1)`)
+	mustInsertProjectAndWorkspace(t, db, 1, 1, "memory", "memory")
 
 	addMemory := func(text string) int64 {
 		t.Helper()
@@ -250,25 +248,32 @@ func TestSchemaEnforcesForeignKeysAndPelletQueueConstraints(t *testing.T) {
 		INSERT INTO pellets(project_id, number, title, status, priority, created_at, updated_at)
 		VALUES (999, 1, 'missing project', 'open', 1024, 1, 1)`)
 
+	mustInsertProjectAndWorkspace(t, db, 1, 11, "one", "one-main")
 	mustExec(t, db, `
-		INSERT INTO projects(project_id, code, root_path, created_at, updated_at)
-		VALUES (1, 'one', 'one', 1, 1), (2, 'two', 'two', 1, 1)`)
-	mustInsertPellet(t, db, 1, 1, "open", intPtr(1024), nil)
+		INSERT INTO project_workspaces(
+			workspace_id, project_id, root_path, root_path_relative,
+			git_dir, git_dir_relative, created_at, updated_at
+		) VALUES (12, 1, 'one-linked', 1, 'one/.git/worktrees/linked', 1, 1, 1)`)
+	mustInsertProjectAndWorkspace(t, db, 2, 21, "two", "two-main")
+	mustInsertPellet(t, db, 1, 1, "open", nil, intPtr(1024), nil)
 
-	// Active priority and in-progress uniqueness are project-scoped partial
-	// indexes, so duplicates fail within a project but work across projects.
-	assertInsertPelletFails(t, db, 1, 2, "open", intPtr(1024), nil)
-	mustInsertPellet(t, db, 1, 3, "in_progress", intPtr(2048), nil)
-	assertInsertPelletFails(t, db, 1, 4, "in_progress", intPtr(3072), nil)
-	mustInsertPellet(t, db, 2, 1, "open", intPtr(1024), nil)
-	mustInsertPellet(t, db, 2, 2, "in_progress", intPtr(2048), nil)
+	// Priority stays project-scoped while ownership is workspace-scoped.
+	assertInsertPelletFails(t, db, 1, 2, "open", nil, intPtr(1024), nil)
+	assertInsertPelletFails(t, db, 1, 3, "in_progress", nil, intPtr(2048), nil)
+	assertInsertPelletFails(t, db, 1, 4, "open", intPtr(11), intPtr(2048), nil)
+	assertInsertPelletFails(t, db, 1, 5, "in_progress", intPtr(21), intPtr(2048), nil)
+	mustInsertPellet(t, db, 1, 6, "in_progress", intPtr(11), intPtr(2048), nil)
+	assertInsertPelletFails(t, db, 1, 7, "in_progress", intPtr(11), intPtr(3072), nil)
+	mustInsertPellet(t, db, 1, 8, "in_progress", intPtr(12), intPtr(3072), nil)
+	mustInsertPellet(t, db, 2, 1, "open", nil, intPtr(1024), nil)
+	mustInsertPellet(t, db, 2, 2, "in_progress", intPtr(21), intPtr(2048), nil)
 
-	assertInsertPelletFails(t, db, 1, 5, "closed", intPtr(4096), floatPtr(2))
-	assertInsertPelletFails(t, db, 1, 6, "maybe_later", intPtr(4096), nil)
-	assertInsertPelletFails(t, db, 1, 7, "open", nil, nil)
-	assertInsertPelletFails(t, db, 1, 8, "closed", nil, nil)
-	mustInsertPellet(t, db, 1, 9, "closed", nil, floatPtr(2))
-	mustInsertPellet(t, db, 1, 10, "maybe_later", nil, nil)
+	assertInsertPelletFails(t, db, 1, 9, "closed", nil, intPtr(4096), floatPtr(2))
+	assertInsertPelletFails(t, db, 1, 10, "maybe_later", nil, intPtr(4096), nil)
+	assertInsertPelletFails(t, db, 1, 11, "open", nil, nil, nil)
+	assertInsertPelletFails(t, db, 1, 12, "closed", nil, nil, nil)
+	mustInsertPellet(t, db, 1, 13, "closed", nil, nil, floatPtr(2))
+	mustInsertPellet(t, db, 1, 14, "maybe_later", nil, nil, nil)
 
 	assertExecFails(t, db, "DELETE FROM projects WHERE project_id = 1")
 	var violations int
@@ -1041,13 +1046,14 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 		"pellets_fts_data",
 		"pellets_fts_docsize",
 		"pellets_fts_idx",
+		"project_workspaces",
 		"projects",
 	}
 	wantIndexes := []string{
 		"memories_project_approval_idx",
 		"pellets_active_priority_idx",
 		"pellets_closed_completed_idx",
-		"pellets_one_in_progress_idx",
+		"pellets_workspace_in_progress_idx",
 	}
 	assertObjectNames(t, db, "table", wantTables)
 	assertObjectNames(t, db, "index", wantIndexes)
@@ -1083,7 +1089,7 @@ func assertObjectNames(t *testing.T, db *sql.DB, objectType string, want []strin
 
 func assertStrictTables(t *testing.T, db *sql.DB) {
 	t.Helper()
-	want := []string{"application_metadata", "memories", "pellets", "projects"}
+	want := []string{"application_metadata", "memories", "pellets", "project_workspaces", "projects"}
 	rows, err := db.Query("PRAGMA table_list")
 	if err != nil {
 		t.Fatal(err)
@@ -1114,9 +1120,9 @@ func assertPartialIndexes(t *testing.T, db *sql.DB) {
 		partial int
 	}
 	want := map[string]properties{
-		"pellets_one_in_progress_idx":  {unique: 1, partial: 1},
-		"pellets_active_priority_idx":  {unique: 1, partial: 1},
-		"pellets_closed_completed_idx": {unique: 0, partial: 1},
+		"pellets_workspace_in_progress_idx": {unique: 1, partial: 1},
+		"pellets_active_priority_idx":       {unique: 1, partial: 1},
+		"pellets_closed_completed_idx":      {unique: 0, partial: 1},
 	}
 	rows, err := db.Query("PRAGMA index_list('pellets')")
 	if err != nil {
@@ -1147,8 +1153,13 @@ func assertPartialIndexes(t *testing.T, db *sql.DB) {
 func assertFTSIndexes(t *testing.T, db *sql.DB) {
 	t.Helper()
 	mustExec(t, db, `
-		INSERT INTO projects(project_id, code, root_path, created_at, updated_at)
-		VALUES (10, 'fts', 'fts', 1, 1);
+		INSERT INTO projects(
+			project_id, code, git_common_dir, git_common_dir_relative, created_at, updated_at
+		) VALUES (10, 'fts', 'fts/.git', 1, 1, 1);
+		INSERT INTO project_workspaces(
+			workspace_id, project_id, root_path, root_path_relative,
+			git_dir, git_dir_relative, created_at, updated_at
+		) VALUES (1000, 10, 'fts', 1, 'fts/.git', 1, 1, 1);
 		INSERT INTO pellets(rowid, project_id, number, title, description, external_id,
 		                    status, priority, created_at, updated_at)
 		VALUES (100, 10, 1, 'alpha-beta', 'searchable pellet', 'ext_id',
@@ -1178,23 +1189,40 @@ func assertFTSIndexes(t *testing.T, db *sql.DB) {
 	}
 }
 
-func mustInsertPellet(t *testing.T, db *sql.DB, projectID, number int, status string, priority *int, completedAt *float64) {
+func mustInsertProjectAndWorkspace(t *testing.T, db *sql.DB, projectID, workspaceID int, code, root string) {
 	t.Helper()
 	if _, err := db.Exec(`
-		INSERT INTO pellets(project_id, number, title, status, priority, created_at, updated_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, 1, 1, ?)`,
-		projectID, number, "pellet", status, priority, completedAt,
+		INSERT INTO projects(
+			project_id, code, git_common_dir, git_common_dir_relative, created_at, updated_at
+		) VALUES (?, ?, ?, 1, 1, 1)`, projectID, code, root+"/.git"); err != nil {
+		t.Fatalf("insert project %d: %v", projectID, err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO project_workspaces(
+			workspace_id, project_id, root_path, root_path_relative,
+			git_dir, git_dir_relative, created_at, updated_at
+		) VALUES (?, ?, ?, 1, ?, 1, 1, 1)`, workspaceID, projectID, root, root+"/.git"); err != nil {
+		t.Fatalf("insert project/workspace %d/%d: %v", projectID, workspaceID, err)
+	}
+}
+
+func mustInsertPellet(t *testing.T, db *sql.DB, projectID, number int, status string, workspaceID, priority *int, completedAt *float64) {
+	t.Helper()
+	if _, err := db.Exec(`
+		INSERT INTO pellets(project_id, workspace_id, number, title, status, priority, created_at, updated_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)`,
+		projectID, workspaceID, number, "pellet", status, priority, completedAt,
 	); err != nil {
 		t.Fatalf("insert pellet project=%d number=%d status=%s: %v", projectID, number, status, err)
 	}
 }
 
-func assertInsertPelletFails(t *testing.T, db *sql.DB, projectID, number int, status string, priority *int, completedAt *float64) {
+func assertInsertPelletFails(t *testing.T, db *sql.DB, projectID, number int, status string, workspaceID, priority *int, completedAt *float64) {
 	t.Helper()
 	if _, err := db.Exec(`
-		INSERT INTO pellets(project_id, number, title, status, priority, created_at, updated_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, 1, 1, ?)`,
-		projectID, number, "pellet", status, priority, completedAt,
+		INSERT INTO pellets(project_id, workspace_id, number, title, status, priority, created_at, updated_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)`,
+		projectID, workspaceID, number, "pellet", status, priority, completedAt,
 	); err == nil {
 		t.Fatalf("insert pellet project=%d number=%d status=%s unexpectedly succeeded", projectID, number, status)
 	}

@@ -36,7 +36,7 @@ There is no `--json` flag because JSON is already the default. There is no color
 
 ## Database and project selection
 
-Normal commands walk upward from the current directory and use the nearest `.pellets/pellets.db`. They then use the nearest Git root to find the registered project. Walking for the database continues past Git boundaries, which permits one database at a common parent of several repositories. V1 has no path override: selecting a database is intentionally a property of the working directory.
+Normal commands walk upward from the current directory and use the nearest `.pellets/pellets.db`. They ask Git for the common directory to find the logical project and for the worktree root plus worktree-specific Git directory to find the current workspace. Walking for the database continues past Git boundaries, which permits one database at a common parent of linked worktrees and unrelated sibling repositories. V1 has no path override: selecting a database is intentionally a property of the working directory.
 
 `--project CODE` does not silently let a caller mutate an unrelated repository. For pellet mutations, the code in the pellet reference must match the selected/current project. Database-level and read-only administrative commands may operate across registered projects when explicitly documented.
 
@@ -56,25 +56,31 @@ If the new database is inside a Git work tree, add `.pellets/` to Git’s local 
 
 ### `pl init`
 
-Register the current Git work tree as a project.
+Register the current Git repository and worktree.
 
 ```text
 pl init --code CODE
 ```
 
-If an ancestor database exists, register the Git root in the nearest one. Otherwise create `.pellets/pellets.db` at the Git root, then register the project. The project path is stored relative to the database root.
+If an ancestor database exists, use the nearest one. Otherwise create `.pellets/pellets.db` at the current worktree root. Git's common directory identifies one logical project; the worktree root and worktree-specific Git directory identify one workspace. Paths are stored relative to the database root when possible and otherwise as normalized absolute local paths.
 
 When the database lies inside the Git work tree, ensure `.pellets/` is in Git’s local exclude file. Do not edit committed `.gitignore`. Fail if the database is already tracked.
 
-Registering an already registered Git root with the same code is idempotent. A different code is a conflict. Project codes are immutable in v1.
+The first invocation creates the project and initial workspace. Running the same command and code in another linked worktree attaches that workspace to the same project; repeating either is idempotent. A different code for the same repository, the same code for an unrelated repository, a live duplicate worktree, one worktree attached to two projects, or inconsistent common/root/Git-directory identity is a typed write-free conflict. `init` may update a moved workspace root when its Git directory is unchanged and the old root is absent. Removed worktrees otherwise remain listed; there is no automatic cleanup. Project codes are immutable in v1.
 
 ### `pl project list`
 
-List registered projects in the selected database. This is a database-level read command and does not require the current directory to be inside a registered project.
+List registered logical projects and every workspace identity in the selected database. This is a database-level read command and does not require the current directory to be inside a registered project. It never registers or repairs a workspace.
 
 ### `pl project show [CODE]`
 
-Show the current project, or a named project when `CODE` is supplied.
+Show the current logical project, or a named project when `CODE` is supplied, including its Git common directory and registered workspace IDs, roots, Git directories, relative/absolute flags, and timestamps. Public project codes and pellet references do not change.
+
+Project `list`, `show`, and `init` use this data shape (timestamps omitted here only for brevity):
+
+```json
+{"code":"foo","git_common_dir":"main/.git","git_common_dir_relative":true,"workspaces":[{"id":1,"root_path":"main","root_path_relative":true,"git_dir":"main/.git","git_dir_relative":true},{"id":2,"root_path":"linked","root_path_relative":true,"git_dir":"main/.git/worktrees/linked","git_dir_relative":true}]}
+```
 
 ### `pl add`
 
@@ -114,11 +120,11 @@ pl next [--external-id ID] [--group GROUP]
 
 Selection is deterministic:
 
-1. Return the project’s one `in_progress` pellet, if present.
+1. Return the current workspace's `in_progress` pellet, if present.
 2. Otherwise return the lowest-priority `open` pellet matching the optional exact external ID and group filters.
 3. Otherwise return a successful empty result.
 
-An in-progress pellet wins even when it does not match `--external-id` or `--group`. The JSON field `selection_reason` is `resume_in_progress`, `next_open`, or `none`. This avoids directing the sole project agent to new work while different work is already in progress.
+The current workspace's in-progress pellet wins even when it does not match `--external-id` or `--group`; another workspace's pellet is never resumed. The JSON field `selection_reason` is `resume_in_progress`, `next_open`, or `none`. `next` never registers a workspace or writes. Workers that intend to begin work immediately should use atomic `start-next` rather than composing `next` and `start`.
 
 ### `pl show`
 
@@ -155,15 +161,33 @@ Raw numeric priority assignment is not part of v1 because relative placement is 
 pl start PELLET
 ```
 
-Move an `open` pellet to `in_progress`. Fail with a conflict if the project already has a different in-progress pellet. Repeating `start` on the same in-progress pellet is idempotent and returns it unchanged.
+Move an `open` pellet to `in_progress` and assign the current workspace. Repeating `start` is idempotent only when that same workspace owns that pellet. Return `workspace_already_in_progress` if the workspace owns another pellet and `pellet_in_progress_elsewhere` if another workspace owns this pellet.
+
+### `pl start-next`
+
+```text
+pl start-next [--external-id ID] [--group GROUP]
+```
+
+In one immediate transaction, resume the current workspace's pellet or select and start the lowest-priority matching open pellet. Selection uses the same filters as `next`. Concurrent worktrees must receive distinct pellets or a stable conflict. Exhaustion is a successful typed empty result with `selection_reason: "none"` and `pellet: null`. Bounded deterministic retry never exposes a partial write.
+
+### `pl release`
+
+```text
+pl release PELLET
+pl release PELLET --recover-workspace WORKSPACE_ID --yes
+```
+
+The owning workspace returns its `in_progress` pellet to `open`, clearing ownership while retaining active priority. Another workspace is rejected by default. The second form is an explicit confirmed recovery for a removed or unavailable worktree; the supplied ID must match the stored owner and the response names that workspace. It is not authentication or silent stealing.
 
 ### `pl close`
 
 ```text
 pl close PELLET
+pl close PELLET --recover-workspace WORKSPACE_ID --yes
 ```
 
-Move an `open` or `in_progress` pellet to `closed`, set `completed_at`, and set priority to `null`. Repeating `close` on a closed pellet is idempotent and does not replace the original completion time.
+Move an `open` or current-workspace `in_progress` pellet to `closed`, set `completed_at`, and clear priority and workspace ownership. Repeating `close` on a closed pellet is idempotent and does not replace the original completion time. Closing another workspace's in-progress pellet requires `--recover-workspace WORKSPACE_ID --yes` with the same recovery semantics as `release`.
 
 ### `pl reopen`
 
@@ -171,15 +195,16 @@ Move an `open` or `in_progress` pellet to `closed`, set `completed_at`, and set 
 pl reopen PELLET
 ```
 
-Move a `closed` or `maybe_later` pellet to `open`, clear `completed_at`, and append it at the end of the active priority order. Repeating it on an open pellet is idempotent. It never starts the pellet automatically.
+Move a `closed` or `maybe_later` pellet to `open`, clear `completed_at` and any workspace ownership, and append it at the end of the active priority order. Repeating it on an open pellet is idempotent. It never starts or carries a stale owner.
 
 ### `pl defer`
 
 ```text
 pl defer PELLET
+pl defer PELLET --recover-workspace WORKSPACE_ID --yes
 ```
 
-Move an `open` or `in_progress` pellet to `maybe_later` and set priority to `null`. Repeating it on a deferred pellet is idempotent. Deferred pellets are excluded from `next` and the active priority index until reopened.
+Move an `open` or current-workspace `in_progress` pellet to `maybe_later` and clear priority and workspace ownership. Repeating it on a deferred pellet is idempotent. Deferring another workspace's in-progress pellet requires `--recover-workspace WORKSPACE_ID --yes`. Deferred pellets are excluded from `next` and the active priority index until reopened.
 
 ### `pl search`
 
@@ -228,7 +253,7 @@ pl memory remove
 Every successful command emits exactly one JSON object:
 
 ```json
-{"schema_version":1,"command":"next","data":{"selection_reason":"next_open","pellet":{"id":"foo-12","project":"foo","number":12,"title":"Add parser","description":"Implement strict command parsing.","external_id":"github:acme/tool#84","group":"parser-rollout","status":"open","priority":2048,"created_at":"2026-08-28T20:00:00Z","updated_at":"2026-08-28T20:00:00Z","completed_at":null}}}
+{"schema_version":1,"command":"next","data":{"selection_reason":"next_open","pellet":{"id":"foo-12","project":"foo","number":12,"title":"Add parser","description":"Implement strict command parsing.","external_id":"github:acme/tool#84","group":"parser-rollout","status":"open","priority":2048,"workspace":null,"created_at":"2026-08-28T20:00:00Z","updated_at":"2026-08-28T20:00:00Z","completed_at":null}}}
 ```
 
 Rules:
@@ -238,6 +263,7 @@ Rules:
 - `data` is always present and command-specific.
 - Lists use arrays, including empty arrays; absent optional scalar values use JSON `null`.
 - Pellet `priority` is an integer for `open` and `in_progress` records and JSON `null` for `closed` and `maybe_later` records.
+- Pellet `workspace` is JSON `null` except for `in_progress`; there it contains the owning workspace ID, root path, Git-directory path, and relative/absolute flags.
 - Timestamps are UTC RFC 3339 strings even though SQLite stores Julian values.
 - Object key order is not contractual.
 - No logs, progress messages, ANSI escapes, or prose appear on stdout in JSON mode.
@@ -257,7 +283,7 @@ No available pellet is not an error:
 Errors emit one compact object to stderr and nothing to stdout:
 
 ```json
-{"schema_version":1,"error":{"code":"project_already_has_in_progress","message":"project foo already has foo-9 in progress","details":{"pellet_id":"foo-9"}}}
+{"schema_version":1,"error":{"code":"workspace_already_in_progress","message":"workspace 7 already owns foo-9","details":{"workspace_id":7,"pellet_id":"foo-9"}}}
 ```
 
 `code` and the types of documented `details` fields are stable. `message` is diagnostic text and may improve without a schema-version change.
@@ -305,6 +331,7 @@ Specific machine error codes disambiguate cases that share an exit code.
 
 - `purge` requires `--yes`; `--human` does not weaken this rule.
 - `memory remove` requires `--yes`.
+- Cross-workspace recovery requires both the exact stored `--recover-workspace WORKSPACE_ID` and `--yes`; human output does not weaken this rule.
 - Initialization never overwrites an existing database.
 - `start`, `close`, `reopen`, and `defer` are idempotent only when the pellet is already in their target status.
 - Repeating `add` is not idempotent and creates another pellet. A future request-id mechanism is out of scope until a real need appears.
@@ -319,7 +346,7 @@ pl add "Implement parser" --description-file parser.md --external-id "github:acm
 pl add "Add parser tests" --external-id "github:acme/foo#84" --group "parser-rollout"
 pl add "Migrate existing configs" --external-id "github:acme/foo#85" --group "parser-rollout"
 pl next --external-id "github:acme/foo#84" --group "parser-rollout"
-pl start foo-1
+pl start-next --external-id "github:acme/foo#84" --group "parser-rollout"
 pl close foo-1
 pl next --group "parser-rollout"
 ```
@@ -336,6 +363,21 @@ pl init --code svc-a
 cd ../service-b
 pl init --code svc-b
 ```
+
+### Several worktrees, one logical project
+
+```text
+cd common-parent
+pl init-db
+cd main-work-tree
+pl init --code foo
+git worktree add ../review-work-tree review-branch
+cd ../review-work-tree
+pl init --code foo
+pl start-next --group parser-rollout
+```
+
+Both worktrees use `foo-N` references, one queue, and one memory store. Each resumes only its own in-progress pellet. If a worktree is later removed while it owns work, another workspace uses the explicit recovery form rather than silently taking it.
 
 ### Insert discovered work before an existing pellet
 
@@ -360,6 +402,6 @@ pl purge --project foo --closed-before 2026-01-01 --yes
 
 ## Deliberately absent commands
 
-There are no `block`, `unblock`, `dependency`, `graph`, `ready`, `epic`, `tag`, `note`, `claim`, `claim-next`, `assign`, `sync`, or vector/embedding commands. `next` is ordering-based, not graph-based.
+There are no `block`, `unblock`, `dependency`, `graph`, `ready`, `epic`, `tag`, `note`, `claim`, `assign`, `sync`, or vector/embedding commands. `next` is ordering-based, not graph-based; `start-next` is a worktree-scoped atomic lifecycle command, not an agent claim or lease.
 
 `--group` is intentionally singular. It is not a tag system: there is no repeated flag, many-to-many table, group entity, hierarchy, or group-specific behavior.

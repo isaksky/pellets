@@ -80,7 +80,7 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 
 		result := runFoundationCLI(t, executable, nested, "init", "--code", "foundation")
 		project := decodeFoundationSuccess[foundationProject](t, result, "init")
-		if project.Code != "foundation" || project.RootPath != "." || project.CreatedAt != project.UpdatedAt {
+		if project.Code != "foundation" || project.GitCommonDir != ".git" || len(project.Workspaces) != 1 || project.Workspaces[0].RootPath != "." || project.CreatedAt != project.UpdatedAt {
 			t.Fatalf("initialized project = %#v", project)
 		}
 		assertFoundationTimestamp(t, project.CreatedAt)
@@ -100,24 +100,23 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 			runFoundationCLI(t, executable, nested, "project", "show"),
 			"project show",
 		)
-		if shown != project {
+		if !reflect.DeepEqual(shown, project) {
 			t.Fatalf("current project = %#v, want %#v", shown, project)
 		}
 
 		repeatedResult := runFoundationCLI(t, executable, nested, "init", "--code=foundation")
 		repeated := decodeFoundationSuccess[foundationProject](t, repeatedResult, "init")
-		if repeated != project || repeatedResult.stdout != result.stdout {
+		if !reflect.DeepEqual(repeated, project) || repeatedResult.stdout != result.stdout {
 			t.Fatalf("idempotent registration = %#v, want unchanged %#v", repeated, project)
 		}
 
 		conflict := runFoundationCLI(t, executable, nested, "init", "--code", "changed")
 		assertFoundationResult(t, conflict, 4, "", foundationErrorJSON(
-			"project_path_already_registered",
-			"the Git work tree is already registered with a different immutable code",
+			"project_repository_already_registered",
+			"the Git repository is already registered with a different immutable code",
 			map[string]any{
 				"existing_code":  "foundation",
 				"requested_code": "changed",
-				"root_path":      ".",
 			},
 		))
 
@@ -259,18 +258,16 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 			runFoundationCLI(t, executable, secondRoot, "init", "--code", "svc-b"),
 			"init",
 		)
-		if first.RootPath != "service alpha" || second.RootPath != "service βeta" {
-			t.Fatalf("sibling paths = %q and %q", first.RootPath, second.RootPath)
+		if first.Workspaces[0].RootPath != "service alpha" || second.Workspaces[0].RootPath != "service βeta" {
+			t.Fatalf("sibling paths = %q and %q", first.Workspaces[0].RootPath, second.Workspaces[0].RootPath)
 		}
 
 		conflict := runFoundationCLI(t, executable, duplicateRoot, "init", "--code", "svc-a")
 		assertFoundationResult(t, conflict, 4, "", foundationErrorJSON(
 			"project_code_already_registered",
-			"the project code is already registered for a different Git work tree",
+			"the project code is already registered for a different Git repository",
 			map[string]any{
-				"code":                "svc-a",
-				"existing_root_path":  "service alpha",
-				"requested_root_path": "service duplicate",
+				"code": "svc-a",
 			},
 		))
 
@@ -285,10 +282,11 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		assertFoundationDatabase(t, initialized.DatabasePath, 2)
 	})
 
-	t.Run("linked worktrees register distinct roots", func(t *testing.T) {
+	t.Run("linked worktrees share one logical project", func(t *testing.T) {
 		common := filepath.Join(t.TempDir(), "worktree database root 界")
 		mainRoot := filepath.Join(common, "main work tree")
 		linkedRoot := filepath.Join(common, "linked 工作 tree")
+		secondLinkedRoot := filepath.Join(common, "second linked tree")
 		createFoundationRepository(t, mainRoot)
 		if _, err := foundationGitCommand(mainRoot, "worktree", "list", "--porcelain"); err != nil {
 			t.Skipf("Git worktrees are unavailable: %v", err)
@@ -299,6 +297,12 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		); err != nil {
 			t.Fatalf("add linked worktree: %v\n%s", err, output)
 		}
+		if output, err := foundationGitCommand(
+			mainRoot,
+			"worktree", "add", "--quiet", "-b", "pellets-foundation-linked-two", secondLinkedRoot,
+		); err != nil {
+			t.Fatalf("add second linked worktree: %v\n%s", err, output)
+		}
 
 		initialized := decodeFoundationSuccess[foundationInitDB](
 			t,
@@ -307,7 +311,7 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		)
 		mainProject := decodeFoundationSuccess[foundationProject](
 			t,
-			runFoundationCLI(t, executable, mainRoot, "init", "--code", "main"),
+			runFoundationCLI(t, executable, mainRoot, "init", "--code", "worktree"),
 			"init",
 		)
 		linkedProject := decodeFoundationSuccess[foundationProject](
@@ -315,27 +319,40 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 			runFoundationCLI(t, executable, linkedRoot, "init", "--code", "worktree"),
 			"init",
 		)
-		if mainProject.RootPath != "main work tree" || linkedProject.RootPath != "linked 工作 tree" {
-			t.Fatalf("worktree roots = %q and %q", mainProject.RootPath, linkedProject.RootPath)
+		allWorkspaces := decodeFoundationSuccess[foundationProject](
+			t,
+			runFoundationCLI(t, executable, secondLinkedRoot, "init", "--code", "worktree"),
+			"init",
+		)
+		if mainProject.Code != linkedProject.Code || linkedProject.Code != allWorkspaces.Code || len(allWorkspaces.Workspaces) != 3 {
+			t.Fatalf("worktree projects = %#v %#v %#v", mainProject, linkedProject, allWorkspaces)
 		}
 
 		shown := decodeFoundationSuccess[foundationProject](
 			t,
-			runFoundationCLI(t, executable, linkedRoot, "project", "show"),
+			runFoundationCLI(t, executable, secondLinkedRoot, "project", "show"),
 			"project show",
 		)
-		if shown != linkedProject {
-			t.Fatalf("linked current project = %#v, want %#v", shown, linkedProject)
+		if !reflect.DeepEqual(shown, allWorkspaces) {
+			t.Fatalf("linked current project = %#v, want %#v", shown, allWorkspaces)
 		}
 		projects := decodeFoundationSuccess[[]foundationProject](
 			t,
 			runFoundationCLI(t, executable, common, "project", "list"),
 			"project list",
 		)
-		if !reflect.DeepEqual(projects, []foundationProject{mainProject, linkedProject}) {
+		if !reflect.DeepEqual(projects, []foundationProject{allWorkspaces}) {
 			t.Fatalf("worktree projects = %#v", projects)
 		}
-		assertFoundationDatabase(t, initialized.DatabasePath, 2)
+		assertFoundationDatabase(t, initialized.DatabasePath, 1)
+		database, err := sqlite.Open(context.Background(), initialized.DatabasePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertFoundationQueryInt(t, database, "SELECT COUNT(*) FROM project_workspaces", 3)
+		if err := database.Close(); err != nil {
+			t.Fatal(err)
+		}
 	})
 }
 
@@ -356,10 +373,22 @@ type foundationInitDB struct {
 }
 
 type foundationProject struct {
-	Code      string `json:"code"`
-	RootPath  string `json:"root_path"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	Code                 string                `json:"code"`
+	GitCommonDir         string                `json:"git_common_dir"`
+	GitCommonDirRelative bool                  `json:"git_common_dir_relative"`
+	Workspaces           []foundationWorkspace `json:"workspaces"`
+	CreatedAt            string                `json:"created_at"`
+	UpdatedAt            string                `json:"updated_at"`
+}
+
+type foundationWorkspace struct {
+	ID               int64  `json:"id"`
+	RootPath         string `json:"root_path"`
+	RootPathRelative bool   `json:"root_path_relative"`
+	GitDir           string `json:"git_dir"`
+	GitDirRelative   bool   `json:"git_dir_relative"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
 }
 
 type foundationError struct {

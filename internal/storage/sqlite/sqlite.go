@@ -18,7 +18,7 @@ import (
 
 const (
 	// LatestSchemaVersion is the newest schema understood by this executable.
-	LatestSchemaVersion = 2
+	LatestSchemaVersion = 3
 	driverName          = "sqlite"
 )
 
@@ -27,6 +27,9 @@ var migration1SQL string
 
 //go:embed migrations/0002_database_identity.sql
 var migration2SQL string
+
+//go:embed migrations/0003_project_workspaces.sql
+var migration3SQL string
 
 type migration struct {
 	version int
@@ -44,6 +47,7 @@ type migrationHooks struct {
 var migrations = []migration{
 	{version: 1, name: "initial", sql: migration1SQL, assert: assertMigration1},
 	{version: 2, name: "database-identity", sql: migration2SQL, assert: assertMigration2},
+	{version: 3, name: "project-workspaces", sql: migration3SQL, assert: assertMigration3},
 }
 
 // Open opens path with the required hardened runtime settings and applies all
@@ -318,9 +322,42 @@ func assertMigration2(ctx context.Context, conn *sql.Conn) error {
 		WHERE key IN ('database_id', 'created_at_julian', 'product')`, 3)
 }
 
-func assertConnectionRowCount(ctx context.Context, conn *sql.Conn, query string, want int) error {
+func assertMigration3(ctx context.Context, conn *sql.Conn) error {
+	for _, name := range []string{"projects", "project_workspaces", "pellets", "memories", "pellets_fts", "memories_fts"} {
+		if err := assertConnectionRowCount(ctx, conn, `
+			SELECT COUNT(*) FROM sqlite_schema
+			WHERE type = 'table' AND name = ?`, 1, name); err != nil {
+			return fmt.Errorf("inspect migration-3 table %q: %w", name, err)
+		}
+	}
+	if err := assertConnectionRowCount(ctx, conn, `
+		SELECT COUNT(*)
+		FROM pellets
+		WHERE (status = 'in_progress') <> (workspace_id IS NOT NULL)`, 0); err != nil {
+		return fmt.Errorf("verify migrated workspace ownership: %w", err)
+	}
+	if err := assertConnectionRowCount(ctx, conn, `
+		SELECT COUNT(*) FROM sqlite_schema
+		WHERE type = 'index' AND name = 'pellets_workspace_in_progress_idx'`, 1); err != nil {
+		return fmt.Errorf("verify workspace in-progress index: %w", err)
+	}
+	if err := assertConnectionRowCount(ctx, conn, `
+		SELECT COUNT(*) FROM sqlite_schema
+		WHERE name IN ('pellets_one_in_progress_idx', 'projects_v2', 'pellets_v2', 'memories_v2', 'migration_0003_state')`, 0); err != nil {
+		return fmt.Errorf("verify removed migration-3 objects: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, "INSERT INTO pellets_fts(pellets_fts) VALUES ('integrity-check')"); err != nil {
+		return fmt.Errorf("verify pellet FTS after rebuild: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, "INSERT INTO memories_fts(memories_fts) VALUES ('integrity-check')"); err != nil {
+		return fmt.Errorf("verify memory FTS after rebuild: %w", err)
+	}
+	return nil
+}
+
+func assertConnectionRowCount(ctx context.Context, conn *sql.Conn, query string, want int, args ...any) error {
 	var got int
-	if err := conn.QueryRowContext(ctx, query).Scan(&got); err != nil {
+	if err := conn.QueryRowContext(ctx, query, args...).Scan(&got); err != nil {
 		return err
 	}
 	if got != want {

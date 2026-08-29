@@ -12,11 +12,12 @@ import (
 	"pellets/internal/storage"
 )
 
-// InitCommand registers the current Git work tree as a project.
+// InitCommand registers the current Git worktree as a workspace of one
+// logical project.
 func InitCommand(manager app.ProjectManager) Command {
 	return Command{
 		Name:                  "init",
-		Summary:               "Register the current Git work tree.",
+		Summary:               "Register the current Git repository and worktree.",
 		Usage:                 "pl init --code CODE",
 		SkipDatabaseDiscovery: true,
 		Validate: func(globals GlobalOptions, _ any) error {
@@ -197,31 +198,62 @@ func parseProject(args []string) (any, error) {
 }
 
 type projectData struct {
-	Code      string `json:"code"`
-	RootPath  string `json:"root_path"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	Code                 string          `json:"code"`
+	GitCommonDir         string          `json:"git_common_dir"`
+	GitCommonDirRelative bool            `json:"git_common_dir_relative"`
+	Workspaces           []workspaceData `json:"workspaces"`
+	CreatedAt            string          `json:"created_at"`
+	UpdatedAt            string          `json:"updated_at"`
+}
+
+type workspaceData struct {
+	ID               int64  `json:"id"`
+	RootPath         string `json:"root_path"`
+	RootPathRelative bool   `json:"root_path_relative"`
+	GitDir           string `json:"git_dir"`
+	GitDirRelative   bool   `json:"git_dir_relative"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
 }
 
 func newProjectData(project storage.Project) projectData {
+	workspaces := make([]workspaceData, len(project.Workspaces))
+	for index, workspace := range project.Workspaces {
+		workspaces[index] = workspaceData{
+			ID: workspace.ID, RootPath: workspace.RootPath.Value,
+			RootPathRelative: workspace.RootPath.Relative,
+			GitDir:           workspace.GitDir.Value, GitDirRelative: workspace.GitDir.Relative,
+			CreatedAt: workspace.CreatedAt.UTC().Format(time.RFC3339Nano),
+			UpdatedAt: workspace.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		}
+	}
 	return projectData{
-		Code:      project.Code,
-		RootPath:  project.RootPath,
-		CreatedAt: project.CreatedAt.UTC().Format(time.RFC3339Nano),
-		UpdatedAt: project.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		Code:                 project.Code,
+		GitCommonDir:         project.GitCommonDir.Value,
+		GitCommonDirRelative: project.GitCommonDir.Relative,
+		Workspaces:           workspaces,
+		CreatedAt:            project.CreatedAt.UTC().Format(time.RFC3339Nano),
+		UpdatedAt:            project.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 }
 
 func (data projectData) RenderHuman(writer io.Writer) error {
-	_, err := fmt.Fprintf(writer, "%s  %s\n", data.Code, data.RootPath)
-	return err
+	if _, err := fmt.Fprintf(writer, "%s  repository=%s\n", data.Code, data.GitCommonDir); err != nil {
+		return err
+	}
+	for _, workspace := range data.Workspaces {
+		if _, err := fmt.Fprintf(writer, "  workspace %d  %s  git-dir=%s\n", workspace.ID, workspace.RootPath, workspace.GitDir); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type projectListData []projectData
 
 func (data projectListData) RenderHuman(writer io.Writer) error {
 	for _, project := range data {
-		if _, err := fmt.Fprintf(writer, "%s  %s\n", project.Code, project.RootPath); err != nil {
+		if err := project.RenderHuman(writer); err != nil {
 			return err
 		}
 	}

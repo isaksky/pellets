@@ -23,12 +23,14 @@ func main() {
 	}
 	projectManager := app.ProjectManager{
 		Discover: app.ProjectDiscovery{
-			FindGitRoot: discovery.FindGitRoot,
+			FindGitIdentity: discovery.FindGitIdentity,
 			FindDatabase: func(workingDirectory string) (app.Database, error) {
 				database, err := discovery.FindDatabase(workingDirectory)
 				return app.Database{Root: database.Root, Path: database.Path}, err
 			},
-			RelativeProjectPath: discovery.RelativeProjectPath,
+			NormalizePath: discovery.NormalizeLocalPath,
+			ResolvePath:   discovery.ResolveLocalPath,
+			PathExists:    discovery.PathExists,
 		},
 		Initialize: initializer.Init,
 		Open: func(ctx context.Context, path string) (storage.ProjectDatabase, error) {

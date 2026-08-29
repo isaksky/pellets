@@ -1,13 +1,16 @@
 # Data Model
 
-SQLite is authoritative for projects, pellets, and memories. FTS5 tables are derived indexes and can always be rebuilt.
+SQLite is authoritative for logical projects, their registered workspaces, pellets, and memories. FTS5 tables are derived indexes and can always be rebuilt.
 
-This model intentionally contains no dependency, edge, epic, tag, group, task-note, task-event, agent, claim, lease, or vector table. Group is a nullable scalar on a pellet, not an entity. Memory is documented separately in [memory.md](memory.md); CLI behavior is in [cli-spec.md](cli-spec.md).
+This model intentionally contains no dependency, edge, epic, tag, group, task-note, task-event, agent, PID, session, claim, lease, heartbeat, expiry, assignment-history, or vector table. A workspace row is a Git worktree coordination identity, not an agent or security principal. Group is a nullable scalar on a pellet, not an entity. Memory is documented separately in [memory.md](memory.md); CLI behavior is in [cli-spec.md](cli-spec.md).
 
 ## Terminology and identity
 
 - A **database root** is the directory containing `.pellets/`.
-- A **project** is a registered Git work-tree root stored relative to the database root.
+- A **repository** is one Git repository, identified locally by Git's common directory.
+- A **logical project** is that repository's shared Pellets queue, code, numbering, ordering, groups, external IDs, search, and memories.
+- A **worktree** is Git's main work tree or one linked worktree.
+- A **workspace** is one worktree registered to a logical project, identified by its worktree root and worktree-specific Git directory.
 - A **project code** is a unique 1–12 character lowercase code such as `foo`.
 - A **pellet number** is a positive integer allocated monotonically within one project.
 - A **pellet reference** combines them, for example `foo-123`.
@@ -30,26 +33,50 @@ CREATE TABLE application_metadata (
 ) STRICT;
 
 CREATE TABLE projects (
-    project_id         INTEGER PRIMARY KEY,
-    code               TEXT NOT NULL UNIQUE,
-    root_path          TEXT NOT NULL UNIQUE,
-    next_pellet_number INTEGER NOT NULL DEFAULT 1,
-    created_at         REAL NOT NULL,
-    updated_at         REAL NOT NULL,
+    project_id              INTEGER PRIMARY KEY,
+    code                    TEXT NOT NULL UNIQUE,
+    git_common_dir          TEXT NOT NULL,
+    git_common_dir_relative INTEGER NOT NULL,
+    next_pellet_number      INTEGER NOT NULL DEFAULT 1,
+    created_at              REAL NOT NULL,
+    updated_at              REAL NOT NULL,
 
+    UNIQUE (git_common_dir_relative, git_common_dir),
     CHECK (length(code) BETWEEN 1 AND 12),
     CHECK (code = lower(code)),
     CHECK (code NOT GLOB '*[^a-z0-9-]*'),
     CHECK (substr(code, 1, 1) <> '-'),
     CHECK (substr(code, -1, 1) <> '-'),
-    CHECK (root_path <> ''),
+    CHECK (git_common_dir <> ''),
+    CHECK (git_common_dir_relative IN (0, 1)),
     CHECK (next_pellet_number > 0),
+    CHECK (updated_at >= created_at)
+) STRICT;
+
+CREATE TABLE project_workspaces (
+    workspace_id       INTEGER PRIMARY KEY,
+    project_id         INTEGER NOT NULL REFERENCES projects(project_id) ON DELETE RESTRICT,
+    root_path          TEXT NOT NULL,
+    root_path_relative INTEGER NOT NULL,
+    git_dir            TEXT NOT NULL,
+    git_dir_relative   INTEGER NOT NULL,
+    created_at         REAL NOT NULL,
+    updated_at         REAL NOT NULL,
+
+    UNIQUE (project_id, workspace_id),
+    UNIQUE (root_path_relative, root_path),
+    UNIQUE (git_dir_relative, git_dir),
+    CHECK (root_path <> ''),
+    CHECK (git_dir <> ''),
+    CHECK (root_path_relative IN (0, 1)),
+    CHECK (git_dir_relative IN (0, 1)),
     CHECK (updated_at >= created_at)
 ) STRICT;
 
 CREATE TABLE pellets (
     rowid        INTEGER PRIMARY KEY,
     project_id   INTEGER NOT NULL REFERENCES projects(project_id) ON DELETE RESTRICT,
+    workspace_id INTEGER,
     number       INTEGER NOT NULL,
     title        TEXT NOT NULL,
     description  TEXT NOT NULL DEFAULT '',
@@ -62,11 +89,18 @@ CREATE TABLE pellets (
     completed_at REAL,
 
     UNIQUE (project_id, number),
+    FOREIGN KEY (project_id, workspace_id)
+        REFERENCES project_workspaces(project_id, workspace_id) ON DELETE RESTRICT,
     CHECK (number > 0),
     CHECK (trim(title) <> ''),
     CHECK (external_id IS NULL OR external_id <> ''),
     CHECK (group_id IS NULL OR group_id <> ''),
     CHECK (status IN ('open', 'in_progress', 'closed', 'maybe_later')),
+    CHECK (
+        (status = 'in_progress' AND workspace_id IS NOT NULL)
+        OR
+        (status <> 'in_progress' AND workspace_id IS NULL)
+    ),
     CHECK (
         (status IN ('open', 'in_progress') AND priority IS NOT NULL AND priority > 0)
         OR
@@ -80,8 +114,8 @@ CREATE TABLE pellets (
     )
 ) STRICT;
 
-CREATE UNIQUE INDEX pellets_one_in_progress_idx
-    ON pellets(project_id)
+CREATE UNIQUE INDEX pellets_workspace_in_progress_idx
+    ON pellets(workspace_id)
     WHERE status = 'in_progress';
 
 CREATE UNIQUE INDEX pellets_active_priority_idx
@@ -116,11 +150,13 @@ CREATE INDEX memories_project_approval_idx
 
 `memories.memory_id` is a database-local, user-visible identity for a removable record. Under [SQLite's `AUTOINCREMENT` allocation rules](https://sqlite.org/autoinc.html), an automatically allocated ID from a committed row is never assigned to a different memory after removal. SQLite may leave gaps, and an allocation rolled back before commit may be reused. This is the only column that needs that guarantee: the additional sequence-maintenance cost is not justified for the internal `pellets.rowid` or unrelated keys, which remain plain `INTEGER PRIMARY KEY` columns.
 
-Pellets store `project_id` rather than repeating the low-cardinality project path. The `projects.root_path` row is the single normalized representation of that path.
+`projects.git_common_dir` is the repository-sameness key. `project_workspaces` is the authoritative workspace relation; its globally unique root and Git-directory identities prevent one worktree from attaching to two projects. Composite uniqueness on `(project_id, workspace_id)` supports the pellet composite foreign key, which makes cross-project workspace ownership impossible even when application checks are bypassed.
+
+Each path has a companion `*_relative` flag. A relative slash-normalized value is interpreted from the database root. A Git location outside that root is stored as a normalized absolute path. On platforms with case-insensitive path identity, normalization folds case before comparison. Paths are local diagnostics, not portable repository IDs. A moved workspace is updated by `init` only after an outside-transaction check establishes that its old root is absent; a live duplicate conflicts. Removed worktrees remain registered and can own in-progress work until explicit recovery. There is no automatic cleanup.
 
 `pellets.group_id` is not a foreign key. There is no groups table: each pellet has zero or one case-sensitive group string, and the same value may appear under several external IDs in that project. Group equality has no meaning across projects.
 
-Only `open` and `in_progress` pellets participate in the active queue and therefore have positive priority. `closed` and `maybe_later` pellets have `NULL` priority and no entry in the partial active-priority index. There is no temporary negative-priority state.
+Only `open` and `in_progress` pellets participate in the shared project queue and therefore have positive project-unique priority. Exactly `in_progress` pellets have a workspace owner. `open`, `closed`, and `maybe_later` pellets have `NULL` workspace ownership; `closed` and `maybe_later` also have `NULL` priority. There is no temporary negative-priority or stale-owner state.
 
 Known application metadata keys are `database_id` (a randomly generated UUID), `created_at_julian`, and `product` (`pellets`). Unknown keys must be preserved by migrations. Schema versioning belongs exclusively in SQLite's application-owned `PRAGMA user_version`, not in this table or another application table.
 
@@ -261,19 +297,31 @@ Before executing the statement, preflight that the fresh band fits in a signed 6
 Allowed transitions are:
 
 ```text
-open --------> in_progress --------> closed
-  |                  |                  |
-  +-----> closed     +-> maybe_later    +-> open
-  |
-  +-----> maybe_later -----------------> open
+open -> in_progress -> closed
+open -> closed
+open -> maybe_later
+in_progress -> open (release)
+in_progress -> maybe_later
+closed -> open (reopen)
+maybe_later -> open (reopen)
 ```
 
-- `start`: `open -> in_progress`.
-- `close`: `open|in_progress -> closed`, setting priority to `NULL`.
-- `reopen`: `closed|maybe_later -> open`, appending at the end of the active queue.
-- `defer`: `open|in_progress -> maybe_later`, setting priority to `NULL`.
+The normative transition and ownership table is:
 
-The partial unique index permits at most one `in_progress` pellet per project even under concurrent commands.
+| Command/source | Required workspace relation | Result |
+|---|---|---|
+| `start` from `open` | Current workspace owns no other pellet | `in_progress`; assign current workspace; retain priority |
+| `start` on `in_progress` | Same pellet is owned by current workspace | Idempotent; no timestamp or position change |
+| `release` from `in_progress` | Current workspace owns pellet | `open`; clear workspace; retain priority |
+| `close` from `open` | No owner exists | `closed`; clear priority/workspace; set `completed_at` |
+| `close` from `in_progress` | Current workspace owns pellet | `closed`; clear priority/workspace; set `completed_at` |
+| `defer` from `open` | No owner exists | `maybe_later`; clear priority/workspace |
+| `defer` from `in_progress` | Current workspace owns pellet | `maybe_later`; clear priority/workspace |
+| `reopen` from `closed` or `maybe_later` | No owner exists | `open`; clear `completed_at` and workspace; append to active order |
+
+Starting an open pellet fails with `workspace_already_in_progress` when the current workspace owns a different pellet. Starting or mutating an in-progress pellet owned by another workspace fails with `pellet_in_progress_elsewhere`. `release`, `close`, and `defer` may cross that boundary only with the explicit recovery tuple `--recover-workspace WORKSPACE_ID --yes`, which must match the stored owner and is validated before the short write transaction. Recovery is available after a worktree is removed, is never implicit, does not authenticate a person, and performs the same owner-clearing transition. Reopen and every non-in-progress state always have `NULL` ownership.
+
+The partial unique workspace index permits at most one `in_progress` pellet per workspace even under concurrent commands. Different workspaces in one project may each own one. Active priority remains unique across all open and in-progress rows in the whole project.
 
 ## Listing and filtering
 
@@ -281,9 +329,12 @@ List pellets with exact optional filters. Actionable pellets use queue order; no
 
 ```sql
 SELECT p.code, t.number, t.title, t.description, t.external_id, t.group_id,
-       t.status, t.priority, t.created_at, t.updated_at, t.completed_at
+       t.status, t.priority, t.workspace_id,
+       w.root_path AS workspace_root_path,
+       t.created_at, t.updated_at, t.completed_at
 FROM pellets AS t
 JOIN projects AS p USING (project_id)
+LEFT JOIN project_workspaces AS w USING (workspace_id)
 WHERE t.project_id = :project_id
   AND (:status IS NULL OR t.status = :status)
   AND (:external_id IS NULL OR t.external_id = :external_id)
@@ -302,16 +353,16 @@ ORDER BY
 
 Closed and `maybe_later` pellets are omitted by the default `list` command, but remain available through status filters or `--all`. A closed-only list is newest-completed first; a deferred-only list is newest-updated first.
 
-## Selecting the next pellet
+## Selecting and starting the next pellet
 
-The sole in-progress pellet wins even if it lies outside an external-ID or group focus. This prevents the agent from being directed to new work it cannot start until current work is closed or deferred. If no pellet is in progress, external-ID and group filters apply conjunctively to open candidates.
+`next` is read-only. The current workspace's in-progress pellet wins even if it lies outside an external-ID or group focus. It never returns another workspace's in-progress pellet. If the current workspace has no pellet, external-ID and group filters apply conjunctively to open candidates.
 
 ```sql
 SELECT t.*
 FROM pellets AS t
 WHERE t.project_id = :project_id
   AND (
-      t.status = 'in_progress'
+      (t.status = 'in_progress' AND t.workspace_id = :workspace_id)
       OR (
           t.status = 'open'
           AND (:external_id IS NULL OR t.external_id = :external_id)
@@ -323,7 +374,9 @@ ORDER BY CASE t.status WHEN 'in_progress' THEN 0 ELSE 1 END,
 LIMIT 1;
 ```
 
-The JSON result identifies whether it was returned for resumption or as the next open candidate.
+The JSON result identifies `resume_in_progress`, `next_open`, or `none` and includes workspace ownership for in-progress rows.
+
+`start-next` accepts the same project, external-ID, and group focus. Inside one `BEGIN IMMEDIATE` transaction it first rechecks the current workspace owner, otherwise selects the lowest-priority matching `open` pellet and updates that exact row to `in_progress` with the current workspace. If no candidate remains it returns the successful typed empty value `selection_reason: "none", pellet: null`. Constraint or selection races retry deterministically within the documented bounded policy; they never return a stale read result or leave a partial write. This atomic command, not `next` followed by `start`, is the multi-worktree claiming primitive.
 
 ## Keyword search
 
@@ -367,3 +420,5 @@ It never deletes open, in-progress, or `maybe_later` pellets. It never resets `n
 The executable embeds a consecutive sequence of forward migrations beginning at 1. `PRAGMA user_version` is the sole authoritative on-disk schema version, version 0 denotes an empty or uninitialized database, and the schema contains no `schema_migrations` table. Migration names may appear in diagnostics but are not persisted. Released migration files are immutable; frozen database fixtures for every released version provide forward-compatibility evidence in place of persisted migration checksums.
 
 Opening first reads `user_version` without a persistent write. Negative versions, version 0 with persistent schema, and newer versions fail with stable typed errors. An older version is re-read after `BEGIN IMMEDIATE`; all missing migrations, their assertions, each consecutive `user_version` advance, and `foreign_key_check` run on one connection in one transaction before commit. A failure rolls back both schema and version, and a concurrent migrator that waited for the lock applies nothing twice. FTS tables are disposable during migration and may be rebuilt with the FTS5 `rebuild` command after authoritative tables are copied or changed. Destructive migrations require a backup mechanism first. See [architecture.md](architecture.md#migration-strategy).
+
+Migration 3 is the consecutive project-workspace migration. It does not modify released migration 1 or the frozen v1 fixture. It deterministically treats every legacy `projects.root_path` as the initial workspace root, derives the legacy common/Git directory as `<root>/.git`, assigns the project's legacy in-progress pellet to that workspace, and preserves project IDs/codes/counters/timestamps, pellet rowids/numbers/order/timestamps, memories including the `AUTOINCREMENT` high-water mark, application metadata including unknown keys, and all authoritative text. It drops `pellets_one_in_progress_idx`, installs the workspace-scoped index and composite foreign key, rebuilds both FTS tables, verifies their integrity, and removes every temporary table. No Git or filesystem command runs in that migration transaction; later explicit `init` safely reconciles a moved normal workspace identity.

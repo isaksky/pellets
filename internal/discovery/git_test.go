@@ -44,27 +44,74 @@ func TestFindGitRootRejectsNonRepository(t *testing.T) {
 	}
 }
 
-func TestRelativeProjectPathNormalizesAndRejectsOutside(t *testing.T) {
+func TestFindGitIdentityDistinguishesLinkedWorkspaceFromSharedRepository(t *testing.T) {
 	t.Parallel()
 
-	root := filepath.Join(t.TempDir(), "database 界")
-	project := filepath.Join(root, "repositories", "project with spaces")
-	outside := filepath.Join(filepath.Dir(root), "outside")
-	for _, directory := range []string{project, outside} {
-		if err := os.MkdirAll(directory, 0o755); err != nil {
-			t.Fatal(err)
-		}
+	common := filepath.Join(t.TempDir(), "identity root 界")
+	mainRoot := filepath.Join(common, "main work tree")
+	linkedRoot := filepath.Join(common, "linked 工作 tree")
+	if err := os.MkdirAll(mainRoot, 0o755); err != nil {
+		t.Fatal(err)
 	}
+	runDiscoveryGit(t, mainRoot, "init", "--quiet")
+	if err := os.WriteFile(filepath.Join(mainRoot, "fixture"), []byte("fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runDiscoveryGit(t, mainRoot, "add", "fixture")
+	runDiscoveryGit(t, mainRoot, "-c", "user.name=Pellets Test", "-c", "user.email=pellets@example.invalid", "commit", "--quiet", "-m", "fixture")
+	runDiscoveryGit(t, mainRoot, "worktree", "add", "--quiet", "-b", "identity-linked", linkedRoot)
 
-	got, err := RelativeProjectPath(root, project)
+	mainIdentity, err := FindGitIdentity(context.Background(), mainRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "repositories/project with spaces" {
-		t.Fatalf("RelativeProjectPath() = %q", got)
+	linkedIdentity, err := FindGitIdentity(context.Background(), linkedRoot)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := RelativeProjectPath(root, outside); err == nil || domain.PublicError(err).Code != "project_outside_database_root" {
-		t.Fatalf("outside RelativeProjectPath() error = %v", err)
+	if mainIdentity.GitCommonDir != linkedIdentity.GitCommonDir {
+		t.Fatalf("common directories differ: %#v %#v", mainIdentity, linkedIdentity)
+	}
+	if mainIdentity.WorkTreeRoot == linkedIdentity.WorkTreeRoot || mainIdentity.GitDir == linkedIdentity.GitDir {
+		t.Fatalf("workspace identities are not distinct: %#v %#v", mainIdentity, linkedIdentity)
+	}
+	for _, identity := range []domain.GitIdentity{mainIdentity, linkedIdentity} {
+		for _, value := range []string{identity.WorkTreeRoot, identity.GitCommonDir, identity.GitDir} {
+			if !filepath.IsAbs(value) {
+				t.Fatalf("Git identity path is not absolute: %q", value)
+			}
+		}
+	}
+}
+
+func TestNormalizeLocalPathUsesRelativeWherePossibleAndAbsoluteOtherwise(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join(t.TempDir(), "database root")
+	inside := filepath.Join(root, "linked tree")
+	outside := filepath.Join(filepath.Dir(root), "outside tree")
+	for _, value := range []string{inside, outside} {
+		if err := os.MkdirAll(value, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insidePath, err := NormalizeLocalPath(root, inside)
+	if err != nil || !insidePath.Relative || insidePath.Value != "linked tree" {
+		t.Fatalf("inside normalized path = (%#v, %v)", insidePath, err)
+	}
+	outsidePath, err := NormalizeLocalPath(root, outside)
+	if err != nil || outsidePath.Relative || !filepath.IsAbs(filepath.FromSlash(outsidePath.Value)) {
+		t.Fatalf("outside normalized path = (%#v, %v)", outsidePath, err)
+	}
+	resolved, err := ResolveLocalPath(root, insidePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalInside, err := filepath.EvalSymlinks(inside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != canonicalInside {
+		t.Fatalf("resolved inside path = %q, want %q", resolved, canonicalInside)
 	}
 }
 

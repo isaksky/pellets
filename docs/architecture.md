@@ -2,7 +2,7 @@
 
 Pellets is a single-process Go CLI around a local SQLite database. It has no daemon, server, network client, plugin loader, or embedding runtime.
 
-See [project-goals.md](project-goals.md) for the product boundary, [data-model.md](data-model.md) for schema and ordering invariants, [cli-spec.md](cli-spec.md) for the public interface, and [0001-initial-architecture.md](decisions/0001-initial-architecture.md) for the initial decision record.
+See [project-goals.md](project-goals.md) for the product boundary, [data-model.md](data-model.md) for schema and ordering invariants, [cli-spec.md](cli-spec.md) for the public interface, [0001-initial-architecture.md](decisions/0001-initial-architecture.md) for the initial decision, and [0002-worktree-scoped-workspaces.md](decisions/0002-worktree-scoped-workspaces.md) for its worktree supersession.
 
 ## High-level design
 
@@ -12,8 +12,8 @@ Each invocation follows the same shape:
    usage-only semantics without reading the working directory, performing
    discovery, or causing command side effects.
 2. Locate the nearest `.pellets/pellets.db` by walking from the working directory toward the filesystem root, unless the command is creating a database.
-3. Find the nearest Git root and resolve it to a registered project path relative to the database root.
-4. Open SQLite, configure the connection, validate/migrate the schema, and verify the registered project.
+3. Ask Git for the worktree root, worktree-specific Git directory, and shared common directory; normalize those paths relative to the database root where possible.
+4. Open SQLite, configure/migrate it, and resolve the common directory to one logical project plus the worktree/Git-directory pair to its registered workspace.
 5. Execute one application operation through a narrow storage interface.
 6. Emit one compact, versioned JSON result to stdout, or one structured JSON error to stderr.
 
@@ -22,7 +22,7 @@ Commands such as `init-db` and `init` vary in discovery behavior as described in
 ```mermaid
 flowchart LR
     A[Agent or human] --> B[pl command parser]
-    B --> C[Database and Git project discovery]
+    B --> C[Database, Git repository, and workspace discovery]
     C --> D[Application services]
     D --> E[SQLite storage]
     E --> F[(.pellets/pellets.db)]
@@ -71,19 +71,19 @@ Rules:
 
 The storage layer is replaceable for tests, but replacement with a different production database is not a product goal.
 
-## Discovery and project resolution
+## Discovery, logical projects, and workspaces
 
 ### Database discovery
 
 For normal commands, start at the current working directory and test each ancestor for `.pellets/pellets.db`. The nearest database wins. Continue past Git boundaries so a common-parent database can serve sibling repositories.
 
-The directory containing `.pellets` is the **database root**. A project path is stored relative to this root, not relative to the database file itself.
+The directory containing `.pellets` is the **database root**. A database may contain unrelated logical projects as well as several workspaces of one project.
 
-### Git project discovery
+### Git repository and workspace discovery
 
-Use Git’s own repository discovery semantics so worktrees and `.git` indirection work correctly. Resolve the nearest non-bare work-tree root to an absolute, cleaned path, then convert it to a slash-normalized path relative to the database root. Reject a project outside the database root.
+Use Git's own discovery semantics and `git rev-parse --show-toplevel --absolute-git-dir --git-common-dir` with absolute path formatting. The common directory identifies the logical repository. The worktree root and worktree-specific Git directory together identify the current workspace; linked worktrees therefore share one project without becoming the same workspace. Canonicalize existing prefixes, normalize separators and platform case, and store paths relative to the database root when they are beneath it, otherwise as explicit absolute paths.
 
-`pl init --code CODE` registers that relative path. Normal commands match both the path and code stored in `projects`; they do not infer a new project automatically.
+All Git commands, canonicalization, existence checks, and stale-path checks finish outside SQLite write transactions. `pl init --code CODE` creates a logical project and its first workspace, attaches another linked worktree with the same code, or updates a moved workspace root only when the old registered root no longer exists. A live duplicate presenting one Git directory at a second root, an unrelated repository reusing a code, or inconsistent common/root/Git-directory identity is a typed conflict with no persistent write. Removed worktrees remain visible as stale registrations so later lifecycle recovery can name their ownership; no read command registers, moves, or removes a workspace implicitly.
 
 ### Keeping the database out of Git
 
@@ -94,16 +94,16 @@ The database and its WAL/SHM/journal companions must never be committed or damag
 A mutating command such as `pl start foo-12` flows as follows:
 
 1. Parse `foo-12` into project code `foo` and number `12`.
-2. Discover the database and current Git project.
-3. Verify that `foo` identifies the current project unless an explicit `--project` override is allowed for that command.
+2. Discover the database and resolve the current logical project and workspace.
+3. Verify that `foo` identifies the resolved project unless an explicit `--project` override is allowed for that command.
 4. Open and migrate the database.
 5. Begin an immediate write transaction.
-6. Load the pellet and validate the `open -> in_progress` transition.
-7. Update it. A partial unique index rejects a second in-progress pellet in the project.
+6. Load the pellet and validate the `open -> in_progress` transition against current workspace ownership.
+7. Update it with the current workspace. A partial unique index rejects a second in-progress pellet in that workspace, and a composite foreign key rejects cross-project ownership.
 8. Commit.
 9. Render the result as JSON v1.
 
-Expected domain conflicts—missing pellet, wrong status, another in-progress pellet—are typed errors. They are not detected by parsing SQLite error strings in the CLI layer.
+Expected domain conflicts—missing pellet, wrong status, `workspace_already_in_progress`, or `pellet_in_progress_elsewhere`—are typed errors. They are not detected by parsing SQLite error strings in the CLI layer.
 
 ## SQLite storage boundary
 
@@ -127,14 +127,14 @@ Keep SQL as embedded `.sql` files or focused Go constants. Do not introduce an O
 
 ## Transaction strategy
 
-SQLite permits multiple readers and one writer. This is sufficient for one active agent per project and several projects in one database.
+SQLite permits multiple readers and one writer. Short atomic writes are sufficient for independent worktree workers and several projects in one database.
 
 - Read-only commands use a read transaction only when they need a consistent multi-query snapshot.
 - Every mutation uses a transaction.
-- ID allocation, `start`, `move`, priority rebalancing, and `purge` use a dedicated-connection write helper that executes `BEGIN IMMEDIATE`, `COMMIT`, and rollback semantics explicitly, so contention is discovered before partial work begins.
+- ID allocation, `start`, `start-next`, lifecycle recovery, `move`, priority rebalancing, and `purge` use a dedicated-connection write helper that executes `BEGIN IMMEDIATE`, `COMMIT`, and rollback semantics explicitly, so contention is discovered before partial work begins.
 - The application retries `SQLITE_BUSY` only for a small bounded interval covered by the busy timeout. It never waits indefinitely.
 - A move and any required rebalance commit atomically.
-- The one-in-progress rule and uniqueness of non-null active priority are also database constraints, so correctness does not depend only on application checks.
+- One in-progress pellet per workspace, same-project ownership, status/ownership consistency, and uniqueness of non-null project priority are database constraints, so correctness does not depend only on application checks.
 
 Priority rebalancing is infrequent, project-scoped, and limited to `open` and `in_progress` rows. Closed and deferred rows have `NULL` priority, are absent from the partial priority index, and are never reprocessed by a rebalance. A rebalance may briefly hold the database’s single writer lock across projects, so the transaction must contain no filesystem work, Git calls, rendering, or user prompts. See [data-model.md](data-model.md#moving-and-rebalancing).
 
@@ -172,10 +172,15 @@ Use typed errors with stable machine codes, for example:
 
 - `database_not_found`
 - `project_not_registered`
+- `workspace_not_registered`
+- `project_repository_already_registered`
+- `project_code_already_registered`
 - `invalid_reference`
 - `pellet_not_found`
 - `invalid_status_transition`
-- `project_already_has_in_progress`
+- `workspace_already_in_progress`
+- `pellet_in_progress_elsewhere`
+- `workspace_identity_conflict`
 - `active_pellet_outside_filter`
 - `priority_conflict`
 - `fts_unavailable`
@@ -206,7 +211,7 @@ There is no package or boundary for:
 - a group entity, hierarchy, or many-to-many label system;
 - task events/history;
 - vector search or embeddings;
-- agent ownership or claiming;
+- agent accounts, PID/session ownership, leases, heartbeats, expiry, or assignment history (the workspace foreign key is only worktree-scoped coordination);
 - synchronization;
 - plugins;
 - a daemon or network transport.

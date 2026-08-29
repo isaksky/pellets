@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,12 +10,34 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"pellets/internal/app"
 	"pellets/internal/discovery"
+	"pellets/internal/domain"
+	"pellets/internal/output"
 	"pellets/internal/storage"
 	"pellets/internal/storage/sqlite"
 )
+
+func TestProjectWorkspaceJSONGolden(t *testing.T) {
+	t.Parallel()
+	created := time.Date(2026, 8, 28, 20, 0, 0, 0, time.UTC)
+	updated := created.Add(time.Minute)
+	project := storage.Project{
+		ID: 1, Code: "foo", GitCommonDir: domain.LocalPath{Value: "main/.git", Relative: true},
+		Workspaces: []storage.Workspace{
+			{ID: 1, ProjectID: 1, RootPath: domain.LocalPath{Value: "main", Relative: true}, GitDir: domain.LocalPath{Value: "main/.git", Relative: true}, CreatedAt: created, UpdatedAt: created},
+			{ID: 2, ProjectID: 1, RootPath: domain.LocalPath{Value: "linked 界", Relative: true}, GitDir: domain.LocalPath{Value: "main/.git/worktrees/linked", Relative: true}, CreatedAt: updated, UpdatedAt: updated},
+		},
+		CreatedAt: created, UpdatedAt: updated,
+	}
+	var rendered bytes.Buffer
+	if err := (output.JSONRenderer{}).Render(&rendered, "project show", newProjectData(project)); err != nil {
+		t.Fatal(err)
+	}
+	assertGolden(t, "project-workspaces.golden", rendered.String())
+}
 
 func TestInitCreatesDatabaseAtGitRootAndProjectCommandsResolveCurrent(t *testing.T) {
 	t.Parallel()
@@ -33,7 +56,7 @@ func TestInitCreatesDatabaseAtGitRootAndProjectCommandsResolveCurrent(t *testing
 		t.Fatalf("init = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 	initialized := decodeProjectResult(t, stdout, "init")
-	if initialized.Code != "demo-1" || initialized.RootPath != "." {
+	if initialized.Code != "demo-1" || len(initialized.Workspaces) != 1 || initialized.Workspaces[0].RootPath != "." || initialized.GitCommonDir != ".git" {
 		t.Fatalf("initialized project = %#v", initialized)
 	}
 	if _, err := os.Stat(discovery.DatabasePath(repository)); err != nil {
@@ -48,7 +71,7 @@ func TestInitCreatesDatabaseAtGitRootAndProjectCommandsResolveCurrent(t *testing
 		t.Fatalf("project show = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 	shown := decodeProjectResult(t, stdout, "project show")
-	if shown != initialized {
+	if !reflect.DeepEqual(shown, initialized) {
 		t.Fatalf("current project = %#v, want %#v", shown, initialized)
 	}
 
@@ -56,7 +79,7 @@ func TestInitCreatesDatabaseAtGitRootAndProjectCommandsResolveCurrent(t *testing
 	if exit != 0 || stderr != "" {
 		t.Fatalf("project show demo-1 = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
-	if named := decodeProjectResult(t, stdout, "project show"); named != initialized {
+	if named := decodeProjectResult(t, stdout, "project show"); !reflect.DeepEqual(named, initialized) {
 		t.Fatalf("named project = %#v, want %#v", named, initialized)
 	}
 
@@ -64,7 +87,7 @@ func TestInitCreatesDatabaseAtGitRootAndProjectCommandsResolveCurrent(t *testing
 	if exit != 0 || stderr != "" {
 		t.Fatalf("idempotent init = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
-	if repeated := decodeProjectResult(t, stdout, "init"); repeated != initialized {
+	if repeated := decodeProjectResult(t, stdout, "init"); !reflect.DeepEqual(repeated, initialized) {
 		t.Fatalf("idempotent project = %#v, want unchanged %#v", repeated, initialized)
 	}
 
@@ -74,7 +97,7 @@ func TestInitCreatesDatabaseAtGitRootAndProjectCommandsResolveCurrent(t *testing
 	}
 
 	stdout, stderr, exit = runTestApp(application, "init", "--code", "changed")
-	if exit != 4 || stdout != "" || !strings.Contains(stderr, `"code":"project_path_already_registered"`) {
+	if exit != 4 || stdout != "" || !strings.Contains(stderr, `"code":"project_repository_already_registered"`) {
 		t.Fatalf("changed immutable code = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 	if projects = runProjectList(t, application); !reflect.DeepEqual(projects, projectListData{initialized}) {
@@ -102,13 +125,13 @@ func TestSiblingRepositoriesUseOneDatabaseWithUniqueCodes(t *testing.T) {
 	current := first
 	application := projectTestApp(&current)
 	firstProject := runProjectInit(t, application, "svc-a")
-	if firstProject.RootPath != "service alpha" {
-		t.Fatalf("first root path = %q", firstProject.RootPath)
+	if firstProject.Workspaces[0].RootPath != "service alpha" {
+		t.Fatalf("first root path = %q", firstProject.Workspaces[0].RootPath)
 	}
 	current = second
 	secondProject := runProjectInit(t, application, "svc-b")
-	if secondProject.RootPath != "service βeta" {
-		t.Fatalf("second root path = %q", secondProject.RootPath)
+	if secondProject.Workspaces[0].RootPath != "service βeta" {
+		t.Fatalf("second root path = %q", secondProject.Workspaces[0].RootPath)
 	}
 
 	current = third
@@ -127,14 +150,14 @@ func TestSiblingRepositoriesUseOneDatabaseWithUniqueCodes(t *testing.T) {
 	if exit != 0 || stderr != "" {
 		t.Fatalf("named show outside Git = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
-	if shown := decodeProjectResult(t, stdout, "project show"); shown != secondProject {
+	if shown := decodeProjectResult(t, stdout, "project show"); !reflect.DeepEqual(shown, secondProject) {
 		t.Fatalf("shown project = %#v, want %#v", shown, secondProject)
 	}
 	stdout, stderr, exit = runTestApp(application, "--project", "svc-a", "project", "show")
 	if exit != 0 || stderr != "" {
 		t.Fatalf("global named show = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
-	if shown := decodeProjectResult(t, stdout, "project show"); shown != firstProject {
+	if shown := decodeProjectResult(t, stdout, "project show"); !reflect.DeepEqual(shown, firstProject) {
 		t.Fatalf("globally selected project = %#v, want %#v", shown, firstProject)
 	}
 	stdout, stderr, exit = runTestApp(application, "project", "show")
@@ -173,7 +196,7 @@ func TestInitRejectsInvalidCodesBeforeCreatingDatabase(t *testing.T) {
 	}
 }
 
-func TestInitRejectsProjectOutsideDatabaseRoot(t *testing.T) {
+func TestInitStoresAbsoluteIdentityWhenRepositoryIsOutsideDatabaseRoot(t *testing.T) {
 	t.Parallel()
 
 	repository := filepath.Join(t.TempDir(), "outer Git repository")
@@ -189,11 +212,16 @@ func TestInitRejectsProjectOutsideDatabaseRoot(t *testing.T) {
 	current := databaseRoot
 	application := projectTestApp(&current)
 	stdout, stderr, exit := runTestApp(application, "init", "--code", "outer")
-	if exit != 4 || stdout != "" || !strings.Contains(stderr, `"code":"project_outside_database_root"`) {
+	if exit != 0 || stderr != "" {
 		t.Fatalf("outside init = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
-	if projects := runProjectList(t, application); len(projects) != 0 {
-		t.Fatalf("projects after outside rejection = %#v", projects)
+	project := decodeProjectResult(t, stdout, "init")
+	canonicalRepository, err := filepath.EvalSymlinks(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if project.GitCommonDirRelative || project.Workspaces[0].RootPathRelative || !strings.EqualFold(project.Workspaces[0].RootPath, filepath.ToSlash(canonicalRepository)) {
+		t.Fatalf("outside project paths = %#v", project)
 	}
 }
 
@@ -298,12 +326,13 @@ func TestUsageValidationPrecedesWorkingDirectoryAndDiscovery(t *testing.T) {
 	}
 }
 
-func TestGitLinkedWorktreesRegisterAsDistinctProjectRoots(t *testing.T) {
+func TestGitLinkedWorktreesShareOneLogicalProject(t *testing.T) {
 	t.Parallel()
 
 	common := filepath.Join(t.TempDir(), "worktree database 界")
 	mainWorkTree := filepath.Join(common, "main work tree")
 	linkedWorkTree := filepath.Join(common, "linked 工作 tree")
+	secondLinkedWorkTree := filepath.Join(common, "second linked tree")
 	if err := os.MkdirAll(mainWorkTree, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -321,20 +350,88 @@ func TestGitLinkedWorktreesRegisterAsDistinctProjectRoots(t *testing.T) {
 		"commit", "--quiet", "-m", "fixture",
 	)
 	runGitTest(t, mainWorkTree, "worktree", "add", "--quiet", "-b", "linked-project-test", linkedWorkTree)
+	runGitTest(t, mainWorkTree, "worktree", "add", "--quiet", "-b", "second-linked-project-test", secondLinkedWorkTree)
 	if stdout, stderr, exit := runTestApp(initDBTestApp(common), "init-db"); exit != 0 || stderr != "" {
 		t.Fatalf("init-db = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 
 	current := mainWorkTree
 	application := projectTestApp(&current)
-	mainProject := runProjectInit(t, application, "main")
+	mainProject := runProjectInit(t, application, "shared")
 	current = linkedWorkTree
-	linkedProject := runProjectInit(t, application, "linked")
-	if mainProject.RootPath != "main work tree" || linkedProject.RootPath != "linked 工作 tree" {
-		t.Fatalf("worktree roots = %q and %q", mainProject.RootPath, linkedProject.RootPath)
+	linkedProject := runProjectInit(t, application, "shared")
+	current = secondLinkedWorkTree
+	allWorkspaces := runProjectInit(t, application, "shared")
+	if mainProject.Code != linkedProject.Code || linkedProject.Code != allWorkspaces.Code || len(allWorkspaces.Workspaces) != 3 {
+		t.Fatalf("linked worktree project snapshots = %#v %#v %#v", mainProject, linkedProject, allWorkspaces)
 	}
-	if shown := decodeCurrentProject(t, application); shown != linkedProject {
-		t.Fatalf("linked current project = %#v, want %#v", shown, linkedProject)
+	gotRoots := []string{allWorkspaces.Workspaces[0].RootPath, allWorkspaces.Workspaces[1].RootPath, allWorkspaces.Workspaces[2].RootPath}
+	wantRoots := []string{"main work tree", "linked 工作 tree", "second linked tree"}
+	if !reflect.DeepEqual(gotRoots, wantRoots) {
+		t.Fatalf("workspace roots = %q, want %q", gotRoots, wantRoots)
+	}
+	if shown := decodeCurrentProject(t, application); !reflect.DeepEqual(shown, allWorkspaces) {
+		t.Fatalf("linked current project = %#v, want %#v", shown, allWorkspaces)
+	}
+	if projects := runProjectList(t, application); len(projects) != 1 || !reflect.DeepEqual(projects[0], allWorkspaces) {
+		t.Fatalf("projects = %#v, want one shared project", projects)
+	}
+}
+
+func TestWorkspaceMoveRemovalAndDuplicateRegistrationAreSafe(t *testing.T) {
+	t.Parallel()
+
+	common := filepath.Join(t.TempDir(), "worktree lifecycle root")
+	mainRoot := filepath.Join(common, "main")
+	linkedRoot := filepath.Join(common, "linked original")
+	movedRoot := filepath.Join(common, "linked moved 界")
+	duplicateRoot := filepath.Join(common, "linked duplicate")
+	replacementRoot := filepath.Join(common, "replacement")
+	if err := os.MkdirAll(mainRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, mainRoot, "init", "--quiet")
+	if err := os.WriteFile(filepath.Join(mainRoot, "README"), []byte("fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, mainRoot, "add", "README")
+	runGitTest(t, mainRoot, "-c", "user.name=Pellets Test", "-c", "user.email=pellets@example.invalid", "commit", "--quiet", "-m", "fixture")
+	runGitTest(t, mainRoot, "worktree", "add", "--quiet", "-b", "workspace-lifecycle", linkedRoot)
+	if _, stderr, exit := runTestApp(initDBTestApp(common), "init-db"); exit != 0 {
+		t.Fatalf("init-db = exit %d stderr %q", exit, stderr)
+	}
+
+	current := mainRoot
+	application := projectTestApp(&current)
+	runProjectInit(t, application, "shared")
+	current = linkedRoot
+	registered := runProjectInit(t, application, "shared")
+	if len(registered.Workspaces) != 2 {
+		t.Fatalf("registered workspaces = %#v", registered.Workspaces)
+	}
+
+	if err := os.CopyFS(duplicateRoot, os.DirFS(linkedRoot)); err != nil {
+		t.Fatal(err)
+	}
+	current = duplicateRoot
+	stdout, stderr, exit := runTestApp(application, "init", "--code", "shared")
+	if exit != 4 || stdout != "" || !strings.Contains(stderr, `"code":"workspace_identity_conflict"`) {
+		t.Fatalf("duplicate init = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+
+	runGitTest(t, mainRoot, "worktree", "move", linkedRoot, movedRoot)
+	current = movedRoot
+	moved := runProjectInit(t, application, "shared")
+	if len(moved.Workspaces) != 2 || moved.Workspaces[1].RootPath != "linked moved 界" {
+		t.Fatalf("moved workspaces = %#v", moved.Workspaces)
+	}
+
+	runGitTest(t, mainRoot, "worktree", "remove", movedRoot)
+	runGitTest(t, mainRoot, "worktree", "add", "--quiet", "-b", "workspace-replacement", replacementRoot)
+	current = replacementRoot
+	withReplacement := runProjectInit(t, application, "shared")
+	if len(withReplacement.Workspaces) != 3 || withReplacement.Workspaces[1].RootPath != "linked moved 界" || withReplacement.Workspaces[2].RootPath != "replacement" {
+		t.Fatalf("removed/stale registration behavior = %#v", withReplacement.Workspaces)
 	}
 }
 
@@ -348,12 +445,14 @@ func projectTestApp(current *string) *App {
 	}
 	manager := app.ProjectManager{
 		Discover: app.ProjectDiscovery{
-			FindGitRoot: discovery.FindGitRoot,
+			FindGitIdentity: discovery.FindGitIdentity,
 			FindDatabase: func(workingDirectory string) (app.Database, error) {
 				database, err := discovery.FindDatabase(workingDirectory)
 				return app.Database{Root: database.Root, Path: database.Path}, err
 			},
-			RelativeProjectPath: discovery.RelativeProjectPath,
+			NormalizePath: discovery.NormalizeLocalPath,
+			ResolvePath:   discovery.ResolveLocalPath,
+			PathExists:    discovery.PathExists,
 		},
 		Initialize: initializer.Init,
 		Open: func(ctx context.Context, path string) (storage.ProjectDatabase, error) {
@@ -405,7 +504,7 @@ func decodeProjectResult(t *testing.T, output, command string) projectData {
 	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		t.Fatalf("decode %s output %q: %v", command, output, err)
 	}
-	if result.SchemaVersion != 1 || result.Command != command || result.Data.Code == "" || result.Data.RootPath == "" || result.Data.CreatedAt == "" || result.Data.UpdatedAt == "" {
+	if result.SchemaVersion != 1 || result.Command != command || result.Data.Code == "" || result.Data.GitCommonDir == "" || len(result.Data.Workspaces) == 0 || result.Data.CreatedAt == "" || result.Data.UpdatedAt == "" {
 		t.Fatalf("%s envelope = %#v", command, result)
 	}
 	return result.Data
