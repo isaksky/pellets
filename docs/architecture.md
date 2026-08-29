@@ -250,6 +250,25 @@ Release archives contain only `pl` (or `pl.exe`) plus license information and ch
 
 macOS is the only platform available for hands-on testing. Windows behavior must therefore be covered by CI integration tests, including path separators, file locking, WAL cleanup, Unicode paths, local Git excludes, and executable exit codes. Code signing is an open release question.
 
+### Same-repository Homebrew tap
+
+The application repository is also the project-owned Homebrew tap. Its
+top-level `Formula/pl.rb` is macOS-only and selects the immutable versioned
+GitHub Release archive and SHA-256 for the native AMD64 or ARM64 architecture.
+The formula installs only `pl`; its test runs `pl --version`, and neither the
+install method nor the test performs network activity. The nonstandard tap
+repository name requires the explicit URL form documented in `README.md`.
+
+Before a stable `vX.Y.Z` tag, the repository-owned formula updater renders the
+formula from the release builder's checksum manifest. The tag build uses the
+pinned release Go toolchain, checks that the committed formula has exactly the
+tag version, both fixed macOS asset names and their actual hashes, and performs
+a native cached-archive Homebrew install/test with formula network access
+denied. GitHub Release publication depends on that check and the complete
+macOS/Windows platform gate, so stale formula metadata cannot be published.
+The project creates no separate tap repository, bottles, or `homebrew/core`
+submission.
+
 ## Explicitly absent components
 
 There is no package or boundary for:

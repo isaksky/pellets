@@ -91,10 +91,26 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: 1.26.5
           cache-dependency-path: go.sum
+      - name: Select release version
+        id: release-version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" == v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              printf 'release tag must be v followed by a stable SemVer core: %s\n' "$GITHUB_REF_NAME" >&2
+              exit 1
+            fi
+          else
+            version="0.0.0"
+          fi
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
       - name: Build, verify, and smoke-test release archives
-        run: ./scripts/build-release.sh 0.0.0-ci
+        run: |
+          ./scripts/build-release.sh "${{ steps.release-version.outputs.version }}"
+          printf '%s\n' "${{ steps.release-version.outputs.version }}" >dist/release-version.txt
       - name: Retain verified release archives
         uses: actions/upload-artifact@v7
         with:
@@ -123,7 +139,7 @@ jobs:
             throw "release smoke test requires a native Windows AMD64 runner"
           }
 
-          $version = "0.0.0-ci"
+          $version = (Get-Content "dist/release-version.txt").Trim()
           $archiveName = "pellets_${version}_windows_amd64.zip"
           $archive = Join-Path $PWD "dist/$archiveName"
           $manifest = Join-Path $PWD "dist/pellets_${version}_checksums.txt"
@@ -176,6 +192,34 @@ jobs:
             Pop-Location
           }
 
+  homebrew-release-check:
+    name: Validate and install the Homebrew formula
+    needs: release-archives
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Download verified release archives
+        uses: actions/download-artifact@v7
+        with:
+          name: pellets-release-archives
+          path: dist
+      - name: Validate committed formula style
+        run: brew style Formula/pl.rb
+      - name: Match release metadata or prepare the CI test formula
+        shell: bash
+        run: |
+          version="$(<dist/release-version.txt)"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" == v* ]]; then
+            ./scripts/update-homebrew-formula.sh --check "$version" dist
+          else
+            ./scripts/update-homebrew-formula.sh --write "$version" dist
+          fi
+      - name: Install and test the native formula without artifact network access
+        shell: bash
+        run: ./scripts/test-homebrew-formula.sh "$(<dist/release-version.txt)" dist
+
   release-platform-gate:
     name: Release gate (supported platforms)
     if: always()
@@ -184,6 +228,7 @@ jobs:
       - cgo-free-cross-builds
       - release-archives
       - windows-release-smoke
+      - homebrew-release-check
     runs-on: ubuntu-latest
     steps:
       - name: Require native tests, cross-builds, and archive smoke tests
@@ -192,8 +237,41 @@ jobs:
           CROSS_BUILD_RESULT: ${{ needs.cgo-free-cross-builds.result }}
           ARCHIVE_RESULT: ${{ needs.release-archives.result }}
           WINDOWS_SMOKE_RESULT: ${{ needs.windows-release-smoke.result }}
+          HOMEBREW_RESULT: ${{ needs.homebrew-release-check.result }}
         run: |
           test "$NATIVE_TEST_RESULT" = success
           test "$CROSS_BUILD_RESULT" = success
           test "$ARCHIVE_RESULT" = success
           test "$WINDOWS_SMOKE_RESULT" = success
+          test "$HOMEBREW_RESULT" = success
+
+  publish-release:
+    name: Publish tagged GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - release-platform-gate
+      - release-archives
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release archives that passed every gate
+        uses: actions/download-artifact@v7
+        with:
+          name: pellets-release-archives
+          path: dist
+      - name: Publish immutable versioned assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          version="$(<dist/release-version.txt)"
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/pellets_${version}_darwin_amd64.tar.gz" \
+            "dist/pellets_${version}_darwin_arm64.tar.gz" \
+            "dist/pellets_${version}_windows_amd64.zip" \
+            "dist/pellets_${version}_checksums.txt" \
+            --verify-tag \
+            --generate-notes \
+            --title "Pellets $version"

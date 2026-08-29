@@ -271,6 +271,8 @@ Required CI jobs:
 - cross-build macOS AMD64/ARM64 and Windows AMD64;
 - archive-content and checksum verification;
 - a no-network smoke test after dependencies are already vendored/cached for the build.
+- deterministic Homebrew formula rendering from the versioned macOS archive checksums;
+- native Homebrew formula style, cached-archive install, and `pl --version` testing before a tagged GitHub Release is published.
 
 Because hands-on Windows testing is unavailable, Windows-specific integration tests are release-blocking. Do not claim Windows ARM64 support based only on successful compilation.
 

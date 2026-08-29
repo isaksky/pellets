@@ -14,13 +14,35 @@ go test ./...
 
 The cross-build script verifies `CGO_ENABLED=0` artifacts for macOS AMD64/ARM64 and Windows AMD64. Runtime dependencies are Go's standard library plus the pinned in-process SQLite driver.
 
+## Install on macOS with Homebrew
+
+Pellets uses the project-owned `isaksky/pellets` tap in this same source
+repository. Because the repository is named `pellets` rather than
+`homebrew-pellets`, add it with its explicit URL before installing:
+
+```text
+brew tap isaksky/pellets https://github.com/isaksky/pellets.git
+brew install isaksky/pellets/pl
+```
+
+Upgrade or uninstall the formula with:
+
+```text
+brew update
+brew upgrade isaksky/pellets/pl
+brew uninstall isaksky/pellets/pl
+brew untap isaksky/pellets
+```
+
 ## Build release archives
 
 Run the repository-owned release builder on macOS with a SemVer value (without
-a leading `v`):
+a leading `v`). Stable releases use the Go 1.26.5 toolchain pinned by CI. After
+building, render `Formula/pl.rb` from the verified archive checksums:
 
 ```text
 ./scripts/build-release.sh 1.2.3
+./scripts/update-homebrew-formula.sh --write 1.2.3
 ```
 
 It writes these fixed files to `dist/` (or to an optional second-argument
@@ -48,8 +70,11 @@ the same unpacked archive is run natively by Windows CI.
 The archive layout and names are stable release inputs. The Go binaries are
 not promised to be byte-identical across toolchain versions, operating
 systems, or compression implementations. Re-running the same version replaces
-only those four versioned output files; signing, notarization, installers, and
-package-manager publishing are separate concerns.
+only those four versioned output files. A stable `vX.Y.Z` tag rebuilds the
+assets with the pinned toolchain, rejects formula version/URL/hash drift,
+installs and tests the native formula without artifact network access, and
+publishes the GitHub Release only after the complete platform gate passes.
+Signing, notarization, bottles, and installers are not part of this process.
 
 ## Start a project
 
