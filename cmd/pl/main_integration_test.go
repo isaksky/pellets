@@ -295,6 +295,14 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		if !reflect.DeepEqual(shown, agent) {
 			t.Fatalf("compiled shown memory = %#v, want %#v", shown, agent)
 		}
+		unapprovedSearch := decodeFoundationSuccess[[]foundationMemory](
+			t,
+			runFoundationCLI(t, executable, root, "memory", "search", "memory-123", "--approved-only"),
+			"memory search",
+		)
+		if unapprovedSearch == nil || len(unapprovedSearch) != 0 {
+			t.Fatalf("compiled approved-only unapproved search = %#v, want typed empty result", unapprovedSearch)
+		}
 		approved := decodeFoundationSuccess[foundationMemory](
 			t, runFoundationCLI(t, executable, root, "memory", "approve", "1"), "memory approve",
 		)
@@ -307,26 +315,76 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		if !reflect.DeepEqual(repeated, approved) {
 			t.Fatalf("compiled repeated approval = %#v, want %#v", repeated, approved)
 		}
+		searched := decodeFoundationSuccess[[]foundationMemory](
+			t,
+			runFoundationCLI(t, executable, root, "memory", "search", "memory-123", "--approved-only", "--limit", "1"),
+			"memory search",
+		)
+		if len(searched) != 1 || searched[0].ID != approved.ID || searched[0].Rank == nil || searched[0].Snippet == nil || *searched[0].Snippet != approved.Text || !searched[0].HumanApproved {
+			t.Fatalf("compiled memory search = %#v", searched)
+		}
+		malformedLiteral := decodeFoundationSuccess[[]foundationMemory](
+			t, runFoundationCLI(t, executable, root, "memory", "search", `memory-123 OR (`), "memory search",
+		)
+		if malformedLiteral == nil || len(malformedLiteral) != 0 {
+			t.Fatalf("compiled malformed memory FTS text = %#v, want typed empty result", malformedLiteral)
+		}
 
 		missing := runFoundationCLI(t, executable, root, "memory", "show", "999")
 		if missing.exit != 3 || missing.stdout != "" || !strings.Contains(missing.stderr, `"code":"memory_not_found"`) {
 			t.Fatalf("compiled missing memory show = %#v", missing)
 		}
-		notYetImplemented := runFoundationCLI(t, executable, root, "memory", "search", "compiled")
-		if notYetImplemented.exit != 2 || notYetImplemented.stdout != "" || !strings.Contains(notYetImplemented.stderr, `"code":"unknown_subcommand"`) {
-			t.Fatalf("compiled out-of-scope memory search = %#v", notYetImplemented)
+		unconfirmed := runFoundationCLI(t, executable, root, "memory", "remove", "2")
+		if unconfirmed.exit != 6 || unconfirmed.stdout != "" || !strings.Contains(unconfirmed.stderr, `"code":"confirmation_required"`) {
+			t.Fatalf("compiled unconfirmed memory removal = %#v", unconfirmed)
+		}
+		stillPresent := decodeFoundationSuccess[foundationMemory](
+			t, runFoundationCLI(t, executable, root, "memory", "show", "2"), "memory show",
+		)
+		if !reflect.DeepEqual(stillPresent, human) {
+			t.Fatalf("compiled unconfirmed removal changed memory: %#v", stillPresent)
+		}
+		removed := decodeFoundationSuccess[foundationMemory](
+			t, runFoundationCLI(t, executable, root, "memory", "remove", "2", "--yes"), "memory remove",
+		)
+		if !reflect.DeepEqual(removed, human) {
+			t.Fatalf("compiled removed memory = %#v, want %#v", removed, human)
+		}
+		removedShow := runFoundationCLI(t, executable, root, "memory", "show", "2")
+		if removedShow.exit != 3 || removedShow.stdout != "" || !strings.Contains(removedShow.stderr, `"code":"memory_not_found"`) {
+			t.Fatalf("compiled removed memory show = %#v", removedShow)
 		}
 
 		database, err := sqlite.Open(context.Background(), discovery.DatabasePath(root))
 		if err != nil {
 			t.Fatal(err)
 		}
-		assertFoundationQueryInt(t, database, "SELECT COUNT(*) FROM memories", 2)
-		assertFoundationQueryInt(t, database, "SELECT COUNT(*) FROM memories_fts", 2)
+		assertFoundationQueryInt(t, database, "SELECT COUNT(*) FROM memories", 1)
+		assertFoundationQueryInt(t, database, "SELECT COUNT(*) FROM memories_fts", 1)
 		for _, forbidden := range []string{"number", "pellet_id", "external_id", "group_id", "status", "priority", "workspace_id"} {
 			assertFoundationQueryInt(t, database, `
 				SELECT COUNT(*) FROM pragma_table_info('memories') WHERE name = ?`, 0, forbidden)
 		}
+		if _, err := database.Exec("DROP TABLE memories_fts"); err != nil {
+			database.Close()
+			t.Fatal(err)
+		}
+		if err := database.Close(); err != nil {
+			t.Fatal(err)
+		}
+		ftsUnavailable := runFoundationCLI(t, executable, root, "memory", "search", "memory-123")
+		if ftsUnavailable.exit != 5 || ftsUnavailable.stdout != "" || !strings.Contains(ftsUnavailable.stderr, `"code":"fts_unavailable"`) {
+			t.Fatalf("compiled unavailable memory FTS search = %#v", ftsUnavailable)
+		}
+		failedRemoval := runFoundationCLI(t, executable, root, "memory", "remove", "1", "--yes")
+		if failedRemoval.exit != 5 || failedRemoval.stdout != "" || !strings.Contains(failedRemoval.stderr, `"code":"fts_unavailable"`) {
+			t.Fatalf("compiled unavailable memory FTS removal = %#v", failedRemoval)
+		}
+		database, err = sqlite.Open(context.Background(), discovery.DatabasePath(root))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertFoundationQueryInt(t, database, "SELECT COUNT(*) FROM memories", 1)
 		if err := database.Close(); err != nil {
 			t.Fatal(err)
 		}
@@ -888,14 +946,16 @@ type foundationNext struct {
 }
 
 type foundationMemory struct {
-	ID            int64   `json:"id"`
-	Project       string  `json:"project"`
-	Text          string  `json:"text"`
-	CreatedBy     string  `json:"created_by"`
-	HumanApproved bool    `json:"human_approved"`
-	CreatedAt     string  `json:"created_at"`
-	UpdatedAt     string  `json:"updated_at"`
-	ApprovedAt    *string `json:"approved_at"`
+	ID            int64    `json:"id"`
+	Project       string   `json:"project"`
+	Text          string   `json:"text"`
+	CreatedBy     string   `json:"created_by"`
+	HumanApproved bool     `json:"human_approved"`
+	CreatedAt     string   `json:"created_at"`
+	UpdatedAt     string   `json:"updated_at"`
+	ApprovedAt    *string  `json:"approved_at"`
+	Rank          *float64 `json:"rank,omitempty"`
+	Snippet       *string  `json:"snippet,omitempty"`
 }
 
 type foundationError struct {

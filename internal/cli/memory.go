@@ -15,15 +15,17 @@ import (
 	"pellets/internal/storage"
 )
 
-// MemoryCommand implements the memory add/list/show/approve family.
+// MemoryCommand implements the project-memory command family.
 func MemoryCommand(manager app.MemoryManager) Command {
 	return Command{
 		Name:    "memory",
-		Summary: "Add, list, show, or approve project memory.",
+		Summary: "Add, search, review, or remove project memory.",
 		Usage: "pl memory add (--text TEXT | --file PATH) [--created-by agent|human]\n" +
 			"  pl memory list [--approved-only] [--limit N]\n" +
 			"  pl memory show MEMORY_ID\n" +
-			"  pl memory approve MEMORY_ID\n\n" +
+			"  pl memory search QUERY [--approved-only] [--limit N]\n" +
+			"  pl memory approve MEMORY_ID\n" +
+			"  pl memory remove MEMORY_ID --yes\n\n" +
 			"Memory text must be non-empty valid UTF-8 and at most 1,048,576 bytes.",
 		Parse: parseMemory,
 		ResultName: func(value any) string {
@@ -59,6 +61,21 @@ func MemoryCommand(manager app.MemoryManager) Command {
 					result[index] = newMemoryData(memory)
 				}
 				return result, nil
+			case "search":
+				memories, err := manager.Search(
+					ctx, database, invocation.WorkingDirectory, invocation.Globals.Project,
+					storage.MemorySearchOptions{
+						Query: input.Query, ApprovedOnly: input.ApprovedOnly, Limit: input.Limit,
+					},
+				)
+				if err != nil {
+					return nil, err
+				}
+				result := make(memoryListData, len(memories))
+				for index, memory := range memories {
+					result[index] = newMemorySearchData(memory)
+				}
+				return result, nil
 			case "show":
 				memory, err := manager.Show(ctx, database, invocation.WorkingDirectory, invocation.Globals.Project, input.ID)
 				if err != nil {
@@ -67,6 +84,12 @@ func MemoryCommand(manager app.MemoryManager) Command {
 				return newMemoryData(memory), nil
 			case "approve":
 				memory, err := manager.Approve(ctx, database, invocation.WorkingDirectory, invocation.Globals.Project, input.ID)
+				if err != nil {
+					return nil, err
+				}
+				return newMemoryData(memory), nil
+			case "remove":
+				memory, err := manager.Remove(ctx, database, invocation.WorkingDirectory, invocation.Globals.Project, input.ID)
 				if err != nil {
 					return nil, err
 				}
@@ -85,12 +108,13 @@ type memoryInput struct {
 	CreatedBy    domain.MemoryCreator
 	ApprovedOnly bool
 	Limit        *int64
+	Query        string
 	ID           int64
 }
 
 func parseMemory(args []string) (any, error) {
 	if len(args) == 0 {
-		return nil, domain.NewError(domain.Usage, "missing_subcommand", "memory requires add, list, show, or approve", map[string]any{"command": "memory"})
+		return nil, domain.NewError(domain.Usage, "missing_subcommand", "memory requires add, list, show, search, approve, or remove", map[string]any{"command": "memory"})
 	}
 	action := args[0]
 	if strings.HasPrefix(action, "-") {
@@ -103,8 +127,12 @@ func parseMemory(args []string) (any, error) {
 		input, err = parseMemoryAdd(args[1:])
 	case "list":
 		input, err = parseMemoryList(args[1:])
+	case "search":
+		input, err = parseMemorySearch(args[1:])
 	case "show", "approve":
 		input.ID, err = parseMemoryIDArgument(action, args[1:])
+	case "remove":
+		input, err = parseMemoryRemove(args[1:])
 	default:
 		return nil, domain.NewError(
 			domain.Usage,
@@ -208,6 +236,103 @@ func parseMemoryList(args []string) (memoryInput, error) {
 	return input, nil
 }
 
+func parseMemorySearch(args []string) (memoryInput, error) {
+	var input memoryInput
+	querySet := false
+	seen := make(map[string]bool)
+	for len(args) > 0 {
+		argument := args[0]
+		if !strings.HasPrefix(argument, "-") {
+			if querySet {
+				return memoryInput{}, unexpectedArgument(argument)
+			}
+			if strings.TrimSpace(argument) == "" {
+				return memoryInput{}, domain.NewError(domain.Usage, "missing_query", "memory search requires a non-empty QUERY", nil)
+			}
+			input.Query = argument
+			querySet = true
+			args = args[1:]
+			continue
+		}
+		name, value, hasValue := splitOption(argument)
+		if seen[name] {
+			return memoryInput{}, duplicateCommandFlag(name)
+		}
+		seen[name] = true
+		switch name {
+		case "--approved-only":
+			if hasValue {
+				return memoryInput{}, flagTakesNoValue(name)
+			}
+			input.ApprovedOnly = true
+			args = args[1:]
+		case "--limit":
+			var err error
+			value, args, err = takeCommandFlagValue(args, name, value, hasValue, false, false)
+			if err != nil {
+				return memoryInput{}, err
+			}
+			limit, parseErr := strconv.ParseInt(value, 10, 64)
+			if parseErr != nil || limit <= 0 || strconv.FormatInt(limit, 10) != value {
+				return memoryInput{}, invalidLimit(value)
+			}
+			input.Limit = &limit
+		default:
+			return memoryInput{}, unknownFlag(name)
+		}
+	}
+	if !querySet {
+		return memoryInput{}, domain.NewError(domain.Usage, "missing_query", "memory search requires a non-empty QUERY", nil)
+	}
+	return input, nil
+}
+
+func parseMemoryRemove(args []string) (memoryInput, error) {
+	var input memoryInput
+	memoryIDSet := false
+	yes := false
+	seen := make(map[string]bool)
+	for len(args) > 0 {
+		argument := args[0]
+		if !strings.HasPrefix(argument, "-") {
+			if memoryIDSet {
+				return memoryInput{}, unexpectedArgument(argument)
+			}
+			memoryID, err := domain.ParseMemoryID(argument)
+			if err != nil {
+				return memoryInput{}, err
+			}
+			input.ID = memoryID
+			memoryIDSet = true
+			args = args[1:]
+			continue
+		}
+		name, _, hasValue := splitOption(argument)
+		if seen[name] {
+			return memoryInput{}, duplicateCommandFlag(name)
+		}
+		seen[name] = true
+		if name != "--yes" {
+			return memoryInput{}, unknownFlag(name)
+		}
+		if hasValue {
+			return memoryInput{}, flagTakesNoValue(name)
+		}
+		yes = true
+		args = args[1:]
+	}
+	if !memoryIDSet {
+		return memoryInput{}, domain.NewError(domain.Usage, "missing_memory_id", "memory remove requires a memory ID", nil)
+	}
+	if !yes {
+		return memoryInput{}, domain.NewError(
+			domain.Confirmation, "confirmation_required", "memory removal requires --yes",
+			map[string]any{"memory_id": input.ID},
+		)
+	}
+	return input, nil
+}
+
 func parseMemoryIDArgument(action string, args []string) (int64, error) {
 	if len(args) == 0 {
 		return 0, domain.NewError(
@@ -280,6 +405,8 @@ type memoryData struct {
 	CreatedAt     string               `json:"created_at"`
 	UpdatedAt     string               `json:"updated_at"`
 	ApprovedAt    *string              `json:"approved_at"`
+	Rank          *float64             `json:"rank,omitempty"`
+	Snippet       *string              `json:"snippet,omitempty"`
 }
 
 func newMemoryData(memory storage.Memory) memoryData {
@@ -295,12 +422,23 @@ func newMemoryData(memory storage.Memory) memoryData {
 	return data
 }
 
+func newMemorySearchData(result storage.MemorySearchResult) memoryData {
+	data := newMemoryData(result.Memory)
+	data.Rank = &result.Rank
+	data.Snippet = &result.Snippet
+	return data
+}
+
 func (data memoryData) RenderHuman(writer io.Writer) error {
 	approval := "unapproved"
 	if data.HumanApproved {
 		approval = "approved"
 	}
-	_, err := fmt.Fprintf(writer, "%d  %s  %s  %s\n", data.ID, data.CreatedBy, approval, data.Text)
+	text := data.Text
+	if data.Snippet != nil {
+		text = *data.Snippet
+	}
+	_, err := fmt.Fprintf(writer, "%d  %s  %s  %s\n", data.ID, data.CreatedBy, approval, text)
 	return err
 }
 

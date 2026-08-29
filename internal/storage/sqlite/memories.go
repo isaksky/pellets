@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"pellets/internal/domain"
 	"pellets/internal/storage"
@@ -17,6 +18,8 @@ const memorySelect = `
 	       strftime('%Y-%m-%dT%H:%M:%fZ', memory.approved_at)
 	FROM memories AS memory
 	JOIN projects AS project ON project.project_id = memory.project_id`
+
+const memorySnippetMaxRunes = 240
 
 // MemoryRepository owns a configured SQLite database used for project memory.
 type MemoryRepository struct {
@@ -136,6 +139,95 @@ func (repository *MemoryRepository) ListMemories(ctx context.Context, project st
 	return memories, nil
 }
 
+// SearchMemories uses the disposable FTS table only for candidate retrieval,
+// ranking, and snippets. Project and approval constraints remain relational
+// predicates over authoritative memory rows.
+func (repository *MemoryRepository) SearchMemories(ctx context.Context, project storage.Project, options storage.MemorySearchOptions) ([]storage.MemorySearchResult, error) {
+	if err := validateMemoryProject(project); err != nil {
+		return nil, err
+	}
+	if err := validateMemorySearchOptions(options); err != nil {
+		return nil, err
+	}
+
+	query := `
+		SELECT memory.memory_id, memory.project_id, project.code, memory.text, memory.created_by,
+		       strftime('%Y-%m-%dT%H:%M:%fZ', memory.created_at),
+		       strftime('%Y-%m-%dT%H:%M:%fZ', memory.updated_at),
+		       strftime('%Y-%m-%dT%H:%M:%fZ', memory.approved_at),
+		       bm25(memories_fts),
+		       snippet(memories_fts, 0, char(1), char(2), '…', 24)
+		FROM memories_fts
+		JOIN memories AS memory ON memory.memory_id = memories_fts.rowid
+		JOIN projects AS project ON project.project_id = memory.project_id
+		WHERE memories_fts MATCH ? AND memory.project_id = ? AND project.code = ?`
+	arguments := []any{escapeFTS5Query(options.Query), project.ID, project.Code}
+	if options.ApprovedOnly {
+		query += " AND memory.approved_at IS NOT NULL"
+	}
+	query += `
+		ORDER BY bm25(memories_fts),
+		         memory.created_at DESC,
+		         memory.memory_id DESC`
+	if options.Limit != nil {
+		query += " LIMIT ?"
+		arguments = append(arguments, *options.Limit)
+	}
+
+	rows, err := repository.db.QueryContext(ctx, query, arguments...)
+	if err != nil {
+		return nil, memoryFTSError("search memories", err)
+	}
+	defer rows.Close()
+	results := make([]storage.MemorySearchResult, 0)
+	for rows.Next() {
+		var rank float64
+		var snippet string
+		memory, scanErr := scanMemoryColumns(rows, &rank, &snippet)
+		if scanErr != nil {
+			return nil, memoryStorageError("read memory search result", scanErr)
+		}
+		results = append(results, storage.MemorySearchResult{
+			Memory: memory, Rank: rank, Snippet: normalizeMemorySnippet(snippet),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, memoryFTSError("iterate memory search results", err)
+	}
+	return results, nil
+}
+
+// RebuildMemorySearchIndex regenerates the disposable external-content index
+// from every authoritative memory under one writer transaction.
+func (repository *MemoryRepository) RebuildMemorySearchIndex(ctx context.Context) error {
+	connection, err := repository.db.Conn(ctx)
+	if err != nil {
+		return memoryStorageError("open memory search rebuild connection", err)
+	}
+	defer connection.Close()
+	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return memoryStorageError("begin memory search rebuild", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = connection.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+
+	if _, err := connection.ExecContext(ctx, "INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')"); err != nil {
+		return memoryFTSError("rebuild memory search index", err)
+	}
+	if _, err := connection.ExecContext(ctx, "INSERT INTO memories_fts(memories_fts) VALUES ('integrity-check')"); err != nil {
+		return memoryFTSError("verify rebuilt memory search index", err)
+	}
+	if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
+		return memoryStorageError("commit memory search rebuild", err)
+	}
+	committed = true
+	return nil
+}
+
 func (repository *MemoryRepository) ReadMemory(ctx context.Context, project storage.Project, memoryID int64) (storage.Memory, error) {
 	if err := validateMemoryProject(project); err != nil {
 		return storage.Memory{}, err
@@ -218,6 +310,65 @@ func (repository *MemoryRepository) ApproveMemory(ctx context.Context, project s
 	return memory, nil
 }
 
+// RemoveMemory deletes one project-scoped authoritative row and its derived
+// external-content FTS entry under the same immediate transaction.
+func (repository *MemoryRepository) RemoveMemory(ctx context.Context, project storage.Project, memoryID int64) (storage.Memory, error) {
+	if err := validateMemoryProject(project); err != nil {
+		return storage.Memory{}, err
+	}
+	if err := validateMemoryID(memoryID); err != nil {
+		return storage.Memory{}, err
+	}
+	connection, err := repository.db.Conn(ctx)
+	if err != nil {
+		return storage.Memory{}, memoryStorageError("open memory removal connection", err)
+	}
+	defer connection.Close()
+	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return storage.Memory{}, memoryStorageError("begin memory removal", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = connection.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+
+	if err := ensureStoredMemoryProject(ctx, connection, project); err != nil {
+		return storage.Memory{}, err
+	}
+	memory, err := loadMemory(ctx, connection, project.ID, project.Code, memoryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return storage.Memory{}, memoryNotFound(memoryID)
+	}
+	if err != nil {
+		return storage.Memory{}, memoryStorageError("read memory before removal", err)
+	}
+	if _, err := connection.ExecContext(ctx, `
+		INSERT INTO memories_fts(memories_fts, rowid, text)
+		VALUES ('delete', ?, ?)`, memory.ID, memory.Text); err != nil {
+		return storage.Memory{}, memoryFTSError("remove memory from search index", err)
+	}
+	result, err := connection.ExecContext(ctx, `
+		DELETE FROM memories
+		WHERE project_id = ? AND memory_id = ?`, project.ID, memoryID)
+	if err != nil {
+		return storage.Memory{}, memoryStorageError("delete memory", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return storage.Memory{}, memoryStorageError("verify memory removal", err)
+	}
+	if deleted != 1 {
+		return storage.Memory{}, memoryStorageError("verify memory removal", fmt.Errorf("deleted %d rows, want 1", deleted))
+	}
+	if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
+		return storage.Memory{}, memoryStorageError("commit memory removal", err)
+	}
+	committed = true
+	return memory, nil
+}
+
 func loadMemory(ctx context.Context, query projectQuery, projectID int64, projectCode string, memoryID int64) (storage.Memory, error) {
 	return scanMemory(query.QueryRowContext(ctx, memorySelect+`
 		WHERE memory.project_id = ? AND project.code = ? AND memory.memory_id = ?`,
@@ -227,13 +378,19 @@ func loadMemory(ctx context.Context, query projectQuery, projectID int64, projec
 type memoryScanner interface{ Scan(...any) error }
 
 func scanMemory(scanner memoryScanner) (storage.Memory, error) {
+	return scanMemoryColumns(scanner)
+}
+
+func scanMemoryColumns(scanner memoryScanner, additionalDestinations ...any) (storage.Memory, error) {
 	var memory storage.Memory
 	var createdBy, createdAt, updatedAt string
 	var approvedAt sql.NullString
-	if err := scanner.Scan(
+	destinations := []any{
 		&memory.ID, &memory.ProjectID, &memory.ProjectCode, &memory.Text, &createdBy,
 		&createdAt, &updatedAt, &approvedAt,
-	); err != nil {
+	}
+	destinations = append(destinations, additionalDestinations...)
+	if err := scanner.Scan(destinations...); err != nil {
 		return storage.Memory{}, err
 	}
 	memory.CreatedBy = domain.MemoryCreator(createdBy)
@@ -284,6 +441,59 @@ func validateMemoryListOptions(options storage.MemoryListOptions) error {
 		return domain.NewError(domain.Usage, "invalid_limit", "limit must be a positive integer", map[string]any{"limit": *options.Limit})
 	}
 	return nil
+}
+
+func validateMemorySearchOptions(options storage.MemorySearchOptions) error {
+	if strings.TrimSpace(options.Query) == "" {
+		return domain.NewError(domain.Usage, "missing_query", "memory search requires a non-empty QUERY", nil)
+	}
+	if options.Limit != nil && *options.Limit <= 0 {
+		return domain.NewError(domain.Usage, "invalid_limit", "limit must be a positive integer", map[string]any{"limit": *options.Limit})
+	}
+	return nil
+}
+
+func normalizeMemorySnippet(snippet string) string {
+	marked := []rune(snippet)
+	clean := make([]rune, 0, len(marked))
+	matchStart, matchEnd := -1, -1
+	for _, value := range marked {
+		switch value {
+		case 1:
+			if matchStart < 0 {
+				matchStart = len(clean)
+			}
+		case 2:
+			if matchStart >= 0 && matchEnd < 0 {
+				matchEnd = len(clean)
+			}
+		default:
+			clean = append(clean, value)
+		}
+	}
+	if len(clean) <= memorySnippetMaxRunes {
+		return string(clean)
+	}
+
+	// An individual token may approach the 1 MiB memory limit, so FTS5's
+	// token-count bound alone is insufficient. Center the hard rune bound on
+	// the first marked match and retain explicit truncation at both edges.
+	windowLength := memorySnippetMaxRunes - 2
+	center := windowLength / 2
+	if matchStart >= 0 {
+		if matchEnd < matchStart {
+			matchEnd = matchStart
+		}
+		center = matchStart + (matchEnd-matchStart)/2
+	}
+	windowStart := center - windowLength/2
+	if windowStart < 0 {
+		windowStart = 0
+	}
+	if maximum := len(clean) - windowLength; windowStart > maximum {
+		windowStart = maximum
+	}
+	return "…" + string(clean[windowStart:windowStart+windowLength]) + "…"
 }
 
 func validateMemoryID(memoryID int64) error {

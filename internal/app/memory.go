@@ -53,6 +53,24 @@ func (manager MemoryManager) List(
 	return memories, closeMemoryRepository(repository, operationErr)
 }
 
+func (manager MemoryManager) Search(
+	ctx context.Context,
+	database Database,
+	workingDirectory, selectedCode string,
+	options storage.MemorySearchOptions,
+) ([]storage.MemorySearchResult, error) {
+	project, err := manager.resolve(ctx, database, workingDirectory, selectedCode)
+	if err != nil {
+		return nil, err
+	}
+	repository, err := manager.open(ctx, database.Path)
+	if err != nil {
+		return nil, err
+	}
+	memories, operationErr := repository.SearchMemories(ctx, project, options)
+	return memories, closeMemoryRepository(repository, operationErr)
+}
+
 func (manager MemoryManager) Show(
 	ctx context.Context,
 	database Database,
@@ -86,6 +104,24 @@ func (manager MemoryManager) Approve(
 		return storage.Memory{}, err
 	}
 	memory, operationErr := repository.ApproveMemory(ctx, project, memoryID)
+	return memory, closeMemoryRepository(repository, operationErr)
+}
+
+func (manager MemoryManager) Remove(
+	ctx context.Context,
+	database Database,
+	workingDirectory, selectedCode string,
+	memoryID int64,
+) (storage.Memory, error) {
+	project, err := manager.resolve(ctx, database, workingDirectory, selectedCode)
+	if err != nil {
+		return storage.Memory{}, err
+	}
+	repository, err := manager.open(ctx, database.Path)
+	if err != nil {
+		return storage.Memory{}, err
+	}
+	memory, operationErr := repository.RemoveMemory(ctx, project, memoryID)
 	return memory, closeMemoryRepository(repository, operationErr)
 }
 

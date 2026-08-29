@@ -32,12 +32,31 @@ type MemoryListOptions struct {
 	Limit        *int64
 }
 
+// MemorySearchOptions describes project-scoped full-text search plus the
+// relational human-approval filter.
+type MemorySearchOptions struct {
+	Query        string
+	ApprovedOnly bool
+	Limit        *int64
+}
+
+// MemorySearchResult combines one authoritative memory with disposable FTS
+// ranking and snippet data. The full text remains available on Memory.
+type MemorySearchResult struct {
+	Memory  Memory
+	Rank    float64
+	Snippet string
+}
+
 // MemoryRepository is the persistence boundary for creation, retrieval, and
 // human approval of project memory.
 type MemoryRepository interface {
 	CreateMemory(ctx context.Context, project Project, input NewMemory) (Memory, error)
 	ListMemories(ctx context.Context, project Project, options MemoryListOptions) ([]Memory, error)
+	SearchMemories(ctx context.Context, project Project, options MemorySearchOptions) ([]MemorySearchResult, error)
 	ReadMemory(ctx context.Context, project Project, memoryID int64) (Memory, error)
 	ApproveMemory(ctx context.Context, project Project, memoryID int64) (Memory, error)
+	RemoveMemory(ctx context.Context, project Project, memoryID int64) (Memory, error)
+	RebuildMemorySearchIndex(ctx context.Context) error
 	Close() error
 }

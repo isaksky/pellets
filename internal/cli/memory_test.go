@@ -81,6 +81,28 @@ func TestMemoryCommandsJSONV1AcrossLinkedWorktrees(t *testing.T) {
 	}
 	appendMemoryGolden(t, &golden, "list-approved-limit", approvedRaw)
 
+	searchRaw := runPelletCommand(t, application, "memory", "search", "shared-123")
+	searched := decodeMemoryListCommand(t, searchRaw, "memory search")
+	if len(searched) != 1 || searched[0].ID != agent.ID || searched[0].Rank == nil || searched[0].Snippet == nil || *searched[0].Snippet != agent.Text || searched[0].HumanApproved {
+		t.Fatalf("memory search = %#v", searched)
+	}
+	assertMemorySearchJSONKeys(t, searchRaw)
+	appendMemoryGolden(t, &golden, "search-reference", searchRaw)
+
+	emptyApprovedRaw := runPelletCommand(t, application, "memory", "search", "shared-123", "--approved-only")
+	emptyApproved := decodeMemoryListCommand(t, emptyApprovedRaw, "memory search")
+	if emptyApproved == nil || len(emptyApproved) != 0 {
+		t.Fatalf("unapproved filtered search = %#v, want typed empty list", emptyApproved)
+	}
+	appendMemoryGolden(t, &golden, "search-approved-empty", emptyApprovedRaw)
+
+	malformedRaw := runPelletCommand(t, application, "memory", "search", `shared-123 OR (`)
+	malformed := decodeMemoryListCommand(t, malformedRaw, "memory search")
+	if malformed == nil || len(malformed) != 0 {
+		t.Fatalf("malformed FTS text search = %#v, want typed empty list", malformed)
+	}
+	appendMemoryGolden(t, &golden, "search-malformed-as-text", malformedRaw)
+
 	showRaw := runPelletCommand(t, application, "memory", "show", "1")
 	shown := decodeMemoryCommand(t, showRaw, "memory show")
 	if !reflect.DeepEqual(shown, agent) {
@@ -99,10 +121,31 @@ func TestMemoryCommandsJSONV1AcrossLinkedWorktrees(t *testing.T) {
 		t.Fatalf("repeated approval changed JSON:\nfirst=%s\nrepeat=%s", approveRaw, repeatRaw)
 	}
 	appendMemoryGolden(t, &golden, "approve-repeat", repeatRaw)
+
+	approvedSearchRaw := runPelletCommand(t, application, "memory", "search", "shared-123", "--approved-only", "--limit", "1")
+	approvedSearch := decodeMemoryListCommand(t, approvedSearchRaw, "memory search")
+	if len(approvedSearch) != 1 || approvedSearch[0].ID != agent.ID || !approvedSearch[0].HumanApproved || approvedSearch[0].Rank == nil || approvedSearch[0].Snippet == nil {
+		t.Fatalf("approved memory search = %#v", approvedSearch)
+	}
+	appendMemoryGolden(t, &golden, "search-approved-limit", approvedSearchRaw)
+
+	stdout, stderr, exit := runTestApp(application, "memory", "remove", "2")
+	if exit != 6 || stdout != "" || !strings.Contains(stderr, `"code":"confirmation_required"`) {
+		t.Fatalf("unconfirmed memory removal = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+	if stillPresent := decodeMemoryCommand(t, runPelletCommand(t, application, "memory", "show", "2"), "memory show"); !reflect.DeepEqual(stillPresent, human) {
+		t.Fatalf("unconfirmed removal changed memory: %#v", stillPresent)
+	}
+	removedRaw := runPelletCommand(t, application, "memory", "remove", "2", "--yes")
+	removed := decodeMemoryCommand(t, removedRaw, "memory remove")
+	if !reflect.DeepEqual(removed, human) {
+		t.Fatalf("removed memory = %#v, want %#v", removed, human)
+	}
+	appendMemoryGolden(t, &golden, "remove", removedRaw)
 	assertGolden(t, "memory.golden", golden.String())
 
-	stdout, stderr, exit := runTestApp(application, "--human", "memory", "list", "--approved-only")
-	if exit != 0 || stderr != "" || !strings.Contains(stdout, "reviewed from stdin") || !strings.Contains(stdout, "shared-123") {
+	stdout, stderr, exit = runTestApp(application, "--human", "memory", "search", "shared-123", "--approved-only")
+	if exit != 0 || stderr != "" || !strings.Contains(stdout, "shared-123") {
 		t.Fatalf("human memory list = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 	stdout, stderr, exit = runTestApp(application, "--project", "other", "memory", "list")
@@ -112,6 +155,10 @@ func TestMemoryCommandsJSONV1AcrossLinkedWorktrees(t *testing.T) {
 	stdout, stderr, exit = runTestApp(application, "memory", "show", "999")
 	if exit != 3 || stdout != "" || !strings.Contains(stderr, `"code":"memory_not_found"`) {
 		t.Fatalf("missing memory show = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+	stdout, stderr, exit = runTestApp(application, "memory", "show", "2")
+	if exit != 3 || stdout != "" || !strings.Contains(stderr, `"code":"memory_not_found"`) {
+		t.Fatalf("removed memory show = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 }
 
@@ -124,8 +171,16 @@ func TestMemoryCommandStrictParsing(t *testing.T) {
 		code string
 	}{
 		{name: "missing subcommand", code: "missing_subcommand"},
-		{name: "unknown leaf search", args: []string{"search", "fact"}, code: "unknown_subcommand"},
-		{name: "unknown leaf remove", args: []string{"remove", "1", "--yes"}, code: "unknown_subcommand"},
+		{name: "search missing query", args: []string{"search"}, code: "missing_query"},
+		{name: "search blank query", args: []string{"search", " \t"}, code: "missing_query"},
+		{name: "search extra query", args: []string{"search", "fact", "extra"}, code: "unexpected_argument"},
+		{name: "search zero limit", args: []string{"search", "fact", "--limit", "0"}, code: "invalid_limit"},
+		{name: "search noncanonical limit", args: []string{"search", "fact", "--limit", "01"}, code: "invalid_limit"},
+		{name: "search approved value", args: []string{"search", "fact", "--approved-only=true"}, code: "unexpected_flag_value"},
+		{name: "remove missing ID", args: []string{"remove", "--yes"}, code: "missing_memory_id"},
+		{name: "remove confirmation required", args: []string{"remove", "1"}, code: "confirmation_required"},
+		{name: "remove confirmation value", args: []string{"remove", "1", "--yes=true"}, code: "unexpected_flag_value"},
+		{name: "remove noncanonical ID", args: []string{"remove", "01", "--yes"}, code: "invalid_memory_id"},
 		{name: "add missing source", args: []string{"add"}, code: "missing_memory_text"},
 		{name: "add both sources", args: []string{"add", "--text", "fact", "--file", "fact.txt"}, code: "conflicting_flags"},
 		{name: "invalid creator", args: []string{"add", "--text", "fact", "--created-by", "worker"}, code: "invalid_memory_creator"},
@@ -199,6 +254,28 @@ func assertMemoryJSONKeys(t *testing.T, raw string) {
 	sort.Strings(got)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("memory JSON keys = %v, want %v", got, want)
+	}
+}
+
+func assertMemorySearchJSONKeys(t *testing.T, raw string) {
+	t.Helper()
+	var envelope struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Data) != 1 {
+		t.Fatalf("memory search JSON data = %#v", envelope.Data)
+	}
+	want := []string{"approved_at", "created_at", "created_by", "human_approved", "id", "project", "rank", "snippet", "text", "updated_at"}
+	got := make([]string, 0, len(envelope.Data[0]))
+	for key := range envelope.Data[0] {
+		got = append(got, key)
+	}
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("memory search JSON keys = %v, want %v", got, want)
 	}
 }
 
