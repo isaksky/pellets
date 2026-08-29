@@ -110,7 +110,7 @@ pl memory list [--approved-only] [--limit N]
 pl memory show MEMORY_ID
 ```
 
-Memory IDs are database-local positive integers used only by memory commands. They are not pellet references.
+Memory IDs are database-local positive integers used only by memory commands. They are not pellet references. Once an ID belongs to a committed memory row, it is never reused after removal; a later automatically allocated memory ID is greater than every previously committed memory ID. IDs may contain gaps, and an allocation that is rolled back before commit may be reused.
 
 ### Search
 

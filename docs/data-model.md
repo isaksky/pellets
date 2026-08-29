@@ -100,7 +100,7 @@ CREATE INDEX pellets_closed_completed_idx
     WHERE status = 'closed';
 
 CREATE TABLE memories (
-    memory_id   INTEGER PRIMARY KEY,
+    memory_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id  INTEGER NOT NULL REFERENCES projects(project_id) ON DELETE RESTRICT,
     text        TEXT NOT NULL,
     created_by  TEXT NOT NULL,
@@ -120,6 +120,8 @@ CREATE INDEX memories_project_approval_idx
 ```
 
 `pellets.rowid` is a database-internal surrogate used by SQLite and FTS. It is never shown as the public pellet ID.
+
+`memories.memory_id` is a database-local, user-visible identity for a removable record. Under [SQLite's `AUTOINCREMENT` allocation rules](https://sqlite.org/autoinc.html), an automatically allocated ID from a committed row is never assigned to a different memory after removal. SQLite may leave gaps, and an allocation rolled back before commit may be reused. This is the only column that needs that guarantee: the additional sequence-maintenance cost is not justified for the internal `pellets.rowid` or unrelated keys, which remain plain `INTEGER PRIMARY KEY` columns.
 
 Pellets store `project_id` rather than repeating the low-cardinality project path. The `projects.root_path` row is the single normalized representation of that path.
 

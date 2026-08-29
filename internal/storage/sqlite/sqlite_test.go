@@ -59,8 +59,12 @@ func TestOpenMigratesRealFileAndConfiguresRuntime(t *testing.T) {
 	if version != LatestSchemaVersion || name != "initial" {
 		t.Fatalf("migration = (%d, %q), want (%d, %q)", version, name, LatestSchemaVersion, "initial")
 	}
-	if checksum != migrationChecksum(migrations[0]) {
-		t.Fatalf("migration checksum = %q, want embedded migration checksum", checksum)
+	const wantMigration1Checksum = "8e5ac8fff4071c360ccdb8410b0521acee7ead7c2b8df33b63bf3547172d3056"
+	if got := migrationChecksum(migrations[0]); got != wantMigration1Checksum {
+		t.Fatalf("embedded migration checksum = %q, want fixture %q", got, wantMigration1Checksum)
+	}
+	if checksum != wantMigration1Checksum {
+		t.Fatalf("recorded migration checksum = %q, want %q", checksum, wantMigration1Checksum)
 	}
 	if appliedAt <= 0 {
 		t.Fatalf("migration applied_at = %v, want positive Julian day", appliedAt)
@@ -83,6 +87,152 @@ func TestOpenMigratesRealFileAndConfiguresRuntime(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("migration count after reopen = %d, want 1", count)
+	}
+}
+
+func TestMemoryIDsAreNeverReusedAfterRemoval(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDatabase(t, filepath.Join(t.TempDir(), "memory-ids.db"))
+	defer db.Close()
+
+	mustExec(t, db, `
+		INSERT INTO projects(project_id, code, root_path, created_at, updated_at)
+		VALUES (1, 'memory', 'memory', 1, 1)`)
+
+	addMemory := func(text string) int64 {
+		t.Helper()
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+
+		var memoryID int64
+		if err := tx.QueryRow(`
+			INSERT INTO memories(project_id, text, created_by, created_at, updated_at)
+			VALUES (1, ?, 'agent', 1, 1)
+			RETURNING memory_id`, text).Scan(&memoryID); err != nil {
+			t.Fatalf("insert memory: %v", err)
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO memories_fts(rowid, text)
+			VALUES (?, ?)`, memoryID, text); err != nil {
+			t.Fatalf("index memory %d: %v", memoryID, err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit memory %d: %v", memoryID, err)
+		}
+		return memoryID
+	}
+
+	removeMemory := func(memoryID int64, text string) {
+		t.Helper()
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+
+		if _, err := tx.Exec(`
+			INSERT INTO memories_fts(memories_fts, rowid, text)
+			VALUES ('delete', ?, ?)`, memoryID, text); err != nil {
+			t.Fatalf("remove memory %d from FTS: %v", memoryID, err)
+		}
+		result, err := tx.Exec("DELETE FROM memories WHERE memory_id = ?", memoryID)
+		if err != nil {
+			t.Fatalf("remove memory %d: %v", memoryID, err)
+		}
+		if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+			t.Fatalf("remove memory %d affected %d rows: %v", memoryID, affected, err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit removal of memory %d: %v", memoryID, err)
+		}
+	}
+
+	assertFTSRows := func(query string, want ...int64) {
+		t.Helper()
+		rows, err := db.Query(`
+			SELECT rowid
+			FROM memories_fts
+			WHERE memories_fts MATCH ?
+			ORDER BY rowid`, query)
+		if err != nil {
+			t.Fatalf("search memory FTS for %q: %v", query, err)
+		}
+		defer rows.Close()
+
+		var got []int64
+		for rows.Next() {
+			var memoryID int64
+			if err := rows.Scan(&memoryID); err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, memoryID)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != len(want) {
+			t.Fatalf("memory FTS rows for %q = %v, want %v", query, got, want)
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Fatalf("memory FTS rows for %q = %v, want %v", query, got, want)
+			}
+		}
+	}
+
+	firstText := "sharedanchor firstanchor"
+	highestText := "sharedanchor highestanchor"
+	firstID := addMemory(firstText)
+	highestID := addMemory(highestText)
+	removeMemory(highestID, highestText)
+
+	replacementText := "sharedanchor replacementanchor"
+	replacementID := addMemory(replacementText)
+	if replacementID <= highestID {
+		t.Fatalf("memory ID after removing highest committed ID = %d, want greater than %d", replacementID, highestID)
+	}
+	assertFTSRows("sharedanchor", firstID, replacementID)
+	assertFTSRows("highestanchor")
+
+	removeMemory(firstID, firstText)
+	removeMemory(replacementID, replacementText)
+	assertFTSRows("sharedanchor")
+
+	afterEmptyID := addMemory("sharedanchor afteremptyanchor")
+	if afterEmptyID <= replacementID {
+		t.Fatalf("memory ID after deleting all memories = %d, want greater than previous maximum %d", afterEmptyID, replacementID)
+	}
+	assertFTSRows("sharedanchor", afterEmptyID)
+	assertFTSRows("firstanchor")
+	assertFTSRows("replacementanchor")
+
+	var sequenceTables string
+	if err := db.QueryRow(`
+		SELECT group_concat(name, ',')
+		FROM (SELECT name FROM sqlite_sequence ORDER BY name)`).Scan(&sequenceTables); err != nil {
+		t.Fatal(err)
+	}
+	if sequenceTables != "memories" {
+		t.Fatalf("AUTOINCREMENT sequence tables = %q, want only memories", sequenceTables)
+	}
+
+	var autoincrementTables string
+	if err := db.QueryRow(`
+		SELECT group_concat(name, ',')
+		FROM (
+			SELECT name
+			FROM sqlite_schema
+			WHERE type = 'table' AND instr(upper(sql), 'AUTOINCREMENT') > 0
+			ORDER BY name
+		)`).Scan(&autoincrementTables); err != nil {
+		t.Fatal(err)
+	}
+	if autoincrementTables != "memories" {
+		t.Fatalf("tables declared AUTOINCREMENT = %q, want only memories", autoincrementTables)
 	}
 }
 

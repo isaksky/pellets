@@ -74,7 +74,7 @@ CREATE INDEX pellets_closed_completed_idx
     WHERE status = 'closed';
 
 CREATE TABLE memories (
-    memory_id   INTEGER PRIMARY KEY,
+    memory_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id  INTEGER NOT NULL REFERENCES projects(project_id) ON DELETE RESTRICT,
     text        TEXT NOT NULL,
     created_by  TEXT NOT NULL,
