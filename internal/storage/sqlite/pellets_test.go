@@ -6,9 +6,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -497,6 +499,287 @@ func TestPelletRepositoryPlacementListFiltersAndStatusOrdering(t *testing.T) {
 	}
 }
 
+func TestPelletRepositoryRelativeAddsCoverHeadMiddleAndTail(t *testing.T) {
+	t.Parallel()
+
+	fixture := newPelletRepositoryFixture(t)
+	repository := fixture.open(t)
+	defer repository.Close()
+
+	first, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{
+		Title: "head", Placement: &storage.PelletPlacement{Target: first.Reference, Before: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	middle, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{
+		Title: "middle", Placement: &storage.PelletPlacement{Target: first.Reference},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tail, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{
+		Title: "tail", Placement: &storage.PelletPlacement{Target: second.Reference},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	active, err := repository.ListPellets(context.Background(), fixture.main, storage.PelletListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPelletReferences(t, active, head.Reference, first.Reference, middle.Reference, second.Reference, tail.Reference)
+	assertActivePriorityInvariants(t, repository.db, fixture.main.Project.ID, 5)
+}
+
+func TestPelletRepositoryMovesInBothDirectionsAndExcludesMovingPellet(t *testing.T) {
+	t.Parallel()
+
+	fixture := newPelletRepositoryFixture(t)
+	repository := fixture.open(t)
+	defer repository.Close()
+
+	created := make([]storage.Pellet, 4)
+	for index := range created {
+		pellet, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: fmt.Sprintf("pellet %d", index+1)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		created[index] = pellet
+	}
+	transitionPellet(t, repository, fixture.main, created[3].Reference, storage.PelletStart, nil)
+
+	unrelatedUpdatedAt := make(map[int64]string)
+	for _, pellet := range created[:3] {
+		unrelatedUpdatedAt[pellet.Reference.Number] = queryPelletText(
+			t, repository.db, "SELECT quote(updated_at) FROM pellets WHERE project_id = ? AND number = ?",
+			fixture.main.Project.ID, pellet.Reference.Number,
+		)
+	}
+
+	moved, err := repository.MovePellet(context.Background(), fixture.linked, created[3].Reference, storage.PelletPlacement{
+		Target: created[0].Reference, Before: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved.Status != domain.PelletInProgress || moved.Workspace == nil || moved.Workspace.ID != fixture.main.Workspace.ID {
+		t.Fatalf("moving in-progress pellet changed lifecycle state: %#v", moved)
+	}
+	assertActiveOrder(t, repository, fixture.main, created[3].Reference, created[0].Reference, created[1].Reference, created[2].Reference)
+	for number, before := range unrelatedUpdatedAt {
+		if after := queryPelletText(t, repository.db, "SELECT quote(updated_at) FROM pellets WHERE project_id = ? AND number = ?", fixture.main.Project.ID, number); after != before {
+			t.Fatalf("head move changed unrelated pellet %d updated_at from %s to %s", number, before, after)
+		}
+	}
+
+	_, err = repository.MovePellet(context.Background(), fixture.main, created[3].Reference, storage.PelletPlacement{Target: created[1].Reference})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertActiveOrder(t, repository, fixture.main, created[0].Reference, created[1].Reference, created[3].Reference, created[2].Reference)
+
+	_, err = repository.MovePellet(context.Background(), fixture.main, created[0].Reference, storage.PelletPlacement{Target: created[2].Reference})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertActiveOrder(t, repository, fixture.main, created[1].Reference, created[3].Reference, created[2].Reference, created[0].Reference)
+
+	_, err = repository.MovePellet(context.Background(), fixture.main, created[2].Reference, storage.PelletPlacement{Target: created[3].Reference, Before: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertActiveOrder(t, repository, fixture.main, created[1].Reference, created[2].Reference, created[3].Reference, created[0].Reference)
+	assertActivePriorityInvariants(t, repository.db, fixture.main.Project.ID, 4)
+}
+
+func TestPelletRepositoryRejectsInvalidMoveAndPlacementParticipants(t *testing.T) {
+	t.Parallel()
+
+	fixture := newPelletRepositoryFixture(t)
+	repository := fixture.open(t)
+	defer repository.Close()
+
+	active, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "closed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed = transitionPellet(t, repository, fixture.main, closed.Reference, storage.PelletClose, nil).Pellet
+	deferred, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "deferred", Status: domain.PelletMaybeLater})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := repository.CreatePellet(context.Background(), fixture.other, storage.NewPellet{Title: "other project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := captureRepositoryPelletState(t, repository.db, fixture.main.Project.ID)
+
+	for _, target := range []storage.Pellet{closed, deferred} {
+		_, err := repository.MovePellet(context.Background(), fixture.main, active.Reference, storage.PelletPlacement{Target: target.Reference, Before: true})
+		assertPelletErrorCode(t, err, "invalid_placement_target")
+		_, err = repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{
+			Title: "rejected relative add", Placement: &storage.PelletPlacement{Target: target.Reference},
+		})
+		assertPelletErrorCode(t, err, "invalid_placement_target")
+	}
+	for _, source := range []storage.Pellet{closed, deferred} {
+		_, err := repository.MovePellet(context.Background(), fixture.main, source.Reference, storage.PelletPlacement{Target: active.Reference})
+		assertPelletErrorCode(t, err, "invalid_move_source")
+	}
+	_, err = repository.MovePellet(context.Background(), fixture.main, active.Reference, storage.PelletPlacement{Target: active.Reference})
+	assertPelletErrorCode(t, err, "invalid_move_target")
+	_, err = repository.MovePellet(context.Background(), fixture.main, active.Reference, storage.PelletPlacement{Target: other.Reference})
+	assertPelletErrorCode(t, err, "reference_project_mismatch")
+	_, err = repository.MovePellet(context.Background(), fixture.main, other.Reference, storage.PelletPlacement{Target: active.Reference})
+	assertPelletErrorCode(t, err, "reference_project_mismatch")
+	_, err = repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{
+		Title: "cross-project relative add", Placement: &storage.PelletPlacement{Target: other.Reference},
+	})
+	assertPelletErrorCode(t, err, "reference_project_mismatch")
+
+	if after := captureRepositoryPelletState(t, repository.db, fixture.main.Project.ID); !reflect.DeepEqual(after, before) {
+		t.Fatalf("rejected moves/placements changed project state:\nbefore=%v\nafter=%v", before, after)
+	}
+	if closed.Priority != nil || deferred.Priority != nil {
+		t.Fatalf("inactive priorities = closed %v deferred %v, want NULL", closed.Priority, deferred.Priority)
+	}
+}
+
+func TestPelletRepositoryRebalancePreservesRowsAndRollsBackWithMove(t *testing.T) {
+	t.Parallel()
+
+	t.Run("successful fresh-band rebalance", func(t *testing.T) {
+		fixture := newPelletRepositoryFixture(t)
+		repository := fixture.open(t)
+		defer repository.Close()
+		active := createTestPellets(t, repository, fixture.main, 3)
+		closed := transitionPellet(t, repository, fixture.main, active[2].Reference, storage.PelletClose, nil).Pellet
+		active = active[:2]
+		third, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "third active"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		active = append(active, third)
+		deferred, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "deferred", Status: domain.PelletMaybeLater})
+		if err != nil {
+			t.Fatal(err)
+		}
+		other, err := repository.CreatePellet(context.Background(), fixture.other, storage.NewPellet{Title: "unrelated project"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		setTestActivePriorities(t, repository.db, fixture.main.Project.ID, active, 1, 2, 3)
+		otherBefore := captureRepositoryPelletState(t, repository.db, fixture.other.Project.ID)
+		inactiveBefore := []string{
+			queryPelletText(t, repository.db, "SELECT quote(priority) || '|' || quote(updated_at) FROM pellets WHERE project_id = ? AND number = ?", fixture.main.Project.ID, closed.Reference.Number),
+			queryPelletText(t, repository.db, "SELECT quote(priority) || '|' || quote(updated_at) FROM pellets WHERE project_id = ? AND number = ?", fixture.main.Project.ID, deferred.Reference.Number),
+		}
+		firstUpdatedAt := queryPelletText(t, repository.db, "SELECT quote(updated_at) FROM pellets WHERE project_id = ? AND number = ?", fixture.main.Project.ID, active[0].Reference.Number)
+		secondUpdatedAt := queryPelletText(t, repository.db, "SELECT quote(updated_at) FROM pellets WHERE project_id = ? AND number = ?", fixture.main.Project.ID, active[1].Reference.Number)
+
+		_, err = repository.MovePellet(context.Background(), fixture.main, active[2].Reference, storage.PelletPlacement{Target: active[0].Reference})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertActiveOrder(t, repository, fixture.main, active[0].Reference, active[2].Reference, active[1].Reference)
+		priorities := []int64{
+			queryPelletInt64(t, repository.db, "SELECT priority FROM pellets WHERE project_id = ? AND number = ?", fixture.main.Project.ID, active[0].Reference.Number),
+			queryPelletInt64(t, repository.db, "SELECT priority FROM pellets WHERE project_id = ? AND number = ?", fixture.main.Project.ID, active[2].Reference.Number),
+			queryPelletInt64(t, repository.db, "SELECT priority FROM pellets WHERE project_id = ? AND number = ?", fixture.main.Project.ID, active[1].Reference.Number),
+		}
+		if !reflect.DeepEqual(priorities, []int64{1024, 1536, 2048}) {
+			t.Fatalf("rebalance/move priorities = %v, want [1024 1536 2048]", priorities)
+		}
+		if got := queryPelletText(t, repository.db, "SELECT quote(updated_at) FROM pellets WHERE project_id = ? AND number = ?", fixture.main.Project.ID, active[0].Reference.Number); got != firstUpdatedAt {
+			t.Fatalf("rebalance changed first unrelated updated_at from %s to %s", firstUpdatedAt, got)
+		}
+		if got := queryPelletText(t, repository.db, "SELECT quote(updated_at) FROM pellets WHERE project_id = ? AND number = ?", fixture.main.Project.ID, active[1].Reference.Number); got != secondUpdatedAt {
+			t.Fatalf("rebalance changed second unrelated updated_at from %s to %s", secondUpdatedAt, got)
+		}
+		inactiveAfter := []string{
+			queryPelletText(t, repository.db, "SELECT quote(priority) || '|' || quote(updated_at) FROM pellets WHERE project_id = ? AND number = ?", fixture.main.Project.ID, closed.Reference.Number),
+			queryPelletText(t, repository.db, "SELECT quote(priority) || '|' || quote(updated_at) FROM pellets WHERE project_id = ? AND number = ?", fixture.main.Project.ID, deferred.Reference.Number),
+		}
+		if !reflect.DeepEqual(inactiveAfter, inactiveBefore) {
+			t.Fatalf("rebalance touched inactive rows: before=%v after=%v", inactiveBefore, inactiveAfter)
+		}
+		if otherAfter := captureRepositoryPelletState(t, repository.db, fixture.other.Project.ID); !reflect.DeepEqual(otherAfter, otherBefore) {
+			t.Fatalf("rebalance touched unrelated project %s: before=%v after=%v", other.Reference, otherBefore, otherAfter)
+		}
+		assertActivePriorityInvariants(t, repository.db, fixture.main.Project.ID, 3)
+	})
+
+	t.Run("move failure rolls back rebalance", func(t *testing.T) {
+		fixture := newPelletRepositoryFixture(t)
+		repository := fixture.open(t)
+		defer repository.Close()
+		active := createTestPellets(t, repository, fixture.main, 3)
+		setTestActivePriorities(t, repository.db, fixture.main.Project.ID, active, 1, 2, 3)
+		before := captureRepositoryPelletState(t, repository.db, fixture.main.Project.ID)
+		if _, err := repository.db.Exec(`
+			CREATE TRIGGER test_reject_final_move
+			BEFORE UPDATE OF updated_at ON pellets
+			BEGIN
+				SELECT RAISE(ABORT, 'forced final move failure');
+			END`); err != nil {
+			t.Fatal(err)
+		}
+		_, err := repository.MovePellet(context.Background(), fixture.main, active[2].Reference, storage.PelletPlacement{Target: active[0].Reference})
+		assertPelletErrorCode(t, err, "pellet_storage_failed")
+		if after := captureRepositoryPelletState(t, repository.db, fixture.main.Project.ID); !reflect.DeepEqual(after, before) {
+			t.Fatalf("failed move did not roll back rebalance:\nbefore=%v\nafter=%v", before, after)
+		}
+	})
+}
+
+func TestPelletRepositoryRebalanceOverflowIsPreflightedBeforeUpdate(t *testing.T) {
+	t.Parallel()
+
+	fixture := newPelletRepositoryFixture(t)
+	repository := fixture.open(t)
+	defer repository.Close()
+	active := createTestPellets(t, repository, fixture.main, 3)
+	setTestActivePriorities(t, repository.db, fixture.main.Project.ID, active, math.MaxInt64-2, math.MaxInt64-1, math.MaxInt64)
+	before := captureRepositoryPelletState(t, repository.db, fixture.main.Project.ID)
+	changesBefore := queryTotalChanges(t, repository.db)
+
+	_, err := repository.MovePellet(context.Background(), fixture.main, active[2].Reference, storage.PelletPlacement{Target: active[0].Reference})
+	assertPelletErrorCode(t, err, "priority_conflict")
+	if changesAfter := queryTotalChanges(t, repository.db); changesAfter != changesBefore {
+		t.Fatalf("overflow preflight attempted an update: total_changes %d -> %d", changesBefore, changesAfter)
+	}
+	if after := captureRepositoryPelletState(t, repository.db, fixture.main.Project.ID); !reflect.DeepEqual(after, before) {
+		t.Fatalf("overflow preflight changed state:\nbefore=%v\nafter=%v", before, after)
+	}
+}
+
+func TestPriorityArithmeticAndRebalanceStatementAreIntegerOnly(t *testing.T) {
+	t.Parallel()
+
+	priority, available, err := midpointPriority(math.MaxInt64-2, math.MaxInt64)
+	if err != nil || !available || priority != math.MaxInt64-1 {
+		t.Fatalf("large midpoint = (%d, %v, %v), want (%d, true, nil)", priority, available, err, int64(math.MaxInt64-1))
+	}
+	upper := strings.ToUpper(rebalanceActivePelletsSQL)
+	if strings.Count(upper, "UPDATE PELLETS") != 1 || strings.Count(upper, "AS MATERIALIZED") != 2 || !strings.Contains(upper, "MAX(PRIORITY) / ?") || strings.Contains(upper, "1.0") {
+		t.Fatalf("rebalance is not the single integer materialized-CTE update:\n%s", rebalanceActivePelletsSQL)
+	}
+}
+
 func TestPelletRepositoryReadOnlyNextIsWorkspaceScopedAndTyped(t *testing.T) {
 	t.Parallel()
 
@@ -974,6 +1257,66 @@ func assertPelletReferences(t *testing.T, pellets []storage.Pellet, references .
 	}
 }
 
+func assertActiveOrder(t *testing.T, repository *PelletRepository, project storage.ResolvedProject, references ...domain.PelletReference) {
+	t.Helper()
+	pellets, err := repository.ListPellets(context.Background(), project, storage.PelletListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPelletReferences(t, pellets, references...)
+}
+
+func assertActivePriorityInvariants(t *testing.T, database *sql.DB, projectID int64, want int) {
+	t.Helper()
+	var rows, nonNull, distinct, positive int
+	if err := database.QueryRow(`
+		SELECT COUNT(*), COUNT(priority), COUNT(DISTINCT priority),
+		       COALESCE(SUM(CASE WHEN priority > 0 THEN 1 ELSE 0 END), 0)
+		FROM pellets
+		WHERE project_id = ? AND status IN ('open', 'in_progress')`, projectID).Scan(&rows, &nonNull, &distinct, &positive); err != nil {
+		t.Fatal(err)
+	}
+	if rows != want || nonNull != want || distinct != want || positive != want {
+		t.Fatalf("active priority invariants = rows %d non-null %d distinct %d positive %d, want %d each", rows, nonNull, distinct, positive, want)
+	}
+	assertPelletQueryInt(t, database, `
+		SELECT COUNT(*) FROM pellets
+		WHERE project_id = ? AND status IN ('closed', 'maybe_later') AND priority IS NOT NULL`, 0, projectID)
+}
+
+func createTestPellets(t *testing.T, repository *PelletRepository, project storage.ResolvedProject, count int) []storage.Pellet {
+	t.Helper()
+	pellets := make([]storage.Pellet, count)
+	for index := range count {
+		pellet, err := repository.CreatePellet(context.Background(), project, storage.NewPellet{Title: fmt.Sprintf("test pellet %d", index+1)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pellets[index] = pellet
+	}
+	return pellets
+}
+
+func setTestActivePriorities(t *testing.T, database *sql.DB, projectID int64, pellets []storage.Pellet, priorities ...int64) {
+	t.Helper()
+	if len(pellets) != len(priorities) {
+		t.Fatalf("setTestActivePriorities received %d pellets and %d priorities", len(pellets), len(priorities))
+	}
+	for index, pellet := range pellets {
+		result, err := database.Exec(`
+			UPDATE pellets SET priority = ?
+			WHERE project_id = ? AND number = ? AND priority IS NOT NULL`,
+			priorities[index], projectID, pellet.Reference.Number)
+		if err != nil {
+			t.Fatal(err)
+		}
+		changed, err := result.RowsAffected()
+		if err != nil || changed != 1 {
+			t.Fatalf("set priority for %s changed %d rows: %v", pellet.Reference, changed, err)
+		}
+	}
+}
+
 func queryTotalChanges(t *testing.T, database *sql.DB) int64 {
 	t.Helper()
 	var changes int64
@@ -986,6 +1329,15 @@ func queryTotalChanges(t *testing.T, database *sql.DB) int64 {
 func queryPelletInt64(t *testing.T, database *sql.DB, query string, args ...any) int64 {
 	t.Helper()
 	var value int64
+	if err := database.QueryRow(query, args...).Scan(&value); err != nil {
+		t.Fatal(err)
+	}
+	return value
+}
+
+func queryPelletText(t *testing.T, database *sql.DB, query string, args ...any) string {
+	t.Helper()
+	var value string
 	if err := database.QueryRow(query, args...).Scan(&value); err != nil {
 		t.Fatal(err)
 	}

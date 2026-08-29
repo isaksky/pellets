@@ -49,6 +49,7 @@ func main() {
 		cli.InitCommand(projectManager),
 		cli.ProjectCommand(projectManager),
 		cli.AddCommand(pelletManager),
+		cli.MoveCommand(pelletManager),
 		cli.ListCommand(pelletManager),
 		cli.ShowCommand(pelletManager),
 		cli.EditCommand(pelletManager),

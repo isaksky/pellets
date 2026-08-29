@@ -39,6 +39,25 @@ func (manager PelletManager) Add(
 	return pellet, closePelletRepository(repository, operationErr)
 }
 
+func (manager PelletManager) Move(
+	ctx context.Context,
+	database Database,
+	workingDirectory, selectedCode string,
+	reference domain.PelletReference,
+	placement storage.PelletPlacement,
+) (storage.Pellet, error) {
+	resolved, err := manager.resolve(ctx, database, workingDirectory, selectedCode, reference, placement.Target)
+	if err != nil {
+		return storage.Pellet{}, err
+	}
+	repository, err := manager.open(ctx, database.Path)
+	if err != nil {
+		return storage.Pellet{}, err
+	}
+	pellet, operationErr := repository.MovePellet(ctx, resolved, reference, placement)
+	return pellet, closePelletRepository(repository, operationErr)
+}
+
 func (manager PelletManager) List(
 	ctx context.Context,
 	database Database,

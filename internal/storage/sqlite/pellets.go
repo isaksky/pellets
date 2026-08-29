@@ -85,7 +85,7 @@ func (repository *PelletRepository) CreatePellet(ctx context.Context, project st
 		if normalized.Placement == nil {
 			allocated, err = allocateTailPriority(ctx, connection, project.Project.ID)
 		} else {
-			allocated, err = allocatePlacedPriority(ctx, connection, project, *normalized.Placement)
+			allocated, err = allocatePlacedPriority(ctx, connection, project, *normalized.Placement, 0)
 		}
 		if err != nil {
 			return storage.Pellet{}, err
@@ -133,6 +133,93 @@ func (repository *PelletRepository) CreatePellet(ctx context.Context, project st
 	}
 	committed = true
 	return pellet, nil
+}
+
+// MovePellet changes one active pellet's relative position in the same
+// immediate transaction as any gap-exhaustion rebalance. Neighbor selection
+// excludes the moving row in both directions.
+func (repository *PelletRepository) MovePellet(
+	ctx context.Context,
+	project storage.ResolvedProject,
+	reference domain.PelletReference,
+	placement storage.PelletPlacement,
+) (storage.Pellet, error) {
+	if err := validatePelletProjectContext(project); err != nil {
+		return storage.Pellet{}, err
+	}
+	if err := validateReferenceProject(project, reference); err != nil {
+		return storage.Pellet{}, err
+	}
+	if err := validateReferenceProject(project, placement.Target); err != nil {
+		return storage.Pellet{}, err
+	}
+	if reference == placement.Target {
+		return storage.Pellet{}, invalidMoveTarget(reference)
+	}
+
+	connection, err := repository.db.Conn(ctx)
+	if err != nil {
+		return storage.Pellet{}, pelletStorageError("open move connection", err)
+	}
+	defer connection.Close()
+	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return storage.Pellet{}, pelletStorageError("begin pellet move", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = connection.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+
+	if err := ensureStoredProject(ctx, connection, project.Project); err != nil {
+		return storage.Pellet{}, err
+	}
+	moving, err := loadPellet(ctx, connection, project.Project.ID, project.Project.Code, reference.Number)
+	if errors.Is(err, sql.ErrNoRows) {
+		return storage.Pellet{}, pelletNotFound(reference)
+	}
+	if err != nil {
+		return storage.Pellet{}, pelletStorageError("read pellet before move", err)
+	}
+	if !activePelletStatus(moving.Status) || moving.Priority == nil || *moving.Priority <= 0 {
+		return storage.Pellet{}, invalidMoveSource(moving)
+	}
+
+	priority, err := allocatePlacedPriority(ctx, connection, project, placement, reference.Number)
+	if err != nil {
+		return storage.Pellet{}, err
+	}
+	timestamp, err := captureJulianTimestamp(ctx, connection)
+	if err != nil {
+		return storage.Pellet{}, pelletStorageError("capture pellet move timestamp", err)
+	}
+	result, err := connection.ExecContext(ctx, `
+		UPDATE pellets
+		SET priority = ?, updated_at = ?
+		WHERE project_id = ? AND number = ?
+		  AND status IN ('open', 'in_progress') AND priority IS NOT NULL`,
+		priority, timestamp, project.Project.ID, reference.Number)
+	if err != nil {
+		return storage.Pellet{}, pelletStorageError("update moved pellet", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed != 1 {
+		if err == nil {
+			err = fmt.Errorf("updated %d rows, want 1", changed)
+		}
+		return storage.Pellet{}, pelletStorageError("verify moved pellet update", err)
+	}
+
+	moved, err := loadPellet(ctx, connection, project.Project.ID, project.Project.Code, reference.Number)
+	if err != nil {
+		return storage.Pellet{}, pelletStorageError("read moved pellet", err)
+	}
+	if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
+		return storage.Pellet{}, pelletStorageError("commit pellet move", err)
+	}
+	committed = true
+	return moved, nil
 }
 
 func (repository *PelletRepository) ReadPellet(ctx context.Context, project storage.ResolvedProject, reference domain.PelletReference) (storage.Pellet, error) {
@@ -810,12 +897,12 @@ func allocateTailPriority(ctx context.Context, query projectQuery, projectID int
 	return maximum.Int64 + domain.PelletPriorityStride, nil
 }
 
-func allocatePlacedPriority(ctx context.Context, query projectQuery, project storage.ResolvedProject, placement storage.PelletPlacement) (int64, error) {
+func allocatePlacedPriority(ctx context.Context, query projectQuery, project storage.ResolvedProject, placement storage.PelletPlacement, excludedNumber int64) (int64, error) {
 	if err := validateReferenceProject(project, placement.Target); err != nil {
 		return 0, err
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		priority, available, err := placedPriority(ctx, query, project.Project.ID, placement)
+		priority, available, err := placedPriority(ctx, query, project.Project.ID, placement, excludedNumber)
 		if err != nil {
 			return 0, err
 		}
@@ -836,7 +923,7 @@ func allocatePlacedPriority(ctx context.Context, query projectQuery, project sto
 	)
 }
 
-func placedPriority(ctx context.Context, query projectQuery, projectID int64, placement storage.PelletPlacement) (int64, bool, error) {
+func placedPriority(ctx context.Context, query projectQuery, projectID int64, placement storage.PelletPlacement, excludedNumber int64) (int64, bool, error) {
 	var targetPriority sql.NullInt64
 	var targetStatus domain.PelletStatus
 	err := query.QueryRowContext(ctx, `
@@ -867,7 +954,7 @@ func placedPriority(ctx context.Context, query projectQuery, projectID int64, pl
 		if err := query.QueryRowContext(ctx, `
 			SELECT MAX(priority)
 			FROM pellets
-			WHERE project_id = ? AND priority < ?`, projectID, priority).Scan(&previous); err != nil {
+			WHERE project_id = ? AND priority < ? AND number <> ?`, projectID, priority, excludedNumber).Scan(&previous); err != nil {
 			return 0, false, pelletStorageError("read previous placement priority", err)
 		}
 		if !previous.Valid {
@@ -883,7 +970,7 @@ func placedPriority(ctx context.Context, query projectQuery, projectID int64, pl
 	if err := query.QueryRowContext(ctx, `
 		SELECT MIN(priority)
 		FROM pellets
-		WHERE project_id = ? AND priority > ?`, projectID, priority).Scan(&next); err != nil {
+		WHERE project_id = ? AND priority > ? AND number <> ?`, projectID, priority, excludedNumber).Scan(&next); err != nil {
 		return 0, false, pelletStorageError("read next placement priority", err)
 	}
 	if !next.Valid {
@@ -905,6 +992,24 @@ func midpointPriority(lower, upper int64) (int64, bool, error) {
 	return lower + (upper-lower)/2, true, nil
 }
 
+const rebalanceActivePelletsSQL = `
+	WITH
+	bounds AS MATERIALIZED (
+		SELECT ((MAX(priority) / ?) + 1) * ? AS base
+		FROM pellets
+		WHERE project_id = ? AND priority IS NOT NULL
+	),
+	ranked AS MATERIALIZED (
+		SELECT p.rowid,
+		       b.base + (ROW_NUMBER() OVER (ORDER BY p.priority, p.number) - 1) * ? AS new_priority
+		FROM pellets AS p
+		CROSS JOIN bounds AS b
+		WHERE p.project_id = ? AND p.priority IS NOT NULL
+	)
+	UPDATE pellets AS p
+	SET priority = (SELECT r.new_priority FROM ranked AS r WHERE r.rowid = p.rowid)
+	WHERE p.project_id = ? AND p.priority IS NOT NULL`
+
 func rebalanceActivePellets(ctx context.Context, query projectQuery, projectID int64) error {
 	var maximum sql.NullInt64
 	var count int64
@@ -925,21 +1030,10 @@ func rebalanceActivePellets(ctx context.Context, query projectQuery, projectID i
 	if count-1 > (math.MaxInt64-base)/stride {
 		return priorityRebalanceOverflow(projectID)
 	}
-	if _, err := query.ExecContext(ctx, `
-		WITH
-		bounds AS MATERIALIZED (
-			SELECT ? AS base
-		),
-		ranked AS MATERIALIZED (
-			SELECT p.rowid,
-			       b.base + (ROW_NUMBER() OVER (ORDER BY p.priority, p.number) - 1) * ? AS new_priority
-			FROM pellets AS p
-			CROSS JOIN bounds AS b
-			WHERE p.project_id = ? AND p.priority IS NOT NULL
-		)
-		UPDATE pellets AS p
-		SET priority = (SELECT r.new_priority FROM ranked AS r WHERE r.rowid = p.rowid)
-		WHERE p.project_id = ? AND p.priority IS NOT NULL`, base, stride, projectID, projectID); err != nil {
+	if _, err := query.ExecContext(
+		ctx, rebalanceActivePelletsSQL,
+		stride, stride, projectID, stride, projectID, projectID,
+	); err != nil {
 		return pelletStorageError("rebalance active pellets", err)
 	}
 	return nil
@@ -951,6 +1045,28 @@ func priorityRebalanceOverflow(projectID int64) error {
 		"priority_conflict",
 		"the active pellet priority range cannot be rebalanced safely",
 		map[string]any{"project_id": projectID},
+	)
+}
+
+func activePelletStatus(status domain.PelletStatus) bool {
+	return status == domain.PelletOpen || status == domain.PelletInProgress
+}
+
+func invalidMoveTarget(reference domain.PelletReference) error {
+	return domain.NewError(
+		domain.Usage,
+		"invalid_move_target",
+		"a pellet cannot be moved relative to itself",
+		map[string]any{"pellet_id": reference.String()},
+	)
+}
+
+func invalidMoveSource(pellet storage.Pellet) error {
+	return domain.NewError(
+		domain.Conflict,
+		"invalid_move_source",
+		"only active work can be moved",
+		map[string]any{"pellet_id": pellet.Reference.String(), "status": pellet.Status},
 	)
 }
 

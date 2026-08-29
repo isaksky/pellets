@@ -118,6 +118,24 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		if len(listed) != 2 || listed[0].ID != first.ID || listed[1].ID != second.ID {
 			t.Fatalf("compiled list = %#v", listed)
 		}
+		movedBefore := decodeFoundationSuccess[foundationPellet](
+			t, runFoundationCLI(t, executable, linkedRoot, "move", second.ID, "--before", first.ID), "move",
+		)
+		listed = decodeFoundationSuccess[[]foundationPellet](
+			t, runFoundationCLI(t, executable, linkedRoot, "list"), "list",
+		)
+		if movedBefore.ID != second.ID || len(listed) != 2 || listed[0].ID != second.ID || listed[1].ID != first.ID {
+			t.Fatalf("compiled upward move = %#v; list = %#v", movedBefore, listed)
+		}
+		movedAfter := decodeFoundationSuccess[foundationPellet](
+			t, runFoundationCLI(t, executable, mainRoot, "move", second.ID, "--after", first.ID), "move",
+		)
+		listed = decodeFoundationSuccess[[]foundationPellet](
+			t, runFoundationCLI(t, executable, mainRoot, "list"), "list",
+		)
+		if movedAfter.ID != second.ID || len(listed) != 2 || listed[0].ID != first.ID || listed[1].ID != second.ID {
+			t.Fatalf("compiled downward move = %#v; list = %#v", movedAfter, listed)
+		}
 		next := decodeFoundationSuccess[foundationNext](
 			t,
 			runFoundationCLI(t, executable, linkedRoot, "next", "--external-id", "Case:Exact", "--group", "Rollout/A"),

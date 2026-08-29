@@ -113,6 +113,7 @@ type PelletLifecycleResult struct {
 // application services.
 type PelletRepository interface {
 	CreatePellet(ctx context.Context, project ResolvedProject, input NewPellet) (Pellet, error)
+	MovePellet(ctx context.Context, project ResolvedProject, reference domain.PelletReference, placement PelletPlacement) (Pellet, error)
 	ListPellets(ctx context.Context, project ResolvedProject, options PelletListOptions) ([]Pellet, error)
 	NextPellet(ctx context.Context, project ResolvedProject, externalID, group *string) (NextSelection, error)
 	StartNextPellet(ctx context.Context, project ResolvedProject, externalID, group *string) (NextSelection, error)

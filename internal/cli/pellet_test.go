@@ -62,6 +62,8 @@ func TestPelletCommandsAcrossMainAndLinkedWorktreesJSONGolden(t *testing.T) {
 		"--project", "shared", "add", "Second from linked", "--after", "shared-1", "--external-id", "Case:Exact", "--group", "Rollout/A"))
 	appendPelletGolden(t, &outputs, "add-deferred", runPelletCommand(t, application,
 		"add", "Maybe later", "--maybe-later", "--external-id", "Case:Exact", "--group", "Rollout/A"))
+	appendPelletGolden(t, &outputs, "move", runPelletCommand(t, application,
+		"move", "shared-2", "--after", "shared-1"))
 
 	databasePath := discovery.DatabasePath(common)
 	database, err := sqlite.Open(context.Background(), databasePath)
@@ -218,7 +220,7 @@ func TestPelletCommandUsageValidationIsStrictAndSideEffectFree(t *testing.T) {
 
 	application := New(
 		"test",
-		AddCommand(emptyPelletManager()), ListCommand(emptyPelletManager()), ShowCommand(emptyPelletManager()),
+		AddCommand(emptyPelletManager()), MoveCommand(emptyPelletManager()), ListCommand(emptyPelletManager()), ShowCommand(emptyPelletManager()),
 		EditCommand(emptyPelletManager()), NextCommand(emptyPelletManager()), StartCommand(emptyPelletManager()),
 		StartNextCommand(emptyPelletManager()), ReleaseCommand(emptyPelletManager()), CloseCommand(emptyPelletManager()),
 		ReopenCommand(emptyPelletManager()), DeferCommand(emptyPelletManager()),
@@ -236,6 +238,10 @@ func TestPelletCommandUsageValidationIsStrictAndSideEffectFree(t *testing.T) {
 		{[]string{"add", "title", "--description", "one", "--description-file", "two"}, "conflicting_flags"},
 		{[]string{"add", "title", "--before", "shared-1", "--after", "shared-2"}, "conflicting_flags"},
 		{[]string{"add", "title", "--maybe-later", "--before", "shared-1"}, "conflicting_flags"},
+		{[]string{"move"}, "missing_reference"},
+		{[]string{"move", "shared-1"}, "missing_placement"},
+		{[]string{"move", "shared-1", "--before", "shared-2", "--after", "shared-3"}, "conflicting_flags"},
+		{[]string{"move", "shared-1", "--after", "shared-1"}, "invalid_move_target"},
 		{[]string{"list", "--status", "unknown"}, "invalid_status"},
 		{[]string{"list", "--status", "open", "--all"}, "conflicting_flags"},
 		{[]string{"list", "--limit", "0"}, "invalid_limit"},

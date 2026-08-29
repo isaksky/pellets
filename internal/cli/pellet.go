@@ -44,6 +44,26 @@ func AddCommand(manager app.PelletManager) Command {
 	}
 }
 
+func MoveCommand(manager app.PelletManager) Command {
+	return Command{
+		Name:    "move",
+		Summary: "Move an active pellet relative to another active pellet.",
+		Usage:   "pl move PELLET (--before OTHER | --after OTHER)",
+		Parse:   parseMove,
+		Run: func(ctx context.Context, invocation Invocation) (any, error) {
+			input := invocation.Input.(moveInput)
+			pellet, err := manager.Move(
+				ctx, invocationDatabase(invocation), invocation.WorkingDirectory, invocation.Globals.Project,
+				input.Reference, input.Placement,
+			)
+			if err != nil {
+				return nil, err
+			}
+			return newPelletData(pellet), nil
+		},
+	}
+}
+
 func ListCommand(manager app.PelletManager) Command {
 	return Command{
 		Name:    "list",
@@ -288,6 +308,70 @@ func parseAdd(args []string) (any, error) {
 	}
 	if input.Status == domain.PelletMaybeLater && input.Placement != nil {
 		return nil, conflictingFlags("--maybe-later", placementFlagName(*input.Placement))
+	}
+	return input, nil
+}
+
+type moveInput struct {
+	Reference domain.PelletReference
+	Placement storage.PelletPlacement
+}
+
+func parseMove(args []string) (any, error) {
+	var input moveInput
+	referenceSet := false
+	placementSet := false
+	seen := make(map[string]bool)
+	for len(args) > 0 {
+		argument := args[0]
+		if !strings.HasPrefix(argument, "-") {
+			if referenceSet {
+				return nil, unexpectedArgument(argument)
+			}
+			reference, err := domain.ParsePelletReference(argument)
+			if err != nil {
+				return nil, err
+			}
+			input.Reference = reference
+			referenceSet = true
+			args = args[1:]
+			continue
+		}
+
+		name, value, hasValue := splitOption(argument)
+		if seen[name] {
+			return nil, duplicateCommandFlag(name)
+		}
+		seen[name] = true
+		if name != "--before" && name != "--after" {
+			return nil, unknownFlag(name)
+		}
+		var err error
+		value, args, err = takeCommandFlagValue(args, name, value, hasValue, false, false)
+		if err != nil {
+			return nil, err
+		}
+		target, err := domain.ParsePelletReference(value)
+		if err != nil {
+			return nil, err
+		}
+		input.Placement = storage.PelletPlacement{Target: target, Before: name == "--before"}
+		placementSet = true
+	}
+	if !referenceSet {
+		return nil, domain.NewError(domain.Usage, "missing_reference", "move requires a pellet reference", nil)
+	}
+	if seen["--before"] && seen["--after"] {
+		return nil, conflictingFlags("--before", "--after")
+	}
+	if !placementSet {
+		return nil, domain.NewError(domain.Usage, "missing_placement", "move requires --before or --after", nil)
+	}
+	if input.Reference == input.Placement.Target {
+		return nil, domain.NewError(
+			domain.Usage, "invalid_move_target", "a pellet cannot be moved relative to itself",
+			map[string]any{"pellet_id": input.Reference.String()},
+		)
 	}
 	return input, nil
 }
