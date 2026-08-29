@@ -1054,6 +1054,60 @@ func TestPelletRepositoryLifecycleTransitionsRecoveryAndStableRepeats(t *testing
 	}
 }
 
+func TestPelletRepositoryRejectsRecoveryForOwnerlessTransitionsWithoutWrites(t *testing.T) {
+	t.Parallel()
+
+	for _, operation := range []storage.PelletLifecycleOperation{storage.PelletClose, storage.PelletDefer} {
+		operation := operation
+		t.Run(string(operation), func(t *testing.T) {
+			fixture := newPelletRepositoryFixture(t)
+			repository := fixture.open(t)
+			defer repository.Close()
+
+			pellet, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "ownerless recovery"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			registeredWorkspaceID := fixture.linked.Workspace.ID
+			nonexistentWorkspaceID := registeredWorkspaceID + 1000
+			for _, workspaceID := range []int64{registeredWorkspaceID, nonexistentWorkspaceID} {
+				before := captureRepositoryLifecycleWriteState(t, repository.db, fixture.main.Project.ID)
+				changesBefore := queryTotalChanges(t, repository.db)
+				_, err = repository.TransitionPellet(context.Background(), fixture.main, pellet.Reference, storage.PelletLifecycleRequest{
+					Operation: operation, RecoveryWorkspaceID: &workspaceID,
+				})
+				assertPelletErrorCode(t, err, "recovery_workspace_mismatch")
+				public := domain.PublicError(err)
+				if public.Kind != domain.Conflict || public.Details["pellet_id"] != pellet.Reference.String() || public.Details["owner_workspace_id"] != nil || public.Details["provided_workspace_id"] != workspaceID {
+					t.Fatalf("ownerless recovery error = %#v", public)
+				}
+				if changesAfter := queryTotalChanges(t, repository.db); changesAfter != changesBefore {
+					t.Fatalf("rejected %s recovery attempted a SQLite write: total_changes %d -> %d", operation, changesBefore, changesAfter)
+				}
+				if after := captureRepositoryLifecycleWriteState(t, repository.db, fixture.main.Project.ID); !reflect.DeepEqual(after, before) {
+					t.Fatalf("rejected %s recovery changed authoritative or derived state:\nbefore=%#v\nafter=%#v", operation, before, after)
+				}
+			}
+
+			result := transitionPellet(t, repository, fixture.main, pellet.Reference, operation, nil)
+			if operation == storage.PelletClose && result.Pellet.Status != domain.PelletClosed {
+				t.Fatalf("normal ownerless close status = %q", result.Pellet.Status)
+			}
+			if operation == storage.PelletDefer && result.Pellet.Status != domain.PelletMaybeLater {
+				t.Fatalf("normal ownerless defer status = %q", result.Pellet.Status)
+			}
+			if result.Pellet.Workspace != nil || result.RecoveredWorkspace != nil {
+				t.Fatalf("normal ownerless %s result = %#v", operation, result)
+			}
+
+			idempotent := transitionPellet(t, repository, fixture.linked, pellet.Reference, operation, &registeredWorkspaceID)
+			if !reflect.DeepEqual(idempotent.Pellet, result.Pellet) || idempotent.RecoveredWorkspace != nil {
+				t.Fatalf("idempotent %s with recovery tuple changed result: first=%#v repeat=%#v", operation, result, idempotent)
+			}
+		})
+	}
+}
+
 func TestPelletRepositoryStartNextIsAtomicFilteredAndBounded(t *testing.T) {
 	t.Parallel()
 
@@ -1228,6 +1282,61 @@ func captureRepositoryPelletState(t *testing.T, database *sql.DB, projectID int6
 		FROM pellets
 		WHERE project_id = ?
 		ORDER BY number`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	state := make([]string, 0)
+	for rows.Next() {
+		var row string
+		if err := rows.Scan(&row); err != nil {
+			t.Fatal(err)
+		}
+		state = append(state, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+type repositoryLifecycleWriteState struct {
+	project    string
+	workspaces []string
+	pellets    []string
+	pelletFTS  []string
+}
+
+func captureRepositoryLifecycleWriteState(t *testing.T, database *sql.DB, projectID int64) repositoryLifecycleWriteState {
+	t.Helper()
+	return repositoryLifecycleWriteState{
+		project: queryPelletText(t, database, `
+			SELECT quote(project_id) || '|' || quote(code) || '|' || quote(git_common_dir) || '|' ||
+			       quote(git_common_dir_relative) || '|' || quote(next_pellet_number) || '|' ||
+			       quote(created_at) || '|' || quote(updated_at)
+			FROM projects WHERE project_id = ?`, projectID),
+		workspaces: captureRepositoryRows(t, database, `
+			SELECT quote(workspace_id) || '|' || quote(project_id) || '|' || quote(root_path) || '|' ||
+			       quote(root_path_relative) || '|' || quote(git_dir) || '|' || quote(git_dir_relative) || '|' ||
+			       quote(created_at) || '|' || quote(updated_at)
+			FROM project_workspaces WHERE project_id = ? ORDER BY workspace_id`, projectID),
+		pellets: captureRepositoryRows(t, database, `
+			SELECT quote(rowid) || '|' || quote(project_id) || '|' || quote(workspace_id) || '|' ||
+			       quote(number) || '|' || quote(title) || '|' || quote(description) || '|' ||
+			       quote(external_id) || '|' || quote(group_id) || '|' || quote(status) || '|' ||
+			       quote(priority) || '|' || quote(created_at) || '|' || quote(updated_at) || '|' || quote(completed_at)
+			FROM pellets WHERE project_id = ? ORDER BY rowid`, projectID),
+		pelletFTS: captureRepositoryRows(t, database, `
+			SELECT quote(f.rowid) || '|' || quote(f.title) || '|' || quote(f.description) || '|' || quote(f.external_id)
+			FROM pellets_fts AS f
+			JOIN pellets AS p ON p.rowid = f.rowid
+			WHERE p.project_id = ? ORDER BY f.rowid`, projectID),
+	}
+}
+
+func captureRepositoryRows(t *testing.T, database *sql.DB, query string, args ...any) []string {
+	t.Helper()
+	rows, err := database.Query(query, args...)
 	if err != nil {
 		t.Fatal(err)
 	}

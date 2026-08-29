@@ -581,6 +581,8 @@ func applyPelletLifecycleTransition(
 			}
 		} else if pellet.Status != domain.PelletOpen {
 			return storage.Pellet{}, nil, false, invalidPelletTransition(request.Operation, pellet)
+		} else if request.RecoveryWorkspaceID != nil {
+			return storage.Pellet{}, nil, false, recoveryWorkspaceMismatch(pellet, *request.RecoveryWorkspaceID)
 		}
 		pellet.Status = domain.PelletClosed
 		pellet.Workspace = nil
@@ -617,6 +619,8 @@ func applyPelletLifecycleTransition(
 			}
 		} else if pellet.Status != domain.PelletOpen {
 			return storage.Pellet{}, nil, false, invalidPelletTransition(request.Operation, pellet)
+		} else if request.RecoveryWorkspaceID != nil {
+			return storage.Pellet{}, nil, false, recoveryWorkspaceMismatch(pellet, *request.RecoveryWorkspaceID)
 		}
 		pellet.Status = domain.PelletMaybeLater
 		pellet.Workspace = nil
@@ -644,18 +648,26 @@ func authorizeOwnedPelletTransition(project storage.ResolvedProject, pellet stor
 		return nil, pelletOwnedElsewhere(pellet)
 	}
 	if *recoveryWorkspaceID != ownerID {
-		return nil, domain.NewError(
-			domain.Conflict,
-			"recovery_workspace_mismatch",
-			"the supplied recovery workspace does not own the pellet",
-			map[string]any{
-				"pellet_id": pellet.Reference.String(), "owner_workspace_id": ownerID,
-				"provided_workspace_id": *recoveryWorkspaceID,
-			},
-		)
+		return nil, recoveryWorkspaceMismatch(pellet, *recoveryWorkspaceID)
 	}
 	recovered := *pellet.Workspace
 	return &recovered, nil
+}
+
+func recoveryWorkspaceMismatch(pellet storage.Pellet, providedWorkspaceID int64) error {
+	var ownerWorkspaceID any
+	if pellet.Workspace != nil {
+		ownerWorkspaceID = pellet.Workspace.ID
+	}
+	return domain.NewError(
+		domain.Conflict,
+		"recovery_workspace_mismatch",
+		"the supplied recovery workspace does not own the pellet",
+		map[string]any{
+			"pellet_id": pellet.Reference.String(), "owner_workspace_id": ownerWorkspaceID,
+			"provided_workspace_id": providedWorkspaceID,
+		},
+	)
 }
 
 func loadWorkspaceInProgressPellet(ctx context.Context, query projectQuery, project storage.ResolvedProject) (storage.Pellet, error) {

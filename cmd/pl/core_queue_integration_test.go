@@ -443,6 +443,52 @@ func TestCoreQueueCompiledProcessIntegration(t *testing.T) {
 			t.Fatalf("explicit stale-worktree recovery = %#v", recovered)
 		}
 	})
+
+	t.Run("ownerless close and defer reject recovery without writes", func(t *testing.T) {
+		fixture := newCoreQueueCompiledFixture(t, executable, 2)
+		registeredWorkspaceID := fixture.workspaceIDs[fixture.roots[1]]
+		nonexistentWorkspaceID := registeredWorkspaceID + 1000
+		for _, operation := range []string{"close", "defer"} {
+			pellet := decodeFoundationSuccess[foundationPellet](
+				t, runFoundationCLI(t, executable, fixture.roots[0], "add", "ownerless "+operation), "add",
+			)
+			for _, workspaceID := range []int64{registeredWorkspaceID, nonexistentWorkspaceID} {
+				before := captureFoundationDatabaseState(t, fixture.databasePath)
+				result := runFoundationCLI(
+					t, executable, fixture.roots[0], operation, pellet.ID,
+					"--recover-workspace", strconv.FormatInt(workspaceID, 10), "--yes",
+				)
+				envelope := decodeCoreQueueError(t, result, 4, "recovery_workspace_mismatch")
+				if envelope.Error.Details["pellet_id"] != pellet.ID || envelope.Error.Details["owner_workspace_id"] != nil || envelope.Error.Details["provided_workspace_id"] != float64(workspaceID) {
+					t.Fatalf("compiled ownerless %s recovery details = %#v", operation, envelope.Error.Details)
+				}
+				assertCoreQueueDatabaseState(t, fixture.databasePath, before, "rejected ownerless "+operation+" recovery")
+			}
+
+			transitioned := decodeFoundationSuccess[foundationPellet](
+				t, runFoundationCLI(t, executable, fixture.roots[0], operation, pellet.ID), operation,
+			)
+			wantStatus := "closed"
+			if operation == "defer" {
+				wantStatus = "maybe_later"
+			}
+			if transitioned.Status != wantStatus || transitioned.Workspace != nil {
+				t.Fatalf("normal compiled ownerless %s = %#v", operation, transitioned)
+			}
+
+			repeated := decodeFoundationSuccess[foundationPellet](
+				t,
+				runFoundationCLI(
+					t, executable, fixture.roots[1], operation, pellet.ID,
+					"--recover-workspace", strconv.FormatInt(registeredWorkspaceID, 10), "--yes",
+				),
+				operation,
+			)
+			if !reflect.DeepEqual(repeated, transitioned) {
+				t.Fatalf("compiled idempotent %s with recovery tuple changed result: first=%#v repeat=%#v", operation, transitioned, repeated)
+			}
+		}
+	})
 }
 
 type coreQueueCompiledFixture struct {

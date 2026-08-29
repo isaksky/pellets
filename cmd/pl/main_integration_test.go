@@ -1081,22 +1081,34 @@ func captureFoundationDatabaseState(t *testing.T, databasePath string) foundatio
 		t.Fatal(err)
 	}
 	state.tables = make(map[string][][]string)
-	for _, table := range []string{
-		"application_metadata",
-		"projects",
-		"project_workspaces",
-		"pellets",
-		"memories",
-		"sqlite_sequence",
+	for _, table := range []struct {
+		name, order string
+	}{
+		{name: "application_metadata", order: "rowid"},
+		{name: "projects", order: "rowid"},
+		{name: "project_workspaces", order: "rowid"},
+		{name: "pellets", order: "rowid"},
+		{name: "pellets_fts", order: "rowid"},
+		{name: "pellets_fts_config", order: "k"},
+		{name: "pellets_fts_data", order: "id"},
+		{name: "pellets_fts_docsize", order: "id"},
+		{name: "pellets_fts_idx", order: "segid, term"},
+		{name: "memories", order: "rowid"},
+		{name: "memories_fts", order: "rowid"},
+		{name: "memories_fts_config", order: "k"},
+		{name: "memories_fts_data", order: "id"},
+		{name: "memories_fts_docsize", order: "id"},
+		{name: "memories_fts_idx", order: "segid, term"},
+		{name: "sqlite_sequence", order: "rowid"},
 	} {
-		rows, err := database.Query("SELECT * FROM " + table + " ORDER BY rowid")
+		rows, err := database.Query("SELECT * FROM " + table.name + " ORDER BY " + table.order)
 		if err != nil {
-			t.Fatalf("snapshot %s: %v", table, err)
+			t.Fatalf("snapshot %s: %v", table.name, err)
 		}
 		columns, err := rows.Columns()
 		if err != nil {
 			rows.Close()
-			t.Fatalf("snapshot %s columns: %v", table, err)
+			t.Fatalf("snapshot %s columns: %v", table.name, err)
 		}
 		for rows.Next() {
 			raw := make([]sql.RawBytes, len(columns))
@@ -1121,13 +1133,13 @@ func captureFoundationDatabaseState(t *testing.T, databasePath string) foundatio
 				}
 				record[index] = string(encoded)
 			}
-			state.tables[table] = append(state.tables[table], record)
+			state.tables[table.name] = append(state.tables[table.name], record)
 		}
 		if err := rows.Close(); err != nil {
-			t.Fatalf("close %s snapshot: %v", table, err)
+			t.Fatalf("close %s snapshot: %v", table.name, err)
 		}
 		if err := rows.Err(); err != nil {
-			t.Fatalf("snapshot %s: %v", table, err)
+			t.Fatalf("snapshot %s: %v", table.name, err)
 		}
 	}
 	return state
