@@ -1,0 +1,9 @@
+HTMX 2.0.4
+
+Upstream project: https://github.com/bigskysoftware/htmx
+Vendored distribution: dist/htmx.min.js from tag v2.0.4
+SHA-256: e209dda5c8235479f3166defc7750e1dbcd5a5c1808b7792fc2e6733768fb447
+License: Zero-Clause BSD; see HTMX-LICENSE.txt in this directory.
+
+The asset is embedded in the pl executable. The running interface does not
+contact the upstream project, a CDN, or any other external host.

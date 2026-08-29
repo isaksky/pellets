@@ -1,6 +1,6 @@
 # Architecture
 
-Pellets is a single-process Go CLI around a local SQLite database. It has no daemon, server, network client, plugin loader, or embedding runtime.
+Pellets is a single-process Go CLI around a local SQLite database. Its optional `pl web` command is a foreground, loopback-only HTTP process over that same database. It is not a daemon or remote service, and Pellets has no external network client, plugin loader, or embedding runtime.
 
 See [project-goals.md](project-goals.md) for the product boundary, [data-model.md](data-model.md) for schema and ordering invariants, [cli-spec.md](cli-spec.md) for the public interface, [0001-initial-architecture.md](decisions/0001-initial-architecture.md) for the initial decision, and [0002-worktree-scoped-workspaces.md](decisions/0002-worktree-scoped-workspaces.md) for its worktree supersession.
 
@@ -43,6 +43,7 @@ internal/domain/        statuses, references, validation, typed errors
 internal/storage/       storage interfaces used by app
 internal/storage/sqlite explicit SQL, migrations, FTS maintenance
 internal/output/        JSON v1 and human renderers
+internal/webui/         loopback HTTP, templates/assets, SSE invalidation
 internal/testutil/      integration database and command helpers
 ```
 
@@ -57,6 +58,7 @@ cmd/pl -> cli -> app -> domain
           |      |
           |      +-> storage interfaces -> storage/sqlite
           +-------------------------------> output
+          +-> webui -> app/storage interfaces
 cli -> discovery
 storage/sqlite -> domain
 ```
@@ -125,6 +127,26 @@ Also verify that FTS5 is available by executing a small capability check. Failur
 
 Keep SQL as embedded `.sql` files or focused Go constants. Do not introduce an ORM or a general query builder.
 
+## Foreground web inspector
+
+`pl web [--port PORT] [--no-open]` uses the same upward nearest-database discovery as ordinary commands. It listens with `tcp4` on exactly `127.0.0.1`; port zero asks the OS for an available port. The URL is printed only after `net.Listen` succeeds and the HTTP server has been scheduled. Unless `--no-open` is supplied, the platform launcher opens that URL after readiness. Launcher failure is a warning and does not stop the server. Interrupt cancellation performs bounded HTTP shutdown and closes every SQLite handle. There is no daemonization, background service, configuration file, or remotely selectable bind address.
+
+The web process owns three deliberately separate database paths:
+
+1. A read pool opens the file with URI `mode=ro` and connection-local `query_only=ON`, `trusted_schema=OFF`, and the normal bounded busy timeout. Every GET, initial page, HTMX fragment, and recovery poll uses this pool. Query rows are always scanned into Go values and closed before template or network output begins.
+2. One writer pool has one connection and uses the existing immediate-transaction queue and memory helpers. Form parsing and usage validation finish before a writer transaction starts. The writer commits or rolls back before any template, SSE, browser, or network work.
+3. Exactly one monitor pool has one connection and one pinned `*sql.Conn`. It also uses `mode=ro` and `query_only=ON`. Only while SSE clients exist, the monitor issues one immediate `PRAGMA data_version` query at a bounded interval. It never begins an explicit transaction and holds no rows between checks.
+
+SQLite documents that [`PRAGMA data_version`](https://sqlite.org/pragma.html#pragma_data_version) values are meaningful only when two values come from the same connection. A change means that some other connection committed; it does not identify a table, row, order, or number of commits. The web writer is intentionally a different connection, so both its commits and commits from CLI processes change the pinned monitor's observation. Rollbacks and reads do not. The monitor therefore treats a changed value only as an invalidation signal, coalesces bursts, and broadcasts a bounded `pellets-invalidate` SSE message containing no row data, database path, or capability. Each visible HTMX fragment then performs its normal authoritative GET. Native `EventSource` reconnect plus slower HTMX polling and initial loads repair missed messages.
+
+Do not replace this design with SQLite update, pre-update, WAL, commit, or filesystem hooks. SQLite's [`sqlite3_update_hook`](https://sqlite.org/c3ref/update_hook.html) is connection-local, omits several write classes, and cannot observe other processes as the source of truth. Pellets adds no change-log table, notification trigger, watcher, or notification-only write.
+
+SSE clients own only bounded in-memory channels. They never own a database handle or transaction, and a full client queue is skipped so a slow browser cannot block the monitor or other clients. Keepalives are comments with no database data. Response writes have bounded deadlines and shutdown cancels every client handler.
+
+All editable rows carry an opaque SHA-256 version token derived from JSON encoding of the complete authoritative Go row, including identity, nullable values, lifecycle/order/ownership, provenance/approval, and timestamps. The storage method reloads the row and validates the submitted token only after `BEGIN IMMEDIATE`. Mismatch returns the current materialized row, rolls back without a write, and becomes HTTP 409 beside the preserved submitted draft. Creation has no pre-existing row token. Memory text replacement deletes the old external-content FTS row, changes authoritative text, and inserts the new FTS row in that same short transaction.
+
+The HTTP mutation surface requires the exact listener `Host`, exact same-loopback `Origin`, a per-process cryptographically random CSRF capability in both a `SameSite=Strict`/`HttpOnly` cookie and form, POST, and `application/x-www-form-urlencoded`. Responses set a restrictive CSP permitting only repository-owned same-origin scripts/styles/connects, disable framing and MIME sniffing, and use `html/template` escaping. Assets are embedded: pinned HTMX 2.0.4 plus its Zero-Clause BSD license, repository JavaScript for native EventSource/theme/focus enhancements, and hand-authored CSS. Runtime CDN, font, icon, Node/npm, WebSocket, HTMX SSE extension, and framework dependencies are absent.
+
 ## Transaction strategy
 
 SQLite permits multiple readers and one writer. Short atomic writes are sufficient for independent worktree workers and several projects in one database.
@@ -163,7 +185,7 @@ The first release does not promise downgrade compatibility. A future migration t
 
 Memory is a small application service over an authoritative `memories` table and a derived FTS5 index. It has no vector extension or embedding provider.
 
-The memory service supports create, list, show, search, approve, and remove. It records whether a memory was created by an agent or a human and whether a human has approved it. Memory belongs to a project but has no foreign key to a pellet and no structured group; references such as `foo-123` or group names are ordinary searchable text.
+The memory service supports create, list, show, search, approve, edit through the web application boundary, and remove through the confirmed CLI boundary. It records whether a memory was created by an agent or a human and whether a human has approved it. Memory belongs to a project but has no foreign key to a pellet and no structured group; references such as `foo-123` or group names are ordinary searchable text.
 
 The task service does not automatically create memories. See [memory.md](memory.md).
 
@@ -220,6 +242,6 @@ There is no package or boundary for:
 - agent accounts, PID/session ownership, leases, heartbeats, expiry, or assignment history (the workspace foreign key is only worktree-scoped coordination);
 - synchronization;
 - plugins;
-- a daemon or network transport.
+- a daemon, remote bind address, or remote network transport.
 
 Adding any of these requires a new decision record rather than an opportunistic schema change.

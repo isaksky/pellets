@@ -101,6 +101,10 @@ func (repository *MemoryRepository) CreateMemory(ctx context.Context, project st
 	return memory, nil
 }
 
+func (repository *MemoryRepository) CreateWebMemory(ctx context.Context, project storage.Project, input storage.NewMemory) (storage.Memory, error) {
+	return repository.CreateMemory(ctx, project, input)
+}
+
 // ListMemories returns newest records first with memory ID as the deterministic
 // ordering key. IDs are monotonically allocated for committed rows.
 func (repository *MemoryRepository) ListMemories(ctx context.Context, project storage.Project, options storage.MemoryListOptions) ([]storage.Memory, error) {
@@ -248,6 +252,17 @@ func (repository *MemoryRepository) ReadMemory(ctx context.Context, project stor
 // ApproveMemory changes only a previously unapproved row. Repeated approval
 // commits no update and therefore preserves the first approval/update instant.
 func (repository *MemoryRepository) ApproveMemory(ctx context.Context, project storage.Project, memoryID int64) (storage.Memory, error) {
+	return repository.approveMemory(ctx, project, memoryID, "")
+}
+
+func (repository *MemoryRepository) ApproveWebMemory(ctx context.Context, project storage.Project, memoryID int64, expectedVersion string) (storage.Memory, error) {
+	if err := validateWebVersion(expectedVersion); err != nil {
+		return storage.Memory{}, err
+	}
+	return repository.approveMemory(ctx, project, memoryID, expectedVersion)
+}
+
+func (repository *MemoryRepository) approveMemory(ctx context.Context, project storage.Project, memoryID int64, expectedVersion string) (storage.Memory, error) {
 	if err := validateMemoryProject(project); err != nil {
 		return storage.Memory{}, err
 	}
@@ -277,6 +292,9 @@ func (repository *MemoryRepository) ApproveMemory(ctx context.Context, project s
 	}
 	if err != nil {
 		return storage.Memory{}, memoryStorageError("read memory before approval", err)
+	}
+	if expectedVersion != "" && expectedVersion != storage.MemoryVersion(memory) {
+		return storage.Memory{}, &storage.OptimisticConflict{Memory: &memory}
 	}
 	if memory.ApprovedAt == nil {
 		timestamp, captureErr := captureJulianTimestamp(ctx, connection)
@@ -308,6 +326,101 @@ func (repository *MemoryRepository) ApproveMemory(ctx context.Context, project s
 	}
 	committed = true
 	return memory, nil
+}
+
+// UpdateMemory replaces authoritative text and the external-content FTS row
+// in one immediate transaction.
+func (repository *MemoryRepository) UpdateMemory(ctx context.Context, project storage.Project, memoryID int64, text string) (storage.Memory, error) {
+	return repository.updateMemory(ctx, project, memoryID, "", text)
+}
+
+func (repository *MemoryRepository) UpdateWebMemory(ctx context.Context, project storage.Project, memoryID int64, expectedVersion, text string) (storage.Memory, error) {
+	if err := validateWebVersion(expectedVersion); err != nil {
+		return storage.Memory{}, err
+	}
+	return repository.updateMemory(ctx, project, memoryID, expectedVersion, text)
+}
+
+func (repository *MemoryRepository) updateMemory(ctx context.Context, project storage.Project, memoryID int64, expectedVersion, text string) (storage.Memory, error) {
+	if err := validateMemoryProject(project); err != nil {
+		return storage.Memory{}, err
+	}
+	if err := validateMemoryID(memoryID); err != nil {
+		return storage.Memory{}, err
+	}
+	if err := domain.ValidateMemoryText(text); err != nil {
+		return storage.Memory{}, err
+	}
+	connection, err := repository.db.Conn(ctx)
+	if err != nil {
+		return storage.Memory{}, memoryStorageError("open memory update connection", err)
+	}
+	defer connection.Close()
+	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return storage.Memory{}, memoryStorageError("begin memory update", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = connection.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+
+	if err := ensureStoredMemoryProject(ctx, connection, project); err != nil {
+		return storage.Memory{}, err
+	}
+	before, err := loadMemory(ctx, connection, project.ID, project.Code, memoryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return storage.Memory{}, memoryNotFound(memoryID)
+	}
+	if err != nil {
+		return storage.Memory{}, memoryStorageError("read memory before update", err)
+	}
+	if expectedVersion != "" && expectedVersion != storage.MemoryVersion(before) {
+		return storage.Memory{}, &storage.OptimisticConflict{Memory: &before}
+	}
+	if before.Text == text {
+		if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
+			return storage.Memory{}, memoryStorageError("commit unchanged memory update", err)
+		}
+		committed = true
+		return before, nil
+	}
+	timestamp, err := captureJulianTimestamp(ctx, connection)
+	if err != nil {
+		return storage.Memory{}, memoryStorageError("capture memory update timestamp", err)
+	}
+	var approvedAt any
+	if before.CreatedBy == domain.MemoryCreatedByHuman {
+		// Browser/CLI text-edit entry points are explicit human actions. The
+		// schema requires human-authored memory to remain approved.
+		approvedAt = timestamp
+	}
+	if _, err := connection.ExecContext(ctx, `
+		INSERT INTO memories_fts(memories_fts, rowid, text)
+		VALUES ('delete', ?, ?)`, before.ID, before.Text); err != nil {
+		return storage.Memory{}, memoryFTSError("remove old memory search text", err)
+	}
+	if _, err := connection.ExecContext(ctx, `
+		UPDATE memories
+		SET text = ?, approved_at = ?, updated_at = ?
+		WHERE project_id = ? AND memory_id = ?`, text, approvedAt, timestamp, project.ID, memoryID); err != nil {
+		return storage.Memory{}, memoryStorageError("update memory", err)
+	}
+	if _, err := connection.ExecContext(ctx, `
+		INSERT INTO memories_fts(rowid, text)
+		VALUES (?, ?)`, before.ID, text); err != nil {
+		return storage.Memory{}, memoryFTSError("index updated memory", err)
+	}
+	updated, err := loadMemory(ctx, connection, project.ID, project.Code, memoryID)
+	if err != nil {
+		return storage.Memory{}, memoryStorageError("read updated memory", err)
+	}
+	if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
+		return storage.Memory{}, memoryStorageError("commit memory update", err)
+	}
+	committed = true
+	return updated, nil
 }
 
 // RemoveMemory deletes one project-scoped authoritative row and its derived

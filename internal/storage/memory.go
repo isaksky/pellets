@@ -7,8 +7,9 @@ import (
 	"pellets/internal/domain"
 )
 
-// Memory is one immutable project-scoped knowledge record. It deliberately
-// carries no pellet identity, lifecycle, ordering, external-ID, or group data.
+// Memory is one project-scoped knowledge record. Its text and approval state
+// are editable; it deliberately carries no pellet identity, lifecycle,
+// ordering, external-ID, or group data.
 type Memory struct {
 	ID          int64
 	ProjectID   int64
@@ -56,6 +57,7 @@ type MemoryRepository interface {
 	SearchMemories(ctx context.Context, project Project, options MemorySearchOptions) ([]MemorySearchResult, error)
 	ReadMemory(ctx context.Context, project Project, memoryID int64) (Memory, error)
 	ApproveMemory(ctx context.Context, project Project, memoryID int64) (Memory, error)
+	UpdateMemory(ctx context.Context, project Project, memoryID int64, text string) (Memory, error)
 	RemoveMemory(ctx context.Context, project Project, memoryID int64) (Memory, error)
 	RebuildMemorySearchIndex(ctx context.Context) error
 	Close() error

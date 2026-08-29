@@ -27,6 +27,7 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 7. Defer a pellet to `maybe_later` for human review without making it executable work.
 8. Store optional project memories, distinguish agent-created memories from human-approved memories, and retrieve them with keyword search.
 9. Use one local database for one repository with several worktrees or for several unrelated sibling repositories.
+10. Let a human inspect and safely edit that same authoritative database through an optional foreground, loopback-only web interface.
 
 ## Goals
 
@@ -39,7 +40,7 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 - Support exact filtering by project, optional external ID, and optional group.
 - Discover the nearest database by walking upward from the current directory, similarly to Git.
 - Support one database containing several logical Git projects and several worktree workspaces per project, with short project codes and project-local pellet numbers.
-- Remain local and usable without an account, server, daemon, or network connection.
+- Remain local and usable without an account, hosted server, daemon, or external network connection. The optional `pl web` process is a foreground loopback tool, not a runtime dependency.
 - Provide keyword search over pellets and memories through SQLite FTS5.
 - Produce self-contained macOS and Windows executables.
 
@@ -50,7 +51,7 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 - Agent accounts, assignment history, PID/process ownership, sessions, leases, heartbeats, expiry, orchestration, or background cleanup.
 - More than one in-progress pellet per workspace. Different workspaces of one project may progress different pellets.
 - Cloud synchronization, automatic Git synchronization, or committing the database to Git.
-- A server, daemon, account system, or network API.
+- A hosted or remotely reachable server, daemon, account system, or network API. `pl web` is intentionally loopback-only and foreground-bound.
 - Tags, separate task notes, or an automatic task event/history log.
 - Multiple groups per pellet, a group table, or behavior attached to a group.
 - Custom workflows or custom statuses in the first release.
@@ -79,7 +80,7 @@ An `in_progress` pellet names exactly one registered workspace from its project.
 
 ### Local means local
 
-The database is never committed to Git. `pl` does not send task or memory contents over the network. It performs no telemetry.
+The database is never committed to Git. `pl` does not send task or memory contents over an external network. The web inspector serves only the local browser over `127.0.0.1`, performs no runtime network fetch, and stops with its foreground process. Pellets performs no telemetry.
 
 ### Agent output is an API
 
@@ -95,9 +96,9 @@ For Pellets, “lightweight” means:
 
 - one `pl` executable;
 - one SQLite file for one or more nearby projects;
-- no long-running process;
+- no required or background long-running process; `pl web` runs only while its foreground command remains active;
 - no required configuration file;
-- no runtime, server, container, account, or network dependency;
+- no hosted runtime, daemon, container, account, or external-network dependency;
 - no model downloads or native vector extensions;
 - a small Go package graph and explicit SQL instead of an ORM;
 - bounded, predictable JSON responses;
@@ -119,8 +120,9 @@ The first release is successful when all of the following are true:
 - Active-queue insertions and moves use integer arithmetic, survive gap exhaustion through transactional rebalancing, and never expose duplicate non-null priorities.
 - Concurrent CLI processes cannot allocate duplicate pellet numbers, assign one pellet twice, or violate the one-in-progress-per-workspace invariant.
 - Agent-created memories can be searched, reviewed, and marked human-approved without being attached to task rows.
+- A human can inspect every project, workspace, pellet state, and memory in the nearest database and perform routine non-destructive edits through `pl web` without weakening queue, ownership, FTS, or concurrency invariants.
 - Core workflows pass automated tests on macOS and Windows.
-- No documented or implemented workflow requires dependency concepts, vector search, Git commits, a daemon, or a network connection.
+- No documented or implemented workflow requires dependency concepts, vector search, Git commits, a daemon, or an external network connection.
 
 ## Constraints
 

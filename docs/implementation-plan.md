@@ -17,6 +17,7 @@ The first release includes:
 - sparse project-scoped integer priority for the active queue, with transactional rebalancing;
 - FTS5 pellet search;
 - independent FTS5 project memory with provenance and human approval;
+- optional foreground, loopback-only HTMX inspector/editor with optimistic concurrency and invalidation-only live refresh;
 - explicit closed-pellet purge;
 - compact versioned JSON by default and optional human output;
 - embedded forward database migrations.
@@ -159,7 +160,23 @@ Acceptance criteria:
 - A read-only integrity diagnostic rejects corrupt and incompatible files before journal-mode or migration writes and emits no partial success.
 - Busy errors, including migration-lock contention, stop within the configured five-second bound and map to the stable `database_busy` response.
 
-## Milestone 8: release hardening
+## Milestone 8: foreground local web inspector
+
+Implement `pl web` with standard-library HTTP/templates/embedding, pinned vendored HTMX, repository CSS and small JavaScript enhancements, a separate read-only/query-only pool, one separate writer connection, and exactly one pinned read-only/query-only `PRAGMA data_version` monitor connection.
+
+Acceptance criteria:
+
+- Normal upward database discovery runs before startup. The listener is hard-coded to `127.0.0.1`, defaults to an OS-selected port, supports `--port`/`--no-open`, prints readiness URL, opens the browser after readiness, warns without exiting on launcher failure, and shuts down cleanly on interruption.
+- Empty, one-project, and multi-project databases render without crossing project boundaries. Wide multi-project navigation, narrow drawer navigation, stable task/memory deep links, task table ordering, composable URL filters, exact ungrouped handling, and safe escaped FTS search are covered with deterministic handlers.
+- The interface displays complete project/workspace ownership, pellet lifecycle/order/identity, and memory provenance/approval/timestamps. It supports pellet create/scalar edit/reorder/lifecycle, memory create/text edit/approve, and explicit named workspace recovery. It exposes no purge or removal.
+- Every existing-row mutation validates a complete-row token under the short writer lock. Concurrent edits yield one commit and one write-free 409 containing current row plus preserved draft. Memory text/FTS changes are atomic and agent-memory approval resets when text changes.
+- Every GET uses `mode=ro` plus `query_only=ON`, materializes and closes rows before output, and cannot retain a transaction across a slow response. Mutation parsing/validation finishes before `BEGIN IMMEDIATE`, and commit/rollback finishes before rendering.
+- One pinned monitor connection compares its own `data_version` only while SSE clients exist. External CLI and separate web-writer commits generate coalesced invalidation; rollback/read activity is silent. SSE client queues are bounded and own no database handle. Native EventSource refresh, initial loads, and slower HTMX polling recover missed signals.
+- Exact Host/Origin, per-process CSRF cookie/form capability, method/media-type checks, escaping, CSP, framing/MIME protections, and loopback-only binding protect mutation routes.
+- Vendored HTMX and license work offline. No Node/npm, CDN, external font/icon, SPA/CSS framework, SSE extension, WebSocket, service worker, daemon, or background service is added.
+- Automated markup/style tests cover system/light/dark pre-paint theming, narrow/wide layouts, visible focus, dialog/focus/dirty behavior, changed-row animation, reduced motion, and WCAG AA palette contrast. A hands-on macOS browser smoke check covers both themes, zoom/reflow, keyboard navigation, deep-link/back/forward behavior, and live external changes.
+
+## Milestone 9: release hardening
 
 Exercise complete workflows, establish build provenance, and publish release archives.
 
@@ -211,6 +228,8 @@ Invoke the compiled executable in temporary Git repositories and assert stdout, 
 - Concurrent `add` calls within one project.
 - Concurrent `start-next` calls from distinct linked worktrees selecting distinct pellets; same-pellet and same-workspace races return stable conflict/exhaustion without partial writes.
 - Reads during a write and bounded busy-timeout behavior.
+- Query-only web reads, pinned `data_version` monitoring, multiple/slow SSE clients, burst coalescing, disconnected recovery, zero-client idling, and graceful shutdown.
+- Concurrent web edits, current/foreign workspace lifecycle controls, memory text/FTS replacement, security headers/CSRF/origin rejection, and compiled foreground command startup/interruption.
 - Two independent processes racing from the same old schema version, with the lock waiter applying nothing twice.
 - Independent activity in different projects sharing the same SQLite file.
 
@@ -241,7 +260,9 @@ Because hands-on Windows testing is unavailable, Windows-specific integration te
 |---|---|
 | Agent output changes break automation. | Version JSON, use golden fixtures, and treat it as public API. |
 | Immediate SQLite uniqueness checks break in-place normalization. | Materialize the old order, preflight overflow, and assign unique values in a fresh band above the old maximum with one CTE update. |
-| Several projects contend for SQLite’s single writer. | Keep writes short, use WAL/busy timeout, and perform no Git/filesystem work inside transactions. |
+| Several projects contend for SQLite’s single writer. | Keep writes short, use WAL/busy timeout, and perform no Git/filesystem/browser/render/network work inside transactions. |
+| A slow local browser holds a read lock or blocks notifications. | Materialize query rows before response writes, give SSE clients bounded non-blocking queues, and keep clients database-free. |
+| Cross-process live refresh misses or misinterprets changes. | Compare `PRAGMA data_version` only on one pinned monitor connection, treat changes only as invalidation, and retain initial/fallback authoritative GETs. |
 | A moved, copied, or removed worktree presents stale local paths. | Treat Git directory as workspace identity, update only after outside-transaction stale checks, reject live duplicates, retain removed registrations, and require explicit lifecycle recovery. |
 | Windows-only path or locking failures go unnoticed. | Make native Windows CI integration tests release-blocking. |
 | Database is accidentally committed. | Use local Git exclude, check tracking during init, document local-only storage. |
@@ -265,7 +286,7 @@ Because hands-on Windows testing is unavailable, Windows-specific integration te
 - custom statuses, custom workflows, and plugins;
 - project-code rename and project deletion;
 - automatic `VACUUM`;
-- graphical or terminal UI.
+- a terminal UI, hosted web service, remote bind address, or daemon (the foreground loopback web inspector is the sole graphical surface).
 
 ## Contradiction checklist
 
@@ -281,6 +302,6 @@ Before each release, verify:
 - one logical repository has shared project state across worktrees, at most one worker is assumed per worktree, and each workspace owns at most one in-progress pellet;
 - no schema or prose invents an agent/PID/session/lease/heartbeat/expiry ownership model;
 - memory has no task foreign key and uses FTS5 only;
-- no core behavior needs network access or a vector capability;
+- no core behavior needs external network access or a vector capability; the optional web inspector uses loopback only;
 - the database is never part of a Git synchronization workflow;
 - JSON v1 fixtures and exit codes match [cli-spec.md](cli-spec.md).

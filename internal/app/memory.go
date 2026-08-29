@@ -107,6 +107,26 @@ func (manager MemoryManager) Approve(
 	return memory, closeMemoryRepository(repository, operationErr)
 }
 
+// Edit replaces authoritative memory text and its FTS entry atomically.
+func (manager MemoryManager) Edit(
+	ctx context.Context,
+	database Database,
+	workingDirectory, selectedCode string,
+	memoryID int64,
+	text string,
+) (storage.Memory, error) {
+	project, err := manager.resolve(ctx, database, workingDirectory, selectedCode)
+	if err != nil {
+		return storage.Memory{}, err
+	}
+	repository, err := manager.open(ctx, database.Path)
+	if err != nil {
+		return storage.Memory{}, err
+	}
+	memory, operationErr := repository.UpdateMemory(ctx, project, memoryID, text)
+	return memory, closeMemoryRepository(repository, operationErr)
+}
+
 func (manager MemoryManager) Remove(
 	ctx context.Context,
 	database Database,

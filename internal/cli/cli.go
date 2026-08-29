@@ -44,7 +44,10 @@ type Command struct {
 	Parse                 func(args []string) (any, error)
 	Validate              func(globals GlobalOptions, input any) error
 	Run                   func(ctx context.Context, invocation Invocation) (any, error)
-	ResultName            func(input any) string
+	// RunForeground owns stdout/stderr and blocks for a foreground tool. It is
+	// mutually exclusive with Run and bypasses JSON/human result rendering.
+	RunForeground func(ctx context.Context, invocation Invocation, stdout, stderr io.Writer) error
+	ResultName    func(input any) string
 }
 
 // App parses and dispatches commands and performs their database selection.
@@ -70,6 +73,9 @@ func NewWithCommands(version string, commands ...Command) *App {
 		}
 		if _, exists := registered[command.Name]; exists {
 			panic("cli: duplicate command " + command.Name)
+		}
+		if command.Run != nil && command.RunForeground != nil {
+			panic("cli: command has both Run and RunForeground: " + command.Name)
 		}
 		registered[command.Name] = command
 	}
@@ -104,7 +110,7 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 			err = parsed.command.Validate(parsed.globals, input)
 		}
 		if err == nil {
-			if parsed.command.Run == nil {
+			if parsed.command.Run == nil && parsed.command.RunForeground == nil {
 				err = domain.NewError(domain.Unexpected, "internal_error", "command has no handler", nil)
 			} else {
 				invocation := Invocation{Globals: parsed.globals, Input: input, Stdin: a.stdin}
@@ -127,10 +133,18 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 				}
 
 				var data any
+				foreground := false
 				if err == nil {
-					data, err = parsed.command.Run(context.Background(), invocation)
+					if parsed.command.RunForeground != nil {
+						foreground = true
+						err = parsed.command.RunForeground(context.Background(), invocation, stdout, stderr)
+					} else if parsed.command.Run != nil {
+						data, err = parsed.command.Run(context.Background(), invocation)
+					} else {
+						err = domain.NewError(domain.Unexpected, "internal_error", "command has no handler", nil)
+					}
 				}
-				if err == nil {
+				if err == nil && !foreground {
 					renderer := output.Renderer(output.JSONRenderer{Pretty: parsed.globals.Pretty})
 					if parsed.globals.Human {
 						renderer = output.HumanRenderer{}

@@ -136,6 +136,11 @@ func (repository *PelletRepository) CreatePellet(ctx context.Context, project st
 	return pellet, nil
 }
 
+// CreateWebPellet uses the same validated queue allocation path as the CLI.
+func (repository *PelletRepository) CreateWebPellet(ctx context.Context, project storage.ResolvedProject, input storage.NewPellet) (storage.Pellet, error) {
+	return repository.CreatePellet(ctx, project, input)
+}
+
 // MovePellet changes one active pellet's relative position in the same
 // immediate transaction as any gap-exhaustion rebalance. Neighbor selection
 // excludes the moving row in both directions.
@@ -143,6 +148,31 @@ func (repository *PelletRepository) MovePellet(
 	ctx context.Context,
 	project storage.ResolvedProject,
 	reference domain.PelletReference,
+	placement storage.PelletPlacement,
+) (storage.Pellet, error) {
+	return repository.movePellet(ctx, project, reference, "", placement)
+}
+
+// MoveWebPellet checks the complete row version after BEGIN IMMEDIATE and
+// before calculating or changing priority.
+func (repository *PelletRepository) MoveWebPellet(
+	ctx context.Context,
+	project storage.ResolvedProject,
+	reference domain.PelletReference,
+	expectedVersion string,
+	placement storage.PelletPlacement,
+) (storage.Pellet, error) {
+	if err := validateWebVersion(expectedVersion); err != nil {
+		return storage.Pellet{}, err
+	}
+	return repository.movePellet(ctx, project, reference, expectedVersion, placement)
+}
+
+func (repository *PelletRepository) movePellet(
+	ctx context.Context,
+	project storage.ResolvedProject,
+	reference domain.PelletReference,
+	expectedVersion string,
 	placement storage.PelletPlacement,
 ) (storage.Pellet, error) {
 	if err := validatePelletProjectContext(project); err != nil {
@@ -182,6 +212,9 @@ func (repository *PelletRepository) MovePellet(
 	}
 	if err != nil {
 		return storage.Pellet{}, pelletStorageError("read pellet before move", err)
+	}
+	if expectedVersion != "" && expectedVersion != storage.PelletVersion(moving) {
+		return storage.Pellet{}, &storage.OptimisticConflict{Pellet: &moving}
 	}
 	if !activePelletStatus(moving.Status) || moving.Priority == nil || *moving.Priority <= 0 {
 		return storage.Pellet{}, invalidMoveSource(moving)
@@ -679,6 +712,19 @@ func (repository *PelletRepository) StartNextPellet(ctx context.Context, project
 // one immediate transaction. Idempotent target-state repeats commit without
 // updating timestamps or queue positions.
 func (repository *PelletRepository) TransitionPellet(ctx context.Context, project storage.ResolvedProject, reference domain.PelletReference, request storage.PelletLifecycleRequest) (storage.PelletLifecycleResult, error) {
+	return repository.transitionPellet(ctx, project, reference, "", request)
+}
+
+// TransitionWebPellet performs the optimistic check under the same writer
+// lock as the shared lifecycle state machine.
+func (repository *PelletRepository) TransitionWebPellet(ctx context.Context, project storage.ResolvedProject, reference domain.PelletReference, expectedVersion string, request storage.PelletLifecycleRequest) (storage.PelletLifecycleResult, error) {
+	if err := validateWebVersion(expectedVersion); err != nil {
+		return storage.PelletLifecycleResult{}, err
+	}
+	return repository.transitionPellet(ctx, project, reference, expectedVersion, request)
+}
+
+func (repository *PelletRepository) transitionPellet(ctx context.Context, project storage.ResolvedProject, reference domain.PelletReference, expectedVersion string, request storage.PelletLifecycleRequest) (storage.PelletLifecycleResult, error) {
 	if err := validatePelletProjectContext(project); err != nil {
 		return storage.PelletLifecycleResult{}, err
 	}
@@ -713,6 +759,9 @@ func (repository *PelletRepository) TransitionPellet(ctx context.Context, projec
 	}
 	if err != nil {
 		return storage.PelletLifecycleResult{}, pelletStorageError("read pellet before lifecycle transition", err)
+	}
+	if expectedVersion != "" && expectedVersion != storage.PelletVersion(before) {
+		return storage.PelletLifecycleResult{}, &storage.OptimisticConflict{Pellet: &before}
 	}
 
 	after, recovered, changed, err := applyPelletLifecycleTransition(ctx, connection, project, before, request)
@@ -1021,6 +1070,20 @@ func isSQLiteConstraint(err error) bool {
 // UpdatePellet edits only user-editable scalar fields and updates FTS in the
 // same immediate transaction when indexed text changes.
 func (repository *PelletRepository) UpdatePellet(ctx context.Context, project storage.ResolvedProject, reference domain.PelletReference, changes storage.PelletChanges) (storage.Pellet, error) {
+	return repository.updatePellet(ctx, project, reference, "", changes)
+}
+
+// UpdateWebPellet validates the submitted full-row version after acquiring the
+// writer lock. A mismatch returns the current materialized row and writes
+// nothing.
+func (repository *PelletRepository) UpdateWebPellet(ctx context.Context, project storage.ResolvedProject, reference domain.PelletReference, expectedVersion string, changes storage.PelletChanges) (storage.Pellet, error) {
+	if err := validateWebVersion(expectedVersion); err != nil {
+		return storage.Pellet{}, err
+	}
+	return repository.updatePellet(ctx, project, reference, expectedVersion, changes)
+}
+
+func (repository *PelletRepository) updatePellet(ctx context.Context, project storage.ResolvedProject, reference domain.PelletReference, expectedVersion string, changes storage.PelletChanges) (storage.Pellet, error) {
 	if err := validatePelletProjectContext(project); err != nil {
 		return storage.Pellet{}, err
 	}
@@ -1052,6 +1115,9 @@ func (repository *PelletRepository) UpdatePellet(ctx context.Context, project st
 	}
 	if err != nil {
 		return storage.Pellet{}, pelletStorageError("read pellet before update", err)
+	}
+	if expectedVersion != "" && expectedVersion != storage.PelletVersion(before) {
+		return storage.Pellet{}, &storage.OptimisticConflict{Pellet: &before}
 	}
 	after := applyPelletChanges(before, changes)
 	timestamp, err := captureJulianTimestamp(ctx, connection)
@@ -1620,6 +1686,13 @@ func equalNullableText(left, right *string) bool {
 		return left == nil && right == nil
 	}
 	return *left == *right
+}
+
+func validateWebVersion(version string) error {
+	if version != "" {
+		return nil
+	}
+	return domain.NewError(domain.Usage, "missing_web_version", "the web edit requires an optimistic row version", nil)
 }
 
 func pelletNotFound(reference domain.PelletReference) error {

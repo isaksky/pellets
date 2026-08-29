@@ -200,7 +200,7 @@ INSERT INTO memories_fts(memories_fts, rowid, text)
 VALUES ('delete', :memory_id, :old_text);
 ```
 
-Only title, description, and external-ID edits touch pellet FTS. Group and external-ID filters are relational predicates; v1 adds no dedicated indexes for them until measurements justify the write cost. Changing status, priority, or group does not rewrite FTS. Closing a pellet therefore leaves its existing FTS row searchable without reindexing it; only purge removes that row. Memory text is immutable in v1. Integration tests must prove that insert, edit, purge/remove, and rebuild produce identical search results.
+Only title, description, and external-ID edits touch pellet FTS. Group and external-ID filters are relational predicates; v1 adds no dedicated indexes for them until measurements justify the write cost. Changing status, priority, or group does not rewrite FTS. Closing a pellet therefore leaves its existing FTS row searchable without reindexing it; only purge removes that row. Memory text may be replaced by the foreground web editor: it sends the FTS5 special delete row with the old text, updates the authoritative row, and inserts the new FTS row in the same immediate transaction. Integration tests must prove that insert, edit, purge/remove, and rebuild produce identical search results.
 
 ## Timestamp rules
 
@@ -216,7 +216,16 @@ This gives every statement in a logical mutation one captured timestamp rather t
 - `updated_at` changes for user-visible field, status, or explicit ordering changes.
 - Internal rebalance updates do not make every pellet appear edited.
 - `completed_at` is set when entering `closed` and cleared when reopening.
-- Memory `updated_at` changes only when an agent-created memory is first approved; memory text is immutable in v1.
+- Memory `updated_at` changes when an agent-created memory is first approved or when web editing changes its text.
+- Editing approved agent-created text clears `approved_at`; the changed statement requires another explicit approval. Editing human-created text captures a new approval/update instant because the web edit itself is an explicit human action and the schema requires human-authored memory to remain approved.
+
+## Optimistic web editing
+
+The web interface adds no version column, trigger, event table, or timestamp-only comparison. A response derives an opaque token from the complete materialized authoritative row. For pellets this includes project/reference identity, title, description, nullable external ID/group, status, nullable priority, complete nullable workspace ownership, creation/update/completion timestamps, and all joined workspace values. For memories it includes memory/project identity, text, provenance, creation/update timestamps, and nullable approval timestamp.
+
+Every edit, reorder, lifecycle action, memory text replacement, and memory approval requires that token. After all request parsing and domain validation, storage acquires the normal bounded `BEGIN IMMEDIATE` writer lock, reloads the complete row, derives its token, and compares it with the submitted value. A mismatch rolls back without capturing a timestamp or changing authoritative/derived data. The HTTP layer renders 409 from the materialized current row after storage releases the connection and preserves the user's submitted draft separately. Creation has no existing row and therefore no row token.
+
+The token is a concurrency capability, not authentication and not persisted state. It prevents silent overwrites by concurrent CLI or web actions even when SQLite timestamp resolution would otherwise make two states appear similar.
 
 ## Allocation invariants
 

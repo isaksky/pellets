@@ -1,0 +1,181 @@
+{{define "page"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <script src="/assets/theme-preflight.js"></script>
+  <link rel="stylesheet" href="/assets/app.css">
+  <script defer src="/assets/htmx-2.0.4.min.js"></script>
+  <script defer src="/assets/app.js"></script>
+  <title>{{if .HasProject}}{{.Project.Code}} · Pellets{{else}}Pellets{{end}}</title>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  {{if not .HasProject}}
+  <main id="main" class="empty-database" tabindex="-1">
+    <div class="empty-card">
+      <span class="brand-mark" aria-hidden="true">●</span>
+      <h1>No registered projects</h1>
+      <p>This database is ready, but it does not contain an authoritative project yet.</p>
+      <code>pl init --code CODE</code>
+    </div>
+  </main>
+  {{else}}
+  <div class="app-shell {{if .MultiProject}}with-projects{{else}}single-project{{end}}">
+    {{if .MultiProject}}
+    {{template "project-rail" .}}
+    {{end}}
+    <main id="main" class="workspace" tabindex="-1">
+      <header class="topbar">
+        <div class="project-heading">
+          {{if .MultiProject}}<button class="drawer-button" type="button" data-drawer-toggle aria-controls="project-drawer" aria-expanded="false">Projects</button>{{end}}
+          <div><span class="eyebrow">Project</span><h1>{{.Project.Code}}</h1></div>
+          {{if not .MultiProject}}<span class="compact-count">{{.ProjectSummary.Open}} open · {{.ProjectSummary.InProgress}} active · {{.ProjectSummary.MemoryCount}} memories</span>{{end}}
+        </div>
+        <label class="theme-control">Theme
+          <select id="theme-select">
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+      </header>
+      {{template "project-record" .}}
+      {{if not .MultiProject}}
+      {{template "workspace-strip" .}}
+      {{end}}
+      <nav class="area-tabs" aria-label="Project areas">
+        <a href="{{.TasksURL}}" {{if eq .Area "tasks"}}aria-current="page"{{end}}>Tasks <span>{{.ProjectSummary.Open}}</span></a>
+        <a href="{{.MemoriesURL}}" {{if eq .Area "memories"}}aria-current="page"{{end}}>Memories <span>{{.ProjectSummary.MemoryCount}}</span></a>
+      </nav>
+      {{if eq .Area "tasks"}}{{template "tasks-area" .}}{{else}}{{template "memories-area" .}}{{end}}
+    </main>
+    <div id="inspector-host" class="inspector-host" aria-live="polite">{{template "inspector" .}}</div>
+  </div>
+  <div class="drawer-scrim" data-drawer-close hidden></div>
+  {{end}}
+</body>
+</html>{{end}}
+
+{{define "project-rail"}}<aside class="project-rail live-fragment" id="project-drawer" aria-label="Projects" hx-get="{{.CurrentURL}}" hx-trigger="pellets:refresh from:body, every 45s" hx-target="this" hx-swap="outerHTML">
+  <div class="brand"><span class="brand-mark" aria-hidden="true">●</span><span>Pellets</span><button class="drawer-close-button" type="button" data-drawer-close aria-label="Close projects">×</button></div>
+  <nav>{{range .Projects}}{{template "project-link" .}}{{end}}</nav>
+</aside>{{end}}
+
+{{define "workspace-strip"}}<section class="workspace-strip live-fragment" id="workspace-strip" aria-label="Registered worktrees" hx-get="{{.CurrentURL}}" hx-trigger="pellets:refresh from:body, every 45s" hx-target="this" hx-swap="outerHTML">
+  {{range (index .Projects 0).Workspaces}}
+  <div class="workspace-chip {{if .Current}}current{{end}}"><span>Workspace {{.ID}}</span><code title="{{.GitDir}}">{{.Root}}</code>{{if .Pellet}}<a href="/projects/{{$.Project.Code}}/tasks/{{.Pellet}}">{{.Pellet}}</a>{{else}}<span class="quiet">idle</span>{{end}}</div>
+  {{end}}
+</section>{{end}}
+
+{{define "project-record"}}<details class="project-record live-fragment" id="project-record" hx-get="{{.CurrentURL}}" hx-trigger="pellets:refresh from:body, every 60s" hx-target="this" hx-swap="outerHTML">
+  <summary>Project record <code>#{{.Project.ID}}</code></summary>
+  <dl>
+    <div><dt>Code</dt><dd><code>{{.Project.Code}}</code></dd></div>
+    <div><dt>Git common directory</dt><dd><code>{{path .Project.GitCommonDir}}</code></dd></div>
+    <div><dt>Created</dt><dd><time datetime="{{.Project.CreatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{formatTime .Project.CreatedAt}}</time></dd></div>
+    <div><dt>Updated</dt><dd><time datetime="{{.Project.UpdatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{formatTime .Project.UpdatedAt}}</time></dd></div>
+  </dl>
+  <h3>Registered worktrees</h3>
+  <div class="project-worktree-records">{{range .Project.Workspaces}}<article><strong>Workspace {{.ID}}</strong><dl><div><dt>Root</dt><dd><code>{{path .RootPath}}</code></dd></div><div><dt>Git directory</dt><dd><code>{{path .GitDir}}</code></dd></div><div><dt>Created</dt><dd>{{formatTime .CreatedAt}}</dd></div><div><dt>Updated</dt><dd>{{formatTime .UpdatedAt}}</dd></div></dl></article>{{end}}</div>
+</details>{{end}}
+
+{{define "project-link"}}<section class="project-nav-item {{if .Active}}active{{end}}">
+  <a href="{{.URL}}" {{if .Active}}aria-current="page"{{end}}><span class="project-code">{{.Code}}</span><span class="project-counts"><b>{{.InProgress}}</b> active · {{.Open}} open</span></a>
+  <div class="rail-workspaces">{{range .Workspaces}}<div title="{{.GitDir}}"><span class="workspace-dot {{if .Current}}current{{end}}"></span><code>{{.Root}}</code>{{if .Pellet}}<span>{{.Pellet}}</span>{{else}}<span class="quiet">idle</span>{{end}}</div>{{end}}</div>
+</section>{{end}}
+
+{{define "tasks-area"}}<section class="area-content" aria-labelledby="tasks-title">
+  <div class="section-heading"><div><span class="eyebrow">Queue</span><h2 id="tasks-title">Tasks</h2></div>
+    <details class="create-popover"><summary class="primary-button">New task</summary>
+      <form hx-post="/projects/{{.Project.Code}}/pellets" hx-target="#inspector-host" hx-swap="innerHTML" class="stack-form">
+        <input type="hidden" name="_csrf" value="{{.CSRF}}">
+        <label>Title <input name="title" required autofocus></label>
+        <label>Description <textarea name="description" rows="4"></textarea></label>
+        <div class="form-grid"><label>External ID <input name="external_id"></label><label>Group <input name="group"></label></div>
+        <label>Status <select name="status"><option value="open">Open</option><option value="maybe_later">Maybe later</option></select></label>
+        <button class="primary-button" type="submit">Create task</button>
+      </form>
+    </details>
+  </div>
+  <form class="filters" action="{{.TasksURL}}" method="get" hx-get="{{.TasksURL}}" hx-target="#task-list" hx-push-url="true" hx-trigger="change from:select, input changed delay:300ms from:input">
+    <label>Search <input id="search" name="q" type="search" value="{{.Filters.Query}}" placeholder="Title, description, external ID" autocomplete="off"></label>
+    <label>Status <select name="status"><option value="" {{if eq .Filters.Status ""}}selected{{end}}>All states</option><option value="open" {{if eq .Filters.Status "open"}}selected{{end}}>Open</option><option value="in_progress" {{if eq .Filters.Status "in_progress"}}selected{{end}}>In progress</option><option value="maybe_later" {{if eq .Filters.Status "maybe_later"}}selected{{end}}>Maybe later</option><option value="closed" {{if eq .Filters.Status "closed"}}selected{{end}}>Closed</option></select></label>
+    <label>Group <select name="group">{{range .Groups}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
+    <label>External ID <input name="external_id" value="{{.Filters.ExternalID}}" placeholder="Exact value"></label>
+    <a class="quiet-button" href="{{.TasksURL}}">Clear</a>
+  </form>
+  {{template "task-list" .}}
+</section>{{end}}
+
+{{define "task-list"}}<div id="task-list" class="table-frame live-fragment" data-live-fragment data-fragment-kind="tasks" hx-get="{{.CurrentURL}}" hx-trigger="pellets:refresh from:body, every 35s" hx-target="this" hx-swap="outerHTML">
+  {{if .Pellets}}<div class="table-scroll"><table><thead><tr><th>Reference</th><th>Title</th><th>Group</th><th>Status</th><th>Priority</th><th>External ID</th><th>Updated</th></tr></thead><tbody>
+  {{range .Pellets}}<tr class="task-row status-{{.Pellet.Status}} {{if .Selected}}selected{{end}}" data-row-id="{{.Pellet.Reference}}" data-row-version="{{.Version}}">
+    <td><a class="row-link" href="{{.URL}}" hx-get="{{.URL}}" hx-target="#inspector-host" hx-push-url="true"><code>{{.Pellet.Reference}}</code></a></td>
+    <td><span class="task-title">{{.Pellet.Title}}</span>{{if .Owner}}<small>{{.Owner}}</small>{{end}}</td>
+    <td>{{.Group}}</td><td><span class="badge status-badge {{.Pellet.Status}}">{{statusLabel .Pellet.Status}}</span></td><td><code>{{.Priority}}</code></td><td><code>{{.ExternalID}}</code></td><td><time datetime="{{.Pellet.UpdatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{formatTime .Pellet.UpdatedAt}}</time></td>
+  </tr>{{end}}</tbody></table></div>
+  {{else}}<div class="empty-state"><h3>No tasks match</h3><p>Try clearing a filter or create the first task in this project.</p></div>{{end}}
+</div>{{end}}
+
+{{define "memories-area"}}<section class="area-content" aria-labelledby="memories-title">
+  <div class="section-heading"><div><span class="eyebrow">Knowledge</span><h2 id="memories-title">Memories</h2></div>
+    <details class="create-popover"><summary class="primary-button">New memory</summary>
+      <form hx-post="/projects/{{.Project.Code}}/memories" hx-target="#inspector-host" hx-swap="innerHTML" class="stack-form">
+        <input type="hidden" name="_csrf" value="{{.CSRF}}">
+        <label>Memory text <textarea name="text" rows="7" required autofocus></textarea></label>
+        <p class="form-help">Browser-created memories are human-authored and immediately approved.</p>
+        <button class="primary-button" type="submit">Create memory</button>
+      </form>
+    </details>
+  </div>
+  {{template "memory-list" .}}
+</section>{{end}}
+
+{{define "memory-list"}}<div id="memory-list" class="memory-grid live-fragment" data-live-fragment data-fragment-kind="memories" hx-get="{{.CurrentURL}}" hx-trigger="pellets:refresh from:body, every 45s" hx-target="this" hx-swap="outerHTML">
+  {{if .Memories}}{{range .Memories}}<article class="memory-card {{if .Selected}}selected{{end}}" data-row-id="memory-{{.Memory.ID}}" data-row-version="{{.Version}}">
+    <a href="{{.URL}}" hx-get="{{.URL}}" hx-target="#inspector-host" hx-push-url="true"><span class="memory-id">Memory {{.Memory.ID}}</span><p>{{.Memory.Text}}</p></a>
+    <footer><span class="badge provenance">{{.Memory.CreatedBy}}</span>{{if .Memory.ApprovedAt}}<span class="badge approved">Approved</span>{{else}}<span class="badge unapproved">Needs review</span>{{end}}<time>{{formatTime .Memory.UpdatedAt}}</time></footer>
+  </article>{{end}}{{else}}<div class="empty-state"><h3>No memories yet</h3><p>Add durable project knowledge without linking it to task lifecycle.</p></div>{{end}}
+</div>{{end}}
+
+{{define "inspector"}}{{if .SelectedPellet}}{{template "pellet-inspector" .}}{{else if .SelectedMemory}}{{template "memory-inspector" .}}{{end}}{{end}}
+
+{{define "pellet-inspector"}}<aside class="inspector live-fragment" role="dialog" aria-modal="false" aria-labelledby="inspector-title" data-inspector data-protect-dirty hx-get="{{.SelectedPellet.URL}}" hx-trigger="pellets:refresh from:body, every 50s" hx-target="#inspector-host" hx-swap="innerHTML">
+  <header><div><span class="eyebrow">Task inspector</span><h2 id="inspector-title">{{.SelectedPellet.Pellet.Reference}}</h2></div>{{if .CloseURL}}<a class="icon-button" href="{{.CloseURL}}" hx-get="{{.CloseURL}}" hx-target="#inspector-host" hx-push-url="true" aria-label="Close inspector">×</a>{{end}}</header>
+  <div class="inspector-scroll">
+    <div class="inspector-title-row"><span class="badge status-badge {{.SelectedPellet.Pellet.Status}}">{{statusLabel .SelectedPellet.Pellet.Status}}</span>{{if .SelectedPellet.Owner}}<span class="owner-badge">{{.SelectedPellet.Owner}}</span>{{end}}</div>
+    <form hx-post="/projects/{{.SelectedPellet.Pellet.Reference.ProjectCode}}/pellets/{{.SelectedPellet.Pellet.Reference}}/edit" hx-target="#inspector-host" hx-swap="innerHTML" class="stack-form dirty-track">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}">
+      <label>Title <input name="title" value="{{.SelectedPellet.Pellet.Title}}" required></label>
+      <label>Description <textarea name="description" rows="9">{{.SelectedPellet.Pellet.Description}}</textarea></label>
+      <div class="form-grid"><label>External ID <input name="external_id" value="{{text .SelectedPellet.Pellet.ExternalID}}"></label><label>Group <input name="group" value="{{text .SelectedPellet.Pellet.Group}}"></label></div>
+      <button class="primary-button" type="submit">Save changes</button>
+    </form>
+    <section class="metadata" aria-label="Task metadata"><h3>Record</h3><dl><div><dt>Project ID</dt><dd><code>{{.SelectedPellet.Pellet.ProjectID}}</code></dd></div><div><dt>Priority</dt><dd><code>{{.SelectedPellet.Priority}}</code></dd></div><div><dt>Created</dt><dd>{{formatTime .SelectedPellet.Pellet.CreatedAt}}</dd></div><div><dt>Updated</dt><dd>{{formatTime .SelectedPellet.Pellet.UpdatedAt}}</dd></div>{{if .SelectedPellet.Pellet.CompletedAt}}<div><dt>Completed</dt><dd>{{formatTime .SelectedPellet.Pellet.CompletedAt}}</dd></div>{{end}}</dl></section>
+    {{if .MoveTargets}}{{if or (eqStatus .SelectedPellet.Pellet.Status "open") (eqStatus .SelectedPellet.Pellet.Status "in_progress")}}<section><h3>Queue position</h3><form hx-post="/projects/{{.SelectedPellet.Pellet.Reference.ProjectCode}}/pellets/{{.SelectedPellet.Pellet.Reference}}/move" hx-target="#inspector-host" class="inline-form"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}"><label>Move <select name="direction"><option value="before">Before</option><option value="after">After</option></select></label><label>Task <select name="target">{{range .MoveTargets}}<option value="{{.Pellet.Reference}}">{{.Pellet.Reference}} · {{.Pellet.Title}}</option>{{end}}</select></label><button type="submit">Reorder</button></form></section>{{end}}{{end}}
+    <section class="lifecycle"><h3>Lifecycle</h3>{{if not .SelectedPellet.CanLifecycle}}<p class="notice">Lifecycle controls are available only from a registered workspace of this project.</p>{{else}}{{template "lifecycle-controls" .}}{{end}}</section>
+  </div>
+</aside>{{end}}
+
+{{define "lifecycle-form"}}<form hx-post="/projects/{{.Page.SelectedPellet.Pellet.Reference.ProjectCode}}/pellets/{{.Page.SelectedPellet.Pellet.Reference}}/transition" hx-target="#inspector-host" class="action-form"><input type="hidden" name="_csrf" value="{{.Page.CSRF}}"><input type="hidden" name="version" value="{{.Page.SelectedPellet.Version}}"><input type="hidden" name="operation" value="{{.Operation}}"><input type="hidden" name="recover_workspace_id" value=""><input type="hidden" name="confirm_recovery" value=""><button type="submit">{{.Label}}</button></form>{{end}}
+
+{{define "lifecycle-controls"}}<div class="action-row">
+  {{if eqStatus .SelectedPellet.Pellet.Status "open"}}{{template "lifecycle-form" (lifecycle . "start")}}{{template "lifecycle-form" (lifecycle . "close")}}{{template "lifecycle-form" (lifecycle . "defer")}}{{end}}
+  {{if eqStatus .SelectedPellet.Pellet.Status "in_progress"}}{{if .SelectedPellet.OwnerCurrent}}{{template "lifecycle-form" (lifecycle . "release")}}{{template "lifecycle-form" (lifecycle . "close")}}{{template "lifecycle-form" (lifecycle . "defer")}}{{else}}<div class="recovery"><p><strong>Owned by {{.SelectedPellet.Owner}}</strong></p><p>This tool does not authenticate an agent. Confirm only when recovering this registered worktree.</p><form hx-post="/projects/{{.SelectedPellet.Pellet.Reference.ProjectCode}}/pellets/{{.SelectedPellet.Pellet.Reference}}/transition" hx-target="#inspector-host" class="stack-form"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}"><input type="hidden" name="recover_workspace_id" value="{{.SelectedPellet.Pellet.Workspace.ID}}"><label>Recovery action <select name="operation"><option value="release">Release</option><option value="close">Close</option><option value="defer">Defer</option></select></label><label class="check"><input type="checkbox" name="confirm_recovery" value="yes" required> I confirm recovery of workspace {{.SelectedPellet.Pellet.Workspace.ID}}</label><button type="submit">Apply confirmed recovery</button></form></div>{{end}}{{end}}
+  {{if or (eqStatus .SelectedPellet.Pellet.Status "closed") (eqStatus .SelectedPellet.Pellet.Status "maybe_later")}}{{template "lifecycle-form" (lifecycle . "reopen")}}{{end}}
+</div>{{end}}
+
+{{define "memory-inspector"}}<aside class="inspector live-fragment" role="dialog" aria-modal="false" aria-labelledby="inspector-title" data-inspector data-protect-dirty hx-get="{{.SelectedMemory.URL}}" hx-trigger="pellets:refresh from:body, every 50s" hx-target="#inspector-host" hx-swap="innerHTML">
+  <header><div><span class="eyebrow">Memory inspector</span><h2 id="inspector-title">Memory {{.SelectedMemory.Memory.ID}}</h2></div>{{if .CloseURL}}<a class="icon-button" href="{{.CloseURL}}" hx-get="{{.CloseURL}}" hx-target="#inspector-host" hx-push-url="true" aria-label="Close inspector">×</a>{{end}}</header>
+  <div class="inspector-scroll"><div class="inspector-title-row"><span class="badge provenance">{{.SelectedMemory.Memory.CreatedBy}}</span>{{if .SelectedMemory.Memory.ApprovedAt}}<span class="badge approved">Human approved</span>{{else}}<span class="badge unapproved">Needs review</span>{{end}}</div>
+    <form hx-post="/projects/{{.SelectedMemory.Memory.ProjectCode}}/memories/{{.SelectedMemory.Memory.ID}}/edit" hx-target="#inspector-host" class="stack-form dirty-track"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedMemory.Version}}"><label>Text <textarea name="text" rows="15" required>{{.SelectedMemory.Memory.Text}}</textarea></label><p class="form-help">Changing reviewed agent text clears its approval; every edit updates FTS atomically.</p><button class="primary-button" type="submit">Save text</button></form>
+    {{if not .SelectedMemory.Memory.ApprovedAt}}<form hx-post="/projects/{{.SelectedMemory.Memory.ProjectCode}}/memories/{{.SelectedMemory.Memory.ID}}/approve" hx-target="#inspector-host" class="action-form"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedMemory.Version}}"><button type="submit">Approve current text</button></form>{{end}}
+    <section class="metadata"><h3>Record</h3><dl><div><dt>Project ID</dt><dd><code>{{.SelectedMemory.Memory.ProjectID}}</code></dd></div><div><dt>Provenance</dt><dd>{{.SelectedMemory.Memory.CreatedBy}}</dd></div><div><dt>Created</dt><dd>{{formatTime .SelectedMemory.Memory.CreatedAt}}</dd></div><div><dt>Updated</dt><dd>{{formatTime .SelectedMemory.Memory.UpdatedAt}}</dd></div>{{if .SelectedMemory.Memory.ApprovedAt}}<div><dt>Approved</dt><dd>{{formatTime .SelectedMemory.Memory.ApprovedAt}}</dd></div>{{end}}</dl></section>
+  </div>
+</aside>{{end}}
+
+{{define "conflict"}}<section class="conflict-state" role="alert" aria-labelledby="conflict-title"><span class="badge conflict">409 conflict</span><h2 id="conflict-title">This record changed elsewhere</h2><p>No write was performed. The current authoritative row is shown below; your submitted draft is preserved for comparison.</p><p class="current-row">{{.Conflict.Current}}</p><details open><summary>Submitted draft</summary><dl>{{range $key, $value := .Conflict.Draft}}<div><dt>{{$key}}</dt><dd><pre>{{$value}}</pre></dd></div>{{end}}</dl></details>{{if .SelectedPellet}}{{template "pellet-inspector" .}}{{else if .SelectedMemory}}{{template "memory-inspector" .}}{{end}}</section>{{end}}
+
+{{define "error"}}<section class="error-state" role="alert"><span class="badge error">{{.StatusCode}} error</span><h2>Request not applied</h2><p>{{.Error}}</p>{{if .Conflict.Draft}}<details><summary>Submitted draft</summary><dl>{{range $key, $value := .Conflict.Draft}}<div><dt>{{$key}}</dt><dd><pre>{{$value}}</pre></dd></div>{{end}}</dl></details>{{end}}</section>{{end}}

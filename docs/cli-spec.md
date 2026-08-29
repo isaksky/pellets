@@ -246,6 +246,31 @@ pl memory approve
 pl memory remove
 ```
 
+### `pl web`
+
+Run the optional local web inspector in the foreground.
+
+```text
+pl [--project CODE] web [--port PORT] [--no-open]
+```
+
+- Database discovery is identical to normal commands: the nearest ancestor `.pellets/pellets.db` wins. `--project` selects the initial project area when it exists; the interface can inspect every registered project in that database.
+- The only listener address is IPv4 `127.0.0.1`. There is no bind-address flag. Omitted `--port`, or explicit canonical port `0`, requests an OS-selected available port; `--port` otherwise accepts 1 through 65535.
+- Print `http://127.0.0.1:PORT` followed by one newline after the listener is ready. This foreground command is the sole exception to the normal JSON-success envelope.
+- Unless `--no-open` is present, open the default browser only after readiness. A launcher failure writes a useful warning to stderr while leaving the printed URL and server usable.
+- Remain in the foreground until interrupted. Interruption performs bounded graceful shutdown; `pl web` never installs, daemonizes, or registers a background service.
+- `--human` and `--pretty` are rejected because the command owns its foreground output.
+
+The browser uses only embedded, offline assets: pinned HTMX 2.0.4 and its license, repository-owned JavaScript/CSS, system fonts, and standard-library HTTP/templates. There is no runtime CDN, font/icon fetch, Node/npm build, WebSocket, service worker, or remote API. A first visit follows `prefers-color-scheme`; the light/dark/system selector persists locally and applies before first paint.
+
+Project pages expose every registered workspace and current pellet, all pellet states, and all authoritative memories. Project/status/exact-group/exact-external-ID/search filters are encoded in the URL; search uses the same escaped safe FTS semantics as `pl search`. Stable project codes, pellet references, and memory IDs form deep links. With one project the header is compact; with several projects a wide sidebar and narrow-screen drawer keep project data separated. Tasks use priority/status ordering and a wide inspector or narrow modal sheet. Browser history, Escape, focus trapping/restoration, scroll preservation, dirty-form warnings, reduced motion, and recovery polling are presentation contracts.
+
+The permitted mutations are pellet create/scalar edit/reorder/lifecycle, memory create/text edit, and memory approval. Purge, memory removal, project deletion, and any irreversible action are absent. Scalar and memory edits can address a selected project. Lifecycle actions require the server's current registered project workspace. A pellet owned by another workspace disables normal actions; an explicit recovery form names the pellet and stored workspace, explains that it does not authenticate an agent, and requires confirmation.
+
+Every existing-row mutation submits a complete-row optimistic token. A mismatch returns HTTP 409, performs no write, and shows current authoritative data beside the preserved submitted draft. Requests must use the exact listener Host and same-loopback Origin, POST, URL-encoded form content, a process-random CSRF value in both strict cookie and form, and normal HTML escaping. Restrictive CSP and response headers permit only the embedded local application.
+
+Live refresh is invalidation-only. One pinned read-only/query-only monitor connection compares `PRAGMA data_version` from that same connection at a bounded interval only while SSE clients exist. A changed value is coalesced into a small SSE event; native `EventSource` triggers authoritative HTMX list/detail GETs. Slower HTMX polling and every initial load recover missed events. SSE carries no row payload, database path, or capability and never owns a database connection. Every GET uses a separate read-only/query-only path and closes SQLite rows before response output.
+
 ## JSON contract
 
 ### Envelope
@@ -310,8 +335,8 @@ Never truncate titles or descriptions when stdout is not a terminal. Terminal tr
 
 - stdin is read only when an explicit option names `-`, such as `--description-file -` or `pl memory add --file -`.
 - Commands never read stdin implicitly; this prevents an agent invocation from hanging.
-- stdout contains the successful result only.
-- stderr contains the structured error only, plus diagnostics only when an explicit future debug flag is used.
+- stdout contains the successful result only. For `pl web`, that result is the ready listener URL rather than JSON.
+- stderr contains the structured error only, plus diagnostics only when an explicit future debug flag is used. A non-fatal `pl web` browser-launch warning is the documented exception.
 - Help and version text go to stdout with exit code 0.
 - Broken-pipe errors terminate quietly with a nonzero operational exit.
 
