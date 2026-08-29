@@ -23,7 +23,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-for command_name in cmp file git go otool sandbox-exec shasum tar unzip zip; do
+for command_name in cmp file git go gzip otool sandbox-exec shasum tar unzip zip; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     printf 'required command not found: %s\n' "$command_name" >&2
     exit 1
@@ -81,10 +81,11 @@ build_archive() {
   if [[ "$archive_name" == *.tar.gz ]]; then
     (
       cd "$staging_directory"
-      COPYFILE_DISABLE=1 tar -czf "$archive_path" \
+      COPYFILE_DISABLE=1 tar -cf - \
         --format ustar --uid 0 --gid 0 --uname root --gname root \
         --no-acls --no-fflags --no-mac-metadata --no-xattrs \
-        LICENSE THIRD_PARTY_NOTICES.txt "$executable_name"
+        LICENSE THIRD_PARTY_NOTICES.txt "$executable_name" \
+        | gzip -n >"$archive_path"
     )
   else
     (

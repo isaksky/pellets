@@ -35,9 +35,10 @@ pellets_1.2.3_checksums.txt
 
 Each archive has a flat, sorted three-file layout: `LICENSE`,
 `THIRD_PARTY_NOTICES.txt`, and `pl` on macOS or `pl.exe` on Windows. The
-builder uses `CGO_ENABLED=0`, embeds the supplied version, normalizes file
-permissions and timestamps, verifies archive names, entries, executable
-formats, Go target metadata, and SHA-256 values, then unpacks and smoke-tests
+builder uses `CGO_ENABLED=0`, embeds the supplied version, normalizes archive
+entry permissions and timestamps plus the gzip header timestamp, verifies
+archive names, entries, executable formats, Go target metadata, and SHA-256
+values, then unpacks and smoke-tests
 only the Mac's native architecture. That offline smoke test runs
 `pl --version`, initializes an isolated temporary database, and completes an
 add/start/close workflow without a SQLite dynamic library. It never requires
