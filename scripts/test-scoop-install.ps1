@@ -18,6 +18,7 @@ if ($env:RUNNER_ARCH -and $env:RUNNER_ARCH -ne "X64") {
 }
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$repositoryUrl = [Uri]::new($repositoryRoot).AbsoluteUri
 $releaseRoot = (Resolve-Path $ReleaseDirectory).Path
 $preparedManifestPath = Join-Path $releaseRoot "scoop-pl.json"
 $archiveName = "pellets_${Version}_windows_amd64.zip"
@@ -67,7 +68,9 @@ function Invoke-Scoop {
     }
 }
 
-Invoke-Scoop bucket add pellets $repositoryRoot
+# Scoop validates bucket sources as Git URLs before cloning them. Use a file
+# URL so it can clone the exact hosted checkout without a separate repository.
+Invoke-Scoop bucket add pellets $repositoryUrl
 $bucketRoot = Join-Path $scoopRoot "buckets\pellets"
 $bucketManifestPath = Join-Path $bucketRoot "bucket\pl.json"
 if (-not (Test-Path -LiteralPath $bucketManifestPath -PathType Leaf)) {
