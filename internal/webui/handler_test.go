@@ -88,7 +88,8 @@ func TestHandlerRendersAuthoritativeResponsiveProjectViewsAndEscapesHTML(t *test
 	if _, err := fixture.application.CreatePellet(context.Background(), fixture.projects[0], storage.NewPellet{Title: "ungrouped needle"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.application.CreateMemory(context.Background(), fixture.projects[0], storage.NewMemory{Text: `<b>memory</b>`, CreatedBy: domain.MemoryCreatedByAgent}); err != nil {
+	memory, err := fixture.application.CreateMemory(context.Background(), fixture.projects[0], storage.NewMemory{Text: `<b>memory</b>`, CreatedBy: domain.MemoryCreatedByAgent})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -125,12 +126,16 @@ func TestHandlerRendersAuthoritativeResponsiveProjectViewsAndEscapesHTML(t *test
 	}
 
 	response = performRequest(fixture.handler, http.MethodGet, "/projects/project1/tasks/"+created.Reference.String(), "", nil)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `&lt;img src=x onerror=alert(1)&gt;`) || !strings.Contains(response.Body.String(), "Task inspector") {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `&lt;img src=x onerror=alert(1)&gt;`) || !strings.Contains(response.Body.String(), "Task inspector") || !strings.Contains(response.Body.String(), `task-row status-open selected`) {
 		t.Fatalf("deep-link response = %d %s", response.Code, response.Body.String())
 	}
 	response = performRequest(fixture.handler, http.MethodGet, "/projects/project1/memories", "", nil)
 	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "<b>memory</b>") || !strings.Contains(response.Body.String(), "&lt;b&gt;memory&lt;/b&gt;") {
 		t.Fatalf("memory response = %d %s", response.Code, response.Body.String())
+	}
+	response = performRequest(fixture.handler, http.MethodGet, "/projects/project1/memories/"+strconv.FormatInt(memory.ID, 10), "", nil)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Memory inspector") || !strings.Contains(response.Body.String(), `memory-card selected`) {
+		t.Fatalf("memory deep-link response = %d %s", response.Code, response.Body.String())
 	}
 }
 

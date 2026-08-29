@@ -344,6 +344,15 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 		return pageData{}, err
 	}
 	if area == "tasks" {
+		var selectedReference domain.PelletReference
+		selectedReferenceText := ""
+		if len(segments) == 4 {
+			selectedReference, err = domain.ParsePelletReference(segments[3])
+			if err != nil || selectedReference.ProjectCode != code {
+				return pageData{}, domain.NewError(domain.NotFound, "pellet_not_found", "the pellet does not exist in the selected project", nil)
+			}
+			selectedReferenceText = selectedReference.String()
+		}
 		filters, view, err := parseFilters(request.URL.Query())
 		if err != nil {
 			return pageData{}, err
@@ -353,22 +362,18 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 		if err != nil {
 			return pageData{}, err
 		}
-		data.Pellets = makePelletViews(pellets, selected.Project.Code, request.URL.Query(), "", data.CurrentWorkspace, data.CurrentProject)
+		data.Pellets = makePelletViews(pellets, selected.Project.Code, request.URL.Query(), selectedReferenceText, data.CurrentWorkspace, data.CurrentProject)
 		groups, err := h.application.Groups(request.Context(), selected.Project)
 		if err != nil {
 			return pageData{}, err
 		}
 		data.Groups = makeGroupViews(groups, view.Group)
-		if len(segments) == 4 {
-			reference, err := domain.ParsePelletReference(segments[3])
-			if err != nil || reference.ProjectCode != code {
-				return pageData{}, domain.NewError(domain.NotFound, "pellet_not_found", "the pellet does not exist in the selected project", nil)
-			}
-			pellet, err := h.application.Pellet(request.Context(), selected.Project, reference)
+		if selectedReferenceText != "" {
+			pellet, err := h.application.Pellet(request.Context(), selected.Project, selectedReference)
 			if err != nil {
 				return pageData{}, err
 			}
-			views := makePelletViews([]storage.Pellet{pellet}, code, request.URL.Query(), reference.String(), data.CurrentWorkspace, data.CurrentProject)
+			views := makePelletViews([]storage.Pellet{pellet}, code, request.URL.Query(), selectedReferenceText, data.CurrentWorkspace, data.CurrentProject)
 			data.SelectedPellet = &views[0]
 			data.CloseURL = taskURL(code, request.URL.Query(), "")
 			active, err := h.application.Pellets(request.Context(), selected.Project, storage.WebPelletFilters{})
@@ -376,27 +381,30 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 				return pageData{}, err
 			}
 			for _, candidate := range active {
-				if candidate.Reference != reference && (candidate.Status == domain.PelletOpen || candidate.Status == domain.PelletInProgress) {
+				if candidate.Reference != selectedReference && (candidate.Status == domain.PelletOpen || candidate.Status == domain.PelletInProgress) {
 					data.MoveTargets = append(data.MoveTargets, makePelletViews([]storage.Pellet{candidate}, code, nil, "", data.CurrentWorkspace, data.CurrentProject)[0])
 				}
 			}
 		}
 	} else {
+		selectedMemoryID := int64(0)
+		if len(segments) == 4 {
+			selectedMemoryID, err = domain.ParseMemoryID(segments[3])
+			if err != nil {
+				return pageData{}, err
+			}
+		}
 		memories, err := h.application.Memories(request.Context(), selected.Project)
 		if err != nil {
 			return pageData{}, err
 		}
-		data.Memories = makeMemoryViews(memories, code, 0)
-		if len(segments) == 4 {
-			memoryID, err := domain.ParseMemoryID(segments[3])
+		data.Memories = makeMemoryViews(memories, code, selectedMemoryID)
+		if selectedMemoryID != 0 {
+			memory, err := h.application.Memory(request.Context(), selected.Project, selectedMemoryID)
 			if err != nil {
 				return pageData{}, err
 			}
-			memory, err := h.application.Memory(request.Context(), selected.Project, memoryID)
-			if err != nil {
-				return pageData{}, err
-			}
-			views := makeMemoryViews([]storage.Memory{memory}, code, memoryID)
+			views := makeMemoryViews([]storage.Memory{memory}, code, selectedMemoryID)
 			data.SelectedMemory = &views[0]
 			data.CloseURL = data.MemoriesURL
 		}

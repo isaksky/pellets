@@ -112,7 +112,7 @@
 {{define "task-list"}}<div id="task-list" class="table-frame live-fragment" data-live-fragment data-fragment-kind="tasks" hx-get="{{.CurrentURL}}" hx-trigger="pellets:refresh from:body, every 35s" hx-target="this" hx-swap="outerHTML">
   {{if .Pellets}}<div class="table-scroll"><table><thead><tr><th>Reference</th><th>Title</th><th>Group</th><th>Status</th><th>Priority</th><th>External ID</th><th>Updated</th></tr></thead><tbody>
   {{range .Pellets}}<tr class="task-row status-{{.Pellet.Status}} {{if .Selected}}selected{{end}}" data-row-id="{{.Pellet.Reference}}" data-row-version="{{.Version}}">
-    <td><a class="row-link" href="{{.URL}}" hx-get="{{.URL}}" hx-target="#inspector-host" hx-push-url="true"><code>{{.Pellet.Reference}}</code></a></td>
+    <td><a class="row-link" href="{{.URL}}" hx-get="{{.URL}}" hx-target="#inspector-host" hx-swap="innerHTML" hx-push-url="true"><code>{{.Pellet.Reference}}</code></a></td>
     <td><span class="task-title">{{.Pellet.Title}}</span>{{if .Owner}}<small>{{.Owner}}</small>{{end}}</td>
     <td>{{.Group}}</td><td><span class="badge status-badge {{.Pellet.Status}}">{{statusLabel .Pellet.Status}}</span></td><td><code>{{.Priority}}</code></td><td><code>{{.ExternalID}}</code></td><td><time datetime="{{.Pellet.UpdatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{formatTime .Pellet.UpdatedAt}}</time></td>
   </tr>{{end}}</tbody></table></div>
@@ -135,7 +135,7 @@
 
 {{define "memory-list"}}<div id="memory-list" class="memory-grid live-fragment" data-live-fragment data-fragment-kind="memories" hx-get="{{.CurrentURL}}" hx-trigger="pellets:refresh from:body, every 45s" hx-target="this" hx-swap="outerHTML">
   {{if .Memories}}{{range .Memories}}<article class="memory-card {{if .Selected}}selected{{end}}" data-row-id="memory-{{.Memory.ID}}" data-row-version="{{.Version}}">
-    <a href="{{.URL}}" hx-get="{{.URL}}" hx-target="#inspector-host" hx-push-url="true"><span class="memory-id">Memory {{.Memory.ID}}</span><p>{{.Memory.Text}}</p></a>
+    <a href="{{.URL}}" hx-get="{{.URL}}" hx-target="#inspector-host" hx-swap="innerHTML" hx-push-url="true"><span class="memory-id">Memory {{.Memory.ID}}</span><p>{{.Memory.Text}}</p></a>
     <footer><span class="badge provenance">{{.Memory.CreatedBy}}</span>{{if .Memory.ApprovedAt}}<span class="badge approved">Approved</span>{{else}}<span class="badge unapproved">Needs review</span>{{end}}<time>{{formatTime .Memory.UpdatedAt}}</time></footer>
   </article>{{end}}{{else}}<div class="empty-state"><h3>No memories yet</h3><p>Add durable project knowledge without linking it to task lifecycle.</p></div>{{end}}
 </div>{{end}}

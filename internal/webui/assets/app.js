@@ -76,12 +76,26 @@
       return;
     }
     var region = event.detail.elt && event.detail.elt.closest("[data-protect-dirty]");
-    if (region && region.classList.contains("is-dirty") && !event.detail.elt.closest("form")) {
-      event.preventDefault();
+    if (region && region.classList.contains("is-dirty") && !event.detail.elt.closest("form.dirty-track")) {
+      // Never interrupt the user for an automatic refresh. An explicit close
+      // or secondary action may proceed after one discard confirmation.
+      if (event.detail.elt === region || !confirmDiscard()) event.preventDefault();
       return;
     }
     var target = event.detail.target;
     if (target && target.id === "inspector-host" && dirtyInspector() && !event.detail.elt.closest("form") && !confirmDiscard()) {
+      event.preventDefault();
+    }
+  });
+  // A refresh can begin while a disclosure is closed and finish after the
+  // user opens it. Guard the swap as well as the request so that an in-flight
+  // response cannot discard the open drawer/details state or strand the
+  // drawer scrim over the page.
+  document.body.addEventListener("htmx:beforeSwap", function (event) {
+    var target = event.detail && event.detail.target;
+    if (!target) return;
+    if ((target.id === "project-drawer" && target.classList.contains("open")) ||
+        (target.id === "project-record" && target.open)) {
       event.preventDefault();
     }
   });
@@ -105,7 +119,13 @@
   }
 
   function configureInspector(scope) {
-    var inspector = scope.querySelector ? scope.querySelector("[data-inspector]") : null;
+    var inspector = scope.matches && scope.matches("[data-inspector]") ? scope :
+      (scope.querySelector ? scope.querySelector("[data-inspector]") : null);
+    var host = document.getElementById("inspector-host");
+    var shell = document.querySelector(".app-shell");
+    var hasInspector = !!document.querySelector("[data-inspector]");
+    if (host) host.classList.toggle("has-inspector", hasInspector);
+    if (shell) shell.classList.toggle("has-inspector", hasInspector);
     if (!inspector) return;
     if (!inspectorOpener) {
       inspectorOpener = document.querySelector(".task-row.selected .row-link, .memory-card.selected > a");
@@ -129,8 +149,8 @@
   }
   initialize(document);
   document.body.addEventListener("htmx:afterSwap", function (event) { initialize(event.detail.target || document); });
-  document.body.addEventListener("htmx:afterSwap", function (event) {
-    if (!event.detail.target || event.detail.target.id !== "inspector-host" || event.detail.target.querySelector("[data-inspector]")) return;
+  document.body.addEventListener("htmx:afterSwap", function () {
+    if (document.querySelector("[data-inspector]") || (!inspectorOpener && !inspectorOpenerHref)) return;
     var table = document.querySelector(".table-scroll");
     if (table) table.scrollLeft = tableScrollLeft;
     if ((!inspectorOpener || !document.contains(inspectorOpener)) && inspectorOpenerHref) {
@@ -140,7 +160,11 @@
         return true;
       });
     }
-    if (inspectorOpener && document.contains(inspectorOpener)) inspectorOpener.focus({preventScroll: true});
+    var focusTarget = inspectorOpener && document.contains(inspectorOpener) ? inspectorOpener :
+      document.querySelector("#task-list a, #memory-list a, #main");
+    if (focusTarget) focusTarget.focus({preventScroll: true});
+    inspectorOpener = null;
+    inspectorOpenerHref = "";
   });
   document.body.addEventListener("htmx:historyRestore", function () { initialize(document); });
   document.body.addEventListener("htmx:afterRequest", function (event) {
@@ -187,7 +211,7 @@
     if (!inspector) return;
     if (event.key === "Escape") {
       var close = inspector.querySelector("[aria-label='Close inspector']");
-      if (close && confirmDiscard()) { event.preventDefault(); close.click(); }
+      if (close) { event.preventDefault(); close.click(); }
       return;
     }
     if (event.key !== "Tab" || inspector.getAttribute("aria-modal") !== "true") return;
