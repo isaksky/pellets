@@ -86,3 +86,11 @@ There is no user login. The server instead enforces a loopback-only listener, ex
 - The SQLite file is local plaintext and is excluded from Git; keep normal filesystem backups and access controls.
 
 Product boundaries and implementation details live in [project goals](docs/project-goals.md), [architecture](docs/architecture.md), [data model](docs/data-model.md), [memory](docs/memory.md), and the [implementation plan](docs/implementation-plan.md).
+
+## License
+
+Repository-owned Pellets source and binaries use the same
+[Apache License 2.0](LICENSE) terms. Binary release archives must also carry
+[the consolidated third-party notices](THIRD_PARTY_NOTICES.txt). The license
+choice, dependency audit, and exact two-file archive contract are recorded in
+[ADR 0003](docs/decisions/0003-distribution-license-and-release-notices.md).
