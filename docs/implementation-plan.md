@@ -269,7 +269,7 @@ Required CI jobs:
 - macOS ARM64 or AMD64 tests;
 - Windows AMD64 tests under PowerShell and native filesystem semantics;
 - cross-build macOS AMD64/ARM64 and Windows AMD64;
-- archive-content and checksum verification;
+- archive-content, checksum, and cross-time-zone byte-reproducibility verification;
 - a no-network smoke test after dependencies are already vendored/cached for the build.
 - deterministic Homebrew formula rendering from the versioned macOS archive checksums;
 - native Homebrew formula style, cached-archive install, and `pl --version` testing before a tagged GitHub Release is published.

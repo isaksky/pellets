@@ -109,10 +109,21 @@ jobs:
             version="0.0.0"
           fi
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
-      - name: Build, verify, and smoke-test release archives
+      - name: Build, verify, and smoke-test reproducible release archives
         run: |
-          ./scripts/build-release.sh "${{ steps.release-version.outputs.version }}"
-          printf '%s\n' "${{ steps.release-version.outputs.version }}" >dist/release-version.txt
+          version="${{ steps.release-version.outputs.version }}"
+          denver_release_directory="$RUNNER_TEMP/pellets-release-denver"
+          mkdir "$denver_release_directory"
+          TZ=UTC ./scripts/build-release.sh "$version"
+          TZ=America/Denver ./scripts/build-release.sh "$version" "$denver_release_directory"
+          for release_file in \
+            "pellets_${version}_darwin_amd64.tar.gz" \
+            "pellets_${version}_darwin_arm64.tar.gz" \
+            "pellets_${version}_windows_amd64.zip" \
+            "pellets_${version}_checksums.txt"; do
+            cmp "dist/$release_file" "$denver_release_directory/$release_file"
+          done
+          printf '%s\n' "$version" >dist/release-version.txt
       - name: Match Scoop release metadata or prepare the CI test manifest
         shell: bash
         run: |

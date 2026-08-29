@@ -248,7 +248,11 @@ Build one executable per supported target with `CGO_ENABLED=0`. The first-releas
 
 A successful Windows ARM64 cross-build alone does not establish support, so the first release does not build, test, or release that target.
 
-Release archives contain only `pl` (or `pl.exe`) plus license information and checksums. No SQLite DLL, model, configuration file, or installer is required.
+Release archives contain only `pl` (or `pl.exe`) plus license information and
+checksums. No SQLite DLL, model, configuration file, or installer is required.
+The release builder fixes staging timestamps in UTC and removes host archive
+metadata so the same source, version, and pinned Go toolchain produce
+byte-identical archives regardless of the invoking macOS time zone.
 
 macOS is the only platform available for hands-on testing. Windows behavior must therefore be covered by CI integration tests, including path separators, file locking, WAL cleanup, Unicode paths, local Git excludes, and executable exit codes. Code signing is an open release question.
 

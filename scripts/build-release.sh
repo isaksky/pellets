@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 export LC_ALL=C
+export TZ=UTC
 
 usage() {
   printf 'usage: %s VERSION [OUTPUT_DIRECTORY]\n' "${0##*/}" >&2
