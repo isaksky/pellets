@@ -85,7 +85,7 @@ Use Git’s own repository discovery semantics so worktrees and `.git` indirecti
 
 ### Keeping the database out of Git
 
-The database and its WAL/SHM companions must never be committed. If `init-db` or `init` places `.pellets` inside a Git work tree, it adds `.pellets/` to the repository’s local Git exclude file (`.git/info/exclude` or the worktree-equivalent path), not to the committed `.gitignore`. Initialization refuses to proceed if the database is already tracked.
+The database and its WAL/SHM/journal companions must never be committed or damaged. If `init-db` or `init` places `.pellets` inside a Git work tree, it adds `.pellets/` to the repository’s local Git exclude file (`.git/info/exclude` or the worktree-equivalent path), not to the committed `.gitignore`. Initialization refuses to proceed if the database or any companion is already tracked, including an index-only or case-equivalent path on a case-insensitive filesystem. It also rejects a symlinked `.pellets` directory and any pre-existing database companion before SQLite opens a file. Failure cleanup removes only files whose identity was recorded as created by that initialization attempt.
 
 ## CLI command flow
 

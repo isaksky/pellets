@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"pellets/internal/domain"
@@ -76,33 +77,90 @@ func RelativeProjectPath(databaseRoot, projectRoot string) (string, error) {
 	return filepath.ToSlash(relative), nil
 }
 
-// RejectTracked rejects databasePath when the containing work tree's index
-// already tracks that exact path. A database root outside a work tree needs no
-// Git safeguard.
+// RejectTracked rejects the database or any SQLite companion when the
+// containing work tree's index already tracks the same filesystem path. A
+// database root outside a work tree needs no Git safeguard.
 func (GitSafety) RejectTracked(ctx context.Context, databaseRoot, databasePath string) error {
 	workTree, ok, err := findWorkTree(ctx, databaseRoot)
 	if err != nil || !ok {
 		return err
 	}
-	relative, err := workTreeRelativePath(workTree, databasePath)
+	relativePaths := make([]string, 0, len(DatabasePaths(databasePath)))
+	for _, path := range DatabasePaths(databasePath) {
+		relative, relativeErr := workTreeRelativeDatabasePath(workTree, databaseRoot, path)
+		if relativeErr != nil {
+			return gitInspectionFailure(path, relativeErr)
+		}
+		relativePaths = append(relativePaths, relative)
+	}
+	caseInsensitive, err := isCaseInsensitiveFilesystem(databaseRoot)
 	if err != nil {
 		return gitInspectionFailure(databasePath, err)
 	}
 
-	_, err = runGit(ctx, workTree, "ls-files", "--error-unmatch", "--full-name", "--", ":(literal)"+relative)
-	if err == nil {
-		return domain.NewError(
-			domain.Conflict,
-			"database_already_tracked",
-			"the Pellets database path is already tracked by Git",
-			map[string]any{"database_path": databasePath},
-		)
+	output, err := runGit(ctx, workTree, "ls-files", "-z", "--full-name")
+	if err != nil {
+		return gitInspectionFailure(databasePath, err)
 	}
-	var exitError *exec.ExitError
-	if errors.As(err, &exitError) && exitError.ExitCode() == 1 {
-		return nil
+	for _, entry := range bytes.Split(output, []byte{0}) {
+		if len(entry) == 0 {
+			continue
+		}
+		trackedPath := string(entry)
+		for _, relative := range relativePaths {
+			if trackedPath == relative || caseInsensitive && strings.EqualFold(trackedPath, relative) {
+				return domain.NewError(
+					domain.Conflict,
+					"database_already_tracked",
+					"the Pellets database path is already tracked by Git",
+					map[string]any{"database_path": databasePath},
+				)
+			}
+		}
 	}
-	return gitInspectionFailure(databasePath, err)
+	return nil
+}
+
+// workTreeRelativeDatabasePath resolves the roots but deliberately does not
+// follow a database or companion path. Git's index names the lexical path in
+// the work tree, and a pre-existing final-component symlink must not redirect
+// the tracked-path inspection elsewhere.
+func workTreeRelativeDatabasePath(workTree, databaseRoot, path string) (string, error) {
+	canonicalWorkTree, err := resolveExistingPrefix(workTree)
+	if err != nil {
+		return "", err
+	}
+	canonicalDatabaseRoot, err := resolveExistingPrefix(databaseRoot)
+	if err != nil {
+		return "", err
+	}
+	absoluteDatabaseRoot, err := filepath.Abs(databaseRoot)
+	if err != nil {
+		return "", err
+	}
+	absolutePath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	withinRoot, err := filepath.Rel(absoluteDatabaseRoot, absolutePath)
+	if err != nil {
+		return "", err
+	}
+	if pathEscapesRoot(withinRoot) {
+		return "", fmt.Errorf("path %q is outside database root %q", path, databaseRoot)
+	}
+	relative, err := filepath.Rel(canonicalWorkTree, filepath.Join(canonicalDatabaseRoot, withinRoot))
+	if err != nil {
+		return "", err
+	}
+	if pathEscapesRoot(relative) {
+		return "", fmt.Errorf("path %q is outside Git work tree %q", path, workTree)
+	}
+	return filepath.ToSlash(relative), nil
+}
+
+func pathEscapesRoot(relative string) bool {
+	return relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative)
 }
 
 // EnsureExcluded adds the fixed .pellets/ pattern to the containing work
@@ -205,6 +263,55 @@ func workTreeRelativePath(workTree, path string) (string, error) {
 		return "", fmt.Errorf("path %q is outside Git work tree %q", path, workTree)
 	}
 	return filepath.ToSlash(relative), nil
+}
+
+// isCaseInsensitiveFilesystem determines path identity without creating a
+// probe file. That keeps a rejected initialization completely read-only.
+func isCaseInsensitiveFilesystem(path string) (bool, error) {
+	current := filepath.Clean(path)
+	for {
+		info, err := os.Lstat(current)
+		if err == nil {
+			variant, changed := swapASCIICase(filepath.Base(current))
+			if changed {
+				variantInfo, variantErr := os.Lstat(filepath.Join(filepath.Dir(current), variant))
+				switch {
+				case variantErr == nil:
+					return os.SameFile(info, variantInfo), nil
+				case errors.Is(variantErr, os.ErrNotExist):
+					return false, nil
+				default:
+					return false, variantErr
+				}
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return false, err
+		}
+
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
+	}
+	// Windows path comparison is case-insensitive even when no alphabetic
+	// existing component was available for the read-only probe.
+	return runtime.GOOS == "windows", nil
+}
+
+func swapASCIICase(value string) (string, bool) {
+	bytes := []byte(value)
+	for index, character := range bytes {
+		switch {
+		case character >= 'a' && character <= 'z':
+			bytes[index] = character - ('a' - 'A')
+			return string(bytes), true
+		case character >= 'A' && character <= 'Z':
+			bytes[index] = character + ('a' - 'A')
+			return string(bytes), true
+		}
+	}
+	return value, false
 }
 
 // resolveExistingPrefix canonicalizes symlinks such as macOS's /var ->

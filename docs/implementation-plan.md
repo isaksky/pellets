@@ -42,7 +42,7 @@ Implement SQLite connection setup, embedded migration 1, `init-db`, upward disco
 
 Acceptance criteria:
 
-- `init-db` creates exactly `.pellets/pellets.db` and does not overwrite it.
+- `init-db` creates exactly `.pellets/pellets.db`, rejects symlink escapes and pre-existing SQLite companions, and does not overwrite or delete any existing path.
 - `init --code foo` registers a normalized relative Git-root path.
 - With no ancestor database, `init` creates one at the Git root.
 - With a database at a common parent, two sibling repositories register in that database with different codes.

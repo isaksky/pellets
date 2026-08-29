@@ -16,6 +16,8 @@ const (
 	DatabaseFilename = "pellets.db"
 )
 
+var sqliteCompanionSuffixes = [...]string{"-wal", "-shm", "-journal"}
+
 // Database identifies a discovered database and the root that contains its
 // .pellets directory.
 type Database struct {
@@ -26,6 +28,17 @@ type Database struct {
 // DatabasePath returns the one supported database path beneath root.
 func DatabasePath(root string) string {
 	return filepath.Join(root, MetadataDirectory, DatabaseFilename)
+}
+
+// DatabasePaths returns the database path followed by every SQLite companion
+// path that must receive the same filesystem and Git safeguards.
+func DatabasePaths(databasePath string) []string {
+	paths := make([]string, 1, 1+len(sqliteCompanionSuffixes))
+	paths[0] = databasePath
+	for _, suffix := range sqliteCompanionSuffixes {
+		paths = append(paths, databasePath+suffix)
+	}
+	return paths
 }
 
 // FindDatabase walks from start to the filesystem root and returns the nearest

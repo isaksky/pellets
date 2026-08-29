@@ -50,9 +50,9 @@ Create `.pellets/pellets.db` beneath the current directory, without registering 
 pl init-db
 ```
 
-Use this at a common parent before registering sibling repositories. Fail if a database already exists; never overwrite it.
+Use this at a common parent before registering sibling repositories. Fail if the database, its WAL/SHM/journal companions, or a symlinked `.pellets` metadata directory already exists; never overwrite or remove any of them.
 
-If the new database is inside a Git work tree, add `.pellets/` to Git’s local exclude file and fail if that path is already tracked.
+If the new database is inside a Git work tree, add `.pellets/` to Git’s local exclude file and fail if the database or any SQLite companion path is already tracked. Index-only entries and case-equivalent paths on case-insensitive filesystems count as tracked.
 
 ### `pl init`
 
