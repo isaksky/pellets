@@ -15,13 +15,22 @@ var version = "dev"
 
 func main() {
 	initializer := app.DatabaseInitializer{
+		Path: discovery.DatabasePath,
 		Open: func(ctx context.Context, path string) (app.DatabaseHandle, error) {
 			return sqlite.Open(ctx, path)
 		},
 		GitSafety: discovery.GitSafety{},
 	}
 	projectManager := app.ProjectManager{
-		Initialize: initializer,
+		Discover: app.ProjectDiscovery{
+			FindGitRoot: discovery.FindGitRoot,
+			FindDatabase: func(workingDirectory string) (app.Database, error) {
+				database, err := discovery.FindDatabase(workingDirectory)
+				return app.Database{Root: database.Root, Path: database.Path}, err
+			},
+			RelativeProjectPath: discovery.RelativeProjectPath,
+		},
+		Initialize: initializer.Init,
 		Open: func(ctx context.Context, path string) (storage.ProjectDatabase, error) {
 			return sqlite.OpenProjectDatabase(ctx, path)
 		},

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"pellets/internal/discovery"
 	"pellets/internal/domain"
 	"pellets/internal/storage"
 )
@@ -12,9 +11,28 @@ import (
 // ProjectDatabaseOpener opens the project storage boundary at path.
 type ProjectDatabaseOpener func(ctx context.Context, path string) (storage.ProjectDatabase, error)
 
+// Database identifies the selected database without exposing the concrete
+// filesystem discovery package to application use cases.
+type Database struct {
+	Root string
+	Path string
+}
+
+// ProjectDiscovery is the narrow discovery boundary needed by project use
+// cases. cmd/pl supplies the concrete filesystem and Git functions.
+type ProjectDiscovery struct {
+	FindGitRoot         func(ctx context.Context, workingDirectory string) (string, error)
+	FindDatabase        func(workingDirectory string) (Database, error)
+	RelativeProjectPath func(databaseRoot, projectRoot string) (string, error)
+}
+
+// ProjectDatabaseInitializer initializes the database selected for a Git root.
+type ProjectDatabaseInitializer func(ctx context.Context, root string) (InitializedDatabase, error)
+
 // ProjectManager registers and resolves Git work trees in selected databases.
 type ProjectManager struct {
-	Initialize DatabaseInitializer
+	Discover   ProjectDiscovery
+	Initialize ProjectDatabaseInitializer
 	Open       ProjectDatabaseOpener
 	GitSafety  DatabaseGitSafety
 }
@@ -28,24 +46,24 @@ func (manager ProjectManager) Init(ctx context.Context, workingDirectory, code s
 	if err := domain.ValidateProjectCode(code); err != nil {
 		return storage.Project{}, err
 	}
-	gitRoot, err := discovery.FindGitRoot(ctx, workingDirectory)
+	gitRoot, err := manager.Discover.FindGitRoot(ctx, workingDirectory)
 	if err != nil {
 		return storage.Project{}, err
 	}
 
-	database, err := discovery.FindDatabase(workingDirectory)
+	database, err := manager.Discover.FindDatabase(workingDirectory)
 	if err != nil {
 		if domain.PublicError(err).Code != "database_not_found" {
 			return storage.Project{}, err
 		}
-		initialized, initializeErr := manager.Initialize.Init(ctx, gitRoot)
+		initialized, initializeErr := manager.Initialize(ctx, gitRoot)
 		if initializeErr != nil {
 			return storage.Project{}, initializeErr
 		}
-		database = discovery.Database{Root: initialized.Root, Path: initialized.Path}
+		database = Database{Root: initialized.Root, Path: initialized.Path}
 	}
 
-	rootPath, err := discovery.RelativeProjectPath(database.Root, gitRoot)
+	rootPath, err := manager.Discover.RelativeProjectPath(database.Root, gitRoot)
 	if err != nil {
 		return storage.Project{}, err
 	}
@@ -67,7 +85,7 @@ func (manager ProjectManager) Init(ctx context.Context, workingDirectory, code s
 }
 
 // List returns every project registered in the selected database.
-func (manager ProjectManager) List(ctx context.Context, database discovery.Database) ([]storage.Project, error) {
+func (manager ProjectManager) List(ctx context.Context, database Database) ([]storage.Project, error) {
 	if err := manager.validateOpen(); err != nil {
 		return nil, err
 	}
@@ -80,7 +98,7 @@ func (manager ProjectManager) List(ctx context.Context, database discovery.Datab
 }
 
 // ShowByCode returns a named project without requiring a current Git work tree.
-func (manager ProjectManager) ShowByCode(ctx context.Context, database discovery.Database, code string) (storage.Project, error) {
+func (manager ProjectManager) ShowByCode(ctx context.Context, database Database, code string) (storage.Project, error) {
 	if err := manager.validateOpen(); err != nil {
 		return storage.Project{}, err
 	}
@@ -96,15 +114,15 @@ func (manager ProjectManager) ShowByCode(ctx context.Context, database discovery
 }
 
 // ShowCurrent resolves the nearest Git root to its registered relative path.
-func (manager ProjectManager) ShowCurrent(ctx context.Context, database discovery.Database, workingDirectory string) (storage.Project, error) {
-	if err := manager.validateOpen(); err != nil {
+func (manager ProjectManager) ShowCurrent(ctx context.Context, database Database, workingDirectory string) (storage.Project, error) {
+	if err := manager.validateCurrent(); err != nil {
 		return storage.Project{}, err
 	}
-	gitRoot, err := discovery.FindGitRoot(ctx, workingDirectory)
+	gitRoot, err := manager.Discover.FindGitRoot(ctx, workingDirectory)
 	if err != nil {
 		return storage.Project{}, err
 	}
-	rootPath, err := discovery.RelativeProjectPath(database.Root, gitRoot)
+	rootPath, err := manager.Discover.RelativeProjectPath(database.Root, gitRoot)
 	if err != nil {
 		return storage.Project{}, err
 	}
@@ -117,7 +135,7 @@ func (manager ProjectManager) ShowCurrent(ctx context.Context, database discover
 }
 
 func (manager ProjectManager) validate() error {
-	if manager.Initialize.Open == nil || manager.Initialize.GitSafety == nil || manager.Open == nil || manager.GitSafety == nil {
+	if manager.Discover.FindGitRoot == nil || manager.Discover.FindDatabase == nil || manager.Discover.RelativeProjectPath == nil || manager.Initialize == nil || manager.Open == nil || manager.GitSafety == nil {
 		return projectManagerConfigurationError()
 	}
 	return nil
@@ -125,6 +143,13 @@ func (manager ProjectManager) validate() error {
 
 func (manager ProjectManager) validateOpen() error {
 	if manager.Open == nil {
+		return projectManagerConfigurationError()
+	}
+	return nil
+}
+
+func (manager ProjectManager) validateCurrent() error {
+	if manager.Discover.FindGitRoot == nil || manager.Discover.RelativeProjectPath == nil || manager.Open == nil {
 		return projectManagerConfigurationError()
 	}
 	return nil

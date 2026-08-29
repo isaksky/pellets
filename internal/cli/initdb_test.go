@@ -255,6 +255,7 @@ func TestInitDBRejectsProjectOverride(t *testing.T) {
 
 func initDBTestApp(workingDirectory string) *App {
 	initializer := app.DatabaseInitializer{
+		Path: discovery.DatabasePath,
 		Open: func(ctx context.Context, path string) (app.DatabaseHandle, error) {
 			return sqlite.Open(ctx, path)
 		},

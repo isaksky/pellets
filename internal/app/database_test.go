@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"pellets/internal/discovery"
 	"pellets/internal/domain"
 )
 
@@ -16,6 +15,7 @@ func TestInitRemovesNewDatabaseWhenGitSafetyCannotBeCompleted(t *testing.T) {
 
 	root := t.TempDir()
 	initializer := DatabaseInitializer{
+		Path: testDatabasePath,
 		Open: func(_ context.Context, path string) (DatabaseHandle, error) {
 			if err := os.WriteFile(path+"-wal", []byte("created by initializer"), 0o600); err != nil {
 				return nil, err
@@ -29,13 +29,13 @@ func TestInitRemovesNewDatabaseWhenGitSafetyCannotBeCompleted(t *testing.T) {
 	if _, err := initializer.Init(context.Background(), root); err == nil {
 		t.Fatal("Init unexpectedly succeeded")
 	}
-	if _, err := os.Stat(discovery.DatabasePath(root)); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(testDatabasePath(root)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("database after failed Git safeguard: %v", err)
 	}
-	if _, err := os.Stat(discovery.DatabasePath(root) + "-wal"); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(testDatabasePath(root) + "-wal"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("owned WAL after failed Git safeguard: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, discovery.MetadataDirectory)); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(root, ".pellets")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("new metadata directory after failed Git safeguard: %v", err)
 	}
 }
@@ -49,7 +49,7 @@ func TestInitRejectsPreexistingCompanionsWithoutCallingDependencies(t *testing.T
 			t.Parallel()
 
 			root := t.TempDir()
-			databasePath := discovery.DatabasePath(root)
+			databasePath := testDatabasePath(root)
 			if err := os.Mkdir(filepath.Dir(databasePath), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -59,7 +59,7 @@ func TestInitRejectsPreexistingCompanionsWithoutCallingDependencies(t *testing.T
 				t.Fatal(err)
 			}
 			dependencies := &countingInitializationDependencies{}
-			initializer := DatabaseInitializer{Open: dependencies.open, GitSafety: dependencies}
+			initializer := DatabaseInitializer{Path: testDatabasePath, Open: dependencies.open, GitSafety: dependencies}
 
 			_, err := initializer.Init(context.Background(), root)
 			if err == nil || publicCode(err) != "database_companion_already_exists" {
@@ -80,9 +80,10 @@ func TestInitCleanupLeavesAReplacedCompanion(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	databasePath := discovery.DatabasePath(root)
+	databasePath := testDatabasePath(root)
 	replacement := []byte("replacement must survive")
 	initializer := DatabaseInitializer{
+		Path: testDatabasePath,
 		Open: func(_ context.Context, path string) (DatabaseHandle, error) {
 			companionPath := path + "-wal"
 			if err := os.WriteFile(companionPath, []byte("owned WAL"), 0o600); err != nil {
@@ -155,4 +156,8 @@ func (handle replacingCompanionHandle) Close() error {
 
 func publicCode(err error) string {
 	return domain.PublicError(err).Code
+}
+
+func testDatabasePath(root string) string {
+	return filepath.Join(root, ".pellets", "pellets.db")
 }

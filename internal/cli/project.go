@@ -117,9 +117,10 @@ func ProjectCommand(manager app.ProjectManager) Command {
 		},
 		Run: func(ctx context.Context, invocation Invocation) (any, error) {
 			input := invocation.Input.(projectInput)
+			database := app.Database{Root: invocation.Database.Root, Path: invocation.Database.Path}
 			switch input.Action {
 			case "list":
-				projects, err := manager.List(ctx, *invocation.Database)
+				projects, err := manager.List(ctx, database)
 				if err != nil {
 					return nil, err
 				}
@@ -136,9 +137,9 @@ func ProjectCommand(manager app.ProjectManager) Command {
 				var project storage.Project
 				var err error
 				if code == "" {
-					project, err = manager.ShowCurrent(ctx, *invocation.Database, invocation.WorkingDirectory)
+					project, err = manager.ShowCurrent(ctx, database, invocation.WorkingDirectory)
 				} else {
-					project, err = manager.ShowByCode(ctx, *invocation.Database, code)
+					project, err = manager.ShowByCode(ctx, database, code)
 				}
 				if err != nil {
 					return nil, err

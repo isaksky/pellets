@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"pellets/internal/discovery"
 	"pellets/internal/domain"
 )
 
@@ -20,6 +19,10 @@ type DatabaseHandle interface {
 // DatabaseOpener creates/configures/migrates the database at path.
 type DatabaseOpener func(ctx context.Context, path string) (DatabaseHandle, error)
 
+// DatabasePath locates the fixed database path beneath a selected root.
+// The composition root supplies the product's concrete filesystem layout.
+type DatabasePath func(root string) string
+
 // DatabaseGitSafety is the local-only Git safety boundary used by database
 // initialization.
 type DatabaseGitSafety interface {
@@ -30,6 +33,7 @@ type DatabaseGitSafety interface {
 // DatabaseInitializer creates a new database without ever opening an existing
 // path as part of initialization.
 type DatabaseInitializer struct {
+	Path      DatabasePath
 	Open      DatabaseOpener
 	GitSafety DatabaseGitSafety
 }
@@ -43,13 +47,8 @@ type InitializedDatabase struct {
 // Init creates and migrates the fixed database path beneath root. The empty
 // file is claimed with O_EXCL before SQLite opens it, preventing overwrite races.
 func (initializer DatabaseInitializer) Init(ctx context.Context, root string) (InitializedDatabase, error) {
-	if initializer.Open == nil || initializer.GitSafety == nil {
-		return InitializedDatabase{}, domain.NewError(
-			domain.Unexpected,
-			"internal_error",
-			"database initializer is not configured",
-			nil,
-		)
+	if err := initializer.validate(); err != nil {
+		return InitializedDatabase{}, err
 	}
 	absoluteRoot, err := filepath.Abs(root)
 	if err != nil {
@@ -64,7 +63,7 @@ func (initializer DatabaseInitializer) Init(ctx context.Context, root string) (I
 		return InitializedDatabase{}, databaseCreationFailure(absoluteRoot, errors.New("database root is not a directory"))
 	}
 
-	databasePath := discovery.DatabasePath(absoluteRoot)
+	databasePath := initializer.Path(absoluteRoot)
 	metadataPath := filepath.Dir(databasePath)
 	metadataInfo, metadataExists, err := inspectMetadataDirectory(metadataPath)
 	if err != nil {
@@ -173,7 +172,7 @@ type initializationOwnership struct {
 }
 
 func (owned *initializationOwnership) captureNewCompanions(databasePath string) error {
-	for _, path := range discovery.DatabasePaths(databasePath)[1:] {
+	for _, path := range databasePaths(databasePath)[1:] {
 		if _, exists := owned.files[path]; exists {
 			continue
 		}
@@ -196,7 +195,7 @@ func (owned *initializationOwnership) captureNewCompanions(databasePath string) 
 
 func cleanupFailedInitialization(databasePath string, owned initializationOwnership, cause error) error {
 	var cleanupErrors []error
-	paths := discovery.DatabasePaths(databasePath)
+	paths := databasePaths(databasePath)
 	for index := len(paths) - 1; index >= 0; index-- {
 		path := paths[index]
 		original, ok := owned.files[path]
@@ -277,7 +276,7 @@ func verifySameDirectory(path string, original os.FileInfo) error {
 }
 
 func rejectExistingDatabasePaths(databasePath string) error {
-	for index, path := range discovery.DatabasePaths(databasePath) {
+	for index, path := range databasePaths(databasePath) {
 		_, err := os.Lstat(path)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -291,6 +290,27 @@ func rejectExistingDatabasePaths(databasePath string) error {
 		return databaseCompanionAlreadyExists(databasePath, path)
 	}
 	return nil
+}
+
+func (initializer DatabaseInitializer) validate() error {
+	if initializer.Path == nil || initializer.Open == nil || initializer.GitSafety == nil {
+		return domain.NewError(
+			domain.Unexpected,
+			"internal_error",
+			"database initializer is not configured",
+			nil,
+		)
+	}
+	return nil
+}
+
+func databasePaths(databasePath string) []string {
+	return []string{
+		databasePath,
+		databasePath + "-wal",
+		databasePath + "-shm",
+		databasePath + "-journal",
+	}
 }
 
 func databaseAlreadyExists(databasePath string) error {
