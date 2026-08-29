@@ -93,6 +93,8 @@ jobs:
         with:
           go-version: 1.26.5
           cache-dependency-path: go.sum
+      - name: Validate committed Scoop manifest structure
+        run: ./scripts/check-scoop-manifest.py bucket/pl.json
       - name: Select release version
         id: release-version
         shell: bash
@@ -111,6 +113,16 @@ jobs:
         run: |
           ./scripts/build-release.sh "${{ steps.release-version.outputs.version }}"
           printf '%s\n' "${{ steps.release-version.outputs.version }}" >dist/release-version.txt
+      - name: Match Scoop release metadata or prepare the CI test manifest
+        shell: bash
+        run: |
+          version="$(<dist/release-version.txt)"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" == v* ]]; then
+            ./scripts/update-scoop-manifest.sh --check "$version" dist
+          else
+            ./scripts/update-scoop-manifest.sh --write "$version" dist
+          fi
+          cp bucket/pl.json dist/scoop-pl.json
       - name: Retain verified release archives
         uses: actions/upload-artifact@v7
         with:
@@ -120,10 +132,10 @@ jobs:
           retention-days: 14
 
   windows-release-smoke:
-    name: Smoke-test macOS-produced Windows archive
+    name: Smoke-test Windows archive and Scoop bucket
     needs: release-archives
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -191,6 +203,11 @@ jobs:
           } finally {
             Pop-Location
           }
+      - name: Install, update, and uninstall through the repository Scoop bucket
+        shell: pwsh
+        run: |
+          $version = (Get-Content "dist/release-version.txt").Trim()
+          ./scripts/test-scoop-install.ps1 -Version $version -ReleaseDirectory dist
 
   homebrew-release-check:
     name: Validate and install the Homebrew formula
@@ -231,7 +248,7 @@ jobs:
       - homebrew-release-check
     runs-on: ubuntu-latest
     steps:
-      - name: Require native tests, cross-builds, and archive smoke tests
+      - name: Require native tests, cross-builds, packaging, and archive smoke tests
         env:
           NATIVE_TEST_RESULT: ${{ needs.foundation-tests.result }}
           CROSS_BUILD_RESULT: ${{ needs.cgo-free-cross-builds.result }}

@@ -1,0 +1,10 @@
+{
+    "version": "0.1.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/isaksky/pellets/releases/download/v0.1.0/pellets_0.1.0_windows_amd64.zip",
+            "hash": "a999de6d3a3560d06eb480e10f1e770147212a8df1286faf882cae133d48821e"
+        }
+    },
+    "bin": "pl.exe"
+}

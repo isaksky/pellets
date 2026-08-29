@@ -273,6 +273,8 @@ Required CI jobs:
 - a no-network smoke test after dependencies are already vendored/cached for the build.
 - deterministic Homebrew formula rendering from the versioned macOS archive checksums;
 - native Homebrew formula style, cached-archive install, and `pl --version` testing before a tagged GitHub Release is published.
+- deterministic minimal Scoop manifest rendering from the versioned Windows AMD64 archive checksum plus macOS structural validation;
+- native per-user Windows Scoop bucket add, cached-archive install, update, `pl --version`, and uninstall testing before a tagged GitHub Release is published.
 
 Because hands-on Windows testing is unavailable, Windows-specific integration tests are release-blocking. Do not claim Windows ARM64 support based only on successful compilation.
 

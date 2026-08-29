@@ -269,6 +269,25 @@ macOS/Windows platform gate, so stale formula metadata cannot be published.
 The project creates no separate tap repository, bottles, or `homebrew/core`
 submission.
 
+### Same-repository Scoop bucket
+
+The application repository is also the project-owned Scoop bucket. Its
+top-level `bucket/pl.json` contains only the stable version, a Windows AMD64
+GitHub Release URL and SHA-256, and the `pl.exe` binary declaration. Scoop
+therefore installs the release archive per user, creates the `pl` shim on PATH,
+and needs no installer, elevation, or separate bucket repository.
+
+Before a stable `vX.Y.Z` tag, the repository-owned manifest updater renders
+the manifest from the release builder's checksum file after independently
+hashing the Windows archive. macOS CI checks the committed JSON structure and
+the tag build requires the committed version, fixed asset name, and hash to
+match those verified inputs. Windows CI adds the checked-out application
+repository as a bucket, installs from the verified cached archive, runs
+`pl --version`, exercises the normal update path, and uninstalls it. GitHub
+Release publication remains behind that platform gate, so stale Scoop metadata
+cannot be published. The project creates no separate bucket, external bucket
+submission, installer, or package-management framework.
+
 ## Explicitly absent components
 
 There is no package or boundary for:

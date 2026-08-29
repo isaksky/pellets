@@ -34,15 +34,38 @@ brew uninstall isaksky/pellets/pl
 brew untap isaksky/pellets
 ```
 
+## Install on Windows with Scoop
+
+Pellets uses a project-owned Scoop bucket in this same `isaksky/pellets`
+source repository; no separate bucket or installer is involved. Add the
+repository by its explicit URL, then install its `pl` manifest:
+
+```text
+scoop bucket add pellets https://github.com/isaksky/pellets.git
+scoop install pellets/pl
+```
+
+Scoop installs Pellets for the current user without administrator privileges.
+Upgrade or uninstall it with:
+
+```text
+scoop update
+scoop update pl
+scoop uninstall pl
+scoop bucket rm pellets
+```
+
 ## Build release archives
 
 Run the repository-owned release builder on macOS with a SemVer value (without
 a leading `v`). Stable releases use the Go 1.26.5 toolchain pinned by CI. After
-building, render `Formula/pl.rb` from the verified archive checksums:
+building, render `Formula/pl.rb` and `bucket/pl.json` from the verified archive
+checksums:
 
 ```text
 ./scripts/build-release.sh 1.2.3
 ./scripts/update-homebrew-formula.sh --write 1.2.3
+./scripts/update-scoop-manifest.sh --write 1.2.3
 ```
 
 It writes these fixed files to `dist/` (or to an optional second-argument
@@ -71,10 +94,11 @@ The archive layout and names are stable release inputs. The Go binaries are
 not promised to be byte-identical across toolchain versions, operating
 systems, or compression implementations. Re-running the same version replaces
 only those four versioned output files. A stable `vX.Y.Z` tag rebuilds the
-assets with the pinned toolchain, rejects formula version/URL/hash drift,
-installs and tests the native formula without artifact network access, and
-publishes the GitHub Release only after the complete platform gate passes.
-Signing, notarization, bottles, and installers are not part of this process.
+assets with the pinned toolchain, rejects Homebrew and Scoop
+version/asset/hash drift, installs and tests both package-manager definitions
+with the verified archives, and publishes the GitHub Release only after the
+complete platform gate passes. Signing, notarization, bottles, and installers
+are not part of this process.
 
 ## Start a project
 
