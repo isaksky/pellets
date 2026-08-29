@@ -374,12 +374,78 @@ func TestPelletLifecycleCommandsJSONGolden(t *testing.T) {
 	assertGolden(t, "pellet-lifecycle.golden", outputs.String())
 }
 
+func TestPelletSearchCommandJSONGoldenAndHumanEmpty(t *testing.T) {
+	t.Parallel()
+
+	repositoryRoot := filepath.Join(t.TempDir(), "pellet search repository")
+	if err := os.MkdirAll(repositoryRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repositoryRoot, "init", "--quiet")
+	if stdout, stderr, exit := runTestApp(initDBTestApp(repositoryRoot), "init-db"); exit != 0 || stderr != "" {
+		t.Fatalf("init-db = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+	current := repositoryRoot
+	application := projectTestApp(&current)
+	runProjectInit(t, application, "search")
+
+	runPelletCommand(t, application,
+		"add", "Searchtoken pl-im9 parser_code", "--description", `c++ (broken "quote`,
+		"--external-id", "Case:Exact", "--group", "Rollout/A",
+	)
+	runPelletCommand(t, application, "add", "ranktoken")
+	runPelletCommand(t, application, "add", "ranktoken", "--maybe-later")
+	runPelletCommand(t, application, "add", "ranktoken")
+	runPelletCommand(t, application, "close", "search-4")
+
+	database, err := sqlite.Open(context.Background(), discovery.DatabasePath(repositoryRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		UPDATE pellets SET updated_at = julianday('2030-01-01T00:00:00Z')
+		WHERE project_id = 1 AND number = 3`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		UPDATE pellets
+		SET updated_at = julianday('2031-01-01T00:00:00Z'),
+		    completed_at = julianday('2031-01-01T00:00:00Z')
+		WHERE project_id = 1 AND number = 4`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var outputs strings.Builder
+	appendPelletGolden(t, &outputs, "search-hyphen", runPelletCommand(t, application, "search", "pl-im9"))
+	appendPelletGolden(t, &outputs, "search-underscore", runPelletCommand(t, application, "search", "parser_code"))
+	appendPelletGolden(t, &outputs, "search-external-text", runPelletCommand(t, application, "search", "Case:Exact"))
+	appendPelletGolden(t, &outputs, "search-all-statuses", runPelletCommand(t, application, "search", "ranktoken"))
+	appendPelletGolden(t, &outputs, "search-status", runPelletCommand(t, application, "search", "ranktoken", "--status", "maybe_later"))
+	appendPelletGolden(t, &outputs, "search-exact-filters", runPelletCommand(
+		t, application, "search", "Searchtoken", "--external-id", "Case:Exact", "--group", "Rollout/A",
+	))
+	appendPelletGolden(t, &outputs, "search-limit", runPelletCommand(t, application, "search", "ranktoken", "--limit", "1"))
+	appendPelletGolden(t, &outputs, "search-malformed-as-text", runPelletCommand(t, application, "search", `ranktoken OR (`))
+	assertGolden(t, "pellet-search.golden", outputs.String())
+
+	stdout, stderr, exit := runTestApp(application, "--human", "search", "missing")
+	if exit != 0 || stderr != "" || stdout != "No pellets.\n" {
+		t.Fatalf("human empty search = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+}
+
 func TestPelletCommandUsageValidationIsStrictAndSideEffectFree(t *testing.T) {
 	t.Parallel()
 
 	application := New(
 		"test",
 		AddCommand(emptyPelletManager()), MoveCommand(emptyPelletManager()), ListCommand(emptyPelletManager()), ShowCommand(emptyPelletManager()),
+		SearchCommand(emptyPelletManager()),
 		EditCommand(emptyPelletManager()), NextCommand(emptyPelletManager()), StartCommand(emptyPelletManager()),
 		StartNextCommand(emptyPelletManager()), ReleaseCommand(emptyPelletManager()), CloseCommand(emptyPelletManager()),
 		ReopenCommand(emptyPelletManager()), DeferCommand(emptyPelletManager()),
@@ -404,6 +470,11 @@ func TestPelletCommandUsageValidationIsStrictAndSideEffectFree(t *testing.T) {
 		{[]string{"list", "--status", "unknown"}, "invalid_status"},
 		{[]string{"list", "--status", "open", "--all"}, "conflicting_flags"},
 		{[]string{"list", "--limit", "0"}, "invalid_limit"},
+		{[]string{"search"}, "missing_query"},
+		{[]string{"search", "   "}, "missing_query"},
+		{[]string{"search", "query", "extra"}, "unexpected_argument"},
+		{[]string{"search", "query", "--status", "unknown"}, "invalid_status"},
+		{[]string{"search", "query", "--limit", "0"}, "invalid_limit"},
 		{[]string{"show", "12"}, "invalid_reference"},
 		{[]string{"edit", "shared-1"}, "missing_edit"},
 		{[]string{"edit", "shared-1", "--status", "closed"}, "unknown_flag"},

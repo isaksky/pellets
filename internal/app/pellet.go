@@ -76,6 +76,24 @@ func (manager PelletManager) List(
 	return pellets, closePelletRepository(repository, operationErr)
 }
 
+func (manager PelletManager) Search(
+	ctx context.Context,
+	database Database,
+	workingDirectory, selectedCode string,
+	options storage.PelletSearchOptions,
+) ([]storage.Pellet, error) {
+	resolved, err := manager.resolve(ctx, database, workingDirectory, selectedCode)
+	if err != nil {
+		return nil, err
+	}
+	repository, err := manager.open(ctx, database.Path)
+	if err != nil {
+		return nil, err
+	}
+	pellets, operationErr := repository.SearchPellets(ctx, resolved, options)
+	return pellets, closePelletRepository(repository, operationErr)
+}
+
 func (manager PelletManager) Show(
 	ctx context.Context,
 	database Database,

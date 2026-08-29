@@ -91,6 +91,33 @@ func ListCommand(manager app.PelletManager) Command {
 	}
 }
 
+func SearchCommand(manager app.PelletManager) Command {
+	return Command{
+		Name:    "search",
+		Summary: "Search pellet title, description, and external ID text.",
+		Usage:   "pl search QUERY [--external-id ID] [--group GROUP] [--status STATUS] [--limit N]",
+		Parse:   parseSearch,
+		Run: func(ctx context.Context, invocation Invocation) (any, error) {
+			input := invocation.Input.(searchInput)
+			pellets, err := manager.Search(
+				ctx, invocationDatabase(invocation), invocation.WorkingDirectory, invocation.Globals.Project,
+				storage.PelletSearchOptions{
+					Query: input.Query, Status: input.Status,
+					ExternalID: input.ExternalID, Group: input.Group, Limit: input.Limit,
+				},
+			)
+			if err != nil {
+				return nil, err
+			}
+			result := make(pelletListData, len(pellets))
+			for index, pellet := range pellets {
+				result[index] = newPelletData(pellet)
+			}
+			return result, nil
+		},
+	}
+}
+
 func ShowCommand(manager app.PelletManager) Command {
 	return Command{
 		Name:    "show",
@@ -382,6 +409,73 @@ type listInput struct {
 	Group      *string
 	All        bool
 	Limit      *int64
+}
+
+type searchInput struct {
+	Query      string
+	Status     *domain.PelletStatus
+	ExternalID *string
+	Group      *string
+	Limit      *int64
+}
+
+func parseSearch(args []string) (any, error) {
+	var input searchInput
+	querySet := false
+	seen := make(map[string]bool)
+	for len(args) > 0 {
+		argument := args[0]
+		if !strings.HasPrefix(argument, "-") {
+			if querySet {
+				return nil, unexpectedArgument(argument)
+			}
+			if strings.TrimSpace(argument) == "" {
+				return nil, domain.NewError(domain.Usage, "missing_query", "search requires a non-empty QUERY", nil)
+			}
+			input.Query = argument
+			querySet = true
+			args = args[1:]
+			continue
+		}
+
+		name, value, hasValue := splitOption(argument)
+		if seen[name] {
+			return nil, duplicateCommandFlag(name)
+		}
+		seen[name] = true
+		switch name {
+		case "--status", "--external-id", "--group", "--limit":
+			var err error
+			value, args, err = takeCommandFlagValue(args, name, value, hasValue, false, false)
+			if err != nil {
+				return nil, err
+			}
+			switch name {
+			case "--status":
+				status := domain.PelletStatus(value)
+				if err := domain.ValidatePelletStatus(status); err != nil {
+					return nil, err
+				}
+				input.Status = &status
+			case "--external-id":
+				input.ExternalID = stringPointer(value)
+			case "--group":
+				input.Group = stringPointer(value)
+			case "--limit":
+				limit, parseErr := strconv.ParseInt(value, 10, 64)
+				if parseErr != nil || limit <= 0 {
+					return nil, invalidLimit(value)
+				}
+				input.Limit = &limit
+			}
+		default:
+			return nil, unknownFlag(name)
+		}
+	}
+	if !querySet {
+		return nil, domain.NewError(domain.Usage, "missing_query", "search requires a non-empty QUERY", nil)
+	}
+	return input, nil
 }
 
 func parseList(args []string) (any, error) {

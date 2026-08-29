@@ -68,6 +68,23 @@ type PelletListOptions struct {
 	Limit      *int64
 }
 
+// PelletSearchOptions describes project-scoped full-text search plus exact
+// relational filters. A nil Status deliberately includes every lifecycle
+// status, including closed and maybe_later pellets.
+type PelletSearchOptions struct {
+	Query      string
+	Status     *domain.PelletStatus
+	ExternalID *string
+	Group      *string
+	Limit      *int64
+}
+
+// PelletPurgeOptions selects closed authoritative rows for permanent removal.
+// Confirmation and dry-run handling belong to the application/CLI boundary.
+type PelletPurgeOptions struct {
+	CompletedBefore *time.Time
+}
+
 type NextSelectionReason string
 
 const (
@@ -115,10 +132,13 @@ type PelletRepository interface {
 	CreatePellet(ctx context.Context, project ResolvedProject, input NewPellet) (Pellet, error)
 	MovePellet(ctx context.Context, project ResolvedProject, reference domain.PelletReference, placement PelletPlacement) (Pellet, error)
 	ListPellets(ctx context.Context, project ResolvedProject, options PelletListOptions) ([]Pellet, error)
+	SearchPellets(ctx context.Context, project ResolvedProject, options PelletSearchOptions) ([]Pellet, error)
+	PurgeClosedPellets(ctx context.Context, project Project, options PelletPurgeOptions) ([]domain.PelletReference, error)
 	NextPellet(ctx context.Context, project ResolvedProject, externalID, group *string) (NextSelection, error)
 	StartNextPellet(ctx context.Context, project ResolvedProject, externalID, group *string) (NextSelection, error)
 	ReadPellet(ctx context.Context, project ResolvedProject, reference domain.PelletReference) (Pellet, error)
 	UpdatePellet(ctx context.Context, project ResolvedProject, reference domain.PelletReference, changes PelletChanges) (Pellet, error)
 	TransitionPellet(ctx context.Context, project ResolvedProject, reference domain.PelletReference, request PelletLifecycleRequest) (PelletLifecycleResult, error)
+	RebuildPelletSearchIndex(ctx context.Context) error
 	Close() error
 }

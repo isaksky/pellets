@@ -121,7 +121,7 @@ func (repository *PelletRepository) CreatePellet(ctx context.Context, project st
 	if _, err := connection.ExecContext(ctx, `
 		INSERT INTO pellets_fts(rowid, title, description, external_id)
 		VALUES (?, ?, ?, ?)`, rowID, normalized.Title, normalized.Description, nullableTextValue(normalized.ExternalID)); err != nil {
-		return storage.Pellet{}, pelletStorageError("index inserted pellet", err)
+		return storage.Pellet{}, pelletFTSError("index inserted pellet", err)
 	}
 
 	pellet, err := loadPellet(ctx, connection, project.Project.ID, project.Project.Code, number)
@@ -288,6 +288,187 @@ func (repository *PelletRepository) ListPellets(ctx context.Context, project sto
 		return nil, pelletStorageError("iterate listed pellets", err)
 	}
 	return pellets, nil
+}
+
+// SearchPellets uses only the derived FTS5 index for candidate retrieval. The
+// project, external-ID, group, and status constraints remain authoritative
+// relational predicates over pellets.
+func (repository *PelletRepository) SearchPellets(ctx context.Context, project storage.ResolvedProject, options storage.PelletSearchOptions) ([]storage.Pellet, error) {
+	if err := validatePelletProjectContext(project); err != nil {
+		return nil, err
+	}
+	if err := validatePelletSearchOptions(options); err != nil {
+		return nil, err
+	}
+
+	query := `
+		SELECT p.project_id, project.code, p.number,
+		       p.title, p.description, p.external_id, p.group_id,
+		       p.status, p.priority,
+		       strftime('%Y-%m-%dT%H:%M:%fZ', p.created_at),
+		       strftime('%Y-%m-%dT%H:%M:%fZ', p.updated_at),
+		       strftime('%Y-%m-%dT%H:%M:%fZ', p.completed_at),
+		       workspace.workspace_id, workspace.project_id,
+		       workspace.root_path, workspace.root_path_relative,
+		       workspace.git_dir, workspace.git_dir_relative,
+		       strftime('%Y-%m-%dT%H:%M:%fZ', workspace.created_at),
+		       strftime('%Y-%m-%dT%H:%M:%fZ', workspace.updated_at)
+		FROM pellets_fts
+		JOIN pellets AS p ON p.rowid = pellets_fts.rowid
+		JOIN projects AS project ON project.project_id = p.project_id
+		LEFT JOIN project_workspaces AS workspace
+		  ON workspace.project_id = p.project_id
+		 AND workspace.workspace_id = p.workspace_id
+		WHERE pellets_fts MATCH ? AND p.project_id = ?`
+	arguments := []any{escapeFTS5Query(options.Query), project.Project.ID}
+	if options.Status != nil {
+		query += " AND p.status = ?"
+		arguments = append(arguments, *options.Status)
+	}
+	if options.ExternalID != nil {
+		query += " AND p.external_id = ?"
+		arguments = append(arguments, *options.ExternalID)
+	}
+	if options.Group != nil {
+		query += " AND p.group_id = ?"
+		arguments = append(arguments, *options.Group)
+	}
+	query += `
+		ORDER BY bm25(pellets_fts, 8.0, 2.0, 1.0),
+		         p.priority IS NULL,
+		         p.priority,
+		         p.updated_at DESC,
+		         p.number`
+	if options.Limit != nil {
+		query += " LIMIT ?"
+		arguments = append(arguments, *options.Limit)
+	}
+
+	rows, err := repository.db.QueryContext(ctx, query, arguments...)
+	if err != nil {
+		return nil, pelletFTSError("search pellets", err)
+	}
+	defer rows.Close()
+	pellets := make([]storage.Pellet, 0)
+	for rows.Next() {
+		pellet, scanErr := scanPellet(rows)
+		if scanErr != nil {
+			return nil, pelletStorageError("read pellet search result", scanErr)
+		}
+		pellets = append(pellets, pellet)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, pelletFTSError("iterate pellet search results", err)
+	}
+	return pellets, nil
+}
+
+// RebuildPelletSearchIndex regenerates the disposable external-content index
+// from all authoritative pellet rows under one writer transaction.
+func (repository *PelletRepository) RebuildPelletSearchIndex(ctx context.Context) error {
+	connection, err := repository.db.Conn(ctx)
+	if err != nil {
+		return pelletStorageError("open pellet search rebuild connection", err)
+	}
+	defer connection.Close()
+	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return pelletStorageError("begin pellet search rebuild", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = connection.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+
+	if _, err := connection.ExecContext(ctx, "INSERT INTO pellets_fts(pellets_fts) VALUES ('rebuild')"); err != nil {
+		return pelletFTSError("rebuild pellet search index", err)
+	}
+	if _, err := connection.ExecContext(ctx, "INSERT INTO pellets_fts(pellets_fts) VALUES ('integrity-check')"); err != nil {
+		return pelletFTSError("verify rebuilt pellet search index", err)
+	}
+	if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
+		return pelletStorageError("commit pellet search rebuild", err)
+	}
+	committed = true
+	return nil
+}
+
+// PurgeClosedPellets removes the selected authoritative rows and their
+// external-content FTS entries under the same immediate transaction. The
+// separate purge command owns confirmation and dry-run policy.
+func (repository *PelletRepository) PurgeClosedPellets(ctx context.Context, project storage.Project, options storage.PelletPurgeOptions) ([]domain.PelletReference, error) {
+	if err := validatePelletProject(project); err != nil {
+		return nil, err
+	}
+
+	connection, err := repository.db.Conn(ctx)
+	if err != nil {
+		return nil, pelletStorageError("open pellet purge connection", err)
+	}
+	defer connection.Close()
+	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return nil, pelletStorageError("begin pellet purge", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = connection.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+	if err := ensureStoredProject(ctx, connection, project); err != nil {
+		return nil, err
+	}
+
+	predicate := "project_id = ? AND status = 'closed'"
+	arguments := []any{project.ID}
+	if options.CompletedBefore != nil {
+		predicate += " AND completed_at < julianday(?)"
+		arguments = append(arguments, options.CompletedBefore.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"))
+	}
+	rows, err := connection.QueryContext(ctx, "SELECT number FROM pellets WHERE "+predicate+" ORDER BY number", arguments...)
+	if err != nil {
+		return nil, pelletStorageError("select closed pellets for purge", err)
+	}
+	references := make([]domain.PelletReference, 0)
+	for rows.Next() {
+		var number int64
+		if err := rows.Scan(&number); err != nil {
+			_ = rows.Close()
+			return nil, pelletStorageError("read closed pellet purge selection", err)
+		}
+		references = append(references, domain.PelletReference{ProjectCode: project.Code, Number: number})
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, pelletStorageError("iterate closed pellet purge selection", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, pelletStorageError("close closed pellet purge selection", err)
+	}
+
+	if _, err := connection.ExecContext(ctx, `
+		INSERT INTO pellets_fts(pellets_fts, rowid, title, description, external_id)
+		SELECT 'delete', rowid, title, description, external_id
+		FROM pellets WHERE `+predicate, arguments...); err != nil {
+		return nil, pelletFTSError("remove purged pellets from search index", err)
+	}
+	result, err := connection.ExecContext(ctx, "DELETE FROM pellets WHERE "+predicate, arguments...)
+	if err != nil {
+		return nil, pelletStorageError("delete purged pellets", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return nil, pelletStorageError("verify purged pellet count", err)
+	}
+	if deleted != int64(len(references)) {
+		return nil, pelletStorageError("verify purged pellet count", fmt.Errorf("deleted %d rows, selected %d", deleted, len(references)))
+	}
+	if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
+		return nil, pelletStorageError("commit pellet purge", err)
+	}
+	committed = true
+	return references, nil
 }
 
 // NextPellet reads one consistent selection and never begins a write
@@ -833,7 +1014,7 @@ func (repository *PelletRepository) UpdatePellet(ctx context.Context, project st
 			SELECT 'delete', rowid, title, description, external_id
 			FROM pellets
 			WHERE project_id = ? AND number = ?`, project.Project.ID, reference.Number); err != nil {
-			return storage.Pellet{}, pelletStorageError("remove old pellet search text", err)
+			return storage.Pellet{}, pelletFTSError("remove old pellet search text", err)
 		}
 	}
 	if _, err := connection.ExecContext(ctx, `
@@ -850,7 +1031,7 @@ func (repository *PelletRepository) UpdatePellet(ctx context.Context, project st
 			SELECT rowid, title, description, external_id
 			FROM pellets
 			WHERE project_id = ? AND number = ?`, project.Project.ID, reference.Number); err != nil {
-			return storage.Pellet{}, pelletStorageError("index updated pellet", err)
+			return storage.Pellet{}, pelletFTSError("index updated pellet", err)
 		}
 	}
 	updated, err := loadPellet(ctx, connection, project.Project.ID, project.Project.Code, reference.Number)
@@ -1189,6 +1370,16 @@ func validatePelletProjectContext(project storage.ResolvedProject) error {
 	return nil
 }
 
+func validatePelletProject(project storage.Project) error {
+	if project.ID <= 0 {
+		return domain.NewError(domain.Unexpected, "internal_error", "resolved pellet project context is inconsistent", nil)
+	}
+	if err := domain.ValidateProjectCode(project.Code); err != nil {
+		return domain.NewError(domain.Unexpected, "internal_error", "resolved pellet project code is invalid", nil)
+	}
+	return nil
+}
+
 func validateReferenceProject(project storage.ResolvedProject, reference domain.PelletReference) error {
 	if reference.ProjectCode == project.Project.Code && reference.Number > 0 {
 		return nil
@@ -1266,6 +1457,35 @@ func validatePelletListOptions(options storage.PelletListOptions) error {
 		return domain.NewError(domain.Usage, "invalid_limit", "limit must be a positive integer", map[string]any{"limit": *options.Limit})
 	}
 	return nil
+}
+
+func validatePelletSearchOptions(options storage.PelletSearchOptions) error {
+	if strings.TrimSpace(options.Query) == "" {
+		return domain.NewError(domain.Usage, "missing_query", "search requires a non-empty QUERY", nil)
+	}
+	if options.Status != nil {
+		if err := domain.ValidatePelletStatus(*options.Status); err != nil {
+			return err
+		}
+	}
+	if err := validateNullablePelletText("external_id", options.ExternalID); err != nil {
+		return err
+	}
+	if err := validateNullablePelletText("group", options.Group); err != nil {
+		return err
+	}
+	if options.Limit != nil && *options.Limit <= 0 {
+		return domain.NewError(domain.Usage, "invalid_limit", "limit must be a positive integer", map[string]any{"limit": *options.Limit})
+	}
+	return nil
+}
+
+func escapeFTS5Query(query string) string {
+	terms := strings.Fields(query)
+	for index, term := range terms {
+		terms[index] = `"` + strings.ReplaceAll(term, `"`, `""`) + `"`
+	}
+	return strings.Join(terms, " ")
 }
 
 func placementFlag(placement storage.PelletPlacement) string {
@@ -1377,5 +1597,22 @@ func pelletStorageError(operation string, err error) error {
 		"could not access pellet records",
 		map[string]any{"operation": operation},
 		fmt.Errorf("%s: %w", operation, err),
+	)
+}
+
+func pelletFTSError(operation string, err error) error {
+	var sqliteError interface{ Code() int }
+	if errors.As(err, &sqliteError) {
+		primaryCode := sqliteError.Code() & 0xff
+		if primaryCode == 5 || primaryCode == 6 {
+			return pelletStorageError(operation, err)
+		}
+	}
+	return domain.WrapError(
+		domain.Storage,
+		"fts_unavailable",
+		"pellet full-text search is unavailable",
+		map[string]any{"operation": operation},
+		err,
 	)
 }

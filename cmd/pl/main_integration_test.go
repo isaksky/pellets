@@ -178,6 +178,23 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		if closedFirst.Status != "closed" || closedFirst.Priority != nil || closedFirst.Workspace != nil || closedFirst.CompletedAt == nil || closedSecond.Status != "closed" || closedSecond.Priority != nil || closedSecond.Workspace != nil || closedSecond.CompletedAt == nil {
 			t.Fatalf("compiled closes = %#v and %#v", closedFirst, closedSecond)
 		}
+		searchedClosed := decodeFoundationSuccess[[]foundationPellet](
+			t,
+			runFoundationCLI(
+				t, executable, linkedRoot, "search", "Case:Exact",
+				"--external-id", "Case:Exact", "--group", "Rollout/A",
+			),
+			"search",
+		)
+		if len(searchedClosed) != 2 || searchedClosed[0].Status != "closed" || searchedClosed[1].Status != "closed" {
+			t.Fatalf("compiled default search did not include closed pellets: %#v", searchedClosed)
+		}
+		malformedLiteral := decodeFoundationSuccess[[]foundationPellet](
+			t, runFoundationCLI(t, executable, linkedRoot, "search", `Case:Exact OR (`), "search",
+		)
+		if malformedLiteral == nil || len(malformedLiteral) != 0 {
+			t.Fatalf("compiled malformed FTS text = %#v, want typed empty result", malformedLiteral)
+		}
 
 		edited := decodeFoundationSuccess[foundationPellet](
 			t,
@@ -189,6 +206,12 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		)
 		if edited.Title != "Second edited" || edited.Group != nil || !reflect.DeepEqual(shown, edited) {
 			t.Fatalf("compiled edit/show = %#v / %#v", edited, shown)
+		}
+		searchedEdit := decodeFoundationSuccess[[]foundationPellet](
+			t, runFoundationCLI(t, executable, mainRoot, "search", "edited"), "search",
+		)
+		if len(searchedEdit) != 1 || searchedEdit[0].ID != second.ID || !reflect.DeepEqual(searchedEdit[0], edited) {
+			t.Fatalf("compiled search after indexed edit = %#v, want %#v", searchedEdit, edited)
 		}
 
 		empty := decodeFoundationSuccess[[]foundationPellet](
@@ -202,6 +225,23 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		)
 		if none.SelectionReason != "none" || none.Pellet != nil {
 			t.Fatalf("compiled typed empty next = %#v", none)
+		}
+
+		databasePath := discovery.DatabasePath(foundationCanonicalPath(t, common))
+		database, err := sqlite.Open(context.Background(), databasePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec("DROP TABLE pellets_fts"); err != nil {
+			database.Close()
+			t.Fatal(err)
+		}
+		if err := database.Close(); err != nil {
+			t.Fatal(err)
+		}
+		ftsUnavailable := runFoundationCLI(t, executable, mainRoot, "search", "edited")
+		if ftsUnavailable.exit != 5 || ftsUnavailable.stdout != "" || !strings.Contains(ftsUnavailable.stderr, `"code":"fts_unavailable"`) {
+			t.Fatalf("compiled unavailable FTS search = %#v", ftsUnavailable)
 		}
 	})
 
