@@ -1,0 +1,208 @@
+# Architecture
+
+Pellets is a single-process Go CLI around a local SQLite database. It has no daemon, server, network client, plugin loader, or embedding runtime.
+
+See [project-goals.md](project-goals.md) for the product boundary, [data-model.md](data-model.md) for schema and ordering invariants, [cli-spec.md](cli-spec.md) for the public interface, and [0001-initial-architecture.md](decisions/0001-initial-architecture.md) for the initial decision record.
+
+## High-level design
+
+Each invocation follows the same shape:
+
+1. Parse global options and the subcommand without opening the database.
+2. Locate the nearest `.pellets/pellets.db` by walking from the working directory toward the filesystem root, unless the command is creating a database.
+3. Find the nearest Git root and resolve it to a registered project path relative to the database root.
+4. Open SQLite, configure the connection, validate/migrate the schema, and verify the registered project.
+5. Execute one application operation through a narrow storage interface.
+6. Emit one compact, versioned JSON result to stdout, or one structured JSON error to stderr.
+
+Commands such as `init-db` and `init` vary in discovery behavior as described in [cli-spec.md](cli-spec.md).
+
+```mermaid
+flowchart LR
+    A[Agent or human] --> B[pl command parser]
+    B --> C[Database and Git project discovery]
+    C --> D[Application services]
+    D --> E[SQLite storage]
+    E --> F[(.pellets/pellets.db)]
+    E --> G[FTS5 task index]
+    E --> H[FTS5 memory index]
+    D --> I[JSON or human renderer]
+    I --> A
+```
+
+## Proposed Go package structure
+
+```text
+cmd/pl/                 executable entry point
+internal/cli/           command definitions, flag parsing, exit mapping
+internal/discovery/     database-root and Git-root discovery
+internal/app/           use cases and transaction boundaries
+internal/domain/        statuses, references, validation, typed errors
+internal/storage/       storage interfaces used by app
+internal/storage/sqlite explicit SQL, migrations, FTS maintenance
+internal/output/        JSON v1 and human renderers
+internal/testutil/      integration database and command helpers
+```
+
+Do not create one package per command. Commands with the same domain behavior should call the same application service. Do not expose SQLite rows directly to CLI rendering.
+
+## Dependency direction
+
+Dependencies point inward:
+
+```text
+cmd/pl -> cli -> app -> domain
+          |      |
+          |      +-> storage interfaces -> storage/sqlite
+          +-------------------------------> output
+cli -> discovery
+storage/sqlite -> domain
+```
+
+Rules:
+
+- `domain` imports no CLI, database, or operating-system packages beyond the Go standard library.
+- `app` owns use-case sequencing and transaction requirements, not SQL syntax.
+- `storage/sqlite` implements storage interfaces and owns all SQL.
+- `output` consumes application result types, not database types.
+- Only `cmd/pl` constructs concrete dependencies.
+
+The storage layer is replaceable for tests, but replacement with a different production database is not a product goal.
+
+## Discovery and project resolution
+
+### Database discovery
+
+For normal commands, start at the current working directory and test each ancestor for `.pellets/pellets.db`. The nearest database wins. Continue past Git boundaries so a common-parent database can serve sibling repositories.
+
+The directory containing `.pellets` is the **database root**. A project path is stored relative to this root, not relative to the database file itself.
+
+### Git project discovery
+
+Use Git’s own repository discovery semantics so worktrees and `.git` indirection work correctly. Resolve the nearest non-bare work-tree root to an absolute, cleaned path, then convert it to a slash-normalized path relative to the database root. Reject a project outside the database root.
+
+`pl init --code CODE` registers that relative path. Normal commands match both the path and code stored in `projects`; they do not infer a new project automatically.
+
+### Keeping the database out of Git
+
+The database and its WAL/SHM companions must never be committed. If `init-db` or `init` places `.pellets` inside a Git work tree, it adds `.pellets/` to the repository’s local Git exclude file (`.git/info/exclude` or the worktree-equivalent path), not to the committed `.gitignore`. Initialization refuses to proceed if the database is already tracked.
+
+## CLI command flow
+
+A mutating command such as `pl start foo-12` flows as follows:
+
+1. Parse `foo-12` into project code `foo` and number `12`.
+2. Discover the database and current Git project.
+3. Verify that `foo` identifies the current project unless an explicit `--project` override is allowed for that command.
+4. Open and migrate the database.
+5. Begin an immediate write transaction.
+6. Load the pellet and validate the `open -> in_progress` transition.
+7. Update it. A partial unique index rejects a second in-progress pellet in the project.
+8. Commit.
+9. Render the result as JSON v1.
+
+Expected domain conflicts—missing pellet, wrong status, another in-progress pellet—are typed errors. They are not detected by parsing SQLite error strings in the CLI layer.
+
+## SQLite storage boundary
+
+Use `database/sql` with a pinned CGo-free SQLite driver, initially `modernc.org/sqlite`. This keeps macOS/Windows cross-compilation simple and provides SQLite and FTS5 in-process. Pin the driver and its required companion versions exactly; upgrades require migration and cross-platform test runs.
+
+Each short-lived CLI process uses one open SQLite connection. Set both maximum open and idle connections to one; this avoids connection-local PRAGMAs silently differing inside a process and is sufficient because a command executes one use case at a time.
+
+At open time, configure and verify:
+
+```sql
+PRAGMA foreign_keys = ON;
+PRAGMA trusted_schema = OFF;
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = FULL;
+PRAGMA busy_timeout = 5000;
+```
+
+Also verify that FTS5 is available by executing a small capability check. Failure is fatal because keyword search and memory are first-release features.
+
+Keep SQL as embedded `.sql` files or focused Go constants. Do not introduce an ORM or a general query builder.
+
+## Transaction strategy
+
+SQLite permits multiple readers and one writer. This is sufficient for one active agent per project and several projects in one database.
+
+- Read-only commands use a read transaction only when they need a consistent multi-query snapshot.
+- Every mutation uses a transaction.
+- ID allocation, `start`, `move`, priority rebalancing, and `purge` use a dedicated-connection write helper that executes `BEGIN IMMEDIATE`, `COMMIT`, and rollback semantics explicitly, so contention is discovered before partial work begins.
+- The application retries `SQLITE_BUSY` only for a small bounded interval covered by the busy timeout. It never waits indefinitely.
+- A move and any required rebalance commit atomically.
+- The one-in-progress rule and uniqueness of non-null active priority are also database constraints, so correctness does not depend only on application checks.
+
+Priority rebalancing is infrequent, project-scoped, and limited to `open` and `in_progress` rows. Closed and deferred rows have `NULL` priority, are absent from the partial priority index, and are never reprocessed by a rebalance. A rebalance may briefly hold the database’s single writer lock across projects, so the transaction must contain no filesystem work, Git calls, rendering, or user prompts. See [data-model.md](data-model.md#moving-and-rebalancing).
+
+## Migration strategy
+
+Migrations are ordered SQL files embedded with `go:embed`. Each migration has a monotonically increasing integer version, a name, and an application checksum recorded in `schema_migrations`.
+
+On database open:
+
+1. Acquire a migration lock with an immediate transaction.
+2. Reject a schema version newer than the executable understands.
+3. Apply pending migrations in order.
+4. Run `PRAGMA foreign_key_check` and migration-specific assertions.
+5. Record the migration and commit.
+
+Migrations must be forward-only and idempotent at the application level. Destructive table rewrites should use SQLite’s create-copy-validate-swap pattern. FTS indexes are derived and may be dropped and rebuilt from authoritative tables during migration.
+
+The first release does not promise downgrade compatibility. A future migration that destroys information must first add a database backup/export mechanism.
+
+## Memory subsystem
+
+Memory is a small application service over an authoritative `memories` table and a derived FTS5 index. It has no vector extension or embedding provider.
+
+The memory service supports create, list, show, search, approve, and remove. It records whether a memory was created by an agent or a human and whether a human has approved it. Memory belongs to a project but has no foreign key to a pellet and no structured group; references such as `foo-123` or group names are ordinary searchable text.
+
+The task service does not automatically create memories. See [memory.md](memory.md).
+
+## Error handling
+
+Use typed errors with stable machine codes, for example:
+
+- `database_not_found`
+- `project_not_registered`
+- `invalid_reference`
+- `pellet_not_found`
+- `invalid_status_transition`
+- `project_already_has_in_progress`
+- `active_pellet_outside_filter`
+- `priority_conflict`
+- `fts_unavailable`
+- `database_busy`
+- `schema_too_new`
+- `confirmation_required`
+
+Wrap internal causes for diagnostics, but never expose stack traces or raw SQL in default JSON. Human output may include a concise recovery hint. Exit-code mapping is specified in [cli-spec.md](cli-spec.md#exit-codes).
+
+## Cross-platform distribution
+
+Build one executable per supported target with `CGO_ENABLED=0`:
+
+- macOS AMD64 and ARM64;
+- Windows AMD64;
+- Windows ARM64 after CI and hardware/VM validation establish support.
+
+Release archives contain only `pl` (or `pl.exe`) plus license information and checksums. No SQLite DLL, model, configuration file, or installer is required.
+
+macOS is the only platform available for hands-on testing. Windows behavior must therefore be covered by CI integration tests, including path separators, file locking, WAL cleanup, Unicode paths, local Git excludes, and executable exit codes. Code signing is an open release question.
+
+## Explicitly absent components
+
+There is no package or boundary for:
+
+- dependencies or graphs;
+- tags or task notes;
+- a group entity, hierarchy, or many-to-many label system;
+- task events/history;
+- vector search or embeddings;
+- agent ownership or claiming;
+- synchronization;
+- plugins;
+- a daemon or network transport.
+
+Adding any of these requires a new decision record rather than an opportunistic schema change.

@@ -1,0 +1,147 @@
+# Pellets: Project Goals
+
+Pellets is a local task queue for coding agents. The product is named **pellets** and its command is `pl`.
+
+This document defines the product boundary. The engineering design is in [architecture.md](architecture.md), the command contract is in [cli-spec.md](cli-spec.md), and the relational model is in [data-model.md](data-model.md).
+
+## Vision
+
+Long-running coding work is easier to complete when it is split into small, explicitly ordered units. Today an agent often stores that plan in Markdown, then repeatedly spends tokens locating, parsing, and rewriting the file. `pl` replaces that loop with small, deterministic database operations.
+
+Pellets should feel like a durable local queue, not a project-management system. An agent can add work, ask what to do next, record progress, and recover after a context reset without reconstructing state from prose.
+
+## Target users
+
+The primary user is a coding agent operating in a local Git working tree. A human may inspect the queue, defer work for later approval, approve memories, or purge old closed pellets, but interactive human project management is not the design center.
+
+The initial operating assumption is **one active coding agent per registered project**. A single database may contain several projects, and different projects may be used concurrently.
+
+## Core use cases
+
+1. Split one long-running issue into a priority-ordered list of pellets.
+2. Give all pellets for that issue the same opaque external ID, then filter work to that ID.
+3. Give pellets from several external issues one optional group identifier, then focus work to that group.
+4. Resume the one in-progress pellet after an agent turn or context boundary.
+5. Select the highest-priority open pellet when no work is in progress.
+6. Add newly discovered work without rewriting the surrounding plan.
+7. Defer a pellet to `maybe_later` for human review without making it executable work.
+8. Store optional project memories, distinguish agent-created memories from human-approved memories, and retrieve them with keyword search.
+9. Use one local database for one repository or for several sibling repositories.
+
+## Goals
+
+- Make persistent task operations cheaper in tokens than searching and editing Markdown.
+- Provide a strict, stable JSON interface suitable for agents.
+- Keep one sparse, explicit priority order for each project's actionable pellets; lower integers are higher priority.
+- Make `pl next` deterministic: resume in-progress work first, otherwise return the highest-priority matching open pellet.
+- Preserve closed pellets by default and make destructive cleanup explicit.
+- Support exact filtering by project, optional external ID, and optional group.
+- Discover the nearest database by walking upward from the current directory, similarly to Git.
+- Support one database containing several Git projects, each with a short code and project-local pellet numbers.
+- Remain local and usable without an account, server, daemon, or network connection.
+- Provide keyword search over pellets and memories through SQLite FTS5.
+- Produce self-contained macOS and Windows executables.
+
+## Non-goals
+
+- Dependencies, blocking relationships, graphs, DAG traversal, or cycle detection.
+- Epics, subtasks, milestones, parent-child work items, or disguised dependency structures.
+- Multi-agent claiming, assignment, leases, orchestration, or PID-based ownership.
+- More than one in-progress pellet per project.
+- Cloud synchronization, automatic Git synchronization, or committing the database to Git.
+- A server, daemon, account system, or network API.
+- Tags, separate task notes, or an automatic task event/history log.
+- Multiple groups per pellet, a group table, or behavior attached to a group.
+- Custom workflows or custom statuses in the first release.
+- Semantic/vector retrieval, embedding models, or embedding providers.
+- Plugins or a general extension framework.
+- Automatic conversion of closed pellets into memories.
+- Becoming a general-purpose issue tracker or project-management platform.
+
+## Product principles
+
+### Simplicity is a feature
+
+Every new concept must justify its schema, commands, state transitions, error cases, migrations, and token cost. Features that recreate project-management machinery should be rejected.
+
+### Structured state beats editable prose
+
+Pellets are authoritative relational records. Agents interact through commands and stable JSON instead of editing database files or generated Markdown.
+
+### Priority is the order
+
+Priority is not a small category such as “high” or “low.” For `open` and `in_progress` pellets, it is a unique sparse integer rank within a project. Lower values come first. `closed` and `maybe_later` pellets have no priority and do not occupy or churn the active queue. There is no second position field.
+
+### Current work is explicit
+
+A project has at most one `in_progress` pellet. `pl next` returns it before considering open work, which makes resumption deterministic without an ownership subsystem.
+
+### Local means local
+
+The database is never committed to Git. `pl` does not send task or memory contents over the network. It performs no telemetry.
+
+### Agent output is an API
+
+Compact JSON is the default output. Its versioned shape, exit codes, and stdout/stderr behavior are public compatibility contracts. Human-readable output is optional presentation.
+
+### Destructive behavior is visible
+
+Closed pellets remain present. `purge` is the only bulk deletion path, operates only on closed pellets, and requires explicit confirmation.
+
+## Definition of lightweight
+
+For Pellets, “lightweight” means:
+
+- one `pl` executable;
+- one SQLite file for one or more nearby projects;
+- no long-running process;
+- no required configuration file;
+- no runtime, server, container, account, or network dependency;
+- no model downloads or native vector extensions;
+- a small Go package graph and explicit SQL instead of an ORM;
+- bounded, predictable JSON responses;
+- schema and migrations embedded in the executable;
+- no Git writes other than a local exclude entry when needed to keep the database untracked.
+
+The SQLite driver may be a pinned CGo-free Go dependency. “Favor the standard library” does not mean reimplementing SQLite or Git repository discovery.
+
+## Success criteria
+
+The first release is successful when all of the following are true:
+
+- An agent can initialize a project, add pellets, reorder them, start one, close it, and obtain the next pellet without opening a planning file.
+- `pl next` always returns the sole in-progress pellet before open work and otherwise returns the lowest-priority eligible open pellet.
+- Project, exact external-ID, and exact group filters behave consistently across `list`, `next`, and `search`.
+- Pellet references remain concise and unambiguous, for example `foo-123`.
+- A database at a common ancestor can serve multiple Git repositories while actionable priority and pellet numbers remain project-scoped.
+- Active-queue insertions and moves use integer arithmetic, survive gap exhaustion through transactional rebalancing, and never expose duplicate non-null priorities.
+- Concurrent CLI processes cannot allocate duplicate pellet numbers or violate the one-in-progress invariant.
+- Agent-created memories can be searched, reviewed, and marked human-approved without being attached to task rows.
+- Core workflows pass automated tests on macOS and Windows.
+- No documented or implemented workflow requires dependency concepts, vector search, Git commits, a daemon, or a network connection.
+
+## Constraints
+
+- Implementation language: Go.
+- Authoritative storage: SQLite with FTS5.
+- Database path: `.pellets/pellets.db` beneath a selected database root.
+- Project identity: nearest Git root registered in that database.
+- Stored project path: normalized path relative to the database root.
+- Project code: unique within a database, 1–12 lowercase ASCII letters, digits, or internal hyphens.
+- Pellet identity: a positive project-local integer; external reference is `<project-code>-<number>`.
+- Group: at most one optional, opaque, case-sensitive string per pellet, scoped to its project and used only as an exact filter.
+- Statuses: `open`, `in_progress`, `closed`, and `maybe_later`.
+- Timestamps: Julian day values stored as SQLite `REAL` values.
+- Priority: a positive, project-unique integer for `open` and `in_progress` pellets; `closed` and `maybe_later` pellets store `NULL`.
+- Distribution targets: macOS and Windows. Hands-on testing is available only on macOS, so Windows requires CI coverage.
+
+## Open questions
+
+These do not block the initial design:
+
+- Which Go version becomes the minimum supported version?
+- Is Windows on ARM64 a first-class first-release target or a later target? Windows AMD64 is required.
+- Should release binaries be code-signed in the first release?
+- Should project codes ever be renameable? The first release treats them as immutable because references may appear in memory text and external systems.
+- Is a database backup/export command needed after the first release, despite there being no synchronization feature?
+- What database-size and response-time thresholds should become release gates after realistic agent workloads are measured?
