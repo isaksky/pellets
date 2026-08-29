@@ -21,6 +21,61 @@ const localExcludeEntry = ".pellets/"
 // history.
 type GitSafety struct{}
 
+// FindGitRoot resolves the nearest non-bare Git work-tree root using Git's own
+// discovery rules. This supports linked worktrees and .git indirection.
+func FindGitRoot(ctx context.Context, directory string) (string, error) {
+	workTree, ok, err := findWorkTree(ctx, directory)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		absolute, absoluteErr := filepath.Abs(directory)
+		if absoluteErr != nil {
+			absolute = directory
+		}
+		return "", domain.NewError(
+			domain.NotFound,
+			"git_repository_not_found",
+			"the current directory is not inside a Git work tree",
+			map[string]any{"start_path": filepath.Clean(absolute)},
+		)
+	}
+	canonical, err := resolveExistingPrefix(workTree)
+	if err != nil {
+		return "", gitInspectionFailure(workTree, err)
+	}
+	return canonical, nil
+}
+
+// RelativeProjectPath returns the canonical, slash-normalized project root
+// relative to the database root. Projects outside that root are rejected.
+func RelativeProjectPath(databaseRoot, projectRoot string) (string, error) {
+	canonicalDatabaseRoot, err := resolveExistingPrefix(databaseRoot)
+	if err != nil {
+		return "", projectPathFailure(databaseRoot, projectRoot, err)
+	}
+	canonicalProjectRoot, err := resolveExistingPrefix(projectRoot)
+	if err != nil {
+		return "", projectPathFailure(databaseRoot, projectRoot, err)
+	}
+	relative, err := filepath.Rel(canonicalDatabaseRoot, canonicalProjectRoot)
+	if err != nil {
+		return "", projectPathFailure(databaseRoot, projectRoot, err)
+	}
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+		return "", domain.NewError(
+			domain.Conflict,
+			"project_outside_database_root",
+			"the Git work tree is outside the selected Pellets database root",
+			map[string]any{
+				"database_root": canonicalDatabaseRoot,
+				"project_root":  canonicalProjectRoot,
+			},
+		)
+	}
+	return filepath.ToSlash(relative), nil
+}
+
 // RejectTracked rejects databasePath when the containing work tree's index
 // already tracks that exact path. A database root outside a work tree needs no
 // Git safeguard.
@@ -213,6 +268,16 @@ func gitExcludeFailure(path string, err error) error {
 		"git_exclude_failed",
 		"could not update Git's local exclude file",
 		map[string]any{"exclude_path": path},
+		err,
+	)
+}
+
+func projectPathFailure(databaseRoot, projectRoot string, err error) error {
+	return domain.WrapError(
+		domain.Storage,
+		"project_path_resolution_failed",
+		"could not normalize the Git project path relative to the Pellets database",
+		map[string]any{"database_root": databaseRoot, "project_root": projectRoot},
 		err,
 	)
 }

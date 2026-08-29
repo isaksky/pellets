@@ -7,6 +7,7 @@ import (
 	"pellets/internal/app"
 	"pellets/internal/cli"
 	"pellets/internal/discovery"
+	"pellets/internal/storage"
 	"pellets/internal/storage/sqlite"
 )
 
@@ -19,6 +20,18 @@ func main() {
 		},
 		GitSafety: discovery.GitSafety{},
 	}
-	application := cli.New(version, cli.InitDBCommand(initializer))
+	projectManager := app.ProjectManager{
+		Initialize: initializer,
+		Open: func(ctx context.Context, path string) (storage.ProjectDatabase, error) {
+			return sqlite.OpenProjectDatabase(ctx, path)
+		},
+		GitSafety: discovery.GitSafety{},
+	}
+	application := cli.New(
+		version,
+		cli.InitDBCommand(initializer),
+		cli.InitCommand(projectManager),
+		cli.ProjectCommand(projectManager),
+	)
 	os.Exit(application.Run(os.Args[1:], os.Stdout, os.Stderr))
 }

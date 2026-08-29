@@ -40,6 +40,7 @@ type Command struct {
 	SkipDatabaseDiscovery bool
 	Parse                 func(args []string) (any, error)
 	Run                   func(ctx context.Context, invocation Invocation) (any, error)
+	ResultName            func(input any) string
 }
 
 // App parses and dispatches commands and performs their database selection.
@@ -123,7 +124,11 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 					if parsed.globals.Human {
 						renderer = output.HumanRenderer{}
 					}
-					err = renderer.Render(stdout, parsed.command.Name, data)
+					resultName := parsed.command.Name
+					if parsed.command.ResultName != nil {
+						resultName = parsed.command.ResultName(input)
+					}
+					err = renderer.Render(stdout, resultName, data)
 				}
 			}
 		}
