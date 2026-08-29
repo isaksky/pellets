@@ -52,6 +52,7 @@ Acceptance criteria:
 - When either initialization command places `.pellets` inside a Git work tree, it is added to the local Git exclude and not to `.gitignore`.
 - Initialization detects and rejects an already tracked database.
 - Foreign keys, trusted-schema hardening, WAL, synchronous mode, busy timeout, and FTS5 capability are verified.
+- `PRAGMA user_version` is the only persisted schema version; a new version-0 database reaches version 1 through embedded migration 1 and contains no migration bookkeeping table.
 - Integration tests pass for paths containing spaces and Unicode on macOS and Windows CI.
 
 ## Milestone 2: basic pellet queue
@@ -148,9 +149,10 @@ Acceptance criteria:
 - With a cutoff it compares `completed_at` and deletes only older closed pellets.
 - Purge never resets the project number counter or deletes memory.
 - FTS rows are removed in the same transaction.
-- A newer schema is rejected without writes.
-- Two processes racing to migrate do not partially apply a migration.
-- `foreign_key_check` and FTS rebuild checks pass after migrations.
+- Embedded migration versions begin at 1, are unique and consecutive, and released migration files are immutable.
+- Negative `user_version` values, version 0 with persistent schema, and newer versions are rejected with stable typed errors before persistent writes; opening the latest version performs no schema-version write.
+- An older `user_version` is re-read after `BEGIN IMMEDIATE`; two processes racing to migrate apply every missing migration exactly once.
+- Migration SQL, assertions, consecutive `user_version` advances, and `foreign_key_check` share one transaction and roll back together on failure. FTS rebuild checks pass after migrations.
 - Busy errors are bounded and mapped to a stable error response.
 
 ## Milestone 8: release hardening
@@ -183,6 +185,8 @@ Acceptance criteria:
 Run against temporary real SQLite files, not a mocked SQL interface:
 
 - all migrations from an empty database;
+- an injected two-step migration sequence, upgrade from an older released fixture, latest-version no-op open, and negative/unsupported/newer write-free rejection;
+- SQL, assertion, `user_version`, and `foreign_key_check` failure rollback with the preceding schema and version intact;
 - constraints and indexes;
 - transaction rollback and busy behavior;
 - project-local number allocation;
@@ -202,12 +206,14 @@ Invoke the compiled executable in temporary Git repositories and assert stdout, 
 - Concurrent `add` calls within one project.
 - Concurrent `start` calls attempting to violate the partial unique index.
 - Reads during a write and bounded busy-timeout behavior.
+- Two independent processes racing from the same old schema version, with the lock waiter applying nothing twice.
 - Independent activity in different projects sharing the same SQLite file.
 
 ### Compatibility tests
 
 - Golden JSON fixtures per command are treated as public API tests.
-- Keep fixtures for at least one database at every released schema version and test forward migration.
+- Keep a frozen real-database fixture at every released schema version and test forward migration. Never regenerate an old fixture from mutable current migration input.
+- Treat every shipped migration file as immutable; add a new consecutive migration for schema changes.
 - Build and test with the pinned SQLite driver on every target matrix entry before upgrading it.
 
 ## Cross-platform release strategy

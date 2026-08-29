@@ -5,10 +5,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"pellets/internal/domain"
 )
@@ -48,46 +51,20 @@ func TestOpenMigratesRealFileAndConfiguresRuntime(t *testing.T) {
 		t.Fatal("FTS5 source ID is empty")
 	}
 
-	var version int
-	var name, checksum string
-	var appliedAt float64
-	if err := db.QueryRow(`
-		SELECT version, name, checksum, applied_at
-		FROM schema_migrations`).Scan(&version, &name, &checksum, &appliedAt); err != nil {
-		t.Fatal(err)
-	}
-	if version != LatestSchemaVersion || name != "initial" {
-		t.Fatalf("migration = (%d, %q), want (%d, %q)", version, name, LatestSchemaVersion, "initial")
-	}
-	const wantMigration1Checksum = "8e5ac8fff4071c360ccdb8410b0521acee7ead7c2b8df33b63bf3547172d3056"
-	if got := migrationChecksum(migrations[0]); got != wantMigration1Checksum {
-		t.Fatalf("embedded migration checksum = %q, want fixture %q", got, wantMigration1Checksum)
-	}
-	if checksum != wantMigration1Checksum {
-		t.Fatalf("recorded migration checksum = %q, want %q", checksum, wantMigration1Checksum)
-	}
-	if appliedAt <= 0 {
-		t.Fatalf("migration applied_at = %v, want positive Julian day", appliedAt)
-	}
+	assertPragmaInt(t, db, "user_version", LatestSchemaVersion)
 
 	assertSchemaObjects(t, db)
 	assertStrictTables(t, db)
 	assertPartialIndexes(t, db)
 	assertFTSIndexes(t, db)
 
-	// Reopening verifies the recorded checksum and leaves migration 1 singular.
+	// Reopening at the latest version applies no migration.
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
 	db = openTestDatabase(t, path)
 	defer db.Close()
-	var count int
-	if err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 1 {
-		t.Fatalf("migration count after reopen = %d, want 1", count)
-	}
+	assertPragmaInt(t, db, "user_version", LatestSchemaVersion)
 }
 
 func TestMemoryIDsAreNeverReusedAfterRemoval(t *testing.T) {
@@ -276,49 +253,346 @@ func TestSchemaEnforcesForeignKeysAndPelletQueueConstraints(t *testing.T) {
 	}
 }
 
-func TestNewerSchemaIsRejectedWithoutWrites(t *testing.T) {
+func TestUnsupportedSchemaVersionsAreRejectedWithoutWrites(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		version  int
+		wantCode string
+	}{
+		{name: "negative", version: -1, wantCode: "schema_version_invalid"},
+		{name: "unsupported", version: 0, wantCode: "schema_version_unsupported"},
+		{name: "newer", version: LatestSchemaVersion + 1, wantCode: "schema_too_new"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), test.name+".db")
+			raw := openRawDatabase(t, path)
+			mustExec(t, raw, `
+				CREATE TABLE marker (value TEXT NOT NULL) STRICT;
+				INSERT INTO marker VALUES ('unchanged');`)
+			mustExec(t, raw, fmt.Sprintf("PRAGMA user_version = %d", test.version))
+			if err := raw.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			db, err := Open(context.Background(), path)
+			if db != nil {
+				db.Close()
+				t.Fatalf("Open returned a database for user_version %d", test.version)
+			}
+			assertDomainErrorCode(t, err, test.wantCode)
+			after, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if !bytes.Equal(after, before) {
+				t.Fatalf("database with user_version %d changed while being rejected", test.version)
+			}
+			for _, suffix := range []string{"-journal", "-wal", "-shm"} {
+				if _, statErr := os.Stat(path + suffix); !errors.Is(statErr, os.ErrNotExist) {
+					t.Fatalf("unexpected sidecar %q after rejection: %v", path+suffix, statErr)
+				}
+			}
+		})
+	}
+}
+
+func TestOpeningLatestVersionPerformsNoPersistentWrite(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "newer.db")
+	path := filepath.Join(t.TempDir(), "latest.db")
+	db := openTestDatabase(t, path)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	observer := openRawDatabase(t, path)
+	defer observer.Close()
+	before := queryPragmaInt(t, observer, "data_version")
+
+	db = openTestDatabase(t, path)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	after := queryPragmaInt(t, observer, "data_version")
+	if after != before {
+		t.Fatalf("PRAGMA data_version changed from %d to %d while opening the latest schema", before, after)
+	}
+	assertPragmaInt(t, observer, "user_version", LatestSchemaVersion)
+}
+
+func TestMigrationSequenceValidation(t *testing.T) {
+	valid := []migration{{version: 1}, {version: 2}}
+	if latest, err := validateMigrations(valid); err != nil || latest != 2 {
+		t.Fatalf("validateMigrations(valid) = (%d, %v), want (2, nil)", latest, err)
+	}
+
+	for _, test := range []struct {
+		name     string
+		sequence []migration
+	}{
+		{name: "empty"},
+		{name: "does not begin at one", sequence: []migration{{version: 2}}},
+		{name: "duplicate", sequence: []migration{{version: 1}, {version: 1}}},
+		{name: "gap", sequence: []migration{{version: 1}, {version: 3}}},
+		{name: "out of order", sequence: []migration{{version: 1}, {version: 3}, {version: 2}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := validateMigrations(test.sequence); err == nil {
+				t.Fatalf("validateMigrations(%v) unexpectedly succeeded", test.sequence)
+			}
+		})
+	}
+}
+
+func TestRunnerAppliesTwoStepTestSequenceExactlyOnce(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "two-step.db")
+	sequence := twoStepTestMigrations()
+	db, err := openWithMigrations(context.Background(), path, sequence)
+	if err != nil {
+		t.Fatalf("apply two-step test sequence: %v", err)
+	}
+	assertPragmaInt(t, db, "user_version", 2)
+	assertQueryInt(t, db, "SELECT COUNT(*) FROM migration_probe", 2)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both migrations contain non-idempotent DDL, so a stale version re-read
+	// would fail here instead of silently applying either migration twice.
+	db, err = openWithMigrations(context.Background(), path, sequence)
+	if err != nil {
+		t.Fatalf("reopen two-step test database: %v", err)
+	}
+	defer db.Close()
+	assertPragmaInt(t, db, "user_version", 2)
+	assertQueryInt(t, db, "SELECT COUNT(*) FROM migration_probe", 2)
+}
+
+func TestReleasedVersionOneFixtureUpgradesWithInjectedMigration(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "released-v1.db")
+	copyDatabaseFixture(t, path, "testdata/released-v1.db")
+
 	raw := openRawDatabase(t, path)
-	mustExec(t, raw, `
-		CREATE TABLE schema_migrations (
-			version INTEGER PRIMARY KEY,
-			name TEXT NOT NULL UNIQUE,
-			checksum TEXT NOT NULL,
-			applied_at REAL NOT NULL
-		) STRICT;
-		CREATE TABLE marker (value TEXT NOT NULL) STRICT;
-		INSERT INTO schema_migrations VALUES (2, 'future', 'future-checksum', 1);
-		INSERT INTO marker VALUES ('unchanged');`)
+	assertPragmaInt(t, raw, "user_version", 1)
+	assertQueryInt(t, raw, `
+		SELECT COUNT(*)
+		FROM application_metadata
+		WHERE key = 'fixture' AND value = 'released-v1'`, 1)
 	if err := raw.Close(); err != nil {
 		t.Fatal(err)
 	}
 
-	before, err := os.ReadFile(path)
+	sequence := append([]migration(nil), migrations...)
+	sequence = append(sequence, migration{
+		version: 2,
+		name:    "fixture-upgrade-probe",
+		sql: `
+			CREATE TABLE fixture_upgrade_probe (
+				value TEXT PRIMARY KEY
+			) STRICT;
+			INSERT INTO fixture_upgrade_probe VALUES ('applied-once');`,
+		assert: func(ctx context.Context, conn *sql.Conn) error {
+			if err := assertConnectionPragma(ctx, conn, "user_version", 1); err != nil {
+				return err
+			}
+			return assertConnectionCount(ctx, conn, "SELECT COUNT(*) FROM fixture_upgrade_probe", 1)
+		},
+	})
+
+	db, err := openWithMigrations(context.Background(), path, sequence)
+	if err != nil {
+		t.Fatalf("upgrade released v1 fixture: %v", err)
+	}
+	defer db.Close()
+	assertPragmaInt(t, db, "user_version", 2)
+	assertQueryInt(t, db, "SELECT COUNT(*) FROM fixture_upgrade_probe", 1)
+	assertQueryInt(t, db, `
+		SELECT COUNT(*)
+		FROM application_metadata
+		WHERE key = 'fixture' AND value = 'released-v1'`, 1)
+}
+
+func TestMigrationAssertionFailureRollsBackSchemaAndVersion(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "assertion-failure.db")
+	sequence := []migration{{
+		version: 1,
+		name:    "assertion-failure",
+		sql:     "CREATE TABLE assertion_probe (value INTEGER) STRICT;",
+		assert: func(context.Context, *sql.Conn) error {
+			return errors.New("injected assertion failure")
+		},
+	}}
+
+	db, err := openWithMigrations(context.Background(), path, sequence)
+	if db != nil {
+		db.Close()
+		t.Fatal("migration with a failing assertion unexpectedly succeeded")
+	}
+	assertDomainErrorCode(t, err, "database_migration_failed")
+	assertMigrationRolledBack(t, path, "assertion_probe", 0)
+}
+
+func TestUserVersionFailureRollsBackSchemaAndVersion(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "user-version-failure.db")
+	sequence := []migration{{
+		version: 1,
+		name:    "user-version-failure",
+		sql: `
+			CREATE TABLE user_version_probe (value INTEGER) STRICT;
+			PRAGMA query_only = ON;`,
+	}}
+
+	db, err := openWithMigrations(context.Background(), path, sequence)
+	if db != nil {
+		db.Close()
+		t.Fatal("migration with a failing user_version write unexpectedly succeeded")
+	}
+	assertDomainErrorCode(t, err, "database_migration_failed")
+	assertMigrationRolledBack(t, path, "user_version_probe", 0)
+}
+
+func TestForeignKeyCheckFailureRollsBackSchemaAndVersion(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "foreign-key-check.db")
+	raw := openRawDatabase(t, path)
+	mustExec(t, raw, `
+		PRAGMA foreign_keys = OFF;
+		CREATE TABLE parent (id INTEGER PRIMARY KEY) STRICT;
+		CREATE TABLE child (
+			id INTEGER PRIMARY KEY,
+			parent_id INTEGER NOT NULL REFERENCES parent(id)
+		) STRICT;
+		INSERT INTO child VALUES (1, 999);
+		PRAGMA user_version = 1;`)
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	sequence := []migration{
+		{version: 1, name: "existing-fixture"},
+		{
+			version: 2,
+			name:    "foreign-key-check",
+			sql:     "CREATE TABLE foreign_key_probe (value INTEGER) STRICT;",
+		},
+	}
+	db, err := openWithMigrations(context.Background(), path, sequence)
+	if db != nil {
+		db.Close()
+		t.Fatal("migration with a foreign-key violation unexpectedly succeeded")
+	}
+	assertDomainErrorCode(t, err, "database_migration_failed")
+	assertMigrationRolledBack(t, path, "foreign_key_probe", 1)
+
+	raw = openRawDatabase(t, path)
+	defer raw.Close()
+	assertQueryInt(t, raw, "SELECT COUNT(*) FROM pragma_foreign_key_check", 1)
+}
+
+func TestTwoProcessMigrationRace(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "race.db")
+	raw := openRawDatabase(t, path)
+	var journalMode string
+	if err := raw.QueryRow("PRAGMA journal_mode = WAL").Scan(&journalMode); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	lockedPath := path + ".locked"
+	releasePath := path + ".release"
+	readyPath := path + ".second-ready"
+
+	first, firstOutput := migrationRaceProcess(path, lockedPath, releasePath, "")
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if first.ProcessState == nil {
+			_ = first.Process.Kill()
+		}
+	})
+	waitForFile(t, lockedPath)
+
+	second, secondOutput := migrationRaceProcess(path, "", "", readyPath)
+	if err := second.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if second.ProcessState == nil {
+			_ = second.Process.Kill()
+		}
+	})
+	waitForFile(t, readyPath)
+
+	if err := os.WriteFile(releasePath, []byte("release"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Wait(); err != nil {
+		t.Fatalf("first migration process: %v\n%s", err, firstOutput.String())
+	}
+	if err := second.Wait(); err != nil {
+		t.Fatalf("second migration process: %v\n%s", err, secondOutput.String())
+	}
+
+	raw = openRawDatabase(t, path)
+	defer raw.Close()
+	assertPragmaInt(t, raw, "user_version", 2)
+	assertQueryInt(t, raw, "SELECT COUNT(*) FROM migration_race_probe", 2)
+	var applied string
+	if err := raw.QueryRow(`
+		SELECT group_concat(version, ',')
+		FROM (SELECT version FROM migration_race_probe ORDER BY version)`).Scan(&applied); err != nil {
+		t.Fatal(err)
+	}
+	if applied != "1,2" {
+		t.Fatalf("applied race migrations = %q, want %q", applied, "1,2")
+	}
+}
+
+func TestMigrationRaceProcess(t *testing.T) {
+	if os.Getenv("PELLETS_MIGRATION_RACE_PROCESS") != "1" {
+		return
+	}
+
+	path := os.Getenv("PELLETS_MIGRATION_RACE_DATABASE")
+	lockedPath := os.Getenv("PELLETS_MIGRATION_RACE_LOCKED")
+	releasePath := os.Getenv("PELLETS_MIGRATION_RACE_RELEASE")
+	readyPath := os.Getenv("PELLETS_MIGRATION_RACE_READY")
+	sequence := migrationRaceTestMigrations(lockedPath, releasePath)
+	hooks := migrationHooks{}
+	if readyPath != "" {
+		hooks.beforeLock = func(observedVersion int) error {
+			if observedVersion != 0 {
+				return fmt.Errorf("observed user_version %d before lock, want 0", observedVersion)
+			}
+			return os.WriteFile(readyPath, []byte("ready"), 0o600)
+		}
+	}
+
+	db, err := openWithMigrationHooks(context.Background(), path, sequence, hooks)
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := Open(context.Background(), path)
-	if db != nil {
-		db.Close()
-		t.Fatal("Open returned a database for a newer schema")
-	}
-	var public *domain.Error
-	if !errors.As(err, &public) || public.Code != "schema_too_new" {
-		t.Fatalf("Open error = %v, want schema_too_new", err)
-	}
-	after, readErr := os.ReadFile(path)
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	if !bytes.Equal(after, before) {
-		t.Fatal("newer database file changed while being rejected")
-	}
-	for _, suffix := range []string{"-journal", "-wal", "-shm"} {
-		if _, statErr := os.Stat(path + suffix); !errors.Is(statErr, os.ErrNotExist) {
-			t.Fatalf("unexpected sidecar %q after rejection: %v", path+suffix, statErr)
-		}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -326,40 +600,176 @@ func TestMigrationIsAtomic(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "atomic.db")
-	raw := openRawDatabase(t, path)
-	mustExec(t, raw, "CREATE TABLE projects (sentinel TEXT) STRICT")
-	if err := raw.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	db, err := Open(context.Background(), path)
+	sequence := []migration{{
+		version: 1,
+		name:    "sql-failure",
+		sql: `
+			CREATE TABLE sql_failure_probe (value INTEGER) STRICT;
+			CREATE TABLE sql_failure_probe (value INTEGER) STRICT;`,
+	}}
+	db, err := openWithMigrations(context.Background(), path, sequence)
 	if db != nil {
 		db.Close()
-		t.Fatal("Open succeeded despite a conflicting pre-migration table")
+		t.Fatal("migration with a mid-SQL failure unexpectedly succeeded")
 	}
-	var public *domain.Error
-	if !errors.As(err, &public) || public.Code != "database_migration_failed" {
-		t.Fatalf("Open error = %v, want database_migration_failed", err)
-	}
+	assertDomainErrorCode(t, err, "database_migration_failed")
+	assertMigrationRolledBack(t, path, "sql_failure_probe", 0)
+}
 
-	raw = openRawDatabase(t, path)
-	defer raw.Close()
-	for _, name := range []string{"application_metadata", "schema_migrations", "pellets", "memories", "pellets_fts", "memories_fts"} {
-		var count int
-		if err := raw.QueryRow("SELECT COUNT(*) FROM sqlite_schema WHERE name = ?", name).Scan(&count); err != nil {
-			t.Fatal(err)
-		}
-		if count != 0 {
-			t.Fatalf("partially migrated object %q survived rollback", name)
-		}
+func twoStepTestMigrations() []migration {
+	return []migration{
+		{
+			version: 1,
+			name:    "test-initial",
+			sql: `
+				CREATE TABLE migration_probe (
+					id INTEGER PRIMARY KEY,
+					note TEXT NOT NULL
+				) STRICT;
+				INSERT INTO migration_probe VALUES (1, 'one');`,
+			assert: func(ctx context.Context, conn *sql.Conn) error {
+				if err := assertConnectionPragma(ctx, conn, "user_version", 0); err != nil {
+					return err
+				}
+				return assertConnectionCount(ctx, conn, "SELECT COUNT(*) FROM migration_probe", 1)
+			},
+		},
+		{
+			version: 2,
+			name:    "test-second",
+			sql: `
+				ALTER TABLE migration_probe
+				ADD COLUMN applied_by INTEGER NOT NULL DEFAULT 2;
+				INSERT INTO migration_probe(id, note) VALUES (2, 'two');`,
+			assert: func(ctx context.Context, conn *sql.Conn) error {
+				if err := assertConnectionPragma(ctx, conn, "user_version", 1); err != nil {
+					return err
+				}
+				return assertConnectionCount(ctx, conn, `
+					SELECT COUNT(*)
+					FROM migration_probe
+					WHERE applied_by = 2`, 2)
+			},
+		},
 	}
-	var sentinelColumns int
-	if err := raw.QueryRow("SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name = 'sentinel'").Scan(&sentinelColumns); err != nil {
+}
+
+func migrationRaceTestMigrations(lockedPath, releasePath string) []migration {
+	return []migration{
+		{
+			version: 1,
+			name:    "race-initial",
+			sql: `
+				CREATE TABLE migration_race_probe (
+					version INTEGER PRIMARY KEY
+				) STRICT;
+				INSERT INTO migration_race_probe VALUES (1);`,
+			assert: func(ctx context.Context, conn *sql.Conn) error {
+				if err := assertConnectionPragma(ctx, conn, "user_version", 0); err != nil {
+					return err
+				}
+				if lockedPath == "" {
+					return nil
+				}
+				if err := os.WriteFile(lockedPath, []byte("locked"), 0o600); err != nil {
+					return err
+				}
+				return waitForPath(ctx, releasePath, 10*time.Second)
+			},
+		},
+		{
+			version: 2,
+			name:    "race-second",
+			sql:     "INSERT INTO migration_race_probe VALUES (2);",
+			assert: func(ctx context.Context, conn *sql.Conn) error {
+				return assertConnectionPragma(ctx, conn, "user_version", 1)
+			},
+		},
+	}
+}
+
+func migrationRaceProcess(path, lockedPath, releasePath, readyPath string) (*exec.Cmd, *bytes.Buffer) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestMigrationRaceProcess$")
+	cmd.Env = append(os.Environ(),
+		"PELLETS_MIGRATION_RACE_PROCESS=1",
+		"PELLETS_MIGRATION_RACE_DATABASE="+path,
+		"PELLETS_MIGRATION_RACE_LOCKED="+lockedPath,
+		"PELLETS_MIGRATION_RACE_RELEASE="+releasePath,
+		"PELLETS_MIGRATION_RACE_READY="+readyPath,
+	)
+	output := &bytes.Buffer{}
+	cmd.Stdout = output
+	cmd.Stderr = output
+	return cmd, output
+}
+
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	if err := waitForPath(context.Background(), path, 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if sentinelColumns != 1 {
-		t.Fatal("preexisting projects table did not survive migration rollback")
+}
+
+func waitForPath(ctx context.Context, path string, timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("timed out waiting for %q", path)
+		case <-ticker.C:
+		}
 	}
+}
+
+func copyDatabaseFixture(t *testing.T, path, fixturePath string) {
+	t.Helper()
+	fixture, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, fixture, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertMigrationRolledBack(t *testing.T, path, objectName string, wantVersion int) {
+	t.Helper()
+	db := openRawDatabase(t, path)
+	defer db.Close()
+	assertPragmaInt(t, db, "user_version", wantVersion)
+	assertObjectAbsent(t, db, objectName)
+}
+
+func assertConnectionPragma(ctx context.Context, conn *sql.Conn, pragma string, want int) error {
+	var got int
+	if err := conn.QueryRowContext(ctx, "PRAGMA "+pragma).Scan(&got); err != nil {
+		return err
+	}
+	if got != want {
+		return fmt.Errorf("PRAGMA %s = %d, want %d", pragma, got, want)
+	}
+	return nil
+}
+
+func assertConnectionCount(ctx context.Context, conn *sql.Conn, query string, want int) error {
+	var got int
+	if err := conn.QueryRowContext(ctx, query).Scan(&got); err != nil {
+		return err
+	}
+	if got != want {
+		return fmt.Errorf("query count = %d, want %d", got, want)
+	}
+	return nil
 }
 
 func openTestDatabase(t *testing.T, path string) *sql.DB {
@@ -388,12 +798,45 @@ func openRawDatabase(t *testing.T, path string) *sql.DB {
 
 func assertPragmaInt(t *testing.T, db *sql.DB, pragma string, want int) {
 	t.Helper()
+	got := queryPragmaInt(t, db, pragma)
+	if got != want {
+		t.Fatalf("PRAGMA %s = %d, want %d", pragma, got, want)
+	}
+}
+
+func queryPragmaInt(t *testing.T, db *sql.DB, pragma string) int {
+	t.Helper()
 	var got int
 	if err := db.QueryRow("PRAGMA " + pragma).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
+	return got
+}
+
+func assertQueryInt(t *testing.T, db *sql.DB, query string, want int) {
+	t.Helper()
+	var got int
+	if err := db.QueryRow(query).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
 	if got != want {
-		t.Fatalf("PRAGMA %s = %d, want %d", pragma, got, want)
+		t.Fatalf("query result = %d, want %d\n%s", got, want, query)
+	}
+}
+
+func assertObjectAbsent(t *testing.T, db *sql.DB, name string) {
+	t.Helper()
+	assertQueryInt(t, db, `
+		SELECT COUNT(*)
+		FROM sqlite_schema
+		WHERE name = '`+name+`'`, 0)
+}
+
+func assertDomainErrorCode(t *testing.T, err error, want string) {
+	t.Helper()
+	var public *domain.Error
+	if !errors.As(err, &public) || public.Code != want {
+		t.Fatalf("error = %v, want domain error %q", err, want)
 	}
 }
 
@@ -414,7 +857,6 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 		"pellets_fts_docsize",
 		"pellets_fts_idx",
 		"projects",
-		"schema_migrations",
 	}
 	wantIndexes := []string{
 		"memories_project_approval_idx",
@@ -456,7 +898,7 @@ func assertObjectNames(t *testing.T, db *sql.DB, objectType string, want []strin
 
 func assertStrictTables(t *testing.T, db *sql.DB) {
 	t.Helper()
-	want := []string{"application_metadata", "memories", "pellets", "projects", "schema_migrations"}
+	want := []string{"application_metadata", "memories", "pellets", "projects"}
 	rows, err := db.Query("PRAGMA table_list")
 	if err != nil {
 		t.Fatal(err)

@@ -3,10 +3,8 @@ package sqlite
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	_ "embed"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -31,15 +29,40 @@ type migration struct {
 	version int
 	name    string
 	sql     string
+	assert  func(context.Context, *sql.Conn) error
 }
 
+type migrationHooks struct {
+	beforeLock func(observedVersion int) error
+}
+
+// Shipped migration SQL is immutable. Compatibility is verified from released
+// database fixtures rather than by storing migration metadata in the database.
 var migrations = []migration{
-	{version: 1, name: "initial", sql: migration1SQL},
+	{version: 1, name: "initial", sql: migration1SQL, assert: assertMigration1},
 }
 
 // Open opens path with the required hardened runtime settings and applies all
 // pending migrations. The returned pool intentionally owns one connection.
 func Open(ctx context.Context, path string) (*sql.DB, error) {
+	latest, err := validateMigrations(migrations)
+	if err != nil {
+		return nil, migrationError(err)
+	}
+	if latest != LatestSchemaVersion {
+		return nil, migrationError(fmt.Errorf(
+			"latest embedded migration is %d, but LatestSchemaVersion is %d",
+			latest, LatestSchemaVersion,
+		))
+	}
+	return openWithMigrations(ctx, path, migrations)
+}
+
+func openWithMigrations(ctx context.Context, path string, sequence []migration) (*sql.DB, error) {
+	return openWithMigrationHooks(ctx, path, sequence, migrationHooks{})
+}
+
+func openWithMigrationHooks(ctx context.Context, path string, sequence []migration, hooks migrationHooks) (*sql.DB, error) {
 	dsn, err := dataSourceName(path)
 	if err != nil {
 		return nil, domain.WrapError(domain.Storage, "database_open_failed", "could not open database", nil, err)
@@ -52,7 +75,7 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
-	if err := prepare(ctx, db); err != nil {
+	if err := prepare(ctx, db, sequence, hooks); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -80,7 +103,12 @@ func dataSourceName(path string) (string, error) {
 	return u.String(), nil
 }
 
-func prepare(ctx context.Context, db *sql.DB) error {
+func prepare(ctx context.Context, db *sql.DB, sequence []migration, hooks migrationHooks) error {
+	latest, err := validateMigrations(sequence)
+	if err != nil {
+		return migrationError(err)
+	}
+
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return domain.WrapError(domain.Storage, "database_open_failed", "could not open database", nil, err)
@@ -93,8 +121,11 @@ func prepare(ctx context.Context, db *sql.DB) error {
 	if err != nil {
 		return migrationError(err)
 	}
-	if version > LatestSchemaVersion {
-		return schemaTooNew(version)
+	if err := validateSchemaVersion(version, latest); err != nil {
+		return err
+	}
+	if err := validateUninitializedDatabase(ctx, conn, version, latest); err != nil {
+		return err
 	}
 
 	var journalMode string
@@ -106,6 +137,18 @@ func prepare(ctx context.Context, db *sql.DB) error {
 	}
 	if err := verifyFTS5(ctx, conn); err != nil {
 		return err
+	}
+
+	if version == latest {
+		if err := verifyForeignKeys(ctx, conn); err != nil {
+			return migrationError(err)
+		}
+		return verifyRuntime(ctx, conn)
+	}
+	if hooks.beforeLock != nil {
+		if err := hooks.beforeLock(version); err != nil {
+			return migrationError(fmt.Errorf("before migration lock: %w", err))
+		}
 	}
 
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
@@ -124,10 +167,13 @@ func prepare(ctx context.Context, db *sql.DB) error {
 	if err != nil {
 		return migrationError(err)
 	}
-	if version > LatestSchemaVersion {
-		return schemaTooNew(version)
+	if err := validateSchemaVersion(version, latest); err != nil {
+		return err
 	}
-	if err := applyMigrations(ctx, conn, version); err != nil {
+	if err := validateUninitializedDatabase(ctx, conn, version, latest); err != nil {
+		return err
+	}
+	if err := applyMigrations(ctx, conn, sequence, version); err != nil {
 		return migrationError(err)
 	}
 	if err := verifyForeignKeys(ctx, conn); err != nil {
@@ -145,69 +191,120 @@ func prepare(ctx context.Context, db *sql.DB) error {
 }
 
 func currentSchemaVersion(ctx context.Context, conn *sql.Conn) (int, error) {
-	var exists int
-	if err := conn.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM sqlite_schema
-			WHERE type = 'table' AND name = 'schema_migrations'
-		)`).Scan(&exists); err != nil {
-		return 0, fmt.Errorf("inspect migration table: %w", err)
-	}
-	if exists == 0 {
-		return 0, nil
-	}
-
 	var version int
-	if err := conn.QueryRowContext(ctx, "SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&version); err != nil {
-		return 0, fmt.Errorf("read schema version: %w", err)
+	if err := conn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return 0, fmt.Errorf("read PRAGMA user_version: %w", err)
 	}
 	return version, nil
 }
 
-func applyMigrations(ctx context.Context, conn *sql.Conn, current int) error {
-	for _, migration := range migrations {
-		if migration.version <= current {
-			if err := verifyAppliedMigration(ctx, conn, migration); err != nil {
-				return err
-			}
-			continue
+func validateMigrations(sequence []migration) (int, error) {
+	if len(sequence) == 0 {
+		return 0, errors.New("embedded migration sequence is empty")
+	}
+	for index, migration := range sequence {
+		expected := index + 1
+		if migration.version != expected {
+			return 0, fmt.Errorf(
+				"embedded migration at index %d has version %d, want %d",
+				index, migration.version, expected,
+			)
 		}
-		if migration.version != current+1 {
-			return fmt.Errorf("migration sequence jumps from %d to %d", current, migration.version)
+	}
+	return sequence[len(sequence)-1].version, nil
+}
+
+func validateSchemaVersion(version, latest int) error {
+	if version < 0 {
+		return domain.NewError(
+			domain.Storage,
+			"schema_version_invalid",
+			"database schema version is invalid",
+			map[string]any{"database_version": version, "supported_version": latest},
+		)
+	}
+	if version > latest {
+		return schemaTooNew(version, latest)
+	}
+	return nil
+}
+
+func validateUninitializedDatabase(ctx context.Context, conn *sql.Conn, version, latest int) error {
+	if version != 0 {
+		return nil
+	}
+
+	var objectCount int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_schema").Scan(&objectCount); err != nil {
+		return migrationError(fmt.Errorf("inspect version-0 schema: %w", err))
+	}
+	if objectCount != 0 {
+		return domain.NewError(
+			domain.Storage,
+			"schema_version_unsupported",
+			"database schema version is unsupported",
+			map[string]any{"database_version": version, "supported_version": latest},
+		)
+	}
+	return nil
+}
+
+func applyMigrations(ctx context.Context, conn *sql.Conn, sequence []migration, current int) error {
+	for _, migration := range sequence {
+		if migration.version <= current {
+			continue
 		}
 		if _, err := conn.ExecContext(ctx, migration.sql); err != nil {
 			return fmt.Errorf("apply migration %d (%s): %w", migration.version, migration.name, err)
 		}
-		if _, err := conn.ExecContext(ctx, `
-			INSERT INTO schema_migrations(version, name, checksum, applied_at)
-			VALUES (?, ?, ?, julianday('now'))`,
-			migration.version, migration.name, migrationChecksum(migration),
-		); err != nil {
-			return fmt.Errorf("record migration %d (%s): %w", migration.version, migration.name, err)
+		if migration.assert != nil {
+			if err := migration.assert(ctx, conn); err != nil {
+				return fmt.Errorf("assert migration %d (%s): %w", migration.version, migration.name, err)
+			}
+		}
+		if err := setSchemaVersion(ctx, conn, migration.version); err != nil {
+			return fmt.Errorf("advance user_version after migration %d (%s): %w", migration.version, migration.name, err)
 		}
 		current = migration.version
 	}
 	return nil
 }
 
-func verifyAppliedMigration(ctx context.Context, conn *sql.Conn, migration migration) error {
-	var name, checksum string
-	if err := conn.QueryRowContext(ctx,
-		"SELECT name, checksum FROM schema_migrations WHERE version = ?",
-		migration.version,
-	).Scan(&name, &checksum); err != nil {
-		return fmt.Errorf("read migration %d: %w", migration.version, err)
+func setSchemaVersion(ctx context.Context, conn *sql.Conn, version int) error {
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
+		return fmt.Errorf("set PRAGMA user_version to %d: %w", version, err)
 	}
-	if name != migration.name || checksum != migrationChecksum(migration) {
-		return fmt.Errorf("migration %d metadata does not match the executable", migration.version)
+	got, err := currentSchemaVersion(ctx, conn)
+	if err != nil {
+		return err
+	}
+	if got != version {
+		return fmt.Errorf("PRAGMA user_version is %d after setting it to %d", got, version)
 	}
 	return nil
 }
 
-func migrationChecksum(migration migration) string {
-	sum := sha256.Sum256([]byte(migration.sql))
-	return hex.EncodeToString(sum[:])
+func assertMigration1(ctx context.Context, conn *sql.Conn) error {
+	for _, name := range []string{
+		"application_metadata",
+		"projects",
+		"pellets",
+		"memories",
+		"pellets_fts",
+		"memories_fts",
+	} {
+		var count int
+		if err := conn.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM sqlite_schema
+			WHERE type = 'table' AND name = ?`, name).Scan(&count); err != nil {
+			return fmt.Errorf("inspect required table %q: %w", name, err)
+		}
+		if count != 1 {
+			return fmt.Errorf("required table %q has %d definitions, want 1", name, count)
+		}
+	}
+	return nil
 }
 
 func verifyForeignKeys(ctx context.Context, conn *sql.Conn) error {
@@ -272,12 +369,12 @@ func verifyRuntime(ctx context.Context, conn *sql.Conn) error {
 	return nil
 }
 
-func schemaTooNew(version int) error {
+func schemaTooNew(version, latest int) error {
 	return domain.NewError(
 		domain.Storage,
 		"schema_too_new",
 		"database schema is newer than this executable",
-		map[string]any{"database_version": version, "supported_version": LatestSchemaVersion},
+		map[string]any{"database_version": version, "supported_version": latest},
 	)
 }
 

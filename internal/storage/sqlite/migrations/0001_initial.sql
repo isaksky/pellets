@@ -3,13 +3,6 @@ CREATE TABLE application_metadata (
     value TEXT NOT NULL
 ) STRICT;
 
-CREATE TABLE schema_migrations (
-    version    INTEGER PRIMARY KEY,
-    name       TEXT NOT NULL UNIQUE,
-    checksum   TEXT NOT NULL,
-    applied_at REAL NOT NULL
-) STRICT;
-
 CREATE TABLE projects (
     project_id         INTEGER PRIMARY KEY,
     code               TEXT NOT NULL UNIQUE,

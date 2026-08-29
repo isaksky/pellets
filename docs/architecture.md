@@ -138,17 +138,21 @@ Priority rebalancing is infrequent, project-scoped, and limited to `open` and `i
 
 ## Migration strategy
 
-Migrations are ordered SQL files embedded with `go:embed`. Each migration has a monotonically increasing integer version, a name, and an application checksum recorded in `schema_migrations`.
+Migrations are ordered forward SQL files embedded with `go:embed`. SQLite's application-owned [`PRAGMA user_version`](https://sqlite.org/pragma.html#pragma_user_version) is the sole authoritative on-disk schema version; there is no migration metadata table. Version 0 means an empty or uninitialized database, and a new database reaches the executable's latest version through the same runner as every upgrade. Migration names exist only for executable diagnostics.
+
+The embedded sequence must begin at version 1 and have no duplicate, missing, or out-of-order version. The executable validates that contract before opening a connection that could write. Every migration file becomes immutable when released. Because `user_version` does not retain names or checksums, compatibility tests keep a frozen real-database fixture for every released schema version and exercise forward migration from those fixtures. Framework tests inject a two-step test sequence; production does not gain a no-op migration solely to test the runner.
 
 On database open:
 
-1. Acquire a migration lock with an immediate transaction.
-2. Reject a schema version newer than the executable understands.
-3. Apply pending migrations in order.
-4. Run `PRAGMA foreign_key_check` and migration-specific assertions.
-5. Record the migration and commit.
+1. Read `PRAGMA user_version` before any persistent write. Reject a negative version as invalid, a version-0 database with persistent schema as unsupported, and a version newer than the executable understands, all with stable typed errors and without changing the database.
+2. If the version is already current, perform no migration transaction and no schema-version write.
+3. If the version is older, use the same connection to acquire SQLite's writer lock with [`BEGIN IMMEDIATE`](https://sqlite.org/lang_transaction.html#deferred_immediate_and_exclusive_transactions), then re-read and revalidate `user_version`. This re-read prevents a second process that waited for the lock from applying migrations already committed by the first.
+4. Apply every missing migration in strict consecutive order in that transaction. Run each migration's assertions after its SQL succeeds, then set `PRAGMA user_version` to that migration's version before continuing.
+5. Run `PRAGMA foreign_key_check` after all pending migrations and before `COMMIT`.
 
-Migrations must be forward-only and idempotent at the application level. Destructive table rewrites should use SQLite’s create-copy-validate-swap pattern. FTS indexes are derived and may be dropped and rebuilt from authoritative tables during migration.
+Any SQL, migration assertion, `user_version`, foreign-key check, or commit failure causes an explicit rollback. Schema changes and every `user_version` advance therefore commit together or the database retains its preceding schema and version.
+
+Migrations are forward-only and are applied exactly once according to the locked `user_version`; they need not be independently idempotent. Destructive table rewrites should use SQLite’s create-copy-validate-swap pattern. FTS indexes are derived and may be dropped and rebuilt from authoritative tables during migration.
 
 The first release does not promise downgrade compatibility. A future migration that destroys information must first add a database backup/export mechanism.
 

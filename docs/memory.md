@@ -141,7 +141,7 @@ Permanently delete one memory and its derived FTS row. Task purge never calls th
 Memory objects follow the global JSON v1 envelope:
 
 ```json
-{"id":42,"project":"foo","text":"foo-123 established the migration checksum rule.","created_by":"agent","human_approved":true,"created_at":"2026-08-28T20:00:00Z","updated_at":"2026-08-28T20:05:00Z","approved_at":"2026-08-28T20:05:00Z"}
+{"id":42,"project":"foo","text":"foo-123 established the released-migration immutability rule.","created_by":"agent","human_approved":true,"created_at":"2026-08-28T20:00:00Z","updated_at":"2026-08-28T20:05:00Z","approved_at":"2026-08-28T20:05:00Z"}
 ```
 
 Search results may add `rank` and `snippet`. The authoritative full `text` remains available from `memory show`.

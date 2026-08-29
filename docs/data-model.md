@@ -29,13 +29,6 @@ CREATE TABLE application_metadata (
     value TEXT NOT NULL
 ) STRICT;
 
-CREATE TABLE schema_migrations (
-    version    INTEGER PRIMARY KEY,
-    name       TEXT NOT NULL UNIQUE,
-    checksum   TEXT NOT NULL,
-    applied_at REAL NOT NULL
-) STRICT;
-
 CREATE TABLE projects (
     project_id         INTEGER PRIMARY KEY,
     code               TEXT NOT NULL UNIQUE,
@@ -129,7 +122,7 @@ Pellets store `project_id` rather than repeating the low-cardinality project pat
 
 Only `open` and `in_progress` pellets participate in the active queue and therefore have positive priority. `closed` and `maybe_later` pellets have `NULL` priority and no entry in the partial active-priority index. There is no temporary negative-priority state.
 
-Known application metadata keys are `database_id` (a randomly generated UUID), `created_at_julian`, and `product` (`pellets`). Unknown keys must be preserved by migrations. Schema versioning belongs in `schema_migrations`, not in ad hoc metadata values.
+Known application metadata keys are `database_id` (a randomly generated UUID), `created_at_julian`, and `product` (`pellets`). Unknown keys must be preserved by migrations. Schema versioning belongs exclusively in SQLite's application-owned `PRAGMA user_version`, not in this table or another application table.
 
 ## FTS5 indexes
 
@@ -371,6 +364,6 @@ It never deletes open, in-progress, or `maybe_later` pellets. It never resets `n
 
 ## Schema migrations
 
-The executable embeds ordered forward migrations and records version, name, checksum, and Julian application time in `schema_migrations`. FTS tables are disposable during migration and may be rebuilt with the FTS5 `rebuild` command after authoritative tables are copied or changed.
+The executable embeds a consecutive sequence of forward migrations beginning at 1. `PRAGMA user_version` is the sole authoritative on-disk schema version, version 0 denotes an empty or uninitialized database, and the schema contains no `schema_migrations` table. Migration names may appear in diagnostics but are not persisted. Released migration files are immutable; frozen database fixtures for every released version provide forward-compatibility evidence in place of persisted migration checksums.
 
-Opening a newer unknown schema fails without writing. Destructive migrations require a backup mechanism first. See [architecture.md](architecture.md#migration-strategy).
+Opening first reads `user_version` without a persistent write. Negative versions, version 0 with persistent schema, and newer versions fail with stable typed errors. An older version is re-read after `BEGIN IMMEDIATE`; all missing migrations, their assertions, each consecutive `user_version` advance, and `foreign_key_check` run on one connection in one transaction before commit. A failure rolls back both schema and version, and a concurrent migrator that waited for the lock applies nothing twice. FTS tables are disposable during migration and may be rebuilt with the FTS5 `rebuild` command after authoritative tables are copied or changed. Destructive migrations require a backup mechanism first. See [architecture.md](architecture.md#migration-strategy).
