@@ -7,11 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"pellets/internal/domain"
 )
 
 const SchemaVersion = 1
+
+// FormatTimestamp renders every public timestamp in stable UTC RFC 3339 form.
+func FormatTimestamp(value time.Time) string {
+	return value.UTC().Format(time.RFC3339Nano)
+}
 
 // Renderer writes a successful command result.
 type Renderer interface {

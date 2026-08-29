@@ -151,6 +151,48 @@ func TestResolveCurrentIsReadOnlyAndReturnsProjectAndWorkspace(t *testing.T) {
 	}
 }
 
+func TestResolvePelletProjectValidatesSelectionAndReferences(t *testing.T) {
+	t.Parallel()
+
+	resolved := storage.ResolvedProject{
+		Project:   storage.Project{ID: 2, Code: "foo-bar"},
+		Workspace: storage.Workspace{ID: 8, ProjectID: 2, RootPath: relative("linked")},
+	}
+	for _, test := range []struct {
+		name       string
+		selected   string
+		references []domain.PelletReference
+		wantCode   string
+	}{
+		{name: "current project"},
+		{name: "matching selection and reference", selected: "foo-bar", references: []domain.PelletReference{{ProjectCode: "foo-bar", Number: 9}}},
+		{name: "different selection", selected: "other", wantCode: "project_selection_mismatch"},
+		{name: "different reference", references: []domain.PelletReference{{ProjectCode: "other", Number: 9}}, wantCode: "reference_project_mismatch"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			database := &fakeProjectDatabase{resolved: resolved}
+			manager := successfulProjectManager(database)
+			got, err := manager.ResolvePelletProject(
+				context.Background(),
+				Database{Root: "/database", Path: "/database/.pellets/pellets.db"},
+				"/working",
+				test.selected,
+				test.references...,
+			)
+			if test.wantCode == "" {
+				if err != nil || !reflect.DeepEqual(got, resolved) {
+					t.Fatalf("ResolvePelletProject() = (%#v, %v), want %#v", got, err, resolved)
+				}
+			} else if err == nil || domain.PublicError(err).Code != test.wantCode || domain.PublicError(err).Kind != domain.Usage {
+				t.Fatalf("ResolvePelletProject() error = %v, want %s", err, test.wantCode)
+			}
+			if database.registerCalls != 0 || database.resolveCalls != 1 {
+				t.Fatalf("register calls = %d, resolve calls = %d", database.registerCalls, database.resolveCalls)
+			}
+		})
+	}
+}
+
 func TestProjectManagerInitStopsBeforeSideEffectsOnIdentityFailure(t *testing.T) {
 	t.Parallel()
 	crossed := false

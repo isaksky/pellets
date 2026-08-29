@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"pellets/internal/app"
 	"pellets/internal/domain"
+	"pellets/internal/output"
 	"pellets/internal/storage"
 )
 
@@ -223,8 +223,8 @@ func newProjectData(project storage.Project) projectData {
 			ID: workspace.ID, RootPath: workspace.RootPath.Value,
 			RootPathRelative: workspace.RootPath.Relative,
 			GitDir:           workspace.GitDir.Value, GitDirRelative: workspace.GitDir.Relative,
-			CreatedAt: workspace.CreatedAt.UTC().Format(time.RFC3339Nano),
-			UpdatedAt: workspace.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			CreatedAt: output.FormatTimestamp(workspace.CreatedAt),
+			UpdatedAt: output.FormatTimestamp(workspace.UpdatedAt),
 		}
 	}
 	return projectData{
@@ -232,8 +232,8 @@ func newProjectData(project storage.Project) projectData {
 		GitCommonDir:         project.GitCommonDir.Value,
 		GitCommonDirRelative: project.GitCommonDir.Relative,
 		Workspaces:           workspaces,
-		CreatedAt:            project.CreatedAt.UTC().Format(time.RFC3339Nano),
-		UpdatedAt:            project.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		CreatedAt:            output.FormatTimestamp(project.CreatedAt),
+		UpdatedAt:            output.FormatTimestamp(project.UpdatedAt),
 	}
 }
 

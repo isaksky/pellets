@@ -170,6 +170,51 @@ func (manager ProjectManager) ResolveCurrent(ctx context.Context, database Datab
 	return resolved, closeProjectDatabase(projectDatabase, operationErr)
 }
 
+// ResolvePelletProject resolves the current registered worktree and validates
+// any explicit selection and references against its shared logical project.
+// Pellet commands cannot use --project or a reference to cross repository
+// boundaries silently.
+func (manager ProjectManager) ResolvePelletProject(
+	ctx context.Context,
+	database Database,
+	workingDirectory string,
+	selectedCode string,
+	references ...domain.PelletReference,
+) (storage.ResolvedProject, error) {
+	if selectedCode != "" {
+		if err := domain.ValidateProjectCode(selectedCode); err != nil {
+			return storage.ResolvedProject{}, err
+		}
+	}
+	resolved, err := manager.ResolveCurrent(ctx, database, workingDirectory)
+	if err != nil {
+		return storage.ResolvedProject{}, err
+	}
+	if selectedCode != "" && selectedCode != resolved.Project.Code {
+		return storage.ResolvedProject{}, domain.NewError(
+			domain.Usage,
+			"project_selection_mismatch",
+			"the selected project does not identify the current Git repository",
+			map[string]any{"selected_project": selectedCode, "current_project": resolved.Project.Code},
+		)
+	}
+	for _, reference := range references {
+		if reference.ProjectCode != resolved.Project.Code {
+			return storage.ResolvedProject{}, domain.NewError(
+				domain.Usage,
+				"reference_project_mismatch",
+				"the pellet reference belongs to a different logical project",
+				map[string]any{
+					"reference":         reference.String(),
+					"reference_project": reference.ProjectCode,
+					"current_project":   resolved.Project.Code,
+				},
+			)
+		}
+	}
+	return resolved, nil
+}
+
 func (manager ProjectManager) validate() error {
 	if manager.Discover.FindGitIdentity == nil || manager.Discover.FindDatabase == nil || manager.Discover.NormalizePath == nil || manager.Discover.ResolvePath == nil || manager.Discover.PathExists == nil || manager.Initialize == nil || manager.Open == nil || manager.GitSafety == nil {
 		return projectManagerConfigurationError()

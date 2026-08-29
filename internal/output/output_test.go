@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"pellets/internal/domain"
 )
@@ -48,6 +49,15 @@ func TestWriteFailureIsIdentifiable(t *testing.T) {
 	err := (JSONRenderer{}).Render(failingWriter{}, "status", struct{}{})
 	if !IsWriteFailure(err) {
 		t.Fatalf("IsWriteFailure(%v) = false", err)
+	}
+}
+
+func TestFormatTimestampIsStableUTC(t *testing.T) {
+	t.Parallel()
+
+	value := time.Date(2026, time.August, 28, 20, 1, 2, 345000000, time.FixedZone("offset", -6*60*60))
+	if got, want := FormatTimestamp(value), "2026-08-29T02:01:02.345Z"; got != want {
+		t.Fatalf("FormatTimestamp() = %q, want %q", got, want)
 	}
 }
 
