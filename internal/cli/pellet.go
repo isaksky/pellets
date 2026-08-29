@@ -144,6 +144,75 @@ func NextCommand(manager app.PelletManager) Command {
 	}
 }
 
+func StartCommand(manager app.PelletManager) Command {
+	return pelletLifecycleCommand(manager, storage.PelletStart, "Start an open pellet in the current workspace.", false)
+}
+
+func StartNextCommand(manager app.PelletManager) Command {
+	return Command{
+		Name:    "start-next",
+		Summary: "Atomically resume or start the current workspace's next work.",
+		Usage:   "pl start-next [--external-id ID] [--group GROUP]",
+		Parse:   parseNext,
+		Run: func(ctx context.Context, invocation Invocation) (any, error) {
+			input := invocation.Input.(nextInput)
+			selection, err := manager.StartNext(
+				ctx, invocationDatabase(invocation), invocation.WorkingDirectory, invocation.Globals.Project,
+				input.ExternalID, input.Group,
+			)
+			if err != nil {
+				return nil, err
+			}
+			result := nextData{SelectionReason: selection.Reason}
+			if selection.Pellet != nil {
+				pellet := newPelletData(*selection.Pellet)
+				result.Pellet = &pellet
+			}
+			return result, nil
+		},
+	}
+}
+
+func ReleaseCommand(manager app.PelletManager) Command {
+	return pelletLifecycleCommand(manager, storage.PelletRelease, "Return the current workspace's pellet to the open queue.", true)
+}
+
+func CloseCommand(manager app.PelletManager) Command {
+	return pelletLifecycleCommand(manager, storage.PelletClose, "Close a pellet and remove it from the active queue.", true)
+}
+
+func ReopenCommand(manager app.PelletManager) Command {
+	return pelletLifecycleCommand(manager, storage.PelletReopen, "Reopen and append a closed or deferred pellet.", false)
+}
+
+func DeferCommand(manager app.PelletManager) Command {
+	return pelletLifecycleCommand(manager, storage.PelletDefer, "Defer a pellet until it is reopened.", true)
+}
+
+func pelletLifecycleCommand(manager app.PelletManager, operation storage.PelletLifecycleOperation, summary string, recovery bool) Command {
+	usage := fmt.Sprintf("pl %s PELLET", operation)
+	parse := func(args []string) (any, error) { return parseLifecycleReference(operation, args) }
+	if recovery {
+		usage += " [--recover-workspace WORKSPACE_ID --yes]"
+		parse = func(args []string) (any, error) { return parseRecoverableLifecycle(operation, args) }
+	}
+	return Command{
+		Name: string(operation), Summary: summary, Usage: usage, Parse: parse,
+		Run: func(ctx context.Context, invocation Invocation) (any, error) {
+			input := invocation.Input.(lifecycleInput)
+			result, err := manager.Transition(
+				ctx, invocationDatabase(invocation), invocation.WorkingDirectory, invocation.Globals.Project,
+				input.Reference,
+				storage.PelletLifecycleRequest{Operation: operation, RecoveryWorkspaceID: input.RecoveryWorkspaceID},
+			)
+			if err != nil {
+				return nil, err
+			}
+			return newLifecycleData(result), nil
+		},
+	}
+}
+
 type addInput struct {
 	Title           string
 	Description     *string
@@ -399,6 +468,106 @@ type nextInput struct {
 	Group      *string
 }
 
+type lifecycleInput struct {
+	Reference           domain.PelletReference
+	RecoveryWorkspaceID *int64
+}
+
+func parseLifecycleReference(operation storage.PelletLifecycleOperation, args []string) (any, error) {
+	if len(args) == 0 {
+		return nil, missingLifecycleReference(operation)
+	}
+	if strings.HasPrefix(args[0], "-") {
+		return nil, unknownFlag(args[0])
+	}
+	if len(args) > 1 {
+		return nil, unexpectedArgument(args[1])
+	}
+	reference, err := domain.ParsePelletReference(args[0])
+	if err != nil {
+		return nil, err
+	}
+	return lifecycleInput{Reference: reference}, nil
+}
+
+func parseRecoverableLifecycle(operation storage.PelletLifecycleOperation, args []string) (any, error) {
+	var input lifecycleInput
+	referenceSet := false
+	yes := false
+	seen := make(map[string]bool)
+	for len(args) > 0 {
+		argument := args[0]
+		if !strings.HasPrefix(argument, "-") {
+			if referenceSet {
+				return nil, unexpectedArgument(argument)
+			}
+			reference, err := domain.ParsePelletReference(argument)
+			if err != nil {
+				return nil, err
+			}
+			input.Reference = reference
+			referenceSet = true
+			args = args[1:]
+			continue
+		}
+
+		name, value, hasValue := splitOption(argument)
+		if seen[name] {
+			return nil, duplicateCommandFlag(name)
+		}
+		seen[name] = true
+		switch name {
+		case "--recover-workspace":
+			var err error
+			value, args, err = takeCommandFlagValue(args, name, value, hasValue, false, false)
+			if err != nil {
+				return nil, err
+			}
+			workspaceID, parseErr := strconv.ParseInt(value, 10, 64)
+			if parseErr != nil || workspaceID <= 0 || strconv.FormatInt(workspaceID, 10) != value {
+				return nil, domain.NewError(
+					domain.Usage, "invalid_workspace_id", "workspace ID must be a positive canonical integer",
+					map[string]any{"workspace_id": value},
+				)
+			}
+			input.RecoveryWorkspaceID = &workspaceID
+		case "--yes":
+			if hasValue {
+				return nil, flagTakesNoValue(name)
+			}
+			yes = true
+			args = args[1:]
+		default:
+			return nil, unknownFlag(name)
+		}
+	}
+	if !referenceSet {
+		return nil, missingLifecycleReference(operation)
+	}
+	if input.RecoveryWorkspaceID == nil && yes {
+		return nil, domain.NewError(
+			domain.Usage, "recovery_workspace_required", "--yes requires --recover-workspace for lifecycle recovery",
+			map[string]any{"flag": "--yes"},
+		)
+	}
+	if input.RecoveryWorkspaceID != nil && !yes {
+		return nil, domain.NewError(
+			domain.Confirmation, "confirmation_required", "workspace recovery requires --yes",
+			map[string]any{"workspace_id": *input.RecoveryWorkspaceID},
+		)
+	}
+	return input, nil
+}
+
+func missingLifecycleReference(operation storage.PelletLifecycleOperation) error {
+	return domain.NewError(
+		domain.Usage,
+		"missing_reference",
+		fmt.Sprintf("%s requires a pellet reference", operation),
+		nil,
+	)
+}
+
 func parseNext(args []string) (any, error) {
 	var input nextInput
 	seen := make(map[string]bool)
@@ -548,6 +717,38 @@ func newPelletData(pellet storage.Pellet) pelletData {
 		data.CompletedAt = &formatted
 	}
 	return data
+}
+
+type lifecycleData struct {
+	pelletData
+	RecoveredWorkspace *pelletWorkspaceData `json:"recovered_workspace,omitempty"`
+}
+
+func newLifecycleData(result storage.PelletLifecycleResult) lifecycleData {
+	data := lifecycleData{pelletData: newPelletData(result.Pellet)}
+	if result.RecoveredWorkspace != nil {
+		data.RecoveredWorkspace = newPelletWorkspaceData(*result.RecoveredWorkspace)
+	}
+	return data
+}
+
+func (data lifecycleData) RenderHuman(writer io.Writer) error {
+	if err := renderPelletSummary(writer, data.pelletData); err != nil {
+		return err
+	}
+	if data.RecoveredWorkspace != nil {
+		_, err := fmt.Fprintf(writer, "Recovered workspace %d.\n", data.RecoveredWorkspace.ID)
+		return err
+	}
+	return nil
+}
+
+func newPelletWorkspaceData(workspace storage.Workspace) *pelletWorkspaceData {
+	return &pelletWorkspaceData{
+		ID: workspace.ID, RootPath: workspace.RootPath.Value,
+		RootPathRelative: workspace.RootPath.Relative,
+		GitDir:           workspace.GitDir.Value, GitDirRelative: workspace.GitDir.Relative,
+	}
 }
 
 func (data pelletData) RenderHuman(writer io.Writer) error {

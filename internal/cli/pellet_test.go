@@ -8,11 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	"pellets/internal/app"
 	"pellets/internal/discovery"
+	"pellets/internal/domain"
 	"pellets/internal/storage/sqlite"
 )
 
@@ -121,6 +123,84 @@ func TestPelletCommandsAcrossMainAndLinkedWorktreesJSONGolden(t *testing.T) {
 	}
 	assertGolden(t, "pellet-human-next-empty.golden", stdout)
 
+	startedLinked := runPelletCommand(t, application, "start", "shared-2")
+	if repeated := runPelletCommand(t, application, "start", "shared-2"); repeated != startedLinked {
+		t.Fatalf("idempotent CLI start changed output:\nfirst=%s\nrepeat=%s", startedLinked, repeated)
+	}
+	stdout, stderr, exit = runTestApp(application, "start", "shared-1")
+	if exit != 4 || stdout != "" || !strings.Contains(stderr, `"code":"pellet_in_progress_elsewhere"`) {
+		t.Fatalf("cross-workspace start = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+	stdout, stderr, exit = runTestApp(application, "close", "shared-1")
+	if exit != 4 || stdout != "" || !strings.Contains(stderr, `"code":"pellet_in_progress_elsewhere"`) {
+		t.Fatalf("cross-workspace close = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+	mainWorkspaceID := mainProject.Workspaces[0].ID
+	linkedWorkspaceID := linkedProject.Workspaces[1].ID
+	stateBeforeUnconfirmed := capturePelletLogicalState(t, databasePath)
+	stdout, stderr, exit = runTestApp(application, "close", "shared-1", "--recover-workspace", strconv.FormatInt(mainWorkspaceID, 10))
+	if exit != 6 || stdout != "" || !strings.Contains(stderr, `"code":"confirmation_required"`) {
+		t.Fatalf("unconfirmed recovery close = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+	if stateAfter := capturePelletLogicalState(t, databasePath); !reflect.DeepEqual(stateAfter, stateBeforeUnconfirmed) {
+		t.Fatalf("unconfirmed recovery changed state:\nbefore=%q\nafter=%q", stateBeforeUnconfirmed, stateAfter)
+	}
+	stdout, stderr, exit = runTestApp(application, "close", "shared-1", "--recover-workspace", strconv.FormatInt(linkedWorkspaceID, 10), "--yes")
+	if exit != 4 || stdout != "" || !strings.Contains(stderr, `"code":"recovery_workspace_mismatch"`) {
+		t.Fatalf("mismatched recovery close = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+	recoveredClose := runPelletCommand(t, application, "close", "shared-1", "--recover-workspace", strconv.FormatInt(mainWorkspaceID, 10), "--yes")
+	var recoveredEnvelope struct {
+		Data struct {
+			ID                 string               `json:"id"`
+			Status             domain.PelletStatus  `json:"status"`
+			Priority           *int64               `json:"priority"`
+			Workspace          *pelletWorkspaceData `json:"workspace"`
+			CompletedAt        *string              `json:"completed_at"`
+			RecoveredWorkspace *pelletWorkspaceData `json:"recovered_workspace"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(recoveredClose), &recoveredEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	if recoveredEnvelope.Data.ID != "shared-1" || recoveredEnvelope.Data.Status != domain.PelletClosed || recoveredEnvelope.Data.Priority != nil || recoveredEnvelope.Data.Workspace != nil || recoveredEnvelope.Data.CompletedAt == nil || recoveredEnvelope.Data.RecoveredWorkspace == nil || recoveredEnvelope.Data.RecoveredWorkspace.ID != mainWorkspaceID {
+		t.Fatalf("recovered close JSON = %#v; raw=%s", recoveredEnvelope, recoveredClose)
+	}
+	repeatedClose := runPelletCommand(t, application, "close", "shared-1", "--recover-workspace", strconv.FormatInt(mainWorkspaceID, 10), "--yes")
+	if !strings.Contains(repeatedClose, `"completed_at":"`+*recoveredEnvelope.Data.CompletedAt+`"`) || strings.Contains(repeatedClose, `"recovered_workspace"`) {
+		t.Fatalf("idempotent close output = %s, first = %s", repeatedClose, recoveredClose)
+	}
+
+	runPelletCommand(t, application, "reopen", "shared-1")
+	deferred := runPelletCommand(t, application, "defer", "shared-1")
+	if repeated := runPelletCommand(t, application, "defer", "shared-1"); repeated != deferred {
+		t.Fatalf("idempotent CLI defer changed output:\nfirst=%s\nrepeat=%s", deferred, repeated)
+	}
+	runPelletCommand(t, application, "reopen", "shared-1")
+	runPelletCommand(t, application, "release", "shared-2")
+	startedNext := runPelletCommand(t, application, "start-next")
+	if !strings.Contains(startedNext, `"selection_reason":"next_open"`) || !strings.Contains(startedNext, `"workspace":{"id":`+strconv.FormatInt(linkedWorkspaceID, 10)) {
+		t.Fatalf("start-next output = %s", startedNext)
+	}
+	resumedNext := runPelletCommand(t, application, "start-next", "--external-id", "missing")
+	if !strings.Contains(resumedNext, `"selection_reason":"resume_in_progress"`) {
+		t.Fatalf("filtered start-next resume = %s", resumedNext)
+	}
+	var resumed struct {
+		Data nextData `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(resumedNext), &resumed); err != nil {
+		t.Fatal(err)
+	}
+	if resumed.Data.Pellet == nil {
+		t.Fatalf("resumed start-next has no pellet: %s", resumedNext)
+	}
+	runPelletCommand(t, application, "close", resumed.Data.Pellet.ID)
+	exhausted := runPelletCommand(t, application, "start-next", "--external-id", "missing")
+	if !strings.Contains(exhausted, `"selection_reason":"none","pellet":null`) {
+		t.Fatalf("empty start-next = %s", exhausted)
+	}
+
 	runGitTest(t, mainWorkTree, "worktree", "add", "--quiet", "-b", "pellet-command-unregistered", unregisteredWorkTree)
 	current = unregisteredWorkTree
 	stateBeforeUnregistered := capturePelletLogicalState(t, databasePath)
@@ -139,7 +219,9 @@ func TestPelletCommandUsageValidationIsStrictAndSideEffectFree(t *testing.T) {
 	application := New(
 		"test",
 		AddCommand(emptyPelletManager()), ListCommand(emptyPelletManager()), ShowCommand(emptyPelletManager()),
-		EditCommand(emptyPelletManager()), NextCommand(emptyPelletManager()),
+		EditCommand(emptyPelletManager()), NextCommand(emptyPelletManager()), StartCommand(emptyPelletManager()),
+		StartNextCommand(emptyPelletManager()), ReleaseCommand(emptyPelletManager()), CloseCommand(emptyPelletManager()),
+		ReopenCommand(emptyPelletManager()), DeferCommand(emptyPelletManager()),
 	)
 	workingDirectoryCalls := 0
 	application.workingDirectory = func() (string, error) {
@@ -162,11 +244,22 @@ func TestPelletCommandUsageValidationIsStrictAndSideEffectFree(t *testing.T) {
 		{[]string{"edit", "shared-1", "--status", "closed"}, "unknown_flag"},
 		{[]string{"edit", "shared-1", "--external-id", "x", "--clear-external-id"}, "conflicting_flags"},
 		{[]string{"next", "extra"}, "unexpected_argument"},
+		{[]string{"start"}, "missing_reference"},
+		{[]string{"start", "shared-1", "--yes"}, "unexpected_argument"},
+		{[]string{"start-next", "extra"}, "unexpected_argument"},
+		{[]string{"release", "shared-1", "--recover-workspace", "1"}, "confirmation_required"},
+		{[]string{"close", "shared-1", "--yes"}, "recovery_workspace_required"},
+		{[]string{"defer", "shared-1", "--recover-workspace", "01", "--yes"}, "invalid_workspace_id"},
+		{[]string{"reopen", "shared-1", "extra"}, "unexpected_argument"},
 	}
 	for _, test := range tests {
 		stdout, stderr, exit := runTestApp(application, test.args...)
-		if exit != 2 || stdout != "" || !strings.Contains(stderr, `"code":"`+test.code+`"`) {
-			t.Errorf("%v = exit %d stdout %q stderr %q, want %s", test.args, exit, stdout, stderr, test.code)
+		wantExit := 2
+		if test.code == "confirmation_required" {
+			wantExit = 6
+		}
+		if exit != wantExit || stdout != "" || !strings.Contains(stderr, `"code":"`+test.code+`"`) {
+			t.Errorf("%v = exit %d stdout %q stderr %q, want exit %d code %s", test.args, exit, stdout, stderr, wantExit, test.code)
 		}
 	}
 	if workingDirectoryCalls != 0 {

@@ -253,6 +253,440 @@ func (repository *PelletRepository) NextPellet(ctx context.Context, project stor
 	return storage.NextSelection{Reason: reason, Pellet: &pellet}, nil
 }
 
+const startNextMaxAttempts = 2
+
+// StartNextPellet holds selection and ownership assignment under one immediate
+// transaction. The retry is deliberately bounded and deterministic even
+// though BEGIN IMMEDIATE normally prevents a competing writer from changing
+// the selected row before assignment.
+func (repository *PelletRepository) StartNextPellet(ctx context.Context, project storage.ResolvedProject, externalID, group *string) (storage.NextSelection, error) {
+	if err := validatePelletProjectContext(project); err != nil {
+		return storage.NextSelection{}, err
+	}
+	if err := validateNullablePelletText("external_id", externalID); err != nil {
+		return storage.NextSelection{}, err
+	}
+	if err := validateNullablePelletText("group", group); err != nil {
+		return storage.NextSelection{}, err
+	}
+
+	connection, err := repository.db.Conn(ctx)
+	if err != nil {
+		return storage.NextSelection{}, pelletStorageError("open start-next connection", err)
+	}
+	defer connection.Close()
+	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return storage.NextSelection{}, pelletStorageError("begin start-next", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = connection.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+
+	if err := ensureStoredProjectWorkspace(ctx, connection, project); err != nil {
+		return storage.NextSelection{}, err
+	}
+	for attempt := 0; attempt < startNextMaxAttempts; attempt++ {
+		owned, err := loadWorkspaceInProgressPellet(ctx, connection, project)
+		if err == nil {
+			selection := storage.NextSelection{Reason: storage.NextResumeInProgress, Pellet: &owned}
+			if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
+				return storage.NextSelection{}, pelletStorageError("commit start-next resume", err)
+			}
+			committed = true
+			return selection, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return storage.NextSelection{}, pelletStorageError("read current workspace pellet for start-next", err)
+		}
+
+		candidate, err := loadNextOpenPellet(ctx, connection, project, externalID, group)
+		if errors.Is(err, sql.ErrNoRows) {
+			if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
+				return storage.NextSelection{}, pelletStorageError("commit empty start-next", err)
+			}
+			committed = true
+			return storage.NextSelection{Reason: storage.NextNone}, nil
+		}
+		if err != nil {
+			return storage.NextSelection{}, pelletStorageError("select open pellet for start-next", err)
+		}
+
+		timestamp, err := captureJulianTimestamp(ctx, connection)
+		if err != nil {
+			return storage.NextSelection{}, pelletStorageError("capture start-next timestamp", err)
+		}
+		result, err := connection.ExecContext(ctx, `
+			UPDATE pellets
+			SET status = 'in_progress', workspace_id = ?, updated_at = ?
+			WHERE project_id = ? AND number = ?
+			  AND status = 'open' AND workspace_id IS NULL`,
+			project.Workspace.ID, timestamp, project.Project.ID, candidate.Reference.Number)
+		if err != nil {
+			if isSQLiteConstraint(err) {
+				continue
+			}
+			return storage.NextSelection{}, pelletStorageError("assign start-next pellet", err)
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return storage.NextSelection{}, pelletStorageError("read start-next assignment result", err)
+		}
+		if changed != 1 {
+			continue
+		}
+		started, err := loadPellet(ctx, connection, project.Project.ID, project.Project.Code, candidate.Reference.Number)
+		if err != nil {
+			return storage.NextSelection{}, pelletStorageError("read started next pellet", err)
+		}
+		if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
+			return storage.NextSelection{}, pelletStorageError("commit start-next assignment", err)
+		}
+		committed = true
+		return storage.NextSelection{Reason: storage.NextOpen, Pellet: &started}, nil
+	}
+
+	return storage.NextSelection{}, domain.NewError(
+		domain.Conflict,
+		"start_next_conflict",
+		"could not assign the next eligible pellet after bounded retry",
+		map[string]any{"workspace_id": project.Workspace.ID, "attempts": startNextMaxAttempts},
+	)
+}
+
+// TransitionPellet enforces the normative workspace-aware transition table in
+// one immediate transaction. Idempotent target-state repeats commit without
+// updating timestamps or queue positions.
+func (repository *PelletRepository) TransitionPellet(ctx context.Context, project storage.ResolvedProject, reference domain.PelletReference, request storage.PelletLifecycleRequest) (storage.PelletLifecycleResult, error) {
+	if err := validatePelletProjectContext(project); err != nil {
+		return storage.PelletLifecycleResult{}, err
+	}
+	if err := validateReferenceProject(project, reference); err != nil {
+		return storage.PelletLifecycleResult{}, err
+	}
+	if err := validatePelletLifecycleRequest(request); err != nil {
+		return storage.PelletLifecycleResult{}, err
+	}
+
+	connection, err := repository.db.Conn(ctx)
+	if err != nil {
+		return storage.PelletLifecycleResult{}, pelletStorageError("open lifecycle connection", err)
+	}
+	defer connection.Close()
+	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return storage.PelletLifecycleResult{}, pelletStorageError("begin pellet lifecycle transition", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = connection.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+
+	if err := ensureStoredProjectWorkspace(ctx, connection, project); err != nil {
+		return storage.PelletLifecycleResult{}, err
+	}
+	before, err := loadPellet(ctx, connection, project.Project.ID, project.Project.Code, reference.Number)
+	if errors.Is(err, sql.ErrNoRows) {
+		return storage.PelletLifecycleResult{}, pelletNotFound(reference)
+	}
+	if err != nil {
+		return storage.PelletLifecycleResult{}, pelletStorageError("read pellet before lifecycle transition", err)
+	}
+
+	after, recovered, changed, err := applyPelletLifecycleTransition(ctx, connection, project, before, request)
+	if err != nil {
+		return storage.PelletLifecycleResult{}, err
+	}
+	if changed {
+		timestamp, err := captureJulianTimestamp(ctx, connection)
+		if err != nil {
+			return storage.PelletLifecycleResult{}, pelletStorageError("capture pellet lifecycle timestamp", err)
+		}
+		var completedAt any
+		if request.Operation == storage.PelletClose {
+			completedAt = timestamp
+		}
+		result, err := connection.ExecContext(ctx, `
+			UPDATE pellets
+			SET status = ?, workspace_id = ?, priority = ?, completed_at = ?, updated_at = ?
+			WHERE project_id = ? AND number = ?`,
+			after.Status, pelletWorkspaceID(after.Workspace), nullableInt64Value(after.Priority), completedAt, timestamp,
+			project.Project.ID, reference.Number)
+		if err != nil {
+			return storage.PelletLifecycleResult{}, pelletStorageError("update pellet lifecycle state", err)
+		}
+		rows, err := result.RowsAffected()
+		if err != nil || rows != 1 {
+			if err == nil {
+				err = fmt.Errorf("updated %d rows, want 1", rows)
+			}
+			return storage.PelletLifecycleResult{}, pelletStorageError("verify pellet lifecycle update", err)
+		}
+		after, err = loadPellet(ctx, connection, project.Project.ID, project.Project.Code, reference.Number)
+		if err != nil {
+			return storage.PelletLifecycleResult{}, pelletStorageError("read transitioned pellet", err)
+		}
+	}
+
+	if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
+		return storage.PelletLifecycleResult{}, pelletStorageError("commit pellet lifecycle transition", err)
+	}
+	committed = true
+	return storage.PelletLifecycleResult{Pellet: after, RecoveredWorkspace: recovered}, nil
+}
+
+func applyPelletLifecycleTransition(
+	ctx context.Context,
+	query projectQuery,
+	project storage.ResolvedProject,
+	pellet storage.Pellet,
+	request storage.PelletLifecycleRequest,
+) (storage.Pellet, *storage.Workspace, bool, error) {
+	switch request.Operation {
+	case storage.PelletStart:
+		switch pellet.Status {
+		case domain.PelletInProgress:
+			if pellet.Workspace != nil && pellet.Workspace.ID == project.Workspace.ID {
+				return pellet, nil, false, nil
+			}
+			return storage.Pellet{}, nil, false, pelletOwnedElsewhere(pellet)
+		case domain.PelletOpen:
+			owned, err := loadWorkspaceInProgressPellet(ctx, query, project)
+			if err == nil {
+				return storage.Pellet{}, nil, false, workspaceAlreadyInProgress(project.Workspace.ID, owned.Reference)
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return storage.Pellet{}, nil, false, pelletStorageError("check workspace before start", err)
+			}
+			pellet.Status = domain.PelletInProgress
+			workspace := project.Workspace
+			pellet.Workspace = &workspace
+			return pellet, nil, true, nil
+		default:
+			return storage.Pellet{}, nil, false, invalidPelletTransition(request.Operation, pellet)
+		}
+
+	case storage.PelletRelease:
+		if pellet.Status != domain.PelletInProgress {
+			return storage.Pellet{}, nil, false, invalidPelletTransition(request.Operation, pellet)
+		}
+		recovered, err := authorizeOwnedPelletTransition(project, pellet, request.RecoveryWorkspaceID)
+		if err != nil {
+			return storage.Pellet{}, nil, false, err
+		}
+		pellet.Status = domain.PelletOpen
+		pellet.Workspace = nil
+		return pellet, recovered, true, nil
+
+	case storage.PelletClose:
+		if pellet.Status == domain.PelletClosed {
+			return pellet, nil, false, nil
+		}
+		var recovered *storage.Workspace
+		if pellet.Status == domain.PelletInProgress {
+			var err error
+			recovered, err = authorizeOwnedPelletTransition(project, pellet, request.RecoveryWorkspaceID)
+			if err != nil {
+				return storage.Pellet{}, nil, false, err
+			}
+		} else if pellet.Status != domain.PelletOpen {
+			return storage.Pellet{}, nil, false, invalidPelletTransition(request.Operation, pellet)
+		}
+		pellet.Status = domain.PelletClosed
+		pellet.Workspace = nil
+		pellet.Priority = nil
+		return pellet, recovered, true, nil
+
+	case storage.PelletReopen:
+		if pellet.Status == domain.PelletOpen {
+			return pellet, nil, false, nil
+		}
+		if pellet.Status != domain.PelletClosed && pellet.Status != domain.PelletMaybeLater {
+			return storage.Pellet{}, nil, false, invalidPelletTransition(request.Operation, pellet)
+		}
+		priority, err := allocateTailPriority(ctx, query, project.Project.ID)
+		if err != nil {
+			return storage.Pellet{}, nil, false, err
+		}
+		pellet.Status = domain.PelletOpen
+		pellet.Workspace = nil
+		pellet.Priority = &priority
+		pellet.CompletedAt = nil
+		return pellet, nil, true, nil
+
+	case storage.PelletDefer:
+		if pellet.Status == domain.PelletMaybeLater {
+			return pellet, nil, false, nil
+		}
+		var recovered *storage.Workspace
+		if pellet.Status == domain.PelletInProgress {
+			var err error
+			recovered, err = authorizeOwnedPelletTransition(project, pellet, request.RecoveryWorkspaceID)
+			if err != nil {
+				return storage.Pellet{}, nil, false, err
+			}
+		} else if pellet.Status != domain.PelletOpen {
+			return storage.Pellet{}, nil, false, invalidPelletTransition(request.Operation, pellet)
+		}
+		pellet.Status = domain.PelletMaybeLater
+		pellet.Workspace = nil
+		pellet.Priority = nil
+		return pellet, recovered, true, nil
+	}
+
+	return storage.Pellet{}, nil, false, domain.NewError(
+		domain.Usage,
+		"invalid_lifecycle_operation",
+		"unknown pellet lifecycle operation",
+		map[string]any{"operation": request.Operation},
+	)
+}
+
+func authorizeOwnedPelletTransition(project storage.ResolvedProject, pellet storage.Pellet, recoveryWorkspaceID *int64) (*storage.Workspace, error) {
+	if pellet.Workspace == nil {
+		return nil, domain.NewError(domain.Storage, "pellet_storage_failed", "stored in-progress pellet has no workspace owner", nil)
+	}
+	ownerID := pellet.Workspace.ID
+	if ownerID == project.Workspace.ID && recoveryWorkspaceID == nil {
+		return nil, nil
+	}
+	if recoveryWorkspaceID == nil {
+		return nil, pelletOwnedElsewhere(pellet)
+	}
+	if *recoveryWorkspaceID != ownerID {
+		return nil, domain.NewError(
+			domain.Conflict,
+			"recovery_workspace_mismatch",
+			"the supplied recovery workspace does not own the pellet",
+			map[string]any{
+				"pellet_id": pellet.Reference.String(), "owner_workspace_id": ownerID,
+				"provided_workspace_id": *recoveryWorkspaceID,
+			},
+		)
+	}
+	recovered := *pellet.Workspace
+	return &recovered, nil
+}
+
+func loadWorkspaceInProgressPellet(ctx context.Context, query projectQuery, project storage.ResolvedProject) (storage.Pellet, error) {
+	return scanPellet(query.QueryRowContext(ctx, pelletSelect+`
+		WHERE p.project_id = ? AND p.status = 'in_progress' AND p.workspace_id = ?
+		ORDER BY p.priority, p.number
+		LIMIT 1`, project.Project.ID, project.Workspace.ID))
+}
+
+func loadNextOpenPellet(ctx context.Context, query projectQuery, project storage.ResolvedProject, externalID, group *string) (storage.Pellet, error) {
+	statement := pelletSelect + `
+		WHERE p.project_id = ? AND p.status = 'open'`
+	arguments := []any{project.Project.ID}
+	if externalID != nil {
+		statement += " AND p.external_id = ?"
+		arguments = append(arguments, *externalID)
+	}
+	if group != nil {
+		statement += " AND p.group_id = ?"
+		arguments = append(arguments, *group)
+	}
+	statement += " ORDER BY p.priority, p.number LIMIT 1"
+	return scanPellet(query.QueryRowContext(ctx, statement, arguments...))
+}
+
+func ensureStoredProjectWorkspace(ctx context.Context, query projectQuery, project storage.ResolvedProject) error {
+	if err := ensureStoredProject(ctx, query, project.Project); err != nil {
+		return err
+	}
+	var workspaceID int64
+	err := query.QueryRowContext(ctx, `
+		SELECT workspace_id
+		FROM project_workspaces
+		WHERE project_id = ? AND workspace_id = ?`, project.Project.ID, project.Workspace.ID).Scan(&workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.NewError(
+			domain.NotFound,
+			"workspace_not_registered",
+			"the current Git worktree is not registered for the logical project",
+			map[string]any{"project": project.Project.Code, "workspace_id": project.Workspace.ID},
+		)
+	}
+	if err != nil {
+		return pelletStorageError("verify pellet workspace", err)
+	}
+	return nil
+}
+
+func validatePelletLifecycleRequest(request storage.PelletLifecycleRequest) error {
+	switch request.Operation {
+	case storage.PelletStart, storage.PelletRelease, storage.PelletClose, storage.PelletReopen, storage.PelletDefer:
+	default:
+		return domain.NewError(
+			domain.Usage, "invalid_lifecycle_operation", "unknown pellet lifecycle operation",
+			map[string]any{"operation": request.Operation},
+		)
+	}
+	if request.RecoveryWorkspaceID == nil {
+		return nil
+	}
+	if request.Operation != storage.PelletRelease && request.Operation != storage.PelletClose && request.Operation != storage.PelletDefer {
+		return domain.NewError(
+			domain.Usage, "recovery_not_supported", "this lifecycle operation does not accept workspace recovery",
+			map[string]any{"operation": request.Operation},
+		)
+	}
+	if *request.RecoveryWorkspaceID <= 0 {
+		return domain.NewError(
+			domain.Usage, "invalid_workspace_id", "workspace ID must be a positive integer",
+			map[string]any{"workspace_id": *request.RecoveryWorkspaceID},
+		)
+	}
+	return nil
+}
+
+func workspaceAlreadyInProgress(workspaceID int64, reference domain.PelletReference) error {
+	return domain.NewError(
+		domain.Conflict,
+		"workspace_already_in_progress",
+		fmt.Sprintf("workspace %d already owns %s", workspaceID, reference),
+		map[string]any{"workspace_id": workspaceID, "pellet_id": reference.String()},
+	)
+}
+
+func pelletOwnedElsewhere(pellet storage.Pellet) error {
+	ownerID := int64(0)
+	if pellet.Workspace != nil {
+		ownerID = pellet.Workspace.ID
+	}
+	return domain.NewError(
+		domain.Conflict,
+		"pellet_in_progress_elsewhere",
+		fmt.Sprintf("%s is in progress in workspace %d", pellet.Reference, ownerID),
+		map[string]any{"pellet_id": pellet.Reference.String(), "workspace_id": ownerID},
+	)
+}
+
+func invalidPelletTransition(operation storage.PelletLifecycleOperation, pellet storage.Pellet) error {
+	return domain.NewError(
+		domain.Conflict,
+		"invalid_pellet_transition",
+		fmt.Sprintf("cannot %s %s from status %s", operation, pellet.Reference, pellet.Status),
+		map[string]any{"command": operation, "pellet_id": pellet.Reference.String(), "status": pellet.Status},
+	)
+}
+
+func pelletWorkspaceID(workspace *storage.Workspace) any {
+	if workspace == nil {
+		return nil
+	}
+	return workspace.ID
+}
+
+func isSQLiteConstraint(err error) bool {
+	var sqliteError interface{ Code() int }
+	return errors.As(err, &sqliteError) && sqliteError.Code()&0xff == 19
+}
+
 // UpdatePellet edits only user-editable scalar fields and updates FTS in the
 // same immediate transaction when indexed text changes.
 func (repository *PelletRepository) UpdatePellet(ctx context.Context, project storage.ResolvedProject, reference domain.PelletReference, changes storage.PelletChanges) (storage.Pellet, error) {

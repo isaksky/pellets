@@ -620,6 +620,349 @@ func TestPelletRepositoryReadOnlyNextIsWorkspaceScopedAndTyped(t *testing.T) {
 	_ = second
 }
 
+func TestPelletRepositoryStartEnforcesWorkspaceOwnershipAndIdempotency(t *testing.T) {
+	t.Parallel()
+
+	fixture := newPelletRepositoryFixture(t)
+	repository := fixture.open(t)
+	defer repository.Close()
+
+	first, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "main work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "linked work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "still open"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	started, err := repository.TransitionPellet(context.Background(), fixture.main, first.Reference, storage.PelletLifecycleRequest{Operation: storage.PelletStart})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.Pellet.Status != domain.PelletInProgress || started.Pellet.Workspace == nil || started.Pellet.Workspace.ID != fixture.main.Workspace.ID || !reflect.DeepEqual(started.Pellet.Priority, first.Priority) {
+		t.Fatalf("started pellet = %#v", started.Pellet)
+	}
+	repeated, err := repository.TransitionPellet(context.Background(), fixture.main, first.Reference, storage.PelletLifecycleRequest{Operation: storage.PelletStart})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(repeated.Pellet, started.Pellet) {
+		t.Fatalf("idempotent start changed pellet:\nfirst=%#v\nrepeat=%#v", started.Pellet, repeated.Pellet)
+	}
+
+	beforeConflict := captureRepositoryPelletState(t, repository.db, fixture.main.Project.ID)
+	_, err = repository.TransitionPellet(context.Background(), fixture.main, second.Reference, storage.PelletLifecycleRequest{Operation: storage.PelletStart})
+	assertPelletErrorCode(t, err, "workspace_already_in_progress")
+	if after := captureRepositoryPelletState(t, repository.db, fixture.main.Project.ID); !reflect.DeepEqual(after, beforeConflict) {
+		t.Fatalf("workspace conflict changed state:\nbefore=%v\nafter=%v", beforeConflict, after)
+	}
+	_, err = repository.TransitionPellet(context.Background(), fixture.linked, first.Reference, storage.PelletLifecycleRequest{Operation: storage.PelletStart})
+	assertPelletErrorCode(t, err, "pellet_in_progress_elsewhere")
+
+	linkedStarted, err := repository.TransitionPellet(context.Background(), fixture.linked, second.Reference, storage.PelletLifecycleRequest{Operation: storage.PelletStart})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if linkedStarted.Pellet.Workspace == nil || linkedStarted.Pellet.Workspace.ID != fixture.linked.Workspace.ID {
+		t.Fatalf("linked start owner = %#v", linkedStarted.Pellet.Workspace)
+	}
+	assertPelletQueryInt(t, repository.db, "SELECT COUNT(*) FROM pellets WHERE project_id = ? AND status = 'in_progress'", 2, fixture.main.Project.ID)
+
+	if _, err := repository.db.Exec(`
+		UPDATE pellets SET status = 'in_progress', workspace_id = ?
+		WHERE project_id = ? AND number = ?`, fixture.main.Workspace.ID, fixture.main.Project.ID, third.Reference.Number); err == nil {
+		t.Fatal("database allowed a second in-progress pellet for one workspace")
+	}
+	other, err := repository.CreatePellet(context.Background(), fixture.other, storage.NewPellet{Title: "other project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.db.Exec(`
+		UPDATE pellets SET status = 'in_progress', workspace_id = ?
+		WHERE project_id = ? AND number = ?`, fixture.main.Workspace.ID, fixture.other.Project.ID, other.Reference.Number); err == nil {
+		t.Fatal("database allowed cross-project workspace ownership")
+	}
+}
+
+func TestPelletRepositoryLifecycleTransitionsRecoveryAndStableRepeats(t *testing.T) {
+	t.Parallel()
+
+	fixture := newPelletRepositoryFixture(t)
+	repository := fixture.open(t)
+	defer repository.Close()
+
+	first, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "recover close"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "queue tail"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := transitionPellet(t, repository, fixture.main, first.Reference, storage.PelletStart, nil)
+
+	beforeConflict := captureRepositoryPelletState(t, repository.db, fixture.main.Project.ID)
+	_, err = repository.TransitionPellet(context.Background(), fixture.linked, first.Reference, storage.PelletLifecycleRequest{Operation: storage.PelletClose})
+	assertPelletErrorCode(t, err, "pellet_in_progress_elsewhere")
+	mismatch := fixture.linked.Workspace.ID
+	_, err = repository.TransitionPellet(context.Background(), fixture.linked, first.Reference, storage.PelletLifecycleRequest{
+		Operation: storage.PelletClose, RecoveryWorkspaceID: &mismatch,
+	})
+	assertPelletErrorCode(t, err, "recovery_workspace_mismatch")
+	if after := captureRepositoryPelletState(t, repository.db, fixture.main.Project.ID); !reflect.DeepEqual(after, beforeConflict) {
+		t.Fatalf("failed ownership transitions changed state:\nbefore=%v\nafter=%v", beforeConflict, after)
+	}
+
+	ownerID := fixture.main.Workspace.ID
+	closed := transitionPellet(t, repository, fixture.linked, first.Reference, storage.PelletClose, &ownerID)
+	if closed.Pellet.Status != domain.PelletClosed || closed.Pellet.Priority != nil || closed.Pellet.Workspace != nil || closed.Pellet.CompletedAt == nil || closed.RecoveredWorkspace == nil || closed.RecoveredWorkspace.ID != ownerID {
+		t.Fatalf("recovered close = %#v", closed)
+	}
+	if !closed.Pellet.UpdatedAt.After(started.Pellet.UpdatedAt) && !closed.Pellet.UpdatedAt.Equal(started.Pellet.UpdatedAt) {
+		t.Fatalf("closed timestamp moved backward: start=%s close=%s", started.Pellet.UpdatedAt, closed.Pellet.UpdatedAt)
+	}
+	repeatedClose := transitionPellet(t, repository, fixture.linked, first.Reference, storage.PelletClose, &ownerID)
+	if !reflect.DeepEqual(repeatedClose.Pellet, closed.Pellet) || repeatedClose.RecoveredWorkspace != nil {
+		t.Fatalf("idempotent close changed state: first=%#v repeat=%#v", closed, repeatedClose)
+	}
+
+	reopened := transitionPellet(t, repository, fixture.linked, first.Reference, storage.PelletReopen, nil)
+	if reopened.Pellet.Status != domain.PelletOpen || reopened.Pellet.Workspace != nil || reopened.Pellet.CompletedAt != nil || reopened.Pellet.Priority == nil || second.Priority == nil || *reopened.Pellet.Priority != *second.Priority+domain.PelletPriorityStride {
+		t.Fatalf("reopened pellet = %#v; second priority = %v", reopened.Pellet, second.Priority)
+	}
+	repeatedReopen := transitionPellet(t, repository, fixture.main, first.Reference, storage.PelletReopen, nil)
+	if !reflect.DeepEqual(repeatedReopen.Pellet, reopened.Pellet) {
+		t.Fatalf("idempotent reopen changed timestamp or position: first=%#v repeat=%#v", reopened.Pellet, repeatedReopen.Pellet)
+	}
+
+	deferred := transitionPellet(t, repository, fixture.main, first.Reference, storage.PelletDefer, nil)
+	if deferred.Pellet.Status != domain.PelletMaybeLater || deferred.Pellet.Priority != nil || deferred.Pellet.Workspace != nil || deferred.Pellet.CompletedAt != nil {
+		t.Fatalf("deferred pellet = %#v", deferred.Pellet)
+	}
+	repeatedDefer := transitionPellet(t, repository, fixture.linked, first.Reference, storage.PelletDefer, nil)
+	if !reflect.DeepEqual(repeatedDefer.Pellet, deferred.Pellet) {
+		t.Fatalf("idempotent defer changed pellet: first=%#v repeat=%#v", deferred.Pellet, repeatedDefer.Pellet)
+	}
+
+	reopened = transitionPellet(t, repository, fixture.main, first.Reference, storage.PelletReopen, nil)
+	started = transitionPellet(t, repository, fixture.main, first.Reference, storage.PelletStart, nil)
+	released := transitionPellet(t, repository, fixture.main, first.Reference, storage.PelletRelease, nil)
+	if released.Pellet.Status != domain.PelletOpen || released.Pellet.Workspace != nil || !reflect.DeepEqual(released.Pellet.Priority, started.Pellet.Priority) {
+		t.Fatalf("owner release = %#v", released.Pellet)
+	}
+	_, err = repository.TransitionPellet(context.Background(), fixture.main, first.Reference, storage.PelletLifecycleRequest{Operation: storage.PelletRelease})
+	assertPelletErrorCode(t, err, "invalid_pellet_transition")
+
+	started = transitionPellet(t, repository, fixture.main, first.Reference, storage.PelletStart, nil)
+	recoveredRelease := transitionPellet(t, repository, fixture.linked, first.Reference, storage.PelletRelease, &ownerID)
+	if recoveredRelease.RecoveredWorkspace == nil || recoveredRelease.RecoveredWorkspace.ID != ownerID || recoveredRelease.Pellet.Status != domain.PelletOpen || !reflect.DeepEqual(recoveredRelease.Pellet.Priority, started.Pellet.Priority) {
+		t.Fatalf("recovered release = %#v", recoveredRelease)
+	}
+
+	transitionPellet(t, repository, fixture.main, first.Reference, storage.PelletStart, nil)
+	recoveredDefer := transitionPellet(t, repository, fixture.linked, first.Reference, storage.PelletDefer, &ownerID)
+	if recoveredDefer.RecoveredWorkspace == nil || recoveredDefer.RecoveredWorkspace.ID != ownerID || recoveredDefer.Pellet.Status != domain.PelletMaybeLater || recoveredDefer.Pellet.Priority != nil || recoveredDefer.Pellet.Workspace != nil {
+		t.Fatalf("recovered defer = %#v", recoveredDefer)
+	}
+}
+
+func TestPelletRepositoryStartNextIsAtomicFilteredAndBounded(t *testing.T) {
+	t.Parallel()
+
+	fixture := newPelletRepositoryFixture(t)
+	firstRepository := fixture.open(t)
+	defer firstRepository.Close()
+	secondRepository := fixture.open(t)
+	defer secondRepository.Close()
+
+	externalID, group := "Case:Exact", "Rollout/A"
+	first, err := firstRepository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "first", ExternalID: &externalID, Group: &group})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := firstRepository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "second", ExternalID: &externalID, Group: &group})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherExternal := "other"
+	if _, err := firstRepository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "outside filter", ExternalID: &otherExternal, Group: &group}); err != nil {
+		t.Fatal(err)
+	}
+
+	type startResult struct {
+		selection storage.NextSelection
+		err       error
+	}
+	start := make(chan struct{})
+	results := make(chan startResult, 2)
+	var calls sync.WaitGroup
+	for _, call := range []struct {
+		repository *PelletRepository
+		project    storage.ResolvedProject
+	}{{firstRepository, fixture.main}, {secondRepository, fixture.linked}} {
+		calls.Add(1)
+		go func(call struct {
+			repository *PelletRepository
+			project    storage.ResolvedProject
+		}) {
+			defer calls.Done()
+			<-start
+			selection, selectionErr := call.repository.StartNextPellet(context.Background(), call.project, &externalID, &group)
+			results <- startResult{selection: selection, err: selectionErr}
+		}(call)
+	}
+	close(start)
+	calls.Wait()
+	close(results)
+	claimed := make(map[domain.PelletReference]int64)
+	for result := range results {
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if result.selection.Reason != storage.NextOpen || result.selection.Pellet == nil || result.selection.Pellet.Workspace == nil {
+			t.Fatalf("start-next result = %#v", result.selection)
+		}
+		claimed[result.selection.Pellet.Reference] = result.selection.Pellet.Workspace.ID
+	}
+	if len(claimed) != 2 || claimed[first.Reference] == 0 || claimed[second.Reference] == 0 || claimed[first.Reference] == claimed[second.Reference] {
+		t.Fatalf("concurrent claims = %#v", claimed)
+	}
+	assertPelletQueryInt(t, firstRepository.db, "SELECT COUNT(DISTINCT workspace_id) FROM pellets WHERE project_id = ? AND status = 'in_progress'", 2, fixture.main.Project.ID)
+
+	mainOwned, err := firstRepository.StartNextPellet(context.Background(), fixture.main, &otherExternal, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mainOwned.Reason != storage.NextResumeInProgress || mainOwned.Pellet == nil || mainOwned.Pellet.Workspace == nil || mainOwned.Pellet.Workspace.ID != fixture.main.Workspace.ID {
+		t.Fatalf("filtered resume = %#v", mainOwned)
+	}
+	repeated, err := firstRepository.StartNextPellet(context.Background(), fixture.main, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(repeated, mainOwned) {
+		t.Fatalf("start-next resume changed pellet: first=%#v repeat=%#v", mainOwned, repeated)
+	}
+
+	for reference, owner := range claimed {
+		project := fixture.main
+		if owner == fixture.linked.Workspace.ID {
+			project = fixture.linked
+		}
+		transitionPellet(t, firstRepository, project, reference, storage.PelletClose, nil)
+	}
+	stateBeforeEmpty := captureRepositoryPelletState(t, firstRepository.db, fixture.main.Project.ID)
+	missing := "missing"
+	none, err := firstRepository.StartNextPellet(context.Background(), fixture.main, &missing, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if none.Reason != storage.NextNone || none.Pellet != nil {
+		t.Fatalf("empty start-next = %#v", none)
+	}
+	if after := captureRepositoryPelletState(t, firstRepository.db, fixture.main.Project.ID); !reflect.DeepEqual(after, stateBeforeEmpty) {
+		t.Fatalf("empty start-next changed state:\nbefore=%v\nafter=%v", stateBeforeEmpty, after)
+	}
+
+	if _, err := firstRepository.db.Exec(`
+		CREATE TRIGGER test_reject_start_next
+		BEFORE UPDATE ON pellets
+		WHEN NEW.status = 'in_progress'
+		BEGIN
+			SELECT RAISE(ABORT, 'forced start-next retry');
+		END`); err != nil {
+		t.Fatal(err)
+	}
+	stateBeforeRetry := captureRepositoryPelletState(t, firstRepository.db, fixture.main.Project.ID)
+	_, err = firstRepository.StartNextPellet(context.Background(), fixture.main, &otherExternal, nil)
+	assertPelletErrorCode(t, err, "start_next_conflict")
+	if after := captureRepositoryPelletState(t, firstRepository.db, fixture.main.Project.ID); !reflect.DeepEqual(after, stateBeforeRetry) {
+		t.Fatalf("retry exhaustion changed state:\nbefore=%v\nafter=%v", stateBeforeRetry, after)
+	}
+}
+
+func TestPelletRepositoryStartNextBusyLeavesNoPartialWrite(t *testing.T) {
+	t.Parallel()
+
+	fixture := newPelletRepositoryFixture(t)
+	lockerRepository := fixture.open(t)
+	defer lockerRepository.Close()
+	workerRepository := fixture.open(t)
+	defer workerRepository.Close()
+	if _, err := workerRepository.db.Exec("PRAGMA busy_timeout = 1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockerRepository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "remains open"}); err != nil {
+		t.Fatal(err)
+	}
+	before := captureRepositoryPelletState(t, workerRepository.db, fixture.main.Project.ID)
+
+	connection, err := lockerRepository.db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	if _, err := connection.ExecContext(context.Background(), "BEGIN IMMEDIATE"); err != nil {
+		t.Fatal(err)
+	}
+	defer connection.ExecContext(context.Background(), "ROLLBACK")
+
+	_, err = workerRepository.StartNextPellet(context.Background(), fixture.linked, nil, nil)
+	assertPelletErrorCode(t, err, "database_busy")
+	if after := captureRepositoryPelletState(t, workerRepository.db, fixture.main.Project.ID); !reflect.DeepEqual(after, before) {
+		t.Fatalf("busy start-next changed state:\nbefore=%v\nafter=%v", before, after)
+	}
+}
+
+func transitionPellet(t *testing.T, repository *PelletRepository, project storage.ResolvedProject, reference domain.PelletReference, operation storage.PelletLifecycleOperation, recoveryWorkspaceID *int64) storage.PelletLifecycleResult {
+	t.Helper()
+	result, err := repository.TransitionPellet(context.Background(), project, reference, storage.PelletLifecycleRequest{
+		Operation: operation, RecoveryWorkspaceID: recoveryWorkspaceID,
+	})
+	if err != nil {
+		t.Fatalf("%s %s: %v", operation, reference, err)
+	}
+	return result
+}
+
+func assertPelletErrorCode(t *testing.T, err error, code string) {
+	t.Helper()
+	if err == nil || domain.PublicError(err).Code != code {
+		t.Fatalf("error = %v, want code %q", err, code)
+	}
+}
+
+func captureRepositoryPelletState(t *testing.T, database *sql.DB, projectID int64) []string {
+	t.Helper()
+	rows, err := database.Query(`
+		SELECT quote(number) || '|' || quote(workspace_id) || '|' || quote(status) || '|' ||
+		       quote(priority) || '|' || quote(updated_at) || '|' || quote(completed_at)
+		FROM pellets
+		WHERE project_id = ?
+		ORDER BY number`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	state := make([]string, 0)
+	for rows.Next() {
+		var row string
+		if err := rows.Scan(&row); err != nil {
+			t.Fatal(err)
+		}
+		state = append(state, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
 func assertPelletReferences(t *testing.T, pellets []storage.Pellet, references ...domain.PelletReference) {
 	t.Helper()
 	got := make([]domain.PelletReference, len(pellets))

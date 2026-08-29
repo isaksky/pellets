@@ -470,7 +470,9 @@ func projectTestApp(current *string) *App {
 		"test",
 		InitDBCommand(initializer), InitCommand(manager), ProjectCommand(manager),
 		AddCommand(pelletManager), ListCommand(pelletManager), ShowCommand(pelletManager),
-		EditCommand(pelletManager), NextCommand(pelletManager),
+		EditCommand(pelletManager), NextCommand(pelletManager), StartCommand(pelletManager),
+		StartNextCommand(pelletManager), ReleaseCommand(pelletManager), CloseCommand(pelletManager),
+		ReopenCommand(pelletManager), DeferCommand(pelletManager),
 	)
 	application.workingDirectory = func() (string, error) { return *current, nil }
 	return application

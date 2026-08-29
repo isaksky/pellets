@@ -53,6 +53,12 @@ func main() {
 		cli.ShowCommand(pelletManager),
 		cli.EditCommand(pelletManager),
 		cli.NextCommand(pelletManager),
+		cli.StartCommand(pelletManager),
+		cli.StartNextCommand(pelletManager),
+		cli.ReleaseCommand(pelletManager),
+		cli.CloseCommand(pelletManager),
+		cli.ReopenCommand(pelletManager),
+		cli.DeferCommand(pelletManager),
 	}
 	application := cli.New(version, commands...)
 	os.Exit(application.Run(os.Args[1:], os.Stdout, os.Stderr))

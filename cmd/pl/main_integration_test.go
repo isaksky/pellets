@@ -126,6 +126,40 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		if next.SelectionReason != "next_open" || next.Pellet == nil || next.Pellet.ID != first.ID {
 			t.Fatalf("compiled next = %#v", next)
 		}
+		startedNext := decodeFoundationSuccess[foundationNext](
+			t,
+			runFoundationCLI(t, executable, linkedRoot, "start-next", "--external-id", "Case:Exact", "--group", "Rollout/A"),
+			"start-next",
+		)
+		linkedWorkspaceID := linkedProject.Workspaces[len(linkedProject.Workspaces)-1].ID
+		if startedNext.SelectionReason != "next_open" || startedNext.Pellet == nil || startedNext.Pellet.ID != first.ID || startedNext.Pellet.Status != "in_progress" || startedNext.Pellet.Workspace == nil || startedNext.Pellet.Workspace.ID != linkedWorkspaceID {
+			t.Fatalf("compiled start-next = %#v", startedNext)
+		}
+		resumed := decodeFoundationSuccess[foundationNext](
+			t, runFoundationCLI(t, executable, linkedRoot, "start-next", "--external-id", "does-not-match"), "start-next",
+		)
+		if resumed.SelectionReason != "resume_in_progress" || resumed.Pellet == nil || !reflect.DeepEqual(resumed.Pellet, startedNext.Pellet) {
+			t.Fatalf("compiled start-next resume = %#v, want %#v", resumed, startedNext)
+		}
+		mainStarted := decodeFoundationSuccess[foundationPellet](
+			t, runFoundationCLI(t, executable, mainRoot, "start", second.ID), "start",
+		)
+		if mainStarted.Status != "in_progress" || mainStarted.Workspace == nil || mainStarted.Workspace.ID != mainProject.Workspaces[0].ID {
+			t.Fatalf("compiled main-worktree start = %#v", mainStarted)
+		}
+		crossWorkspace := runFoundationCLI(t, executable, mainRoot, "close", first.ID)
+		if crossWorkspace.exit != 4 || crossWorkspace.stdout != "" || !strings.Contains(crossWorkspace.stderr, `"code":"pellet_in_progress_elsewhere"`) {
+			t.Fatalf("compiled cross-workspace close = %#v", crossWorkspace)
+		}
+		closedFirst := decodeFoundationSuccess[foundationPellet](
+			t, runFoundationCLI(t, executable, linkedRoot, "close", first.ID), "close",
+		)
+		closedSecond := decodeFoundationSuccess[foundationPellet](
+			t, runFoundationCLI(t, executable, mainRoot, "close", second.ID), "close",
+		)
+		if closedFirst.Status != "closed" || closedFirst.Priority != nil || closedFirst.Workspace != nil || closedFirst.CompletedAt == nil || closedSecond.Status != "closed" || closedSecond.Priority != nil || closedSecond.Workspace != nil || closedSecond.CompletedAt == nil {
+			t.Fatalf("compiled closes = %#v and %#v", closedFirst, closedSecond)
+		}
 
 		edited := decodeFoundationSuccess[foundationPellet](
 			t,

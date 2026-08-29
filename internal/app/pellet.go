@@ -112,6 +112,43 @@ func (manager PelletManager) Next(
 	return selection, closePelletRepository(repository, operationErr)
 }
 
+func (manager PelletManager) StartNext(
+	ctx context.Context,
+	database Database,
+	workingDirectory, selectedCode string,
+	externalID, group *string,
+) (storage.NextSelection, error) {
+	resolved, err := manager.resolve(ctx, database, workingDirectory, selectedCode)
+	if err != nil {
+		return storage.NextSelection{}, err
+	}
+	repository, err := manager.open(ctx, database.Path)
+	if err != nil {
+		return storage.NextSelection{}, err
+	}
+	selection, operationErr := repository.StartNextPellet(ctx, resolved, externalID, group)
+	return selection, closePelletRepository(repository, operationErr)
+}
+
+func (manager PelletManager) Transition(
+	ctx context.Context,
+	database Database,
+	workingDirectory, selectedCode string,
+	reference domain.PelletReference,
+	request storage.PelletLifecycleRequest,
+) (storage.PelletLifecycleResult, error) {
+	resolved, err := manager.resolve(ctx, database, workingDirectory, selectedCode, reference)
+	if err != nil {
+		return storage.PelletLifecycleResult{}, err
+	}
+	repository, err := manager.open(ctx, database.Path)
+	if err != nil {
+		return storage.PelletLifecycleResult{}, err
+	}
+	result, operationErr := repository.TransitionPellet(ctx, resolved, reference, request)
+	return result, closePelletRepository(repository, operationErr)
+}
+
 func (manager PelletManager) resolve(
 	ctx context.Context,
 	database Database,
