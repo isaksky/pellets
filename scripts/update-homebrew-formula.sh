@@ -87,17 +87,14 @@ rendered_formula="$work_directory/pl.rb"
     'class Pl < Formula' \
     '  desc "Local SQLite task queue for coding agents"' \
     '  homepage "https://github.com/isaksky/pellets"' \
-    "  version \"$version\"" \
     '  license "Apache-2.0"' \
     '' \
     '  depends_on :macos' \
     '' \
-    '  on_arm do' \
+    '  if Hardware::CPU.arm?' \
     "    url \"https://github.com/isaksky/pellets/releases/download/v$version/$arm64_archive\"" \
     "    sha256 \"$arm64_hash\"" \
-    '  end' \
-    '' \
-    '  on_intel do' \
+    '  else' \
     "    url \"https://github.com/isaksky/pellets/releases/download/v$version/$amd64_archive\"" \
     "    sha256 \"$amd64_hash\"" \
     '  end' \
