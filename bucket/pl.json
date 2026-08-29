@@ -1,5 +1,7 @@
 {
     "version": "0.1.0",
+    "homepage": "https://github.com/isaksky/pellets",
+    "license": "Apache-2.0",
     "architecture": {
         "64bit": {
             "url": "https://github.com/isaksky/pellets/releases/download/v0.1.0/pellets_0.1.0_windows_amd64.zip",

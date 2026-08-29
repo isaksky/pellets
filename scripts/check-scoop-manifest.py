@@ -54,10 +54,18 @@ def main() -> None:
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
         fail(f"cannot read {manifest_path}: {error}")
 
-    root = require_exact_keys(manifest, {"architecture", "bin", "version"}, "root")
+    root = require_exact_keys(
+        manifest,
+        {"architecture", "bin", "homepage", "license", "version"},
+        "root",
+    )
     version = root["version"]
     if not isinstance(version, str) or VERSION_PATTERN.fullmatch(version) is None:
         fail("version must be a stable SemVer core without a leading v")
+    if root["homepage"] != "https://github.com/isaksky/pellets":
+        fail("homepage must be 'https://github.com/isaksky/pellets'")
+    if root["license"] != "Apache-2.0":
+        fail("license must be 'Apache-2.0'")
 
     architecture = require_exact_keys(root["architecture"], {"64bit"}, "architecture")
     amd64 = require_exact_keys(architecture["64bit"], {"hash", "url"}, "architecture.64bit")

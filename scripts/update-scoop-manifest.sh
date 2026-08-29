@@ -75,6 +75,8 @@ rendered_manifest="$work_directory/pl.json"
   printf '%s\n' \
     '{' \
     "    \"version\": \"$version\"," \
+    '    "homepage": "https://github.com/isaksky/pellets",' \
+    '    "license": "Apache-2.0",' \
     '    "architecture": {' \
     '        "64bit": {' \
     "            \"url\": \"https://github.com/isaksky/pellets/releases/download/v$version/$archive_name\"," \

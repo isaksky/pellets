@@ -272,10 +272,11 @@ submission.
 ### Same-repository Scoop bucket
 
 The application repository is also the project-owned Scoop bucket. Its
-top-level `bucket/pl.json` contains only the stable version, a Windows AMD64
-GitHub Release URL and SHA-256, and the `pl.exe` binary declaration. Scoop
-therefore installs the release archive per user, creates the `pl` shim on PATH,
-and needs no installer, elevation, or separate bucket repository.
+top-level `bucket/pl.json` contains only Scoop's required version, homepage,
+license, Windows AMD64 GitHub Release URL and SHA-256, and the `pl.exe` binary
+declaration. Scoop therefore installs the release archive per user, creates the
+`pl` shim on PATH, and needs no installer, elevation, or separate bucket
+repository.
 
 Before a stable `vX.Y.Z` tag, the repository-owned manifest updater renders
 the manifest from the release builder's checksum file after independently
