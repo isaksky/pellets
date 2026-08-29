@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -11,7 +12,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"pellets/internal/discovery"
+	"pellets/internal/storage/sqlite"
 )
 
 func TestCompiledCLIInitializationSafety(t *testing.T) {
@@ -36,6 +40,7 @@ func TestCompiledCLIInitializationSafety(t *testing.T) {
 		if len(entries) != 1 || entries[0].Name() != discovery.DatabaseFilename || entries[0].IsDir() {
 			t.Fatalf("metadata entries = %v", entryNames(entries))
 		}
+		assertCompiledInitDBIdentityMetadata(t, databasePath)
 		if status := compiledGitOutput(t, root, "status", "--porcelain=v1", "--untracked-files=all"); len(status) != 0 {
 			t.Fatalf("Git status after init-db = %q, want empty", status)
 		}
@@ -224,6 +229,59 @@ func TestCompiledCLIInitializationSafety(t *testing.T) {
 			}
 			assertCompiledStateUnchanged(t, root, excludePath, excludeBefore, indexBefore)
 		})
+	}
+}
+
+func assertCompiledInitDBIdentityMetadata(t *testing.T, databasePath string) {
+	t.Helper()
+	database, err := sqlite.Open(context.Background(), databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	var count int
+	if err := database.QueryRow("SELECT COUNT(*) FROM application_metadata").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 3 {
+		t.Fatalf("compiled init-db metadata row count = %d, want 3", count)
+	}
+
+	var databaseID string
+	if err := database.QueryRow(
+		"SELECT value FROM application_metadata WHERE key = 'database_id'",
+	).Scan(&databaseID); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := uuid.Parse(databaseID)
+	if err != nil || parsed.String() != databaseID || parsed.Variant() != uuid.RFC4122 || parsed.Version() != 4 {
+		t.Fatalf("compiled init-db database_id = %q, parsed = %v, error = %v", databaseID, parsed, err)
+	}
+
+	var createdIsText, createdIsValid int
+	if err := database.QueryRow(`
+		SELECT typeof(value) = 'text', julianday(value) IS NOT NULL
+		FROM application_metadata
+		WHERE key = 'created_at_julian'`).Scan(&createdIsText, &createdIsValid); err != nil {
+		t.Fatal(err)
+	}
+	if createdIsText != 1 || createdIsValid != 1 {
+		t.Fatalf(
+			"compiled init-db created_at_julian checks = (text %d, valid %d), want (1, 1)",
+			createdIsText,
+			createdIsValid,
+		)
+	}
+
+	var product string
+	if err := database.QueryRow(
+		"SELECT value FROM application_metadata WHERE key = 'product'",
+	).Scan(&product); err != nil {
+		t.Fatal(err)
+	}
+	if product != "pellets" {
+		t.Fatalf("compiled init-db product = %q, want %q", product, "pellets")
 	}
 }
 

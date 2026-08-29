@@ -6,12 +6,16 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"pellets/internal/domain"
 )
@@ -20,7 +24,9 @@ func TestOpenMigratesRealFileAndConfiguresRuntime(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "pellets.db")
+	started := time.Now()
 	db := openTestDatabase(t, path)
+	finished := time.Now()
 	defer db.Close()
 
 	if _, err := os.Stat(path); err != nil {
@@ -57,6 +63,7 @@ func TestOpenMigratesRealFileAndConfiguresRuntime(t *testing.T) {
 	assertStrictTables(t, db)
 	assertPartialIndexes(t, db)
 	assertFTSIndexes(t, db)
+	identity := assertFreshIdentityMetadata(t, db, started, finished)
 
 	// Reopening at the latest version applies no migration.
 	if err := db.Close(); err != nil {
@@ -65,6 +72,26 @@ func TestOpenMigratesRealFileAndConfiguresRuntime(t *testing.T) {
 	db = openTestDatabase(t, path)
 	defer db.Close()
 	assertPragmaInt(t, db, "user_version", LatestSchemaVersion)
+	assertApplicationMetadataEqual(t, readApplicationMetadata(t, db), identity)
+}
+
+func TestFreshDatabasesReceiveDistinctDatabaseIDs(t *testing.T) {
+	t.Parallel()
+
+	var databaseIDs [2]string
+	for index := range databaseIDs {
+		started := time.Now()
+		db := openTestDatabase(t, filepath.Join(t.TempDir(), fmt.Sprintf("fresh-%d.db", index)))
+		finished := time.Now()
+		metadata := assertFreshIdentityMetadata(t, db, started, finished)
+		databaseIDs[index] = metadata["database_id"]
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if databaseIDs[0] == databaseIDs[1] {
+		t.Fatalf("fresh databases received the same database_id %q", databaseIDs[0])
+	}
 }
 
 func TestMemoryIDsAreNeverReusedAfterRemoval(t *testing.T) {
@@ -307,6 +334,7 @@ func TestOpeningLatestVersionPerformsNoPersistentWrite(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "latest.db")
 	db := openTestDatabase(t, path)
+	identity := readApplicationMetadata(t, db)
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -325,6 +353,7 @@ func TestOpeningLatestVersionPerformsNoPersistentWrite(t *testing.T) {
 		t.Fatalf("PRAGMA data_version changed from %d to %d while opening the latest schema", before, after)
 	}
 	assertPragmaInt(t, observer, "user_version", LatestSchemaVersion)
+	assertApplicationMetadataEqual(t, readApplicationMetadata(t, observer), identity)
 }
 
 func TestMigrationSequenceValidation(t *testing.T) {
@@ -377,50 +406,115 @@ func TestRunnerAppliesTwoStepTestSequenceExactlyOnce(t *testing.T) {
 	assertQueryInt(t, db, "SELECT COUNT(*) FROM migration_probe", 2)
 }
 
-func TestReleasedVersionOneFixtureUpgradesWithInjectedMigration(t *testing.T) {
+func TestReleasedVersionOneFixtureInstallsOnlyMissingIdentityMetadata(t *testing.T) {
+	tests := []struct {
+		name             string
+		preexistingKey   string
+		preexistingValue string
+	}{
+		{name: "all known keys missing"},
+		{name: "product is preserved", preexistingKey: "product", preexistingValue: "fixture-product"},
+		{
+			name:             "database ID is preserved",
+			preexistingKey:   "database_id",
+			preexistingValue: "11111111-2222-4333-8444-555555555555",
+		},
+		{name: "creation time is preserved", preexistingKey: "created_at_julian", preexistingValue: "2451544.5"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "released-v1.db")
+			copyDatabaseFixture(t, path, "testdata/released-v1.db")
+
+			raw := openRawDatabase(t, path)
+			assertPragmaInt(t, raw, "user_version", 1)
+			if test.preexistingKey != "" {
+				if _, err := raw.Exec(
+					"INSERT INTO application_metadata(key, value) VALUES (?, ?)",
+					test.preexistingKey,
+					test.preexistingValue,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+			assertQueryInt(t, raw, `
+				SELECT COUNT(*)
+				FROM application_metadata
+				WHERE key = 'fixture' AND value = 'released-v1'`, 1)
+			if err := raw.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			started := time.Now()
+			db := openTestDatabase(t, path)
+			finished := time.Now()
+			defer db.Close()
+			assertPragmaInt(t, db, "user_version", LatestSchemaVersion)
+
+			metadata := readApplicationMetadata(t, db)
+			if len(metadata) != 4 {
+				t.Fatalf("upgraded metadata = %v, want three known keys and the fixture key", metadata)
+			}
+			if metadata["fixture"] != "released-v1" {
+				t.Fatalf("fixture metadata = %q, want %q", metadata["fixture"], "released-v1")
+			}
+			for _, key := range []string{"database_id", "created_at_julian", "product"} {
+				if _, exists := metadata[key]; !exists {
+					t.Fatalf("upgraded metadata is missing %q: %v", key, metadata)
+				}
+			}
+			if test.preexistingKey != "" && metadata[test.preexistingKey] != test.preexistingValue {
+				t.Fatalf(
+					"pre-existing %s = %q after upgrade, want %q",
+					test.preexistingKey,
+					metadata[test.preexistingKey],
+					test.preexistingValue,
+				)
+			}
+
+			if test.preexistingKey != "database_id" {
+				assertRFC4122DatabaseID(t, metadata["database_id"])
+			}
+			if test.preexistingKey != "created_at_julian" {
+				assertCapturedJulianText(t, db, metadata["created_at_julian"], started, finished)
+			}
+			wantProduct := "pellets"
+			if test.preexistingKey == "product" {
+				wantProduct = test.preexistingValue
+			}
+			if metadata["product"] != wantProduct {
+				t.Fatalf("product = %q, want %q", metadata["product"], wantProduct)
+			}
+		})
+	}
+}
+
+func TestDatabaseIdentityMigrationRollsBackMetadataAndVersion(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "released-v1.db")
+	path := filepath.Join(t.TempDir(), "identity-rollback.db")
 	copyDatabaseFixture(t, path, "testdata/released-v1.db")
-
-	raw := openRawDatabase(t, path)
-	assertPragmaInt(t, raw, "user_version", 1)
-	assertQueryInt(t, raw, `
-		SELECT COUNT(*)
-		FROM application_metadata
-		WHERE key = 'fixture' AND value = 'released-v1'`, 1)
-	if err := raw.Close(); err != nil {
-		t.Fatal(err)
-	}
-
 	sequence := append([]migration(nil), migrations...)
-	sequence = append(sequence, migration{
-		version: 2,
-		name:    "fixture-upgrade-probe",
-		sql: `
-			CREATE TABLE fixture_upgrade_probe (
-				value TEXT PRIMARY KEY
-			) STRICT;
-			INSERT INTO fixture_upgrade_probe VALUES ('applied-once');`,
-		assert: func(ctx context.Context, conn *sql.Conn) error {
-			if err := assertConnectionPragma(ctx, conn, "user_version", 1); err != nil {
-				return err
-			}
-			return assertConnectionCount(ctx, conn, "SELECT COUNT(*) FROM fixture_upgrade_probe", 1)
-		},
-	})
+	sequence[1].assert = func(context.Context, *sql.Conn) error {
+		return errors.New("injected identity assertion failure")
+	}
 
 	db, err := openWithMigrations(context.Background(), path, sequence)
-	if err != nil {
-		t.Fatalf("upgrade released v1 fixture: %v", err)
+	if db != nil {
+		db.Close()
+		t.Fatal("identity migration with a failing assertion unexpectedly succeeded")
 	}
-	defer db.Close()
-	assertPragmaInt(t, db, "user_version", 2)
-	assertQueryInt(t, db, "SELECT COUNT(*) FROM fixture_upgrade_probe", 1)
-	assertQueryInt(t, db, `
-		SELECT COUNT(*)
-		FROM application_metadata
-		WHERE key = 'fixture' AND value = 'released-v1'`, 1)
+	assertDomainErrorCode(t, err, "database_migration_failed")
+
+	raw := openRawDatabase(t, path)
+	defer raw.Close()
+	assertPragmaInt(t, raw, "user_version", 1)
+	metadata := readApplicationMetadata(t, raw)
+	if len(metadata) != 1 || metadata["fixture"] != "released-v1" {
+		t.Fatalf("metadata after rolled-back identity migration = %v", metadata)
+	}
 }
 
 func TestMigrationAssertionFailureRollsBackSchemaAndVersion(t *testing.T) {
@@ -505,7 +599,7 @@ func TestForeignKeyCheckFailureRollsBackSchemaAndVersion(t *testing.T) {
 	assertQueryInt(t, raw, "SELECT COUNT(*) FROM pragma_foreign_key_check", 1)
 }
 
-func TestTwoProcessMigrationRace(t *testing.T) {
+func TestTwoProcessProductionMigrationRace(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "race.db")
 	raw := openRawDatabase(t, path)
 	var journalMode string
@@ -520,6 +614,7 @@ func TestTwoProcessMigrationRace(t *testing.T) {
 	releasePath := path + ".release"
 	readyPath := path + ".second-ready"
 
+	started := time.Now()
 	first, firstOutput := migrationRaceProcess(path, lockedPath, releasePath, "")
 	if err := first.Start(); err != nil {
 		t.Fatal(err)
@@ -551,20 +646,12 @@ func TestTwoProcessMigrationRace(t *testing.T) {
 	if err := second.Wait(); err != nil {
 		t.Fatalf("second migration process: %v\n%s", err, secondOutput.String())
 	}
+	finished := time.Now()
 
 	raw = openRawDatabase(t, path)
 	defer raw.Close()
-	assertPragmaInt(t, raw, "user_version", 2)
-	assertQueryInt(t, raw, "SELECT COUNT(*) FROM migration_race_probe", 2)
-	var applied string
-	if err := raw.QueryRow(`
-		SELECT group_concat(version, ',')
-		FROM (SELECT version FROM migration_race_probe ORDER BY version)`).Scan(&applied); err != nil {
-		t.Fatal(err)
-	}
-	if applied != "1,2" {
-		t.Fatalf("applied race migrations = %q, want %q", applied, "1,2")
-	}
+	assertPragmaInt(t, raw, "user_version", LatestSchemaVersion)
+	assertFreshIdentityMetadata(t, raw, started, finished)
 }
 
 func TestMigrationRaceProcess(t *testing.T) {
@@ -655,37 +742,26 @@ func twoStepTestMigrations() []migration {
 }
 
 func migrationRaceTestMigrations(lockedPath, releasePath string) []migration {
-	return []migration{
-		{
-			version: 1,
-			name:    "race-initial",
-			sql: `
-				CREATE TABLE migration_race_probe (
-					version INTEGER PRIMARY KEY
-				) STRICT;
-				INSERT INTO migration_race_probe VALUES (1);`,
-			assert: func(ctx context.Context, conn *sql.Conn) error {
-				if err := assertConnectionPragma(ctx, conn, "user_version", 0); err != nil {
-					return err
-				}
-				if lockedPath == "" {
-					return nil
-				}
-				if err := os.WriteFile(lockedPath, []byte("locked"), 0o600); err != nil {
-					return err
-				}
-				return waitForPath(ctx, releasePath, 10*time.Second)
-			},
-		},
-		{
-			version: 2,
-			name:    "race-second",
-			sql:     "INSERT INTO migration_race_probe VALUES (2);",
-			assert: func(ctx context.Context, conn *sql.Conn) error {
-				return assertConnectionPragma(ctx, conn, "user_version", 1)
-			},
-		},
+	sequence := append([]migration(nil), migrations...)
+	initialAssertion := sequence[0].assert
+	sequence[0].assert = func(ctx context.Context, conn *sql.Conn) error {
+		if initialAssertion != nil {
+			if err := initialAssertion(ctx, conn); err != nil {
+				return err
+			}
+		}
+		if err := assertConnectionPragma(ctx, conn, "user_version", 0); err != nil {
+			return err
+		}
+		if lockedPath == "" {
+			return nil
+		}
+		if err := os.WriteFile(lockedPath, []byte("locked"), 0o600); err != nil {
+			return err
+		}
+		return waitForPath(ctx, releasePath, 10*time.Second)
 	}
+	return sequence
 }
 
 func migrationRaceProcess(path, lockedPath, releasePath, readyPath string) (*exec.Cmd, *bytes.Buffer) {
@@ -729,6 +805,115 @@ func waitForPath(ctx context.Context, path string, timeout time.Duration) error 
 		case <-ticker.C:
 		}
 	}
+}
+
+func assertFreshIdentityMetadata(t *testing.T, db *sql.DB, started, finished time.Time) map[string]string {
+	t.Helper()
+	metadata := readApplicationMetadata(t, db)
+	if len(metadata) != 3 {
+		t.Fatalf("fresh application metadata = %v, want exactly three identity keys", metadata)
+	}
+	for _, key := range []string{"database_id", "created_at_julian", "product"} {
+		if _, exists := metadata[key]; !exists {
+			t.Fatalf("fresh application metadata is missing %q: %v", key, metadata)
+		}
+	}
+	if metadata["product"] != "pellets" {
+		t.Fatalf("product = %q, want %q", metadata["product"], "pellets")
+	}
+	assertRFC4122DatabaseID(t, metadata["database_id"])
+	assertCapturedJulianText(t, db, metadata["created_at_julian"], started, finished)
+	return metadata
+}
+
+func readApplicationMetadata(t *testing.T, db *sql.DB) map[string]string {
+	t.Helper()
+	rows, err := db.Query("SELECT key, value FROM application_metadata ORDER BY key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	metadata := make(map[string]string)
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			t.Fatal(err)
+		}
+		metadata[key] = value
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return metadata
+}
+
+func assertApplicationMetadataEqual(t *testing.T, got, want map[string]string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("application metadata = %v, want unchanged %v", got, want)
+	}
+	for key, wantValue := range want {
+		if gotValue, exists := got[key]; !exists || gotValue != wantValue {
+			t.Fatalf("application metadata = %v, want unchanged %v", got, want)
+		}
+	}
+}
+
+func assertRFC4122DatabaseID(t *testing.T, value string) {
+	t.Helper()
+	parsed, err := uuid.Parse(value)
+	if err != nil {
+		t.Fatalf("database_id %q is not a UUID: %v", value, err)
+	}
+	if parsed.String() != value {
+		t.Fatalf("database_id %q is not canonical RFC 4122 text", value)
+	}
+	if parsed.Variant() != uuid.RFC4122 {
+		t.Fatalf("database_id %q has variant %v, want RFC 4122", value, parsed.Variant())
+	}
+	if parsed.Version() != 4 {
+		t.Fatalf("database_id %q has version %d, want randomly generated version 4", value, parsed.Version())
+	}
+}
+
+func assertCapturedJulianText(t *testing.T, db *sql.DB, value string, started, finished time.Time) {
+	t.Helper()
+	created, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		t.Fatalf("created_at_julian %q is not numeric text: %v", value, err)
+	}
+	var valueType string
+	if err := db.QueryRow(`
+		SELECT typeof(value)
+		FROM application_metadata
+		WHERE key = 'created_at_julian'`).Scan(&valueType); err != nil {
+		t.Fatal(err)
+	}
+	if valueType != "text" {
+		t.Fatalf("created_at_julian SQLite type = %q, want text", valueType)
+	}
+	var parsedBySQLite float64
+	if err := db.QueryRow("SELECT julianday(?)", value).Scan(&parsedBySQLite); err != nil {
+		t.Fatalf("SQLite could not parse created_at_julian %q: %v", value, err)
+	}
+	if difference := math.Abs(parsedBySQLite - created); difference > float64(time.Millisecond)/float64(24*time.Hour) {
+		t.Fatalf("SQLite parsed created_at_julian %q as %.15f, want %.15f", value, parsedBySQLite, created)
+	}
+	lower := julianDay(started.Add(-time.Second))
+	upper := julianDay(finished.Add(time.Second))
+	if created < lower || created > upper {
+		t.Fatalf(
+			"created_at_julian %.15f is outside initialization interval [%.15f, %.15f]",
+			created,
+			lower,
+			upper,
+		)
+	}
+}
+
+func julianDay(value time.Time) float64 {
+	return float64(value.UnixNano())/float64(24*time.Hour) + 2440587.5
 }
 
 func copyDatabaseFixture(t *testing.T, path, fixturePath string) {

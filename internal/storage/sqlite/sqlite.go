@@ -18,12 +18,15 @@ import (
 
 const (
 	// LatestSchemaVersion is the newest schema understood by this executable.
-	LatestSchemaVersion = 1
+	LatestSchemaVersion = 2
 	driverName          = "sqlite"
 )
 
 //go:embed migrations/0001_initial.sql
 var migration1SQL string
+
+//go:embed migrations/0002_database_identity.sql
+var migration2SQL string
 
 type migration struct {
 	version int
@@ -40,6 +43,7 @@ type migrationHooks struct {
 // database fixtures rather than by storing migration metadata in the database.
 var migrations = []migration{
 	{version: 1, name: "initial", sql: migration1SQL, assert: assertMigration1},
+	{version: 2, name: "database-identity", sql: migration2SQL, assert: assertMigration2},
 }
 
 // Open opens path with the required hardened runtime settings and applies all
@@ -303,6 +307,24 @@ func assertMigration1(ctx context.Context, conn *sql.Conn) error {
 		if count != 1 {
 			return fmt.Errorf("required table %q has %d definitions, want 1", name, count)
 		}
+	}
+	return nil
+}
+
+func assertMigration2(ctx context.Context, conn *sql.Conn) error {
+	return assertConnectionRowCount(ctx, conn, `
+		SELECT COUNT(*)
+		FROM application_metadata
+		WHERE key IN ('database_id', 'created_at_julian', 'product')`, 3)
+}
+
+func assertConnectionRowCount(ctx context.Context, conn *sql.Conn, query string, want int) error {
+	var got int
+	if err := conn.QueryRowContext(ctx, query).Scan(&got); err != nil {
+		return err
+	}
+	if got != want {
+		return fmt.Errorf("query row count = %d, want %d", got, want)
 	}
 	return nil
 }
