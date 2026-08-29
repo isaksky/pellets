@@ -19,11 +19,14 @@ func InitCommand(manager app.ProjectManager) Command {
 		Summary:               "Register the current Git work tree.",
 		Usage:                 "pl init --code CODE",
 		SkipDatabaseDiscovery: true,
-		Parse:                 parseInit,
-		Run: func(ctx context.Context, invocation Invocation) (any, error) {
-			if invocation.Globals.Project != "" {
-				return nil, projectNotAllowed("init")
+		Validate: func(globals GlobalOptions, _ any) error {
+			if globals.Project != "" {
+				return projectNotAllowed("init")
 			}
+			return nil
+		},
+		Parse: parseInit,
+		Run: func(ctx context.Context, invocation Invocation) (any, error) {
 			input := invocation.Input.(initInput)
 			project, err := manager.Init(ctx, invocation.WorkingDirectory, input.Code)
 			if err != nil {
@@ -89,6 +92,25 @@ func ProjectCommand(manager app.ProjectManager) Command {
 		Summary: "List or show registered projects.",
 		Usage:   "pl project list\n  pl project show [CODE]",
 		Parse:   parseProject,
+		Validate: func(globals GlobalOptions, value any) error {
+			input := value.(projectInput)
+			switch input.Action {
+			case "list":
+				if globals.Project != "" {
+					return projectNotAllowed("project list")
+				}
+			case "show":
+				if input.Code != "" && globals.Project != "" {
+					return domain.NewError(
+						domain.Usage,
+						"conflicting_project_selection",
+						"project show accepts either positional CODE or --project, not both",
+						map[string]any{"code": input.Code, "project": globals.Project},
+					)
+				}
+			}
+			return nil
+		},
 		ResultName: func(value any) string {
 			input := value.(projectInput)
 			return "project " + input.Action
@@ -97,9 +119,6 @@ func ProjectCommand(manager app.ProjectManager) Command {
 			input := invocation.Input.(projectInput)
 			switch input.Action {
 			case "list":
-				if invocation.Globals.Project != "" {
-					return nil, projectNotAllowed("project list")
-				}
 				projects, err := manager.List(ctx, *invocation.Database)
 				if err != nil {
 					return nil, err
@@ -110,14 +129,6 @@ func ProjectCommand(manager app.ProjectManager) Command {
 				}
 				return result, nil
 			case "show":
-				if input.Code != "" && invocation.Globals.Project != "" {
-					return nil, domain.NewError(
-						domain.Usage,
-						"conflicting_project_selection",
-						"project show accepts either positional CODE or --project, not both",
-						map[string]any{"code": input.Code, "project": invocation.Globals.Project},
-					)
-				}
 				code := input.Code
 				if code == "" {
 					code = invocation.Globals.Project

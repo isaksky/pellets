@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"pellets/internal/app"
-	"pellets/internal/domain"
 )
 
 // InitDBCommand creates the database-only initialization command.
@@ -16,15 +15,13 @@ func InitDBCommand(initializer app.DatabaseInitializer) Command {
 		Summary:               "Create a database in the current directory.",
 		Usage:                 "pl init-db",
 		SkipDatabaseDiscovery: true,
-		Run: func(ctx context.Context, invocation Invocation) (any, error) {
-			if invocation.Globals.Project != "" {
-				return nil, domain.NewError(
-					domain.Usage,
-					"project_not_allowed",
-					"--project is not valid for init-db",
-					map[string]any{"command": "init-db"},
-				)
+		Validate: func(globals GlobalOptions, _ any) error {
+			if globals.Project != "" {
+				return projectNotAllowed("init-db")
 			}
+			return nil
+		},
+		Run: func(ctx context.Context, invocation Invocation) (any, error) {
 			initialized, err := initializer.Init(ctx, invocation.WorkingDirectory)
 			if err != nil {
 				return nil, err

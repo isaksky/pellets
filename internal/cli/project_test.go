@@ -242,6 +242,62 @@ func TestUnregisteredSiblingAndProjectCommandValidationFailCleanly(t *testing.T)
 	}
 }
 
+func TestUsageValidationPrecedesWorkingDirectoryAndDiscovery(t *testing.T) {
+	t.Parallel()
+
+	manager := app.ProjectManager{}
+	application := New(
+		"test",
+		InitDBCommand(app.DatabaseInitializer{}),
+		InitCommand(manager),
+		ProjectCommand(manager),
+	)
+	workingDirectoryCalls := 0
+	application.workingDirectory = func() (string, error) {
+		workingDirectoryCalls++
+		return "", errors.New("working directory boundary must not be crossed")
+	}
+
+	tests := []struct {
+		name string
+		args []string
+		code string
+	}{
+		{name: "init-db project override", args: []string{"--project", "known", "init-db"}, code: "project_not_allowed"},
+		{name: "init project override", args: []string{"--project", "known", "init", "--code", "other"}, code: "project_not_allowed"},
+		{name: "project list override", args: []string{"--project", "known", "project", "list"}, code: "project_not_allowed"},
+		{name: "conflicting show selection", args: []string{"--project", "known", "project", "show", "other"}, code: "conflicting_project_selection"},
+		{name: "malformed global project", args: []string{"--project", "bad_code", "project", "show"}, code: "invalid_project_code"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			stdout, stderr, exit := runTestApp(application, test.args...)
+			if exit != 2 || stdout != "" {
+				t.Fatalf("%v = exit %d stdout %q stderr %q, want usage failure", test.args, exit, stdout, stderr)
+			}
+			assertCompactErrorCode(t, stderr, test.code)
+		})
+	}
+	if workingDirectoryCalls != 0 {
+		t.Fatalf("invalid invocations crossed working-directory boundary %d times", workingDirectoryCalls)
+	}
+
+	root := t.TempDir()
+	application.workingDirectory = func() (string, error) {
+		workingDirectoryCalls++
+		return root, nil
+	}
+	stdout, stderr, exit := runTestApp(application, "--project", "known", "project", "show")
+	if exit != 3 || stdout != "" {
+		t.Fatalf("valid project show = exit %d stdout %q stderr %q, want discovery failure", exit, stdout, stderr)
+	}
+	assertCompactErrorCode(t, stderr, "database_not_found")
+	if workingDirectoryCalls != 1 {
+		t.Fatalf("valid project show crossed working-directory boundary %d times, want 1", workingDirectoryCalls)
+	}
+}
+
 func TestGitLinkedWorktreesRegisterAsDistinctProjectRoots(t *testing.T) {
 	t.Parallel()
 
@@ -353,4 +409,23 @@ func decodeCurrentProject(t *testing.T, application *App) projectData {
 		t.Fatalf("project show = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 	return decodeProjectResult(t, stdout, "project show")
+}
+
+func assertCompactErrorCode(t *testing.T, output, wantCode string) {
+	t.Helper()
+	if strings.Count(output, "\n") != 1 || !strings.HasSuffix(output, "\n") {
+		t.Fatalf("error output is not one compact line: %q", output)
+	}
+	var envelope struct {
+		SchemaVersion int `json:"schema_version"`
+		Error         struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(output), &envelope); err != nil {
+		t.Fatalf("decode error output %q: %v", output, err)
+	}
+	if envelope.SchemaVersion != 1 || envelope.Error.Code != wantCode {
+		t.Fatalf("error envelope = %#v, want code %q", envelope, wantCode)
+	}
 }

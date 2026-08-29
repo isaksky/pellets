@@ -32,13 +32,16 @@ type Invocation struct {
 }
 
 // Command defines one CLI command. Parse must reject every unsupported flag and
-// positional argument. Run does not render or write process output.
+// positional argument. Validate must reject usage errors that depend on parsed
+// globals and command input. Neither function may perform discovery or command
+// side effects. Run does not render or write process output.
 type Command struct {
 	Name                  string
 	Summary               string
 	Usage                 string
 	SkipDatabaseDiscovery bool
 	Parse                 func(args []string) (any, error)
+	Validate              func(globals GlobalOptions, input any) error
 	Run                   func(ctx context.Context, invocation Invocation) (any, error)
 	ResultName            func(input any) string
 }
@@ -91,6 +94,12 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 			input, err = ParseNoArguments(parsed.args)
 		} else {
 			input, err = parsed.command.Parse(parsed.args)
+		}
+		if err == nil {
+			err = validateGlobalOptions(parsed.globals)
+		}
+		if err == nil && parsed.command.Validate != nil {
+			err = parsed.command.Validate(parsed.globals, input)
 		}
 		if err == nil {
 			if parsed.command.Run == nil {
@@ -276,6 +285,13 @@ func validateFormats(parsed parsedInvocation) error {
 		return conflictingFlags("--human", "--pretty")
 	}
 	return nil
+}
+
+func validateGlobalOptions(globals GlobalOptions) error {
+	if globals.Project == "" {
+		return nil
+	}
+	return domain.ValidateProjectCode(globals.Project)
 }
 
 func conflictingFlags(first, second string) error {

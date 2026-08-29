@@ -8,7 +8,9 @@ See [project-goals.md](project-goals.md) for the product boundary, [data-model.m
 
 Each invocation follows the same shape:
 
-1. Parse global options and the subcommand without opening the database.
+1. Strictly parse global options and the subcommand, then validate all
+   usage-only semantics without reading the working directory, performing
+   discovery, or causing command side effects.
 2. Locate the nearest `.pellets/pellets.db` by walking from the working directory toward the filesystem root, unless the command is creating a database.
 3. Find the nearest Git root and resolve it to a registered project path relative to the database root.
 4. Open SQLite, configure the connection, validate/migrate the schema, and verify the registered project.
