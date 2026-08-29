@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net/url"
-	"path/filepath"
 	"strings"
 
 	"pellets/internal/domain"
@@ -379,14 +377,10 @@ func openReadOnly(ctx context.Context, databasePath string, connections int) (*s
 }
 
 func readOnlyDataSourceName(databasePath string) (string, error) {
-	if databasePath == "" {
-		return "", errors.New("database path is empty")
-	}
-	absolute, err := filepath.Abs(databasePath)
+	u, err := absoluteFileURL(databasePath)
 	if err != nil {
-		return "", fmt.Errorf("resolve database path: %w", err)
+		return "", err
 	}
-	u := &url.URL{Scheme: "file", Path: filepath.ToSlash(absolute)}
 	query := u.Query()
 	query.Set("mode", "ro")
 	query.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", busyTimeoutMilliseconds))

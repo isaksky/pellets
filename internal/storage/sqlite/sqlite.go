@@ -95,22 +95,10 @@ func openWithMigrationHooks(ctx context.Context, path string, sequence []migrati
 }
 
 func dataSourceName(path string) (string, error) {
-	if path == "" {
-		return "", errors.New("database path is empty")
-	}
-	absolute, err := filepath.Abs(path)
+	u, err := absoluteFileURL(path)
 	if err != nil {
-		return "", fmt.Errorf("resolve database path: %w", err)
+		return "", err
 	}
-
-	uriPath := filepath.ToSlash(absolute)
-	if runtime.GOOS == "windows" && filepath.VolumeName(absolute) != "" && !strings.HasPrefix(uriPath, "/") {
-		// SQLite requires an absolute Windows drive path in a file URI to begin
-		// with /X:/. Without the leading slash, file:C:/... is a relative URI
-		// and fails to open outside the process working directory.
-		uriPath = "/" + uriPath
-	}
-	u := &url.URL{Scheme: "file", Path: uriPath}
 	query := u.Query()
 	// These settings are connection-local, so the driver reapplies them if
 	// database/sql ever has to replace the single idle connection.
@@ -120,6 +108,25 @@ func dataSourceName(path string) (string, error) {
 	query.Add("_pragma", "trusted_schema(OFF)")
 	u.RawQuery = query.Encode()
 	return u.String(), nil
+}
+
+func absoluteFileURL(path string) (*url.URL, error) {
+	if path == "" {
+		return nil, errors.New("database path is empty")
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve database path: %w", err)
+	}
+
+	uriPath := filepath.ToSlash(absolute)
+	if runtime.GOOS == "windows" && filepath.VolumeName(absolute) != "" && !strings.HasPrefix(uriPath, "/") {
+		// SQLite requires an absolute Windows drive path in a file URI to begin
+		// with /X:/. Without the leading slash, file:C:/... is a relative URI
+		// and fails to open outside the process working directory.
+		uriPath = "/" + uriPath
+	}
+	return &url.URL{Scheme: "file", Path: uriPath}, nil
 }
 
 func prepare(ctx context.Context, db *sql.DB, sequence []migration, hooks migrationHooks) error {

@@ -46,7 +46,7 @@ func TestReleaseEndToEndCompiledWorkflows(t *testing.T) {
 	})
 
 	t.Run("common parent multi-project queue memory purge and recovery", func(t *testing.T) {
-		common := filepath.Join(t.TempDir(), "release common parent with spaces 世界")
+		common := filepath.Join(foundationShortTempDir(t), "release common parent with spaces 世界")
 		mainRoot := filepath.Join(common, "main work tree")
 		linkedA := filepath.Join(common, "linked alpha ü")
 		linkedB := filepath.Join(common, "linked beta 界")
@@ -74,9 +74,7 @@ func TestReleaseEndToEndCompiledWorkflows(t *testing.T) {
 			"init-db",
 		)
 		wantDatabase := discovery.DatabasePath(foundationCanonicalPath(t, common))
-		if initialized.DatabasePath != wantDatabase {
-			t.Fatalf("common-parent database = %q, want %q", initialized.DatabasePath, wantDatabase)
-		}
+		assertFoundationSamePath(t, initialized.DatabasePath, wantDatabase)
 
 		mainProject := decodeFoundationSuccess[foundationProject](
 			t,

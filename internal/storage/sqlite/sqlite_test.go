@@ -27,25 +27,46 @@ func TestDataSourceNameUsesAbsoluteFileURI(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "database with spaces 界.db")
-	dsn, err := dataSourceName(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	parsed, err := url.Parse(dsn)
-	if err != nil {
-		t.Fatalf("parse data source name %q: %v", dsn, err)
-	}
 	wantPath := filepath.ToSlash(path)
 	if runtime.GOOS == "windows" {
 		wantPath = "/" + wantPath
 	}
-	if parsed.Scheme != "file" || parsed.Path != wantPath || parsed.Host != "" {
-		t.Fatalf("data source name = %q (scheme %q, host %q, path %q), want absolute file URI path %q", dsn, parsed.Scheme, parsed.Host, parsed.Path, wantPath)
+	tests := []struct {
+		name    string
+		build   func(string) (string, error)
+		mode    string
+		pragmas []string
+	}{
+		{
+			name: "read-write", build: dataSourceName,
+			pragmas: []string{"busy_timeout(5000)", "foreign_keys(ON)", "synchronous(FULL)", "trusted_schema(OFF)"},
+		},
+		{
+			name: "read-only", build: readOnlyDataSourceName, mode: "ro",
+			pragmas: []string{"busy_timeout(5000)", "foreign_keys(ON)", "query_only(ON)", "trusted_schema(OFF)"},
+		},
 	}
-	if got := parsed.Query()["_pragma"]; !reflect.DeepEqual(got, []string{
-		"busy_timeout(5000)", "foreign_keys(ON)", "synchronous(FULL)", "trusted_schema(OFF)",
-	}) {
-		t.Fatalf("data source pragmas = %q", got)
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			dsn, err := test.build(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, err := url.Parse(dsn)
+			if err != nil {
+				t.Fatalf("parse data source name %q: %v", dsn, err)
+			}
+			if parsed.Scheme != "file" || parsed.Path != wantPath || parsed.Host != "" {
+				t.Fatalf("data source name = %q (scheme %q, host %q, path %q), want absolute file URI path %q", dsn, parsed.Scheme, parsed.Host, parsed.Path, wantPath)
+			}
+			if got := parsed.Query().Get("mode"); got != test.mode {
+				t.Fatalf("data source mode = %q, want %q", got, test.mode)
+			}
+			if got := parsed.Query()["_pragma"]; !reflect.DeepEqual(got, test.pragmas) {
+				t.Fatalf("data source pragmas = %q, want %q", got, test.pragmas)
+			}
+		})
 	}
 }
 

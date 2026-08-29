@@ -516,7 +516,7 @@ func newCoreQueueCompiledFixture(t *testing.T, executable string, workspaceCount
 	if workspaceCount < 1 {
 		t.Fatal("core queue fixture needs at least one workspace")
 	}
-	common := filepath.Join(t.TempDir(), "core queue compiled")
+	common := filepath.Join(foundationShortTempDir(t), "core queue compiled")
 	mainRoot := filepath.Join(common, "main")
 	createFoundationRepository(t, mainRoot)
 	roots := []string{mainRoot}

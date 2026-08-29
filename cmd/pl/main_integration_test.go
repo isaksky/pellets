@@ -43,11 +43,11 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		))
 
 		result = runFoundationCLI(t, executable, root, "project", "list")
-		assertFoundationResult(t, result, 3, "", foundationErrorJSON(
+		assertFoundationErrorPath(t, result, 3,
 			"database_not_found",
 			"no Pellets database was found in the current directory or its ancestors",
-			map[string]any{"start_path": foundationCanonicalPath(t, root)},
-		))
+			"start_path", foundationCanonicalPath(t, root),
+		)
 
 		metadataPath := filepath.Join(root, discovery.MetadataDirectory)
 		if err := os.Mkdir(metadataPath, 0o755); err != nil {
@@ -701,11 +701,11 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		excludeBefore := readFoundationFile(t, excludePath)
 
 		result := runFoundationCLI(t, executable, repository, "init-db")
-		assertFoundationResult(t, result, 4, "", foundationErrorJSON(
+		assertFoundationErrorPath(t, result, 4,
 			"database_already_tracked",
 			"the Pellets database path is already tracked by Git",
-			map[string]any{"database_path": databasePath},
-		))
+			"database_path", databasePath,
+		)
 		if got := readFoundationFile(t, databasePath); !bytes.Equal(got, sentinel) {
 			t.Fatalf("tracked database changed from %q to %q", sentinel, got)
 		}
@@ -744,9 +744,7 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 			runFoundationCLI(t, executable, innerRoot, "init-db"),
 			"init-db",
 		)
-		if initialized.DatabasePath != innerDatabase {
-			t.Fatalf("nested database path = %q, want %q", initialized.DatabasePath, innerDatabase)
-		}
+		assertFoundationSamePath(t, initialized.DatabasePath, innerDatabase)
 
 		innerProjects := decodeFoundationSuccess[[]foundationProject](
 			t,
@@ -782,9 +780,7 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 			runFoundationCLI(t, executable, common, "init-db"),
 			"init-db",
 		)
-		if initialized.DatabasePath != discovery.DatabasePath(foundationCanonicalPath(t, common)) {
-			t.Fatalf("common database path = %q", initialized.DatabasePath)
-		}
+		assertFoundationSamePath(t, initialized.DatabasePath, discovery.DatabasePath(foundationCanonicalPath(t, common)))
 		first := decodeFoundationSuccess[foundationProject](
 			t,
 			runFoundationCLI(t, executable, firstRoot, "init", "--code", "svc-a"),
@@ -1359,6 +1355,49 @@ func decodeFoundationSuccess[T any](t *testing.T, result foundationResult, comma
 	return envelope.Data
 }
 
+func decodeFoundationError(t *testing.T, result foundationResult, exit int, code, message string) foundationError {
+	t.Helper()
+	if result.exit != exit || result.stdout != "" {
+		t.Fatalf("error result = exit %d stdout %q stderr %q, want exit %d and empty stdout", result.exit, result.stdout, result.stderr, exit)
+	}
+	var envelope foundationError
+	if err := json.Unmarshal([]byte(result.stderr), &envelope); err != nil {
+		t.Fatalf("decode error output %q: %v", result.stderr, err)
+	}
+	if envelope.SchemaVersion != 1 || envelope.Error.Code != code || envelope.Error.Message != message {
+		t.Fatalf("error envelope = %#v, want code %q and message %q", envelope, code, message)
+	}
+	encoded, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := string(encoded) + "\n"; result.stderr != want {
+		t.Fatalf("stderr = %q, want exact compact envelope %q", result.stderr, want)
+	}
+	return envelope
+}
+
+func assertFoundationErrorPath(
+	t *testing.T,
+	result foundationResult,
+	exit int,
+	code string,
+	message string,
+	detail string,
+	want string,
+) {
+	t.Helper()
+	envelope := decodeFoundationError(t, result, exit, code, message)
+	if len(envelope.Error.Details) != 1 {
+		t.Fatalf("error details = %#v, want only %q", envelope.Error.Details, detail)
+	}
+	got, ok := envelope.Error.Details[detail].(string)
+	if !ok {
+		t.Fatalf("error detail %q = %#v, want path string", detail, envelope.Error.Details[detail])
+	}
+	assertFoundationSamePath(t, got, want)
+}
+
 func foundationErrorJSON(code, message string, details map[string]any) string {
 	var envelope foundationError
 	envelope.SchemaVersion = 1
@@ -1702,4 +1741,33 @@ func foundationCanonicalPath(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return filepath.Clean(absolute)
+}
+
+func assertFoundationSamePath(t *testing.T, got, want string) {
+	t.Helper()
+	if filepath.Clean(got) == filepath.Clean(want) {
+		return
+	}
+	gotInfo, gotErr := os.Stat(got)
+	wantInfo, wantErr := os.Stat(want)
+	if gotErr != nil || wantErr != nil || !os.SameFile(gotInfo, wantInfo) {
+		t.Fatalf("paths identify different files: got %q (%v), want %q (%v)", got, gotErr, want, wantErr)
+	}
+}
+
+func foundationShortTempDir(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		return t.TempDir()
+	}
+	directory, err := os.MkdirTemp("", "pl-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(directory); err != nil {
+			t.Errorf("remove short Windows fixture directory %q: %v", directory, err)
+		}
+	})
+	return directory
 }
