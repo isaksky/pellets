@@ -38,11 +38,22 @@ func main() {
 		},
 		GitSafety: discovery.GitSafety{},
 	}
-	application := cli.New(
-		version,
+	pelletManager := app.PelletManager{
+		Projects: projectManager,
+		Open: func(ctx context.Context, path string) (storage.PelletRepository, error) {
+			return sqlite.OpenPelletRepository(ctx, path)
+		},
+	}
+	commands := []cli.Command{
 		cli.InitDBCommand(initializer),
 		cli.InitCommand(projectManager),
 		cli.ProjectCommand(projectManager),
-	)
+		cli.AddCommand(pelletManager),
+		cli.ListCommand(pelletManager),
+		cli.ShowCommand(pelletManager),
+		cli.EditCommand(pelletManager),
+		cli.NextCommand(pelletManager),
+	}
+	application := cli.New(version, commands...)
 	os.Exit(application.Run(os.Args[1:], os.Stdout, os.Stderr))
 }

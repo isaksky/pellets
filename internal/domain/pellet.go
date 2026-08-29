@@ -25,6 +25,21 @@ type PelletReference struct {
 	Number      int64
 }
 
+// ValidatePelletStatus accepts exactly the four persisted lifecycle states.
+func ValidatePelletStatus(status PelletStatus) error {
+	switch status {
+	case PelletOpen, PelletInProgress, PelletClosed, PelletMaybeLater:
+		return nil
+	default:
+		return NewError(
+			Usage,
+			"invalid_status",
+			fmt.Sprintf("unknown pellet status %q", status),
+			map[string]any{"status": status},
+		)
+	}
+}
+
 func (reference PelletReference) String() string {
 	return fmt.Sprintf("%s-%d", reference.ProjectCode, reference.Number)
 }

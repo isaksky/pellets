@@ -29,6 +29,7 @@ type Invocation struct {
 	Input            any
 	WorkingDirectory string
 	Database         *discovery.Database
+	Stdin            io.Reader
 }
 
 // Command defines one CLI command. Parse must reject every unsupported flag and
@@ -51,6 +52,7 @@ type App struct {
 	version          string
 	commands         map[string]Command
 	workingDirectory func() (string, error)
+	stdin            io.Reader
 }
 
 // New creates an application with the supplied commands.
@@ -71,7 +73,7 @@ func NewWithCommands(version string, commands ...Command) *App {
 		}
 		registered[command.Name] = command
 	}
-	return &App{version: version, commands: registered, workingDirectory: os.Getwd}
+	return &App{version: version, commands: registered, workingDirectory: os.Getwd, stdin: os.Stdin}
 }
 
 // Run executes one CLI invocation and returns its process exit code.
@@ -105,7 +107,7 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 			if parsed.command.Run == nil {
 				err = domain.NewError(domain.Unexpected, "internal_error", "command has no handler", nil)
 			} else {
-				invocation := Invocation{Globals: parsed.globals, Input: input}
+				invocation := Invocation{Globals: parsed.globals, Input: input, Stdin: a.stdin}
 				invocation.WorkingDirectory, err = a.workingDirectory()
 				if err != nil {
 					err = domain.WrapError(

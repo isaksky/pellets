@@ -460,7 +460,18 @@ func projectTestApp(current *string) *App {
 		},
 		GitSafety: discovery.GitSafety{},
 	}
-	application := New("test", InitDBCommand(initializer), InitCommand(manager), ProjectCommand(manager))
+	pelletManager := app.PelletManager{
+		Projects: manager,
+		Open: func(ctx context.Context, path string) (storage.PelletRepository, error) {
+			return sqlite.OpenPelletRepository(ctx, path)
+		},
+	}
+	application := New(
+		"test",
+		InitDBCommand(initializer), InitCommand(manager), ProjectCommand(manager),
+		AddCommand(pelletManager), ListCommand(pelletManager), ShowCommand(pelletManager),
+		EditCommand(pelletManager), NextCommand(pelletManager),
+	)
 	application.workingDirectory = func() (string, error) { return *current, nil }
 	return application
 }

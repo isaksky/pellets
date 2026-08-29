@@ -1,0 +1,274 @@
+package cli
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"pellets/internal/app"
+	"pellets/internal/discovery"
+	"pellets/internal/storage/sqlite"
+)
+
+func TestPelletCommandsAcrossMainAndLinkedWorktreesJSONGolden(t *testing.T) {
+	t.Parallel()
+
+	common := filepath.Join(t.TempDir(), "pellet worktree database 界")
+	mainWorkTree := filepath.Join(common, "main")
+	linkedWorkTree := filepath.Join(common, "linked")
+	unregisteredWorkTree := filepath.Join(common, "unregistered")
+	if err := os.MkdirAll(mainWorkTree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, mainWorkTree, "init", "--quiet")
+	if err := os.WriteFile(filepath.Join(mainWorkTree, "README"), []byte("fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, mainWorkTree, "add", "README")
+	runGitTest(
+		t, mainWorkTree,
+		"-c", "user.name=Pellets Test", "-c", "user.email=pellets@example.invalid",
+		"-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "fixture",
+	)
+	runGitTest(t, mainWorkTree, "worktree", "add", "--quiet", "-b", "pellet-command-linked", linkedWorkTree)
+	if stdout, stderr, exit := runTestApp(initDBTestApp(common), "init-db"); exit != 0 || stderr != "" {
+		t.Fatalf("init-db = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+
+	current := mainWorkTree
+	application := projectTestApp(&current)
+	mainProject := runProjectInit(t, application, "shared")
+	current = linkedWorkTree
+	linkedProject := runProjectInit(t, application, "shared")
+	if len(linkedProject.Workspaces) != 2 || linkedProject.Workspaces[0].ID != mainProject.Workspaces[0].ID {
+		t.Fatalf("linked registration = %#v", linkedProject)
+	}
+
+	var outputs strings.Builder
+	application.stdin = strings.NewReader("stdin description\n")
+	appendPelletGolden(t, &outputs, "add-open", runPelletCommand(t, application,
+		"add", "First from main", "--description-file", "-", "--external-id", "Case:Exact", "--group", "Rollout/A"))
+
+	current = linkedWorkTree
+	appendPelletGolden(t, &outputs, "add-placed", runPelletCommand(t, application,
+		"--project", "shared", "add", "Second from linked", "--after", "shared-1", "--external-id", "Case:Exact", "--group", "Rollout/A"))
+	appendPelletGolden(t, &outputs, "add-deferred", runPelletCommand(t, application,
+		"add", "Maybe later", "--maybe-later", "--external-id", "Case:Exact", "--group", "Rollout/A"))
+
+	databasePath := discovery.DatabasePath(common)
+	database, err := sqlite.Open(context.Background(), databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		UPDATE pellets
+		SET status = 'in_progress', workspace_id = ?
+		WHERE project_id = 1 AND number = 1`, mainProject.Workspaces[0].ID); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	appendPelletGolden(t, &outputs, "list-default", runPelletCommand(t, application, "list"))
+	current = mainWorkTree
+	beforeNext := capturePelletLogicalState(t, databasePath)
+	appendPelletGolden(t, &outputs, "next-resume", runPelletCommand(t, application,
+		"next", "--external-id", "does-not-match", "--group", "does-not-match"))
+	afterNext := capturePelletLogicalState(t, databasePath)
+	if !reflect.DeepEqual(afterNext, beforeNext) {
+		t.Fatalf("read-only next changed persistent state:\nbefore=%q\nafter=%q", beforeNext, afterNext)
+	}
+
+	current = linkedWorkTree
+	appendPelletGolden(t, &outputs, "next-open", runPelletCommand(t, application,
+		"next", "--external-id", "Case:Exact", "--group", "Rollout/A"))
+	appendPelletGolden(t, &outputs, "show", runPelletCommand(t, application, "show", "shared-1"))
+
+	descriptionPath := filepath.Join(common, "edited description 世界.txt")
+	if err := os.WriteFile(descriptionPath, []byte("edited from file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	appendPelletGolden(t, &outputs, "edit", runPelletCommand(t, application,
+		"edit", "shared-2", "--title", "Second edited", "--description-file", descriptionPath,
+		"--clear-external-id", "--clear-group"))
+	appendPelletGolden(t, &outputs, "list-status", runPelletCommand(t, application,
+		"list", "--status", "maybe_later"))
+	appendPelletGolden(t, &outputs, "list-all", runPelletCommand(t, application, "list", "--all"))
+	appendPelletGolden(t, &outputs, "list-exact-limit", runPelletCommand(t, application,
+		"list", "--external-id", "Case:Exact", "--group", "Rollout/A", "--limit", "1"))
+	appendPelletGolden(t, &outputs, "list-empty", runPelletCommand(t, application,
+		"list", "--external-id", "case:exact"))
+	appendPelletGolden(t, &outputs, "next-none", runPelletCommand(t, application,
+		"next", "--external-id", "Case:Exact", "--group", "Rollout/A"))
+	assertGolden(t, "pellet-worktrees.golden", outputs.String())
+
+	stdout, stderr, exit := runTestApp(application, "--human", "list")
+	if exit != 0 || stderr != "" {
+		t.Fatalf("human list = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+	assertGolden(t, "pellet-human-list.golden", stdout)
+	stdout, stderr, exit = runTestApp(application, "--human", "next", "--external-id", "missing")
+	if exit != 0 || stderr != "" {
+		t.Fatalf("human empty next = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+	assertGolden(t, "pellet-human-next-empty.golden", stdout)
+
+	runGitTest(t, mainWorkTree, "worktree", "add", "--quiet", "-b", "pellet-command-unregistered", unregisteredWorkTree)
+	current = unregisteredWorkTree
+	stateBeforeUnregistered := capturePelletLogicalState(t, databasePath)
+	stdout, stderr, exit = runTestApp(application, "next")
+	if exit != 3 || stdout != "" || !strings.Contains(stderr, `"code":"workspace_not_registered"`) {
+		t.Fatalf("unregistered next = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+	if stateAfter := capturePelletLogicalState(t, databasePath); !reflect.DeepEqual(stateAfter, stateBeforeUnregistered) {
+		t.Fatalf("unregistered next changed persistent state:\nbefore=%q\nafter=%q", stateBeforeUnregistered, stateAfter)
+	}
+}
+
+func TestPelletCommandUsageValidationIsStrictAndSideEffectFree(t *testing.T) {
+	t.Parallel()
+
+	application := New(
+		"test",
+		AddCommand(emptyPelletManager()), ListCommand(emptyPelletManager()), ShowCommand(emptyPelletManager()),
+		EditCommand(emptyPelletManager()), NextCommand(emptyPelletManager()),
+	)
+	workingDirectoryCalls := 0
+	application.workingDirectory = func() (string, error) {
+		workingDirectoryCalls++
+		return "", fmt.Errorf("usage validation crossed discovery boundary")
+	}
+	tests := []struct {
+		args []string
+		code string
+	}{
+		{[]string{"add"}, "missing_title"},
+		{[]string{"add", "title", "--description", "one", "--description-file", "two"}, "conflicting_flags"},
+		{[]string{"add", "title", "--before", "shared-1", "--after", "shared-2"}, "conflicting_flags"},
+		{[]string{"add", "title", "--maybe-later", "--before", "shared-1"}, "conflicting_flags"},
+		{[]string{"list", "--status", "unknown"}, "invalid_status"},
+		{[]string{"list", "--status", "open", "--all"}, "conflicting_flags"},
+		{[]string{"list", "--limit", "0"}, "invalid_limit"},
+		{[]string{"show", "12"}, "invalid_reference"},
+		{[]string{"edit", "shared-1"}, "missing_edit"},
+		{[]string{"edit", "shared-1", "--status", "closed"}, "unknown_flag"},
+		{[]string{"edit", "shared-1", "--external-id", "x", "--clear-external-id"}, "conflicting_flags"},
+		{[]string{"next", "extra"}, "unexpected_argument"},
+	}
+	for _, test := range tests {
+		stdout, stderr, exit := runTestApp(application, test.args...)
+		if exit != 2 || stdout != "" || !strings.Contains(stderr, `"code":"`+test.code+`"`) {
+			t.Errorf("%v = exit %d stdout %q stderr %q, want %s", test.args, exit, stdout, stderr, test.code)
+		}
+	}
+	if workingDirectoryCalls != 0 {
+		t.Fatalf("invalid pellet commands crossed working-directory boundary %d times", workingDirectoryCalls)
+	}
+}
+
+func TestDescriptionMayBeExplicitlyEditedToEmpty(t *testing.T) {
+	t.Parallel()
+
+	parsed, err := parseEdit([]string{"shared-1", "--description="})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := parsed.(editInput)
+	if input.Description == nil || *input.Description != "" || input.DescriptionFile != nil {
+		t.Fatalf("empty inline description parse = %#v", input)
+	}
+	parsed, err = parseAdd([]string{"title", "--description", ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	added := parsed.(addInput)
+	if added.Description == nil || *added.Description != "" {
+		t.Fatalf("empty add description parse = %#v", added)
+	}
+}
+
+func emptyPelletManager() (manager app.PelletManager) { return manager }
+
+func runPelletCommand(t *testing.T, application *App, arguments ...string) string {
+	t.Helper()
+	stdout, stderr, exit := runTestApp(application, arguments...)
+	if exit != 0 || stderr != "" {
+		t.Fatalf("pl %s = exit %d stdout %q stderr %q", strings.Join(arguments, " "), exit, stdout, stderr)
+	}
+	return stdout
+}
+
+func appendPelletGolden(t *testing.T, output *strings.Builder, label, raw string) {
+	t.Helper()
+	var value any
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		t.Fatalf("decode %s JSON %q: %v", label, raw, err)
+	}
+	normalizePelletTimestamps(value)
+	var encoded bytes.Buffer
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintf(output, "%s %s", label, encoded.String())
+}
+
+func normalizePelletTimestamps(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			if (key == "created_at" || key == "updated_at" || key == "completed_at") && child != nil {
+				typed[key] = "<timestamp>"
+				continue
+			}
+			normalizePelletTimestamps(child)
+		}
+	case []any:
+		for _, child := range typed {
+			normalizePelletTimestamps(child)
+		}
+	}
+}
+
+func capturePelletLogicalState(t *testing.T, path string) []string {
+	t.Helper()
+	database, err := sqlite.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	rows, err := database.Query(`
+		SELECT value FROM (
+			SELECT 'project|' || quote(project_id) || '|' || quote(code) || '|' || quote(next_pellet_number) || '|' || quote(updated_at) AS value, 0 AS kind, project_id AS first, 0 AS second FROM projects
+			UNION ALL
+			SELECT 'workspace|' || quote(workspace_id) || '|' || quote(project_id) || '|' || quote(root_path) || '|' || quote(git_dir) || '|' || quote(created_at) || '|' || quote(updated_at), 1, project_id, workspace_id FROM project_workspaces
+			UNION ALL
+			SELECT 'pellet|' || quote(rowid) || '|' || quote(project_id) || '|' || quote(workspace_id) || '|' || quote(number) || '|' || quote(title) || '|' || quote(description) || '|' || quote(external_id) || '|' || quote(group_id) || '|' || quote(status) || '|' || quote(priority) || '|' || quote(created_at) || '|' || quote(updated_at) || '|' || quote(completed_at), 2, project_id, number FROM pellets
+		)
+		ORDER BY kind, first, second`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	state := make([]string, 0)
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			t.Fatal(err)
+		}
+		state = append(state, value)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return state
+}

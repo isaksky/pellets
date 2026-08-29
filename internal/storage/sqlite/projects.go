@@ -305,6 +305,7 @@ func (database *ProjectDatabase) ResolveProjectWorkspace(ctx context.Context, co
 
 type projectQuery interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
 type rowsQuery interface {

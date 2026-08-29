@@ -64,6 +64,95 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		))
 	})
 
+	t.Run("compiled pellet queue workflow", func(t *testing.T) {
+		common := filepath.Join(t.TempDir(), "compiled pellet queue 界")
+		mainRoot := filepath.Join(common, "main")
+		linkedRoot := filepath.Join(common, "linked")
+		createFoundationRepository(t, mainRoot)
+		if output, err := foundationGitCommand(
+			mainRoot, "worktree", "add", "--quiet", "-b", "compiled-pellet-queue", linkedRoot,
+		); err != nil {
+			t.Fatalf("add pellet workflow linked worktree: %v\n%s", err, output)
+		}
+
+		decodeFoundationSuccess[foundationInitDB](
+			t, runFoundationCLI(t, executable, common, "init-db"), "init-db",
+		)
+		mainProject := decodeFoundationSuccess[foundationProject](
+			t, runFoundationCLI(t, executable, mainRoot, "init", "--code", "queue"), "init",
+		)
+		linkedProject := decodeFoundationSuccess[foundationProject](
+			t, runFoundationCLI(t, executable, linkedRoot, "init", "--code", "queue"), "init",
+		)
+		if len(mainProject.Workspaces) != 1 || len(linkedProject.Workspaces) != 2 {
+			t.Fatalf("compiled pellet workflow workspaces = %#v then %#v", mainProject, linkedProject)
+		}
+
+		first := decodeFoundationSuccess[foundationPellet](
+			t,
+			runFoundationCLI(
+				t, executable, mainRoot,
+				"add", "First compiled pellet", "--description", "from executable",
+				"--external-id", "Case:Exact", "--group", "Rollout/A",
+			),
+			"add",
+		)
+		second := decodeFoundationSuccess[foundationPellet](
+			t,
+			runFoundationCLI(
+				t, executable, linkedRoot,
+				"--project", "queue", "add", "Second compiled pellet", "--after", "queue-1",
+				"--external-id", "Case:Exact", "--group", "Rollout/A",
+			),
+			"add",
+		)
+		if first.ID != "queue-1" || first.Priority == nil || *first.Priority != 1024 || second.ID != "queue-2" || second.Priority == nil || *second.Priority != 2048 {
+			t.Fatalf("compiled additions = %#v and %#v", first, second)
+		}
+
+		listed := decodeFoundationSuccess[[]foundationPellet](
+			t,
+			runFoundationCLI(t, executable, linkedRoot, "list", "--external-id", "Case:Exact", "--group", "Rollout/A"),
+			"list",
+		)
+		if len(listed) != 2 || listed[0].ID != first.ID || listed[1].ID != second.ID {
+			t.Fatalf("compiled list = %#v", listed)
+		}
+		next := decodeFoundationSuccess[foundationNext](
+			t,
+			runFoundationCLI(t, executable, linkedRoot, "next", "--external-id", "Case:Exact", "--group", "Rollout/A"),
+			"next",
+		)
+		if next.SelectionReason != "next_open" || next.Pellet == nil || next.Pellet.ID != first.ID {
+			t.Fatalf("compiled next = %#v", next)
+		}
+
+		edited := decodeFoundationSuccess[foundationPellet](
+			t,
+			runFoundationCLI(t, executable, linkedRoot, "edit", second.ID, "--title", "Second edited", "--clear-group"),
+			"edit",
+		)
+		shown := decodeFoundationSuccess[foundationPellet](
+			t, runFoundationCLI(t, executable, mainRoot, "show", second.ID), "show",
+		)
+		if edited.Title != "Second edited" || edited.Group != nil || !reflect.DeepEqual(shown, edited) {
+			t.Fatalf("compiled edit/show = %#v / %#v", edited, shown)
+		}
+
+		empty := decodeFoundationSuccess[[]foundationPellet](
+			t, runFoundationCLI(t, executable, mainRoot, "list", "--external-id", "case:exact"), "list",
+		)
+		if empty == nil || len(empty) != 0 {
+			t.Fatalf("compiled typed empty list = %#v", empty)
+		}
+		none := decodeFoundationSuccess[foundationNext](
+			t, runFoundationCLI(t, executable, mainRoot, "next", "--external-id", "case:exact"), "next",
+		)
+		if none.SelectionReason != "none" || none.Pellet != nil {
+			t.Fatalf("compiled typed empty next = %#v", none)
+		}
+	})
+
 	t.Run("Git root initialization and immutable registration", func(t *testing.T) {
 		repository := filepath.Join(t.TempDir(), "foundation repository with spaces and 世界")
 		createFoundationRepository(t, repository)
@@ -588,6 +677,35 @@ type foundationWorkspace struct {
 	GitDirRelative   bool   `json:"git_dir_relative"`
 	CreatedAt        string `json:"created_at"`
 	UpdatedAt        string `json:"updated_at"`
+}
+
+type foundationPellet struct {
+	ID          string                     `json:"id"`
+	Project     string                     `json:"project"`
+	Number      int64                      `json:"number"`
+	Title       string                     `json:"title"`
+	Description string                     `json:"description"`
+	ExternalID  *string                    `json:"external_id"`
+	Group       *string                    `json:"group"`
+	Status      string                     `json:"status"`
+	Priority    *int64                     `json:"priority"`
+	Workspace   *foundationPelletWorkspace `json:"workspace"`
+	CreatedAt   string                     `json:"created_at"`
+	UpdatedAt   string                     `json:"updated_at"`
+	CompletedAt *string                    `json:"completed_at"`
+}
+
+type foundationPelletWorkspace struct {
+	ID               int64  `json:"id"`
+	RootPath         string `json:"root_path"`
+	RootPathRelative bool   `json:"root_path_relative"`
+	GitDir           string `json:"git_dir"`
+	GitDirRelative   bool   `json:"git_dir_relative"`
+}
+
+type foundationNext struct {
+	SelectionReason string            `json:"selection_reason"`
+	Pellet          *foundationPellet `json:"pellet"`
 }
 
 type foundationError struct {

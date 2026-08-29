@@ -3,6 +3,7 @@ package sqlite
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -369,6 +370,283 @@ func TestPelletRepositoryJulianTimestampRendersStableUTCJSON(t *testing.T) {
 	if envelope.Data.CreatedAt != output.FormatTimestamp(sqliteTime) {
 		t.Fatalf("JSON timestamp = %q, want instant %q; JSON: %s", envelope.Data.CreatedAt, sqliteRendered, rendered.String())
 	}
+}
+
+func TestPelletRepositoryPlacementListFiltersAndStatusOrdering(t *testing.T) {
+	t.Parallel()
+
+	fixture := newPelletRepositoryFixture(t)
+	repository := fixture.open(t)
+	defer repository.Close()
+
+	externalA, externalB := "Case:Exact", "case:exact"
+	groupA, groupB := "Rollout/A", "rollout/a"
+	first, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{
+		Title: "first", ExternalID: &externalA, Group: &groupA,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{
+		Title: "second", ExternalID: &externalB, Group: &groupB,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := repository.CreatePellet(context.Background(), fixture.linked, storage.NewPellet{
+		Title: "before first", ExternalID: &externalA, Group: &groupA,
+		Placement: &storage.PelletPlacement{Target: first.Reference, Before: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := repository.CreatePellet(context.Background(), fixture.linked, storage.NewPellet{
+		Title: "after first", ExternalID: &externalA, Group: &groupA,
+		Placement: &storage.PelletPlacement{Target: first.Reference},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deferredOlder, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{
+		Title: "deferred older", Status: domain.PelletMaybeLater, ExternalID: &externalA, Group: &groupA,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deferredNewer, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{
+		Title: "deferred newer", Status: domain.PelletMaybeLater, ExternalID: &externalA, Group: &groupA,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedOlder, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "closed older"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedNewer, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "closed newer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updates := []struct {
+		query string
+		args  []any
+	}{
+		{`UPDATE pellets SET status = 'in_progress', workspace_id = ? WHERE project_id = ? AND number = ?`, []any{fixture.linked.Workspace.ID, fixture.main.Project.ID, second.Reference.Number}},
+		{`UPDATE pellets SET updated_at = julianday('2030-01-01T00:00:00Z') WHERE project_id = ? AND number = ?`, []any{fixture.main.Project.ID, deferredOlder.Reference.Number}},
+		{`UPDATE pellets SET updated_at = julianday('2030-01-02T00:00:00Z') WHERE project_id = ? AND number = ?`, []any{fixture.main.Project.ID, deferredNewer.Reference.Number}},
+		{`UPDATE pellets SET status = 'closed', priority = NULL, completed_at = julianday('2030-01-03T00:00:00Z'), updated_at = julianday('2030-01-03T00:00:00Z') WHERE project_id = ? AND number = ?`, []any{fixture.main.Project.ID, closedOlder.Reference.Number}},
+		{`UPDATE pellets SET status = 'closed', priority = NULL, completed_at = julianday('2030-01-04T00:00:00Z'), updated_at = julianday('2030-01-04T00:00:00Z') WHERE project_id = ? AND number = ?`, []any{fixture.main.Project.ID, closedNewer.Reference.Number}},
+	}
+	for _, update := range updates {
+		if _, err := repository.db.Exec(update.query, update.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	active, err := repository.ListPellets(context.Background(), fixture.main, storage.PelletListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPelletReferences(t, active, before.Reference, first.Reference, after.Reference, second.Reference)
+	if active[3].Workspace == nil || active[3].Workspace.ID != fixture.linked.Workspace.ID {
+		t.Fatalf("in-progress list row workspace = %#v", active[3].Workspace)
+	}
+
+	exact, err := repository.ListPellets(context.Background(), fixture.main, storage.PelletListOptions{
+		ExternalID: &externalA, Group: &groupA,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPelletReferences(t, exact, before.Reference, first.Reference, after.Reference)
+
+	limit := int64(2)
+	all, err := repository.ListPellets(context.Background(), fixture.main, storage.PelletListOptions{All: true, Limit: &limit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPelletReferences(t, all, before.Reference, first.Reference)
+
+	all, err = repository.ListPellets(context.Background(), fixture.main, storage.PelletListOptions{All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPelletReferences(
+		t, all,
+		before.Reference, first.Reference, after.Reference, second.Reference,
+		deferredNewer.Reference, deferredOlder.Reference,
+		closedNewer.Reference, closedOlder.Reference,
+	)
+
+	closedStatus := domain.PelletClosed
+	closed, err := repository.ListPellets(context.Background(), fixture.main, storage.PelletListOptions{Status: &closedStatus})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPelletReferences(t, closed, closedNewer.Reference, closedOlder.Reference)
+
+	nextNumberBefore := queryPelletInt64(t, repository.db, "SELECT next_pellet_number FROM projects WHERE project_id = ?", fixture.main.Project.ID)
+	if _, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{
+		Title: "invalid relative add", Placement: &storage.PelletPlacement{Target: deferredOlder.Reference, Before: true},
+	}); err == nil || domain.PublicError(err).Code != "invalid_placement_target" {
+		t.Fatalf("relative add beside deferred pellet error = %v", err)
+	}
+	if nextNumberAfter := queryPelletInt64(t, repository.db, "SELECT next_pellet_number FROM projects WHERE project_id = ?", fixture.main.Project.ID); nextNumberAfter != nextNumberBefore {
+		t.Fatalf("failed relative add changed allocator from %d to %d", nextNumberBefore, nextNumberAfter)
+	}
+}
+
+func TestPelletRepositoryReadOnlyNextIsWorkspaceScopedAndTyped(t *testing.T) {
+	t.Parallel()
+
+	fixture := newPelletRepositoryFixture(t)
+	repository := fixture.open(t)
+	defer repository.Close()
+
+	matchingExternal, otherExternal := "match", "other"
+	matchingGroup, otherGroup := "group", "other-group"
+	first, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{
+		Title: "first matching", ExternalID: &matchingExternal, Group: &matchingGroup,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{
+		Title: "second matching", ExternalID: &matchingExternal, Group: &matchingGroup,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownedByMain, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{
+		Title: "main owned outside filter", ExternalID: &otherExternal, Group: &otherGroup,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownedByLinked, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{
+		Title: "linked owned", ExternalID: &matchingExternal, Group: &matchingGroup,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.db.Exec(`UPDATE pellets SET status = 'in_progress', workspace_id = ? WHERE project_id = ? AND number = ?`,
+		fixture.main.Workspace.ID, fixture.main.Project.ID, ownedByMain.Reference.Number); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.db.Exec(`UPDATE pellets SET status = 'in_progress', workspace_id = ? WHERE project_id = ? AND number = ?`,
+		fixture.linked.Workspace.ID, fixture.main.Project.ID, ownedByLinked.Reference.Number); err != nil {
+		t.Fatal(err)
+	}
+
+	beforeChanges := queryTotalChanges(t, repository.db)
+	mainSelection, err := repository.NextPellet(context.Background(), fixture.main, &matchingExternal, &matchingGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mainSelection.Reason != storage.NextResumeInProgress || mainSelection.Pellet == nil || mainSelection.Pellet.Reference != ownedByMain.Reference {
+		t.Fatalf("main next = %#v", mainSelection)
+	}
+	if afterChanges := queryTotalChanges(t, repository.db); afterChanges != beforeChanges {
+		t.Fatalf("next changed database connection total_changes from %d to %d", beforeChanges, afterChanges)
+	}
+
+	if _, err := repository.db.Exec(`UPDATE pellets SET status = 'open', workspace_id = NULL WHERE project_id = ? AND number = ?`, fixture.main.Project.ID, ownedByMain.Reference.Number); err != nil {
+		t.Fatal(err)
+	}
+	mainSelection, err = repository.NextPellet(context.Background(), fixture.main, &matchingExternal, &matchingGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mainSelection.Reason != storage.NextOpen || mainSelection.Pellet == nil || mainSelection.Pellet.Reference != first.Reference {
+		t.Fatalf("main filtered next = %#v, want %s", mainSelection, first.Reference)
+	}
+	if mainSelection.Pellet.Reference == ownedByLinked.Reference {
+		t.Fatal("next resumed another workspace's pellet")
+	}
+
+	missing := "missing"
+	none, err := repository.NextPellet(context.Background(), fixture.main, &missing, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if none.Reason != storage.NextNone || none.Pellet != nil {
+		t.Fatalf("empty next = %#v", none)
+	}
+
+	if _, err := repository.db.Exec(`UPDATE pellets SET status = 'open', workspace_id = NULL WHERE project_id = ? AND status = 'in_progress'`, fixture.main.Project.ID); err != nil {
+		t.Fatal(err)
+	}
+	linkedRepository := fixture.open(t)
+	defer linkedRepository.Close()
+	type nextResult struct {
+		selection storage.NextSelection
+		err       error
+	}
+	start := make(chan struct{})
+	results := make(chan nextResult, 2)
+	var calls sync.WaitGroup
+	for _, call := range []struct {
+		repository *PelletRepository
+		project    storage.ResolvedProject
+	}{
+		{repository, fixture.main},
+		{linkedRepository, fixture.linked},
+	} {
+		calls.Add(1)
+		go func(call struct {
+			repository *PelletRepository
+			project    storage.ResolvedProject
+		}) {
+			defer calls.Done()
+			<-start
+			selection, selectionErr := call.repository.NextPellet(context.Background(), call.project, &matchingExternal, &matchingGroup)
+			results <- nextResult{selection: selection, err: selectionErr}
+		}(call)
+	}
+	close(start)
+	calls.Wait()
+	close(results)
+	for result := range results {
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if result.selection.Reason != storage.NextOpen || result.selection.Pellet == nil || result.selection.Pellet.Reference != first.Reference {
+			t.Fatalf("concurrent read-only next = %#v, want shared candidate %s", result.selection, first.Reference)
+		}
+	}
+	assertPelletQueryInt(t, repository.db, "SELECT COUNT(*) FROM pellets WHERE project_id = ? AND workspace_id IS NOT NULL", 0, fixture.main.Project.ID)
+	assertPelletQueryInt(t, repository.db, "SELECT COUNT(*) FROM pellets WHERE project_id = ? AND status = 'open'", 4, fixture.main.Project.ID)
+	_ = second
+}
+
+func assertPelletReferences(t *testing.T, pellets []storage.Pellet, references ...domain.PelletReference) {
+	t.Helper()
+	got := make([]domain.PelletReference, len(pellets))
+	for index, pellet := range pellets {
+		got[index] = pellet.Reference
+	}
+	if !reflect.DeepEqual(got, references) {
+		t.Fatalf("pellet references = %v, want %v", got, references)
+	}
+}
+
+func queryTotalChanges(t *testing.T, database *sql.DB) int64 {
+	t.Helper()
+	var changes int64
+	if err := database.QueryRow("SELECT total_changes()").Scan(&changes); err != nil {
+		t.Fatal(err)
+	}
+	return changes
+}
+
+func queryPelletInt64(t *testing.T, database *sql.DB, query string, args ...any) int64 {
+	t.Helper()
+	var value int64
+	if err := database.QueryRow(query, args...).Scan(&value); err != nil {
+		t.Fatal(err)
+	}
+	return value
 }
 
 func assertPelletIdentity(t *testing.T, pellet storage.Pellet, reference string, priority int64) {
