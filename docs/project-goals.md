@@ -28,6 +28,7 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 8. Store optional project memories, distinguish agent-created memories from human-approved memories, and retrieve them with keyword search.
 9. Use one local database for one repository with several worktrees or for several unrelated sibling repositories.
 10. Let a human inspect and safely edit that same authoritative database through an optional foreground, loopback-only web interface.
+11. Install a narrow, portable Pellets agent skill at repository or personal scope so Codex and Claude can follow the current `pl` contract even when no database has been initialized.
 
 ## Goals
 
@@ -43,6 +44,7 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 - Remain local and usable without an account, hosted server, daemon, or external network connection. The optional `pl web` process is a foreground loopback tool, not a runtime dependency.
 - Provide keyword search over pellets and memories through SQLite FTS5.
 - Produce self-contained macOS and Windows executables.
+- Install an instruction-only `pellets` Agent Skill for Codex, Claude, or both without opening a database, changing Git state, or requiring a network connection.
 
 ## Non-goals
 
@@ -57,6 +59,7 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 - Custom workflows or custom statuses in the first release.
 - Semantic/vector retrieval, embedding models, or embedding providers.
 - Plugins or a general extension framework.
+- Agent configuration generation beyond the focused portable `pellets/SKILL.md` artifact.
 - Automatic conversion of closed pellets into memories.
 - Becoming a general-purpose issue tracker or project-management platform.
 
@@ -81,6 +84,8 @@ An `in_progress` pellet names exactly one registered workspace from its project.
 ### Local means local
 
 The database is never committed to Git. `pl` does not send task or memory contents over an external network. The web inspector serves only the local browser over `127.0.0.1`, performs no runtime network fetch, and stops with its foreground process. Pellets performs no telemetry.
+
+The optional skill installer uses one embedded instruction template and local filesystem operations. Repository-scoped skills are ordinary files the user may choose to commit; `pl` never stages or commits them. Personal-scoped skills stay under the platform-resolved home directory. Installation does not inspect or open `.pellets` data.
 
 ### Agent output is an API
 
@@ -122,6 +127,7 @@ The first release is successful when all of the following are true:
 - Agent-created memories can be searched, reviewed, and marked human-approved without being attached to task rows.
 - A human can inspect every project, workspace, pellet state, and memory in the nearest database and perform routine non-destructive edits through `pl web` without weakening queue, ownership, FTS, or concurrency invariants.
 - Core workflows pass automated tests on macOS and Windows.
+- Codex and Claude can discover logically identical repository- or personal-scoped `pellets` skills, and repeated installation is safe and idempotent.
 - No documented or implemented workflow requires dependency concepts, vector search, Git commits, a daemon, or an external network connection.
 
 ## Constraints

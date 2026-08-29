@@ -246,6 +246,79 @@ pl memory approve
 pl memory remove
 ```
 
+### `pl skill install`
+
+Install the embedded portable Pellets Agent Skill without discovering or opening a Pellets database.
+
+```text
+pl skill install [--scope repo|personal] [--agent codex|claude|both]
+                 [--yes] [--dry-run] [--force]
+```
+
+| Option | Meaning |
+|---|---|
+| `--scope repo|personal` | Select repository or personal installation. |
+| `--agent codex|claude|both` | Select one or both agent destinations. |
+| `--yes` | Suppress only the final write confirmation. It does not choose missing values or approve replacement of differing files. |
+| `--dry-run` | Return the complete plan and embedded content without any directory, temporary-file, or target write. No final confirmation is required. |
+| `--force` | Permit replacement of differing regular target files. It never permits a symlink, non-regular target, unsafe parent, or path escape. |
+
+The exact destination matrix is:
+
+| Scope | Codex | Claude |
+|---|---|---|
+| Repository | `<git-root>/.agents/skills/pellets/SKILL.md` | `<git-root>/.claude/skills/pellets/SKILL.md` |
+| Personal | `<home>/.agents/skills/pellets/SKILL.md` | `<home>/.claude/skills/pellets/SKILL.md` |
+
+`<git-root>` is Git's resolved current worktree root, including linked-worktree semantics. `<home>` comes from the operating system's user-home API. A personal selection never substitutes a repository-relative location. Repository installation creates ordinary untracked files the user may choose to commit. The command never edits `.gitignore`, Git local exclude, the index, commits, `AGENTS.md`, `CLAUDE.md`, settings, or `.pellets` data.
+
+Compact JSON is the default, so JSON invocations never prompt or read stdin. They require both `--scope` and `--agent`; a write also requires `--yes`. Missing choices return `missing_skill_choices` with exit 2. A write without an available final confirmation returns `confirmation_required` with exit 6. Unknown choice values are `invalid_skill_scope` or `invalid_skill_agent`, and unavailable repository scope is `repository_scope_unavailable`; all fail before target creation.
+
+The wizard runs only with `--human` when both stdin and stdout are interactive terminals. Supplied choices are retained and only missing choices are asked. When Git is available, the scope prompt is exactly:
+
+```text
+Git repository root: <git-root>
+Choose installation scope:
+  1) Repository
+  2) Personal (<home>)
+  0) Cancel
+Scope:
+```
+
+Outside a Git worktree, Repository is omitted and Personal is selected after this explanation:
+
+```text
+Repository scope is unavailable because the current directory is not inside a Git work tree.
+Using Personal scope rooted at <home>.
+```
+
+The agent prompt is:
+
+```text
+Choose agent target:
+  1) Codex
+  2) Claude
+  3) Both
+  0) Cancel
+Agent:
+```
+
+After read-only preflight, human mode prints the selected scope, the repository root when applicable, and every exact destination. A differing regular file is labeled `(different existing file)` and an identical file `(already current)`. A differing file is never silently overwritten: without `--force`, interactive mode asks `Replace every differing existing skill file? [y/N]:`; noninteractive mode returns `skill_content_conflict` with every conflicting agent/path and exit 4. `--yes` does not suppress this replacement question. The final prompt is `Install the Pellets skill at every displayed destination? [y/N]:` unless `--yes` is present.
+
+Empty input, `0`, `cancel`, `c`, `q`, `quit`, `n`, or `no` cancels at the applicable prompt. Cancellation exits 0, writes no files, and reports `status: "cancelled"` with per-target `result: "cancelled"` for targets already planned. Invalid interactive answers are explained and retried without writing.
+
+Normal JSON results use `command: "skill install"`:
+
+```json
+{"schema_version":1,"command":"skill install","data":{"status":"installed","scope":"repo","agent":"both","repository_root":"/work/repo","targets":[{"agent":"codex","path":"/work/repo/.agents/skills/pellets/SKILL.md","result":"installed"},{"agent":"claude","path":"/work/repo/.claude/skills/pellets/SKILL.md","result":"idempotent"}]}}
+```
+
+Overall `status` is `installed` when any target was installed or replaced and `idempotent` when every target already matched. Per-target results are `installed`, `replaced`, or `idempotent`. Dry-run uses overall `dry_run`, includes `content`, and reports `would_install`, `would_replace` when `--force` is present, `would_conflict` for an unforced differing file, or `idempotent` per target.
+
+Before any multi-target write, every destination, existing parent, file type, permission, and content state is preflighted. A target or descendant parent symlink, non-regular target, non-directory parent, path escape, or unusable parent returns `skill_target_unsafe` with exit 4 even under `--force`. Files are replaced atomically. If a later target write fails, `skill_install_failed` reports whether rollback completed; the invocation restores replaced bytes/modes and removes only files and empty directories it created, so `both` never intentionally leaves one agent updated and the other stale.
+
+The embedded artifact contains only portable instructions and narrow `name: pellets`/`description` frontmatter. Its implicit trigger applies only when a prompt explicitly names the `pl` command or Pellet/Pellets. It explicitly rejects generic task, issue, ticket, queue, backlog, project, project-management, and memory requests that do not name `pl`/Pellets. Explicit skill invocation remains available. See the current official [OpenAI Codex skill guidance](https://developers.openai.com/codex/skills) and [Claude Code skill guidance](https://code.claude.com/docs/en/skills).
+
 ### `pl web`
 
 Run the optional local web inspector in the foreground.
@@ -333,8 +406,8 @@ Never truncate titles or descriptions when stdout is not a terminal. Terminal tr
 
 ## stdin, stdout, and stderr
 
-- stdin is read only when an explicit option names `-`, such as `--description-file -` or `pl memory add --file -`.
-- Commands never read stdin implicitly; this prevents an agent invocation from hanging.
+- stdin is read only when an explicit option names `-`, such as `--description-file -` or `pl memory add --file -`, or by the documented interactive `--human skill install` wizard when both stdin and stdout are terminals.
+- JSON commands never read stdin implicitly; this prevents an agent invocation from hanging.
 - stdout contains the successful result only. For `pl web`, that result is the ready listener URL rather than JSON.
 - stderr contains the structured error only, plus diagnostics only when an explicit future debug flag is used. A non-fatal `pl web` browser-launch warning is the documented exception.
 - Help and version text go to stdout with exit code 0.
@@ -359,6 +432,7 @@ Specific machine error codes disambiguate cases that share an exit code.
 - `purge` requires `--yes`; `--human` does not weaken this rule.
 - `memory remove` requires `--yes`.
 - Cross-workspace recovery requires both the exact stored `--recover-workspace WORKSPACE_ID` and `--yes`; human output does not weaken this rule.
+- Noninteractive `skill install` writes require `--yes`; interactive cancellation is a successful write-free result. Differing skill files additionally require `--force` or the separate interactive replacement confirmation.
 - Initialization never overwrites an existing database.
 - `start`, `close`, `reopen`, and `defer` are idempotent only when the pellet is already in their target status.
 - Repeating `add` is not idempotent and creates another pellet. A future request-id mechanism is out of scope until a real need appears.

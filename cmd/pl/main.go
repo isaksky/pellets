@@ -83,6 +83,10 @@ func main() {
 		},
 		OpenBrowser: webui.OpenDefaultBrowser,
 	}
+	skillInstaller := app.SkillInstaller{
+		FindGitRoot: discovery.FindGitRoot,
+		UserHomeDir: os.UserHomeDir,
+	}
 	commands := []cli.Command{
 		cli.InitDBCommand(initializer),
 		cli.InitCommand(projectManager),
@@ -102,6 +106,7 @@ func main() {
 		cli.ReopenCommand(pelletManager),
 		cli.DeferCommand(pelletManager),
 		cli.MemoryCommand(memoryManager),
+		cli.SkillCommand(skillInstaller),
 		cli.WebCommand(func(ctx context.Context, invocation cli.Invocation, options cli.WebOptions, stdout, stderr io.Writer) error {
 			if invocation.Database == nil {
 				return errors.New("web command database discovery did not run")

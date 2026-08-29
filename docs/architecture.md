@@ -11,7 +11,7 @@ Each invocation follows the same shape:
 1. Strictly parse global options and the subcommand, then validate all
    usage-only semantics without reading the working directory, performing
    discovery, or causing command side effects.
-2. Locate the nearest `.pellets/pellets.db` by walking from the working directory toward the filesystem root, unless the command is creating a database.
+2. Locate the nearest `.pellets/pellets.db` by walking from the working directory toward the filesystem root, unless the command is creating a database or installing the portable agent skill.
 3. Ask Git for the worktree root, worktree-specific Git directory, and shared common directory; normalize those paths relative to the database root where possible.
 4. Open SQLite, configure/migrate it, and resolve the common directory to one logical project plus the worktree/Git-directory pair to its registered workspace.
 5. Execute one application operation through a narrow storage interface.
@@ -39,6 +39,7 @@ cmd/pl/                 executable entry point
 internal/cli/           command definitions, flag parsing, exit mapping
 internal/discovery/     database-root and Git-root discovery
 internal/app/           use cases and transaction boundaries
+internal/app/skill_template embedded portable pellets/SKILL.md source
 internal/domain/        statuses, references, validation, typed errors
 internal/storage/       storage interfaces used by app
 internal/storage/sqlite explicit SQL, migrations, FTS maintenance
@@ -72,6 +73,20 @@ Rules:
 - Only `cmd/pl` constructs concrete dependencies.
 
 The storage layer is replaceable for tests, but replacement with a different production database is not a product goal.
+
+The database-independent skill path is `cmd/pl -> cli -> app -> filesystem`, with existing Git discovery injected into the application service. It does not import or construct a storage implementation.
+
+## Portable agent skill installer
+
+`pl skill install` embeds one version-controlled, instruction-only `SKILL.md` template with portable `name` and `description` frontmatter. Codex and Claude receive byte-identical instructions; only their destination paths differ. No script, plugin manifest, MCP configuration, `AGENTS.md`, `CLAUDE.md`, settings file, runtime download, or prompt-framework dependency is generated.
+
+The CLI owns the small line-oriented wizard behind injected input, output, and terminal detection. The default JSON interface never prompts. Interactive `--human` mode prompts only when stdin and stdout are terminals, shows the Git root when repository scope is available, previews exact destinations, and obtains replacement and final-write confirmation separately. Parsing and enum validation occur before working-directory or Git inspection.
+
+The application service resolves the personal root with the platform home-directory API and the repository root with Git's existing worktree discovery. Planning is read-only: it computes the complete target matrix, checks lexical containment, walks every existing parent with `Lstat`, refuses symlink and non-regular paths, verifies usable parent permissions, reads existing regular files, and classifies them as missing, identical, or different. Dry-run stops after this plan and returns the embedded content.
+
+Apply re-runs the full preflight before creating anything. Missing parents are created one component at a time without following symlinks. Each target is written through a same-directory temporary file and atomic rename; replacements preserve the existing file mode. For a multi-target install, original bytes and modes plus invocation-created directories form a rollback journal in memory. A later failure restores replaced files, removes files created by that invocation, and removes only now-empty directories created by that invocation. Unrelated files and existing directory modes are never changed.
+
+Repository targets are ordinary untracked files. The installer never runs `git add`, edits `.gitignore` or the local exclude, changes the index, or commits. Personal targets are always rooted at the resolved home directory rather than a repository selected from the working directory.
 
 ## Discovery, logical projects, and workspaces
 
@@ -242,6 +257,7 @@ There is no package or boundary for:
 - agent accounts, PID/session ownership, leases, heartbeats, expiry, or assignment history (the workspace foreign key is only worktree-scoped coordination);
 - synchronization;
 - plugins;
+- generated agent configuration beyond the portable Pellets skill;
 - a daemon, remote bind address, or remote network transport.
 
 Adding any of these requires a new decision record rather than an opportunistic schema change.

@@ -30,6 +30,8 @@ type Invocation struct {
 	WorkingDirectory string
 	Database         *discovery.Database
 	Stdin            io.Reader
+	Stdout           io.Writer
+	Interactive      bool
 }
 
 // Command defines one CLI command. Parse must reject every unsupported flag and
@@ -56,6 +58,7 @@ type App struct {
 	commands         map[string]Command
 	workingDirectory func() (string, error)
 	stdin            io.Reader
+	isInteractive    func(io.Reader, io.Writer) bool
 }
 
 // New creates an application with the supplied commands.
@@ -79,7 +82,10 @@ func NewWithCommands(version string, commands ...Command) *App {
 		}
 		registered[command.Name] = command
 	}
-	return &App{version: version, commands: registered, workingDirectory: os.Getwd, stdin: os.Stdin}
+	return &App{
+		version: version, commands: registered, workingDirectory: os.Getwd, stdin: os.Stdin,
+		isInteractive: streamsAreInteractive,
+	}
 }
 
 // Run executes one CLI invocation and returns its process exit code.
@@ -113,7 +119,10 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 			if parsed.command.Run == nil && parsed.command.RunForeground == nil {
 				err = domain.NewError(domain.Unexpected, "internal_error", "command has no handler", nil)
 			} else {
-				invocation := Invocation{Globals: parsed.globals, Input: input, Stdin: a.stdin}
+				invocation := Invocation{
+					Globals: parsed.globals, Input: input, Stdin: a.stdin, Stdout: stdout,
+					Interactive: a.isInteractive(a.stdin, stdout),
+				}
 				invocation.WorkingDirectory, err = a.workingDirectory()
 				if err != nil {
 					err = domain.WrapError(
@@ -166,6 +175,18 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 		return writeFailure(stderr, err)
 	}
 	return 0
+}
+
+func streamsAreInteractive(input io.Reader, outputWriter io.Writer) bool {
+	inputFile, inputOK := input.(*os.File)
+	outputFile, outputOK := outputWriter.(*os.File)
+	if !inputOK || !outputOK {
+		return false
+	}
+	inputInfo, inputErr := inputFile.Stat()
+	outputInfo, outputErr := outputFile.Stat()
+	return inputErr == nil && outputErr == nil &&
+		inputInfo.Mode()&os.ModeCharDevice != 0 && outputInfo.Mode()&os.ModeCharDevice != 0
 }
 
 // ParseNoArguments is a strict parser for commands that accept no options or arguments.

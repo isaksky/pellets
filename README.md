@@ -29,6 +29,24 @@ Commands discover the nearest database by walking from the current directory to 
 
 Compact versioned JSON is the default command output. See [the CLI specification](docs/cli-spec.md) for exact commands, fields, errors, and lifecycle behavior.
 
+## Install the Pellets agent skill
+
+Install the focused, instruction-only `pellets` skill for Codex, Claude, or both:
+
+```text
+pl --human skill install
+pl skill install --scope repo --agent both --yes
+pl skill install --scope personal --agent codex --dry-run
+```
+
+Choose **Repository** when the skill should travel with one Git worktree/repository and be available to collaborators after they choose to commit it. Codex reads `<git-root>/.agents/skills/pellets/SKILL.md`; Claude reads `<git-root>/.claude/skills/pellets/SKILL.md`. The files remain ordinary untracked files until the user stages them—`pl` never changes the Git index or ignore files.
+
+Choose **Personal** when the same Pellets guidance should be available across local projects without adding repository files. Codex reads `<home>/.agents/skills/pellets/SKILL.md`; Claude reads `<home>/.claude/skills/pellets/SKILL.md`. The home directory is resolved with the operating system API, and personal installation stays outside the selected repository.
+
+The interactive wizard requires `--human` plus terminal stdin/stdout. Default JSON mode never prompts and requires explicit `--scope`, `--agent`, and `--yes` for writes. `--dry-run` returns every target and the complete generated content without creating directories or temporary files. Differing existing files are refused unless the user separately confirms replacement or supplies `--force`; Both is preflighted and rolled back as one installation.
+
+The generated instructions activate implicitly only when a prompt explicitly names `pl` or Pellet/Pellets; generic task, issue, backlog, project-management, or memory requests are deliberately excluded. The format and locations follow the current official [OpenAI Codex skill guidance](https://developers.openai.com/codex/skills) and [Claude Code skill guidance](https://code.claude.com/docs/en/skills).
+
 ## Local web inspector
 
 ```text

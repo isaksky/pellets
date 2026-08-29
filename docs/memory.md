@@ -161,6 +161,10 @@ Search results may add `rank` and `snippet`. The authoritative full `text` remai
 - Purge of closed pellets does not remove memory. Users must remove sensitive or obsolete memory explicitly.
 - Backups made outside `pl` contain memory in plaintext.
 
+## Portable agent-skill guidance
+
+The instruction-only skill installed by `pl skill install` mirrors this provenance boundary for both Codex and Claude. It tells an agent to create its own durable observations with `--created-by agent`, to use `--created-by human` only for text actually supplied or authored by a human, and never to invoke `pl memory approve` to self-approve agent-created content. The generated skill treats future work as a focused pellet and memory as independent project knowledge; it does not introduce task links, approval identity, automatic extraction, or a parallel memory store.
+
 ## Deferred possibilities
 
 Do not implement these in v1:

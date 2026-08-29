@@ -20,7 +20,8 @@ The first release includes:
 - optional foreground, loopback-only HTMX inspector/editor with optimistic concurrency and invalidation-only live refresh;
 - explicit closed-pellet purge;
 - compact versioned JSON by default and optional human output;
-- embedded forward database migrations.
+- embedded forward database migrations;
+- a database-independent installer for one embedded portable Pellets Agent Skill shared by Codex and Claude.
 
 Anything outside this list is deferred unless required to satisfy an invariant or acceptance test.
 
@@ -176,7 +177,22 @@ Acceptance criteria:
 - Vendored HTMX and license work offline. No Node/npm, CDN, external font/icon, SPA/CSS framework, SSE extension, WebSocket, service worker, daemon, or background service is added.
 - Automated markup/style tests cover system/light/dark pre-paint theming, narrow/wide layouts, visible focus, dialog/focus/dirty behavior, changed-row animation, reduced motion, and WCAG AA palette contrast. A hands-on macOS browser smoke check covers both themes, zoom/reflow, keyboard navigation, deep-link/back/forward behavior, and live external changes.
 
-## Milestone 9: release hardening
+## Milestone 9: portable agent skill installer
+
+Implement `pl skill install` with an embedded instruction-only `pellets/SKILL.md`, deterministic repository/personal and Codex/Claude target selection, an injected standard-library wizard, read-only dry-run planning, conflict refusal, atomic replacement, and multi-target rollback. This command bypasses Pellets database discovery.
+
+Acceptance criteria:
+
+- The generated frontmatter is valid portable Agent Skills metadata with `name: pellets` and a narrow description that requires explicit `pl` or Pellet/Pellets naming while rejecting generic task/project/memory triggers.
+- The shared instructions use only implemented CLI commands and teach atomic `start-next`, current-workspace resumption, conflict/recovery behavior, lifecycle/order/project/group/external-ID semantics, focused follow-ups, and memory provenance/approval.
+- Repository and platform-home roots produce the exact Codex, Claude, and Both path matrix; nested paths, linked worktrees, spaces, Unicode, macOS homes, and Windows path behavior are covered.
+- JSON never prompts. Noninteractive missing choices and confirmation fail with stable typed errors; interactive choices, exact path preview, replacement confirmation, final confirmation, and cancellation use injected input/output/terminal detection.
+- Dry-run creates no directories or temporary files and returns the complete plan/content. Identical targets are idempotent. Differing files require explicit replacement authority.
+- Complete preflight rejects symlinks, non-regular paths, escapes, and unusable permissions. Atomic per-file writes and injected second-target failures prove Both restores replaced files and removes invocation-created files/directories.
+- Golden frontmatter/body tests plus static positive/negative trigger fixtures preserve the activation boundary. A drift contract parses every documented command example and rejects referenced flags without implemented CLI coverage.
+- Real-filesystem, CLI-harness, and compiled-executable tests prove no-database operation, scope/agent behavior, Git discovery, protected unrelated files, JSON/error shapes, and full content installation. `CGO_ENABLED=0` macOS and Windows builds add no runtime, prompt, network, or plugin dependency.
+
+## Milestone 10: release hardening
 
 Exercise complete workflows, establish build provenance, and publish release archives.
 
@@ -198,6 +214,7 @@ Acceptance criteria:
 - status transition matrix;
 - FTS query escaping;
 - JSON rendering and stable error mapping;
+- portable skill frontmatter, trigger fixtures, command/flag drift, prompt state, and installation result rendering;
 - relative/absolute platform path normalization and Git repository/workspace identity;
 - midpoint and overflow arithmetic.
 
@@ -221,6 +238,8 @@ Run against temporary real SQLite files, not a mocked SQL interface:
 
 Invoke the compiled executable in temporary Git repositories and assert stdout, stderr, exit code, database location, local Git exclude changes, and final rows. Cover nested directories, sibling repositories, a main work tree plus two linked worktrees, worktree move/removal/duplicate/stale registration, and filenames with spaces/Unicode.
 
+Invoke the compiled skill installer in temporary home and repository fixtures without a Pellets database. Assert exact destinations and content, default JSON non-interactivity, dry-run write freedom, idempotence/conflicts, and unchanged Git index/ignore/config files.
+
 ### Property and concurrency tests
 
 - Randomized ordering operations against a simple slice model.
@@ -239,6 +258,7 @@ Invoke the compiled executable in temporary Git repositories and assert stdout, 
 - Keep a frozen real-database fixture at every released schema version and test forward migration. Never regenerate an old fixture from mutable current migration input.
 - Treat every shipped migration file as immutable; add a new consecutive migration for schema changes.
 - Build and test with the pinned SQLite driver on every target matrix entry before upgrading it.
+- Treat the embedded portable skill and positive/negative trigger fixtures as compatibility artifacts. Parse its frontmatter and every referenced `pl` command/flag so CLI and skill changes cannot drift independently.
 
 ## Cross-platform release strategy
 

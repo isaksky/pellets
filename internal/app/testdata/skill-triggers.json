@@ -1,0 +1,13 @@
+{
+  "positive": [
+    "use pl",
+    "add a pellet",
+    "inspect Pellets"
+  ],
+  "negative": [
+    "track this task",
+    "prioritize these issues",
+    "manage my backlog",
+    "remember this"
+  ]
+}
