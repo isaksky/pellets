@@ -1,0 +1,7 @@
+list-empty exit=0 {"command":"list","data":[],"schema_version":1}
+search-empty exit=0 {"command":"search","data":[],"schema_version":1}
+next-empty exit=0 {"command":"next","data":{"pellet":null,"selection_reason":"none"},"schema_version":1}
+start-next-empty exit=0 {"command":"start-next","data":{"pellet":null,"selection_reason":"none"},"schema_version":1}
+memory-list-empty exit=0 {"command":"memory list","data":[],"schema_version":1}
+memory-search-empty exit=0 {"command":"memory search","data":[],"schema_version":1}
+purge-empty exit=0 {"command":"purge","data":{"count":0,"dry_run":true,"project":"compat","references":[]},"schema_version":1}
