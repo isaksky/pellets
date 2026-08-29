@@ -87,6 +87,7 @@ rendered_formula="$work_directory/pl.rb"
     'class Pl < Formula' \
     '  desc "Local SQLite task queue for coding agents"' \
     '  homepage "https://github.com/isaksky/pellets"' \
+    "  version \"$version\"" \
     '  license "Apache-2.0"' \
     '' \
     '  depends_on :macos' \
