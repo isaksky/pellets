@@ -24,7 +24,7 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 	}
 	for _, required := range []string{
 		`:root[data-theme="dark"]`, `@media (max-width: 760px)`, `@media (prefers-reduced-motion: reduce)`,
-		`:focus-visible`, `.state-changed`, `.status-in_progress`, `.conflict-state`, `.error-state`, `.drawer-scrim[hidden]`, `.inspector-host.has-inspector`,
+		`:focus-visible`, `.state-changed`, `.status-in_progress`, `.conflict-state`, `.error-state`, `.drawer-scrim[hidden]`, `.inspector-host.has-inspector`, `.inspector-host:has(.error-state)`,
 	} {
 		if !strings.Contains(css, required) {
 			t.Fatalf("CSS missing %q", required)
@@ -33,7 +33,7 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 	for _, required := range []string{
 		`new EventSource("/events")`, `pellets-invalidate`, `every 35s`, `id="project-drawer"`, `id="workspace-strip"`, `id="project-record"`, `data-protect-dirty`,
 		`htmx:beforeSwap`, `target.id === "project-drawer"`, `target.id === "project-record"`,
-		`scope.matches("[data-inspector]")`, `classList.toggle("has-inspector", hasInspector)`,
+		`scope.matches("[data-inspector]")`, `document.querySelector("[data-inspector], .error-state")`, `classList.toggle("has-inspector", hasInspector)`,
 		`closest("form.dirty-track")`, `event.detail.elt === region`,
 		`document.querySelector("#task-list a, #memory-list a, #main")`, `inspectorOpener = null`,
 		`beforeunload`, `Discard unsaved inspector changes?`, `event.key === "Escape"`,
@@ -43,8 +43,21 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 			t.Fatalf("UI assets missing %q", required)
 		}
 	}
+	responseHandling := `window.htmx.config.responseHandling = [
+      {code: "204", swap: false},
+      {code: "409", swap: true, error: true},
+      {code: "422", swap: true, error: true},
+      {code: "[23]..", swap: true},
+      {code: "[45]..", swap: false, error: true}
+    ];`
+	if !strings.Contains(javascript, responseHandling) {
+		t.Fatal("application JavaScript must swap only intentional 409/422 application errors before the safe 4xx/5xx default")
+	}
 	if !strings.Contains(preflight, `localStorage.getItem("pellets-theme")`) || strings.Index(templates, "theme-preflight.js") > strings.Index(templates, "app.css") {
 		t.Fatal("theme choice is not applied before first stylesheet paint")
+	}
+	if strings.Index(templates, "htmx-2.0.4.min.js") > strings.Index(templates, "app.js") {
+		t.Fatal("HTMX must load before application JavaScript configures response handling")
 	}
 	if strings.Count(templates, `hx-target="#inspector-host" hx-swap="innerHTML" hx-push-url="true"`) != 2 {
 		t.Fatal("task and memory inspector links must override inherited outerHTML swaps")

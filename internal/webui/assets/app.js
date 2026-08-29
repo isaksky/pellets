@@ -4,6 +4,19 @@
   var root = document.documentElement;
   var media = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
 
+  // Keep HTTP error semantics while rendering the two application responses
+  // that intentionally contain actionable inspector fragments. Every other
+  // client/server error retains HTMX's safe no-swap default.
+  if (window.htmx) {
+    window.htmx.config.responseHandling = [
+      {code: "204", swap: false},
+      {code: "409", swap: true, error: true},
+      {code: "422", swap: true, error: true},
+      {code: "[23]..", swap: true},
+      {code: "[45]..", swap: false, error: true}
+    ];
+  }
+
   function applyTheme(choice) {
     if (choice !== "light" && choice !== "dark") choice = "system";
     root.dataset.themeChoice = choice;
@@ -123,7 +136,7 @@
       (scope.querySelector ? scope.querySelector("[data-inspector]") : null);
     var host = document.getElementById("inspector-host");
     var shell = document.querySelector(".app-shell");
-    var hasInspector = !!document.querySelector("[data-inspector]");
+    var hasInspector = !!document.querySelector("[data-inspector], .error-state");
     if (host) host.classList.toggle("has-inspector", hasInspector);
     if (shell) shell.classList.toggle("has-inspector", hasInspector);
     if (!inspector) return;
@@ -150,7 +163,7 @@
   initialize(document);
   document.body.addEventListener("htmx:afterSwap", function (event) { initialize(event.detail.target || document); });
   document.body.addEventListener("htmx:afterSwap", function () {
-    if (document.querySelector("[data-inspector]") || (!inspectorOpener && !inspectorOpenerHref)) return;
+    if (document.querySelector("[data-inspector], .error-state") || (!inspectorOpener && !inspectorOpenerHref)) return;
     var table = document.querySelector(".table-scroll");
     if (table) table.scrollLeft = tableScrollLeft;
     if ((!inspectorOpener || !document.contains(inspectorOpener)) && inspectorOpenerHref) {

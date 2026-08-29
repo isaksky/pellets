@@ -231,11 +231,11 @@ dd { margin: 0; overflow-wrap: anywhere; font-size: .76rem; }
   .table-frame { border-radius: 8px; }
   th, td { padding: .58rem; }
   th:nth-child(3), td:nth-child(3), th:nth-child(5), td:nth-child(5), th:nth-child(6), td:nth-child(6), th:nth-child(7), td:nth-child(7) { display: none; }
-  .inspector-host:has(.inspector), .inspector-host:has(.conflict-state), .inspector-host.has-inspector { position: fixed; z-index: 80; inset: 0; display: grid; align-items: end; background: rgb(0 0 0 / 42%); }
+  .inspector-host:has(.inspector), .inspector-host:has(.conflict-state), .inspector-host:has(.error-state), .inspector-host.has-inspector { position: fixed; z-index: 80; inset: 0; display: grid; align-items: end; background: rgb(0 0 0 / 42%); }
   .inspector, .conflict-state > .inspector { position: relative; height: min(88vh, 760px); width: 100%; border: 1px solid var(--border); border-radius: 16px 16px 0 0; box-shadow: var(--shadow); }
   .inspector-scroll { height: calc(min(88vh, 760px) - 68px); }
   .inspector > header { min-height: 68px; }
-  .conflict-state { max-height: 94vh; overflow: auto; border-radius: 16px 16px 0 0; }
+  .conflict-state, .error-state { max-height: 94vh; overflow: auto; border-radius: 16px 16px 0 0; }
   .form-grid, .inline-form { grid-template-columns: 1fr; }
   .memory-grid { grid-template-columns: 1fr; }
 }
