@@ -5,9 +5,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 
+	"pellets/internal/discovery"
 	"pellets/internal/domain"
 	"pellets/internal/output"
 )
@@ -23,29 +25,33 @@ type GlobalOptions struct {
 
 // Invocation is the strictly parsed input passed to a command handler.
 type Invocation struct {
-	Globals GlobalOptions
-	Input   any
+	Globals          GlobalOptions
+	Input            any
+	WorkingDirectory string
+	Database         *discovery.Database
 }
 
 // Command defines one CLI command. Parse must reject every unsupported flag and
 // positional argument. Run does not render or write process output.
 type Command struct {
-	Name    string
-	Summary string
-	Usage   string
-	Parse   func(args []string) (any, error)
-	Run     func(ctx context.Context, invocation Invocation) (any, error)
+	Name                  string
+	Summary               string
+	Usage                 string
+	SkipDatabaseDiscovery bool
+	Parse                 func(args []string) (any, error)
+	Run                   func(ctx context.Context, invocation Invocation) (any, error)
 }
 
-// App is a database-independent command parser and dispatcher.
+// App parses and dispatches commands and performs their database selection.
 type App struct {
-	version  string
-	commands map[string]Command
+	version          string
+	commands         map[string]Command
+	workingDirectory func() (string, error)
 }
 
-// New creates the production milestone-zero application.
-func New(version string) *App {
-	return NewWithCommands(version)
+// New creates an application with the supplied commands.
+func New(version string, commands ...Command) *App {
+	return NewWithCommands(version, commands...)
 }
 
 // NewWithCommands creates an application with the supplied command handlers.
@@ -61,7 +67,7 @@ func NewWithCommands(version string, commands ...Command) *App {
 		}
 		registered[command.Name] = command
 	}
-	return &App{version: version, commands: registered}
+	return &App{version: version, commands: registered, workingDirectory: os.Getwd}
 }
 
 // Run executes one CLI invocation and returns its process exit code.
@@ -89,11 +95,29 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 			if parsed.command.Run == nil {
 				err = domain.NewError(domain.Unexpected, "internal_error", "command has no handler", nil)
 			} else {
+				invocation := Invocation{Globals: parsed.globals, Input: input}
+				invocation.WorkingDirectory, err = a.workingDirectory()
+				if err != nil {
+					err = domain.WrapError(
+						domain.Unexpected,
+						"working_directory_unavailable",
+						"could not determine the current working directory",
+						nil,
+						err,
+					)
+				}
+				if err == nil && !parsed.command.SkipDatabaseDiscovery {
+					var database discovery.Database
+					database, err = discovery.FindDatabase(invocation.WorkingDirectory)
+					if err == nil {
+						invocation.Database = &database
+					}
+				}
+
 				var data any
-				data, err = parsed.command.Run(context.Background(), Invocation{
-					Globals: parsed.globals,
-					Input:   input,
-				})
+				if err == nil {
+					data, err = parsed.command.Run(context.Background(), invocation)
+				}
 				if err == nil {
 					renderer := output.Renderer(output.JSONRenderer{Pretty: parsed.globals.Pretty})
 					if parsed.globals.Human {

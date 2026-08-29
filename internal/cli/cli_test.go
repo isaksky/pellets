@@ -20,9 +20,10 @@ func (data statusData) RenderHuman(w io.Writer) error {
 
 func statusCommand() Command {
 	return Command{
-		Name:    "status",
-		Summary: "Show harness status.",
-		Usage:   "pl status",
+		Name:                  "status",
+		Summary:               "Show harness status.",
+		Usage:                 "pl status",
+		SkipDatabaseDiscovery: true,
 		Run: func(_ context.Context, _ Invocation) (any, error) {
 			return statusData{Ready: true}, nil
 		},
