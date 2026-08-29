@@ -405,11 +405,12 @@ WHERE pellets_fts MATCH :query
 ORDER BY rank,
          t.priority IS NULL,
          t.priority,
-         t.updated_at DESC
+         t.updated_at DESC,
+         t.number
 LIMIT :limit;
 ```
 
-Search rank orders relevance. For equal ranks, actionable pellets sort by priority before non-actionable pellets, then by update time. Exact external-ID and group selection use relational predicates rather than FTS tokenization; dedicated filter indexes are deferred until measurement shows they are needed.
+Search rank orders relevance. For equal ranks, actionable pellets sort before non-actionable pellets and follow queue priority. Non-actionable ties sort by update time, newest first. Pellet number is the final deterministic tie-break. Exact external-ID and group selection use relational predicates rather than FTS tokenization; dedicated filter indexes are deferred until measurement shows they are needed.
 
 ## Purge and deletion behavior
 

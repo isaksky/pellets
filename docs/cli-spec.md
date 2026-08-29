@@ -215,7 +215,7 @@ pl search QUERY [--external-id ID] [--group GROUP]
                 [--status STATUS] [--limit N]
 ```
 
-Search includes every status by default so closed pellets remain discoverable in FTS without participating in queue maintenance. Ordinary query text is escaped into safe FTS terms. Exact external-ID and group filtering are relational and independent of tokenization. Results sort by FTS relevance, actionable records before non-actionable records on a relevance tie, active priority, and update time.
+Search includes every status by default so closed pellets remain discoverable in FTS without participating in queue maintenance. Ordinary query text is escaped into safe FTS terms. Exact external-ID and group filtering are relational and independent of tokenization. Results sort by FTS relevance, actionable records before non-actionable records on a relevance tie, active priority, update time newest first, and finally pellet number for deterministic ties.
 
 ### `pl purge`
 

@@ -189,6 +189,87 @@ func TestPelletRepositorySearchIncludesEveryStatusAndRanksDeterministically(t *t
 	assertPelletReferences(t, results, pellets[3].Reference)
 }
 
+func TestPelletRepositorySearchEqualRanksUseQueueOrderAndPelletNumberTieBreak(t *testing.T) {
+	t.Parallel()
+
+	fixture := newPelletRepositoryFixture(t)
+	repository := fixture.open(t)
+	defer repository.Close()
+
+	first, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "equaltoken"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{Title: "equaltoken"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstDeferred, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{
+		Title: "equaltoken", Status: domain.PelletMaybeLater,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondDeferred, err := repository.CreatePellet(context.Background(), fixture.main, storage.NewPellet{
+		Title: "equaltoken", Status: domain.PelletMaybeLater,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := repository.MovePellet(context.Background(), fixture.main, second.Reference, storage.PelletPlacement{
+		Target: first.Reference, Before: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.db.Exec(`
+		UPDATE pellets
+		SET updated_at = julianday('2030-01-01T00:00:00Z')
+		WHERE project_id = ?`, fixture.main.Project.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := repository.db.Query(`
+		SELECT bm25(pellets_fts, 8.0, 2.0, 1.0)
+		FROM pellets_fts
+		JOIN pellets AS p ON p.rowid = pellets_fts.rowid
+		WHERE pellets_fts MATCH 'equaltoken' AND p.project_id = ?`, fixture.main.Project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var ranks []float64
+	for rows.Next() {
+		var rank float64
+		if err := rows.Scan(&rank); err != nil {
+			t.Fatal(err)
+		}
+		ranks = append(ranks, rank)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(ranks) != 4 {
+		t.Fatalf("rank count = %d, want 4", len(ranks))
+	}
+	for _, rank := range ranks[1:] {
+		if rank != ranks[0] {
+			t.Fatalf("FTS ranks = %v, want an exact tie", ranks)
+		}
+	}
+
+	results, err := repository.SearchPellets(context.Background(), fixture.main, storage.PelletSearchOptions{Query: "equaltoken"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPelletReferences(t, results,
+		second.Reference,
+		first.Reference,
+		firstDeferred.Reference,
+		secondDeferred.Reference,
+	)
+}
+
 func TestPelletRepositorySearchUsesDocumentedColumnWeightsBeforeQueueTies(t *testing.T) {
 	t.Parallel()
 
@@ -303,12 +384,16 @@ func TestPelletRepositoryPurgeSynchronizesFTSInTheDeletionTransaction(t *testing
 	transitionPellet(t, repository, fixture.main, newClosed.Reference, storage.PelletClose, nil)
 	transitionPellet(t, repository, fixture.other, otherClosed.Reference, storage.PelletClose, nil)
 	if _, err := repository.db.Exec(`
-		UPDATE pellets SET completed_at = julianday('2029-01-01T00:00:00Z')
+		UPDATE pellets
+		SET completed_at = julianday('2029-01-01T00:00:00Z'),
+		    updated_at = julianday('2029-01-01T00:00:00Z')
 		WHERE project_id = ? AND number = ?`, fixture.main.Project.ID, oldClosed.Reference.Number); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repository.db.Exec(`
-		UPDATE pellets SET completed_at = julianday('2031-01-01T00:00:00Z')
+		UPDATE pellets
+		SET completed_at = julianday('2031-01-01T00:00:00Z'),
+		    updated_at = julianday('2031-01-01T00:00:00Z')
 		WHERE project_id = ? AND number = ?`, fixture.main.Project.ID, newClosed.Reference.Number); err != nil {
 		t.Fatal(err)
 	}
