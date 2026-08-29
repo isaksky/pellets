@@ -14,6 +14,42 @@ go test ./...
 
 The cross-build script verifies `CGO_ENABLED=0` artifacts for macOS AMD64/ARM64 and Windows AMD64. Runtime dependencies are Go's standard library plus the pinned in-process SQLite driver.
 
+## Build release archives
+
+Run the repository-owned release builder on macOS with a SemVer value (without
+a leading `v`):
+
+```text
+./scripts/build-release.sh 1.2.3
+```
+
+It writes these fixed files to `dist/` (or to an optional second-argument
+directory):
+
+```text
+pellets_1.2.3_darwin_amd64.tar.gz
+pellets_1.2.3_darwin_arm64.tar.gz
+pellets_1.2.3_windows_amd64.zip
+pellets_1.2.3_checksums.txt
+```
+
+Each archive has a flat, sorted three-file layout: `LICENSE`,
+`THIRD_PARTY_NOTICES.txt`, and `pl` on macOS or `pl.exe` on Windows. The
+builder uses `CGO_ENABLED=0`, embeds the supplied version, normalizes file
+permissions and timestamps, verifies archive names, entries, executable
+formats, Go target metadata, and SHA-256 values, then unpacks and smoke-tests
+only the Mac's native architecture. That offline smoke test runs
+`pl --version`, initializes an isolated temporary database, and completes an
+add/start/close workflow without a SQLite dynamic library. It never requires
+Rosetta. The Windows archive is produced and structurally checked on macOS;
+the same unpacked archive is run natively by Windows CI.
+
+The archive layout and names are stable release inputs. The Go binaries are
+not promised to be byte-identical across toolchain versions, operating
+systems, or compression implementations. Re-running the same version replaces
+only those four versioned output files; signing, notarization, installers, and
+package-manager publishing are separate concerns.
+
 ## Start a project
 
 ```text

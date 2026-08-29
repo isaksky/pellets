@@ -81,18 +81,119 @@ jobs:
       - name: Build and verify target metadata
         run: bash scripts/verify-cross-builds.sh
 
+  release-archives:
+    name: Build and verify release archives on macOS
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Build, verify, and smoke-test release archives
+        run: ./scripts/build-release.sh 0.0.0-ci
+      - name: Retain verified release archives
+        uses: actions/upload-artifact@v7
+        with:
+          name: pellets-release-archives
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-release-smoke:
+    name: Smoke-test macOS-produced Windows archive
+    needs: release-archives
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Download verified release archives
+        uses: actions/download-artifact@v7
+        with:
+          name: pellets-release-archives
+          path: dist
+      - name: Unpack and run the Windows AMD64 archive natively
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_ARCH -ne "X64") {
+            throw "release smoke test requires a native Windows AMD64 runner"
+          }
+
+          $version = "0.0.0-ci"
+          $archiveName = "pellets_${version}_windows_amd64.zip"
+          $archive = Join-Path $PWD "dist/$archiveName"
+          $manifest = Join-Path $PWD "dist/pellets_${version}_checksums.txt"
+          $manifestLine = @(Get-Content $manifest | Where-Object { $_ -like "*  $archiveName" })
+          if ($manifestLine.Count -ne 1) {
+            throw "checksum manifest does not contain exactly one $archiveName entry"
+          }
+          $expectedHash = ($manifestLine -split "  ")[0]
+          $actualHash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actualHash -ne $expectedHash) {
+            throw "Windows archive checksum mismatch"
+          }
+
+          $unpacked = Join-Path $env:RUNNER_TEMP "pellets-release-smoke"
+          Expand-Archive -LiteralPath $archive -DestinationPath $unpacked
+          $entries = @(Get-ChildItem -LiteralPath $unpacked | Sort-Object Name | ForEach-Object Name)
+          $expectedEntries = @("LICENSE", "pl.exe", "THIRD_PARTY_NOTICES.txt") | Sort-Object
+          if (Compare-Object $expectedEntries $entries) {
+            throw "unexpected Windows archive entries: $($entries -join ', ')"
+          }
+
+          $executable = Join-Path $unpacked "pl.exe"
+          $versionOutput = & $executable --version
+          if ($LASTEXITCODE -ne 0 -or $versionOutput -ne "pl $version (JSON schema 1)") {
+            throw "unexpected pl --version result: $versionOutput"
+          }
+
+          $smokeRoot = Join-Path $env:RUNNER_TEMP "pellets-workflow-smoke"
+          New-Item -ItemType Directory -Path $smokeRoot | Out-Null
+          git -C $smokeRoot init -q
+          if ($LASTEXITCODE -ne 0) { throw "git init failed" }
+          $env:NO_COLOR = "1"
+          $env:HTTP_PROXY = "http://127.0.0.1:1"
+          $env:HTTPS_PROXY = "http://127.0.0.1:1"
+          $env:ALL_PROXY = "http://127.0.0.1:1"
+          $env:NO_PROXY = ""
+          Push-Location $smokeRoot
+          try {
+            $initialized = & $executable init --code smoke | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $initialized.command -ne "init" -or $initialized.data.code -ne "smoke") {
+              throw "pl init smoke failed"
+            }
+            $added = & $executable add "release archive smoke" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $added.data.id -ne "smoke-1") { throw "pl add smoke failed" }
+            $started = & $executable start-next | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $started.data.pellet.status -ne "in_progress") { throw "pl start-next smoke failed" }
+            $closed = & $executable close smoke-1 | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $closed.data.status -ne "closed") { throw "pl close smoke failed" }
+          } finally {
+            Pop-Location
+          }
+
   release-platform-gate:
     name: Release gate (supported platforms)
     if: always()
     needs:
       - foundation-tests
       - cgo-free-cross-builds
+      - release-archives
+      - windows-release-smoke
     runs-on: ubuntu-latest
     steps:
-      - name: Require native tests and CGo-free cross-builds
+      - name: Require native tests, cross-builds, and archive smoke tests
         env:
           NATIVE_TEST_RESULT: ${{ needs.foundation-tests.result }}
           CROSS_BUILD_RESULT: ${{ needs.cgo-free-cross-builds.result }}
+          ARCHIVE_RESULT: ${{ needs.release-archives.result }}
+          WINDOWS_SMOKE_RESULT: ${{ needs.windows-release-smoke.result }}
         run: |
           test "$NATIVE_TEST_RESULT" = success
           test "$CROSS_BUILD_RESULT" = success
+          test "$ARCHIVE_RESULT" = success
+          test "$WINDOWS_SMOKE_RESULT" = success
