@@ -317,59 +317,22 @@ func setSchemaVersion(ctx context.Context, conn *sql.Conn, version int) error {
 }
 
 func assertMigration1(ctx context.Context, conn *sql.Conn) error {
-	if err := preflightMigration1(ctx, conn); err != nil {
-		return err
-	}
-	for _, name := range []string{"pellets_fts", "memories_fts"} {
-		var count int
-		if err := conn.QueryRowContext(ctx, `
-			SELECT COUNT(*)
-			FROM sqlite_schema
-			WHERE type = 'table' AND name = ?`, name).Scan(&count); err != nil {
-			return fmt.Errorf("inspect required table %q: %w", name, err)
-		}
-		if count != 1 {
-			return fmt.Errorf("required table %q has %d definitions, want 1", name, count)
-		}
-	}
-	return nil
+	return verifyProductionSchemaContract(ctx, conn, 1)
 }
 
 func preflightMigration1(ctx context.Context, conn *sql.Conn) error {
-	for _, name := range []string{"application_metadata", "projects", "pellets", "memories"} {
-		if err := assertConnectionRowCount(ctx, conn, `
-			SELECT COUNT(*) FROM sqlite_schema
-			WHERE type = 'table' AND name = ?`, 1, name); err != nil {
-			return fmt.Errorf("inspect required table %q: %w", name, err)
-		}
-	}
-	if err := assertConnectionRowCount(ctx, conn, `
-		SELECT COUNT(*) FROM pragma_table_info('projects')
-		WHERE name = 'root_path'`, 1); err != nil {
-		return fmt.Errorf("verify legacy project root column: %w", err)
-	}
-	if err := assertConnectionRowCount(ctx, conn, `
-		SELECT COUNT(*) FROM pragma_table_info('pellets')
-		WHERE name = 'workspace_id'`, 0); err != nil {
-		return fmt.Errorf("verify legacy pellet ownership columns: %w", err)
-	}
-	if err := assertConnectionRowCount(ctx, conn, `
-		SELECT COUNT(*) FROM sqlite_schema
-		WHERE name = 'project_workspaces'`, 0); err != nil {
-		return fmt.Errorf("verify legacy workspace table absence: %w", err)
-	}
-	return nil
+	return verifyProductionSchemaContract(ctx, conn, 1)
 }
 
 func assertMigration2(ctx context.Context, conn *sql.Conn) error {
-	if err := assertMigration1(ctx, conn); err != nil {
+	if err := verifyProductionSchemaContract(ctx, conn, 2); err != nil {
 		return err
 	}
 	return assertMigration2Metadata(ctx, conn)
 }
 
 func preflightMigration2(ctx context.Context, conn *sql.Conn) error {
-	if err := preflightMigration1(ctx, conn); err != nil {
+	if err := verifyProductionSchemaContract(ctx, conn, 2); err != nil {
 		return err
 	}
 	return assertMigration2Metadata(ctx, conn)
@@ -383,50 +346,22 @@ func assertMigration2Metadata(ctx context.Context, conn *sql.Conn) error {
 }
 
 func assertMigration3(ctx context.Context, conn *sql.Conn) error {
-	return assertMigration3Schema(ctx, conn, true)
+	return assertMigration3Schema(ctx, conn)
 }
 
 func preflightMigration3(ctx context.Context, conn *sql.Conn) error {
-	return assertMigration3Schema(ctx, conn, false)
+	return assertMigration3Schema(ctx, conn)
 }
 
-func assertMigration3Schema(ctx context.Context, conn *sql.Conn, includeFTS bool) error {
-	tables := []string{"application_metadata", "projects", "project_workspaces", "pellets", "memories"}
-	if includeFTS {
-		tables = append(tables, "pellets_fts", "memories_fts")
-	}
-	for _, name := range tables {
-		if err := assertConnectionRowCount(ctx, conn, `
-			SELECT COUNT(*) FROM sqlite_schema
-			WHERE type = 'table' AND name = ?`, 1, name); err != nil {
-			return fmt.Errorf("inspect migration-3 table %q: %w", name, err)
-		}
+func assertMigration3Schema(ctx context.Context, conn *sql.Conn) error {
+	if err := verifyProductionSchemaContract(ctx, conn, 3); err != nil {
+		return err
 	}
 	if err := assertConnectionRowCount(ctx, conn, `
 		SELECT COUNT(*)
 		FROM pellets
 		WHERE (status = 'in_progress') <> (workspace_id IS NOT NULL)`, 0); err != nil {
 		return fmt.Errorf("verify migrated workspace ownership: %w", err)
-	}
-	if err := assertConnectionRowCount(ctx, conn, `
-		SELECT COUNT(*) FROM sqlite_schema
-		WHERE type = 'index' AND name = 'pellets_workspace_in_progress_idx'`, 1); err != nil {
-		return fmt.Errorf("verify workspace in-progress index: %w", err)
-	}
-	if err := assertConnectionRowCount(ctx, conn, `
-		SELECT COUNT(*) FROM sqlite_schema
-		WHERE name IN ('pellets_one_in_progress_idx', 'projects_v2', 'pellets_v2', 'memories_v2', 'migration_0003_state')`, 0); err != nil {
-		return fmt.Errorf("verify removed migration-3 objects: %w", err)
-	}
-	if err := assertConnectionRowCount(ctx, conn, `
-		SELECT COUNT(*) FROM pragma_table_info('projects')
-		WHERE name = 'git_common_dir'`, 1); err != nil {
-		return fmt.Errorf("verify project Git identity columns: %w", err)
-	}
-	if err := assertConnectionRowCount(ctx, conn, `
-		SELECT COUNT(*) FROM pragma_table_info('pellets')
-		WHERE name = 'workspace_id'`, 1); err != nil {
-		return fmt.Errorf("verify pellet workspace ownership column: %w", err)
 	}
 	if err := assertConnectionRowCount(ctx, conn, `
 		SELECT COUNT(*) FROM application_metadata

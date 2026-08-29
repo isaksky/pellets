@@ -366,6 +366,150 @@ func TestSupportedVersionOnIncompatibleSchemaIsRejectedWithoutWrites(t *testing.
 	assertOpenFailureLeavesFileUnchanged(t, path, "schema_version_unsupported")
 }
 
+func TestStructurallyMismatchedSupportedSchemasAreRejectedWithoutWrites(t *testing.T) {
+	for version := 1; version <= LatestSchemaVersion; version++ {
+		version := version
+		t.Run(fmt.Sprintf("version-%d", version), func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), fmt.Sprintf("partial-version-%d.db", version))
+			raw := openRawDatabase(t, path)
+			mustExec(t, raw, previouslyAcceptedPartialSchema(version))
+			mustExec(t, raw, fmt.Sprintf("PRAGMA user_version = %d", version))
+			if err := raw.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			assertOpenFailureLeavesFileUnchanged(t, path, "schema_version_unsupported")
+		})
+	}
+}
+
+func TestCurrentSchemaContractRejectsStructuralDriftWithoutWrites(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*testing.T, *sql.DB)
+	}{
+		{
+			name: "column type and nullability",
+			mutate: func(t *testing.T, database *sql.DB) {
+				recreateApplicationMetadata(t, database, `
+					CREATE TABLE application_metadata (
+						key   TEXT PRIMARY KEY,
+						value TEXT
+					) STRICT;`)
+			},
+		},
+		{
+			name: "primary key",
+			mutate: func(t *testing.T, database *sql.DB) {
+				recreateApplicationMetadata(t, database, `
+					CREATE TABLE application_metadata (
+						key   TEXT NOT NULL,
+						value TEXT NOT NULL
+					) STRICT;`)
+			},
+		},
+		{
+			name: "check constraint",
+			mutate: func(t *testing.T, database *sql.DB) {
+				rewriteSchemaObject(t, database, "memories", "CHECK (trim(text) <> '')", "CHECK (length(text) >= 0)")
+			},
+		},
+		{
+			name: "foreign key action",
+			mutate: func(t *testing.T, database *sql.DB) {
+				rewriteSchemaObject(t, database, "project_workspaces", "ON DELETE RESTRICT", "ON DELETE CASCADE")
+			},
+		},
+		{
+			name: "strict mode",
+			mutate: func(t *testing.T, database *sql.DB) {
+				recreateApplicationMetadata(t, database, `
+					CREATE TABLE application_metadata (
+						key   TEXT PRIMARY KEY,
+						value TEXT NOT NULL
+					);`)
+			},
+		},
+		{
+			name: "required index",
+			mutate: func(t *testing.T, database *sql.DB) {
+				mustExec(t, database, "DROP INDEX pellets_closed_completed_idx")
+			},
+		},
+		{
+			name: "index uniqueness",
+			mutate: func(t *testing.T, database *sql.DB) {
+				mustExec(t, database, `
+					DROP INDEX pellets_workspace_in_progress_idx;
+					CREATE INDEX pellets_workspace_in_progress_idx
+					ON pellets(workspace_id) WHERE status = 'in_progress';`)
+			},
+		},
+		{
+			name: "FTS configuration",
+			mutate: func(t *testing.T, database *sql.DB) {
+				mustExec(t, database, `
+					DROP TABLE pellets_fts;
+					CREATE VIRTUAL TABLE pellets_fts USING fts5(
+						title,
+						description,
+						external_id,
+						content = 'pellets',
+						content_rowid = 'rowid'
+					);`)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "drifted-current.db")
+			database := openTestDatabase(t, path)
+			if err := database.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			raw := openRawDatabase(t, path)
+			test.mutate(t, raw)
+			if err := raw.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			assertOpenFailureLeavesFileUnchanged(t, path, "schema_version_unsupported")
+		})
+	}
+}
+
+func TestEverySupportedProductionEndpointPassesSchemaPreflight(t *testing.T) {
+	for version := 1; version <= LatestSchemaVersion; version++ {
+		version := version
+		t.Run(fmt.Sprintf("version-%d", version), func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), fmt.Sprintf("production-version-%d.db", version))
+			database, err := openWithMigrations(context.Background(), path, migrations[:version])
+			if err != nil {
+				t.Fatalf("create production endpoint %d: %v", version, err)
+			}
+			if err := database.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			database, err = Open(context.Background(), path)
+			if err != nil {
+				t.Fatalf("open production endpoint %d: %v", version, err)
+			}
+			defer database.Close()
+			assertPragmaInt(t, database, "user_version", LatestSchemaVersion)
+		})
+	}
+}
+
 func TestOpeningLatestVersionPerformsNoPersistentWrite(t *testing.T) {
 	t.Parallel()
 
@@ -1183,6 +1327,66 @@ func assertOpenFailureLeavesFileUnchanged(t *testing.T, path, wantCode string) {
 			t.Fatalf("Open(%q) left unexpected sidecar %q: %v", path, path+suffix, err)
 		}
 	}
+}
+
+func previouslyAcceptedPartialSchema(version int) string {
+	if version < 3 {
+		metadata := ""
+		if version == 2 {
+			metadata = `
+				INSERT INTO application_metadata(key, value) VALUES
+					('database_id', 'not-a-production-id'),
+					('created_at_julian', 'not-a-Julian-day'),
+					('product', 'not-pellets');`
+		}
+		return `
+			CREATE TABLE application_metadata (key TEXT, value TEXT);
+			CREATE TABLE projects (root_path TEXT);
+			CREATE TABLE pellets (status TEXT);
+			CREATE TABLE memories (value TEXT);` + metadata
+	}
+	return `
+		CREATE TABLE application_metadata (key TEXT, value TEXT);
+		INSERT INTO application_metadata(key, value) VALUES
+			('database_id', 'not-a-production-id'),
+			('created_at_julian', 'not-a-Julian-day'),
+			('product', 'not-pellets');
+		CREATE TABLE projects (git_common_dir TEXT);
+		CREATE TABLE project_workspaces (value TEXT);
+		CREATE TABLE pellets (status TEXT, workspace_id INTEGER);
+		CREATE TABLE memories (value TEXT);
+		CREATE UNIQUE INDEX pellets_workspace_in_progress_idx
+			ON pellets(workspace_id) WHERE status = 'in_progress';`
+}
+
+func rewriteSchemaObject(t *testing.T, database *sql.DB, name, old, replacement string) {
+	t.Helper()
+	mustExec(t, database, "PRAGMA writable_schema = ON")
+	result, err := database.Exec(`
+		UPDATE sqlite_schema
+		SET sql = replace(sql, ?, ?)
+		WHERE name = ? AND instr(sql, ?) > 0`, old, replacement, name, old)
+	if err != nil {
+		t.Fatalf("rewrite schema object %q: %v", name, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		t.Fatalf("read rewritten schema object count %q: %v", name, err)
+	}
+	if affected != 1 {
+		t.Fatalf("rewritten schema object count %q = %d, want 1", name, affected)
+	}
+	mustExec(t, database, "PRAGMA writable_schema = OFF")
+}
+
+func recreateApplicationMetadata(t *testing.T, database *sql.DB, createSQL string) {
+	t.Helper()
+	mustExec(t, database, "ALTER TABLE application_metadata RENAME TO application_metadata_old")
+	mustExec(t, database, createSQL)
+	mustExec(t, database, `
+		INSERT INTO application_metadata(key, value)
+		SELECT key, value FROM application_metadata_old`)
+	mustExec(t, database, "DROP TABLE application_metadata_old")
 }
 
 func createCorruptDatabaseFixture(t *testing.T, path string) {

@@ -451,8 +451,8 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 			t.Fatal(err)
 		}
 		ftsUnavailable := runFoundationCLI(t, executable, mainRoot, "search", "edited")
-		if ftsUnavailable.exit != 5 || ftsUnavailable.stdout != "" || !strings.Contains(ftsUnavailable.stderr, `"code":"fts_unavailable"`) {
-			t.Fatalf("compiled unavailable FTS search = %#v", ftsUnavailable)
+		if ftsUnavailable.exit != 5 || ftsUnavailable.stdout != "" || !strings.Contains(ftsUnavailable.stderr, `"code":"schema_version_unsupported"`) {
+			t.Fatalf("compiled malformed FTS schema search = %#v", ftsUnavailable)
 		}
 	})
 
@@ -584,14 +584,14 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 			t.Fatal(err)
 		}
 		ftsUnavailable := runFoundationCLI(t, executable, root, "memory", "search", "memory-123")
-		if ftsUnavailable.exit != 5 || ftsUnavailable.stdout != "" || !strings.Contains(ftsUnavailable.stderr, `"code":"fts_unavailable"`) {
-			t.Fatalf("compiled unavailable memory FTS search = %#v", ftsUnavailable)
+		if ftsUnavailable.exit != 5 || ftsUnavailable.stdout != "" || !strings.Contains(ftsUnavailable.stderr, `"code":"schema_version_unsupported"`) {
+			t.Fatalf("compiled malformed memory FTS schema search = %#v", ftsUnavailable)
 		}
 		failedRemoval := runFoundationCLI(t, executable, root, "memory", "remove", "1", "--yes")
-		if failedRemoval.exit != 5 || failedRemoval.stdout != "" || !strings.Contains(failedRemoval.stderr, `"code":"fts_unavailable"`) {
-			t.Fatalf("compiled unavailable memory FTS removal = %#v", failedRemoval)
+		if failedRemoval.exit != 5 || failedRemoval.stdout != "" || !strings.Contains(failedRemoval.stderr, `"code":"schema_version_unsupported"`) {
+			t.Fatalf("compiled malformed memory FTS schema removal = %#v", failedRemoval)
 		}
-		database, err = sqlite.Open(context.Background(), discovery.DatabasePath(root))
+		database, err = sql.Open("sqlite", discovery.DatabasePath(root))
 		if err != nil {
 			t.Fatal(err)
 		}

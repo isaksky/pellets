@@ -1,11 +1,16 @@
 package cli
 
 import (
+	"bytes"
+	"database/sql"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"pellets/internal/discovery"
+	storageSQLite "pellets/internal/storage/sqlite"
 )
 
 func TestCompiledCLIUsageValidationDoesNotDependOnDatabase(t *testing.T) {
@@ -59,4 +64,59 @@ func TestCompiledCLIUsageValidationDoesNotDependOnDatabase(t *testing.T) {
 		t.Fatalf("valid project show = exit %d stdout %q stderr %q, want discovery failure", exit, stdout, stderr)
 	}
 	assertCompactErrorCode(t, stderr, "database_not_found")
+}
+
+func TestCompiledCLIRejectsPartialCurrentSchemaWithoutWrites(t *testing.T) {
+	executable := buildTestExecutable(t)
+	root := t.TempDir()
+	databasePath := discovery.DatabasePath(root)
+	if err := os.MkdirAll(filepath.Dir(databasePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(fmt.Sprintf(`
+		CREATE TABLE application_metadata (key TEXT, value TEXT);
+		INSERT INTO application_metadata(key, value) VALUES
+			('database_id', 'not-a-production-id'),
+			('created_at_julian', 'not-a-Julian-day'),
+			('product', 'not-pellets');
+		CREATE TABLE projects (git_common_dir TEXT);
+		CREATE TABLE project_workspaces (value TEXT);
+		CREATE TABLE pellets (status TEXT, workspace_id INTEGER);
+		CREATE TABLE memories (value TEXT);
+		CREATE UNIQUE INDEX pellets_workspace_in_progress_idx
+			ON pellets(workspace_id) WHERE status = 'in_progress';
+		PRAGMA user_version = %d;`, storageSQLite.LatestSchemaVersion)); err != nil {
+		database.Close()
+		t.Fatalf("create partial current schema: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := os.ReadFile(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, exit := runCompiledCLI(t, executable, root, "project", "list")
+	if exit != 5 || stdout != "" {
+		t.Fatalf("project list = exit %d stdout %q stderr %q, want storage failure", exit, stdout, stderr)
+	}
+	assertCompactErrorCode(t, stderr, "schema_version_unsupported")
+	after, err := os.ReadFile(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("compiled CLI mutated the rejected database")
+	}
+	for _, suffix := range []string{"-journal", "-wal", "-shm"} {
+		if _, err := os.Stat(databasePath + suffix); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("compiled CLI left unexpected sidecar %q: %v", databasePath+suffix, err)
+		}
+	}
 }
