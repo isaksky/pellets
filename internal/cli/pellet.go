@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"pellets/internal/app"
 	"pellets/internal/domain"
@@ -112,6 +113,68 @@ func SearchCommand(manager app.PelletManager) Command {
 			result := make(pelletListData, len(pellets))
 			for index, pellet := range pellets {
 				result[index] = newPelletData(pellet)
+			}
+			return result, nil
+		},
+	}
+}
+
+func PurgeCommand(manager app.PelletManager) Command {
+	return Command{
+		Name:    "purge",
+		Summary: "Permanently delete explicitly selected closed pellets.",
+		Usage: "pl purge --project CODE [--closed-before DATE] (--dry-run | --yes)\n" +
+			"  pl --project CODE purge [--closed-before DATE] (--dry-run | --yes)",
+		Parse: parsePurge,
+		Validate: func(globals GlobalOptions, value any) error {
+			input := value.(purgeInput)
+			if globals.Project != "" && input.Project != "" {
+				return domain.NewError(
+					domain.Usage,
+					"conflicting_project_selection",
+					"purge accepts --project either before or after the command, not both",
+					map[string]any{"global_project": globals.Project, "command_project": input.Project},
+				)
+			}
+			if globals.Project == "" && input.Project == "" {
+				return domain.NewError(
+					domain.Usage, "missing_required_flag", "purge requires an explicit --project",
+					map[string]any{"flag": "--project"},
+				)
+			}
+			if input.DryRun && input.Yes {
+				return conflictingFlags("--dry-run", "--yes")
+			}
+			if !input.DryRun && !input.Yes {
+				return domain.NewError(
+					domain.Confirmation, "confirmation_required", "purge requires exactly one of --dry-run or --yes",
+					map[string]any{"flags": []string{"--dry-run", "--yes"}},
+				)
+			}
+			return nil
+		},
+		Run: func(ctx context.Context, invocation Invocation) (any, error) {
+			input := invocation.Input.(purgeInput)
+			project := input.Project
+			if project == "" {
+				project = invocation.Globals.Project
+			}
+			references, err := manager.Purge(
+				ctx,
+				invocationDatabase(invocation),
+				project,
+				storage.PelletPurgeOptions{CompletedBefore: input.CompletedBefore},
+				input.DryRun,
+			)
+			if err != nil {
+				return nil, err
+			}
+			result := purgeData{
+				DryRun: input.DryRun, Project: project, Count: len(references),
+				References: make([]string, len(references)),
+			}
+			for index, reference := range references {
+				result.References[index] = reference.String()
 			}
 			return result, nil
 		},
@@ -417,6 +480,77 @@ type searchInput struct {
 	ExternalID *string
 	Group      *string
 	Limit      *int64
+}
+
+type purgeInput struct {
+	Project         string
+	CompletedBefore *time.Time
+	DryRun          bool
+	Yes             bool
+}
+
+func parsePurge(args []string) (any, error) {
+	var input purgeInput
+	seen := make(map[string]bool)
+	for len(args) > 0 {
+		argument := args[0]
+		if !strings.HasPrefix(argument, "-") {
+			return nil, unexpectedArgument(argument)
+		}
+		name, value, hasValue := splitOption(argument)
+		if seen[name] {
+			return nil, duplicateCommandFlag(name)
+		}
+		seen[name] = true
+		switch name {
+		case "--project", "--closed-before":
+			var err error
+			value, args, err = takeCommandFlagValue(args, name, value, hasValue, false, false)
+			if err != nil {
+				return nil, err
+			}
+			if name == "--project" {
+				if err := domain.ValidateProjectCode(value); err != nil {
+					return nil, err
+				}
+				input.Project = value
+			} else {
+				completedBefore, err := parsePurgeDate(value)
+				if err != nil {
+					return nil, err
+				}
+				input.CompletedBefore = &completedBefore
+			}
+		case "--dry-run", "--yes":
+			if hasValue {
+				return nil, flagTakesNoValue(name)
+			}
+			if name == "--dry-run" {
+				input.DryRun = true
+			} else {
+				input.Yes = true
+			}
+			args = args[1:]
+		default:
+			return nil, unknownFlag(name)
+		}
+	}
+	return input, nil
+}
+
+func parsePurgeDate(value string) (time.Time, error) {
+	if parsed, err := time.Parse("2006-01-02", value); err == nil {
+		return parsed, nil
+	}
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed, nil
+	}
+	return time.Time{}, domain.NewError(
+		domain.Usage,
+		"invalid_date",
+		"--closed-before must be an RFC 3339 timestamp or YYYY-MM-DD date",
+		map[string]any{"flag": "--closed-before", "value": value},
+	)
 }
 
 func parseSearch(args []string) (any, error) {
@@ -951,6 +1085,31 @@ func (data pelletListData) RenderHuman(writer io.Writer) error {
 type nextData struct {
 	SelectionReason storage.NextSelectionReason `json:"selection_reason"`
 	Pellet          *pelletData                 `json:"pellet"`
+}
+
+type purgeData struct {
+	DryRun     bool     `json:"dry_run"`
+	Project    string   `json:"project"`
+	Count      int      `json:"count"`
+	References []string `json:"references"`
+}
+
+func (data purgeData) RenderHuman(writer io.Writer) error {
+	action := "Purged"
+	if data.DryRun {
+		action = "Would purge"
+	}
+	if data.Count == 0 {
+		_, err := fmt.Fprintf(writer, "%s 0 closed pellets from %s.\n", action, data.Project)
+		return err
+	}
+	noun := "pellets"
+	if data.Count == 1 {
+		noun = "pellet"
+	}
+	_, err := fmt.Fprintf(writer, "%s %d closed %s from %s: %s\n",
+		action, data.Count, noun, data.Project, strings.Join(data.References, ", "))
+	return err
 }
 
 func (data nextData) RenderHuman(writer io.Writer) error {

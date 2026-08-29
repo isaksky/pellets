@@ -58,6 +58,7 @@ func main() {
 		cli.MoveCommand(pelletManager),
 		cli.ListCommand(pelletManager),
 		cli.SearchCommand(pelletManager),
+		cli.PurgeCommand(pelletManager),
 		cli.ShowCommand(pelletManager),
 		cli.EditCommand(pelletManager),
 		cli.NextCommand(pelletManager),

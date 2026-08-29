@@ -312,6 +312,22 @@ func TestPelletRepositoryPurgeSynchronizesFTSInTheDeletionTransaction(t *testing
 	}
 
 	cutoff := time.Date(2030, time.January, 1, 0, 0, 0, 0, time.UTC)
+	previewed, err := repository.PreviewClosedPelletPurge(
+		context.Background(), fixture.main.Project, storage.PelletPurgeOptions{CompletedBefore: &cutoff},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(previewed, []domain.PelletReference{oldClosed.Reference}) {
+		t.Fatalf("previewed references = %v, want %v", previewed, []domain.PelletReference{oldClosed.Reference})
+	}
+	previewResults, err := repository.SearchPellets(context.Background(), fixture.main, storage.PelletSearchOptions{Query: "purgetoken"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPelletReferences(t, previewResults, open.Reference, newClosed.Reference, oldClosed.Reference, deferred.Reference)
+	assertPelletQueryInt(t, repository.db, "SELECT next_pellet_number FROM projects WHERE project_id = ?", 5, fixture.main.Project.ID)
+
 	purged, err := repository.PurgeClosedPellets(context.Background(), fixture.main.Project, storage.PelletPurgeOptions{CompletedBefore: &cutoff})
 	if err != nil {
 		t.Fatal(err)

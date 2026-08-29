@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"pellets/internal/domain"
 	"pellets/internal/storage"
@@ -394,6 +395,38 @@ func (repository *PelletRepository) RebuildPelletSearchIndex(ctx context.Context
 	return nil
 }
 
+// PreviewClosedPelletPurge reads the exact project-scoped selection used by
+// PurgeClosedPellets without writing authoritative or derived state.
+func (repository *PelletRepository) PreviewClosedPelletPurge(ctx context.Context, project storage.Project, options storage.PelletPurgeOptions) ([]domain.PelletReference, error) {
+	if err := validatePelletProject(project); err != nil {
+		return nil, err
+	}
+
+	transaction, err := repository.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, pelletStorageError("begin pellet purge preview", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = transaction.Rollback()
+		}
+	}()
+	if err := ensureStoredProject(ctx, transaction, project); err != nil {
+		return nil, err
+	}
+	predicate, arguments := pelletPurgePredicate(project, options)
+	references, err := selectPelletPurgeReferences(ctx, transaction, project.Code, predicate, arguments)
+	if err != nil {
+		return nil, err
+	}
+	if err := transaction.Commit(); err != nil {
+		return nil, pelletStorageError("commit pellet purge preview", err)
+	}
+	committed = true
+	return references, nil
+}
+
 // PurgeClosedPellets removes the selected authoritative rows and their
 // external-content FTS entries under the same immediate transaction. The
 // separate purge command owns confirmation and dry-run policy.
@@ -420,31 +453,10 @@ func (repository *PelletRepository) PurgeClosedPellets(ctx context.Context, proj
 		return nil, err
 	}
 
-	predicate := "project_id = ? AND status = 'closed'"
-	arguments := []any{project.ID}
-	if options.CompletedBefore != nil {
-		predicate += " AND completed_at < julianday(?)"
-		arguments = append(arguments, options.CompletedBefore.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"))
-	}
-	rows, err := connection.QueryContext(ctx, "SELECT number FROM pellets WHERE "+predicate+" ORDER BY number", arguments...)
+	predicate, arguments := pelletPurgePredicate(project, options)
+	references, err := selectPelletPurgeReferences(ctx, connection, project.Code, predicate, arguments)
 	if err != nil {
-		return nil, pelletStorageError("select closed pellets for purge", err)
-	}
-	references := make([]domain.PelletReference, 0)
-	for rows.Next() {
-		var number int64
-		if err := rows.Scan(&number); err != nil {
-			_ = rows.Close()
-			return nil, pelletStorageError("read closed pellet purge selection", err)
-		}
-		references = append(references, domain.PelletReference{ProjectCode: project.Code, Number: number})
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, pelletStorageError("iterate closed pellet purge selection", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, pelletStorageError("close closed pellet purge selection", err)
+		return nil, err
 	}
 
 	if _, err := connection.ExecContext(ctx, `
@@ -468,6 +480,45 @@ func (repository *PelletRepository) PurgeClosedPellets(ctx context.Context, proj
 		return nil, pelletStorageError("commit pellet purge", err)
 	}
 	committed = true
+	return references, nil
+}
+
+func pelletPurgePredicate(project storage.Project, options storage.PelletPurgeOptions) (string, []any) {
+	predicate := "project_id = ? AND status = 'closed'"
+	arguments := []any{project.ID}
+	if options.CompletedBefore != nil {
+		predicate += " AND completed_at < julianday(?)"
+		arguments = append(arguments, options.CompletedBefore.UTC().Format(time.RFC3339Nano))
+	}
+	return predicate, arguments
+}
+
+func selectPelletPurgeReferences(
+	ctx context.Context,
+	query rowsQuery,
+	projectCode, predicate string,
+	arguments []any,
+) ([]domain.PelletReference, error) {
+	rows, err := query.QueryContext(ctx, "SELECT number FROM pellets WHERE "+predicate+" ORDER BY number", arguments...)
+	if err != nil {
+		return nil, pelletStorageError("select closed pellets for purge", err)
+	}
+	references := make([]domain.PelletReference, 0)
+	for rows.Next() {
+		var number int64
+		if err := rows.Scan(&number); err != nil {
+			_ = rows.Close()
+			return nil, pelletStorageError("read closed pellet purge selection", err)
+		}
+		references = append(references, domain.PelletReference{ProjectCode: projectCode, Number: number})
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, pelletStorageError("iterate closed pellet purge selection", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, pelletStorageError("close closed pellet purge selection", err)
+	}
 	return references, nil
 }
 

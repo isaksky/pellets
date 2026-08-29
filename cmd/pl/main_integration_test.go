@@ -227,8 +227,117 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 			t.Fatalf("compiled typed empty next = %#v", none)
 		}
 
+		openSurvivor := decodeFoundationSuccess[foundationPellet](
+			t, runFoundationCLI(t, executable, mainRoot, "add", "Purge open survivor"), "add",
+		)
+		inProgressSurvivor := decodeFoundationSuccess[foundationPellet](
+			t, runFoundationCLI(t, executable, mainRoot, "add", "Purge in-progress survivor"), "add",
+		)
+		inProgressSurvivor = decodeFoundationSuccess[foundationPellet](
+			t, runFoundationCLI(t, executable, mainRoot, "start", inProgressSurvivor.ID), "start",
+		)
+		deferredSurvivor := decodeFoundationSuccess[foundationPellet](
+			t, runFoundationCLI(t, executable, mainRoot, "add", "Purge deferred survivor", "--maybe-later"), "add",
+		)
+		memorySurvivor := decodeFoundationSuccess[foundationMemory](
+			t, runFoundationCLI(t, executable, mainRoot, "memory", "add", "--text", "queue-1 remains memory text"), "memory add",
+		)
+
+		missingProject := runFoundationCLI(t, executable, common, "purge", "--dry-run")
+		if missingProject.exit != 2 || missingProject.stdout != "" || !strings.Contains(missingProject.stderr, `"code":"missing_required_flag"`) {
+			t.Fatalf("compiled purge without explicit project = %#v", missingProject)
+		}
+		unconfirmedPurge := runFoundationCLI(t, executable, common, "purge", "--project", "queue")
+		if unconfirmedPurge.exit != 6 || unconfirmedPurge.stdout != "" || !strings.Contains(unconfirmedPurge.stderr, `"code":"confirmation_required"`) {
+			t.Fatalf("compiled unconfirmed purge = %#v", unconfirmedPurge)
+		}
+		conflictingConfirmation := runFoundationCLI(t, executable, common, "purge", "--project", "queue", "--dry-run", "--yes")
+		if conflictingConfirmation.exit != 2 || conflictingConfirmation.stdout != "" || !strings.Contains(conflictingConfirmation.stderr, `"code":"conflicting_flags"`) {
+			t.Fatalf("compiled conflicting purge confirmation = %#v", conflictingConfirmation)
+		}
+
 		databasePath := discovery.DatabasePath(foundationCanonicalPath(t, common))
 		database, err := sqlite.Open(context.Background(), databasePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`
+			UPDATE pellets
+			SET completed_at = CASE number
+				WHEN ? THEN julianday('2029-01-01T00:00:00Z')
+				WHEN ? THEN julianday('2031-01-01T00:00:00Z')
+			END
+			WHERE project_id = (SELECT project_id FROM projects WHERE code = 'queue')
+			  AND number IN (?, ?)`, first.Number, second.Number, first.Number, second.Number); err != nil {
+			database.Close()
+			t.Fatal(err)
+		}
+		if err := database.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		beforeDryRun := captureFoundationDatabaseState(t, databasePath)
+		dryRun := decodeFoundationSuccess[foundationPurge](
+			t,
+			runFoundationCLI(t, executable, common, "purge", "--project", "queue", "--closed-before", "2030-01-01", "--dry-run"),
+			"purge",
+		)
+		if !dryRun.DryRun || dryRun.Project != "queue" || dryRun.Count != 1 || !reflect.DeepEqual(dryRun.References, []string{first.ID}) {
+			t.Fatalf("compiled purge dry-run = %#v", dryRun)
+		}
+		assertFoundationDatabaseState(t, databasePath, beforeDryRun)
+
+		purgedOld := decodeFoundationSuccess[foundationPurge](
+			t,
+			runFoundationCLI(t, executable, common, "purge", "--project", "queue", "--closed-before", "2030-01-01T00:00:00Z", "--yes"),
+			"purge",
+		)
+		if purgedOld.DryRun || purgedOld.Count != 1 || !reflect.DeepEqual(purgedOld.References, []string{first.ID}) {
+			t.Fatalf("compiled cutoff purge = %#v", purgedOld)
+		}
+		purgedRemaining := decodeFoundationSuccess[foundationPurge](
+			t, runFoundationCLI(t, executable, common, "--project", "queue", "purge", "--yes"), "purge",
+		)
+		if purgedRemaining.DryRun || purgedRemaining.Count != 1 || !reflect.DeepEqual(purgedRemaining.References, []string{second.ID}) {
+			t.Fatalf("compiled all-closed purge = %#v", purgedRemaining)
+		}
+
+		database, err = sqlite.Open(context.Background(), databasePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertFoundationQueryInt(t, database, `
+			SELECT COUNT(*) FROM pellets
+			WHERE project_id = (SELECT project_id FROM projects WHERE code = 'queue')
+			  AND status IN ('open', 'in_progress', 'maybe_later')`, 3)
+		assertFoundationQueryInt(t, database, `
+			SELECT COUNT(*) FROM pellets
+			WHERE project_id = (SELECT project_id FROM projects WHERE code = 'queue')
+			  AND status = 'closed'`, 0)
+		assertFoundationQueryInt(t, database, "SELECT COUNT(*) FROM pellets_fts", 3)
+		assertFoundationQueryInt(t, database, "SELECT COUNT(*) FROM memories", 1)
+		assertFoundationQueryInt(t, database, "SELECT COUNT(*) FROM memories_fts", 1)
+		assertFoundationQueryInt(t, database, `SELECT next_pellet_number FROM projects WHERE code = 'queue'`, 6)
+		if err := database.Close(); err != nil {
+			t.Fatal(err)
+		}
+		shownMemory := decodeFoundationSuccess[foundationMemory](
+			t, runFoundationCLI(t, executable, mainRoot, "memory", "show", "1"), "memory show",
+		)
+		if !reflect.DeepEqual(shownMemory, memorySurvivor) {
+			t.Fatalf("compiled memory changed by purge = %#v, want %#v", shownMemory, memorySurvivor)
+		}
+		postPurge := decodeFoundationSuccess[foundationPellet](
+			t, runFoundationCLI(t, executable, mainRoot, "add", "Number after purge"), "add",
+		)
+		if postPurge.ID != "queue-6" || postPurge.Number != 6 {
+			t.Fatalf("compiled purge reused a pellet number: %#v", postPurge)
+		}
+		if openSurvivor.Status != "open" || inProgressSurvivor.Status != "in_progress" || deferredSurvivor.Status != "maybe_later" {
+			t.Fatalf("compiled purge survivor setup = %#v %#v %#v", openSurvivor, inProgressSurvivor, deferredSurvivor)
+		}
+
+		database, err = sqlite.Open(context.Background(), databasePath)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -943,6 +1052,13 @@ type foundationPelletWorkspace struct {
 type foundationNext struct {
 	SelectionReason string            `json:"selection_reason"`
 	Pellet          *foundationPellet `json:"pellet"`
+}
+
+type foundationPurge struct {
+	DryRun     bool     `json:"dry_run"`
+	Project    string   `json:"project"`
+	Count      int      `json:"count"`
+	References []string `json:"references"`
 }
 
 type foundationMemory struct {

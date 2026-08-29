@@ -133,6 +133,7 @@ type PelletRepository interface {
 	MovePellet(ctx context.Context, project ResolvedProject, reference domain.PelletReference, placement PelletPlacement) (Pellet, error)
 	ListPellets(ctx context.Context, project ResolvedProject, options PelletListOptions) ([]Pellet, error)
 	SearchPellets(ctx context.Context, project ResolvedProject, options PelletSearchOptions) ([]Pellet, error)
+	PreviewClosedPelletPurge(ctx context.Context, project Project, options PelletPurgeOptions) ([]domain.PelletReference, error)
 	PurgeClosedPellets(ctx context.Context, project Project, options PelletPurgeOptions) ([]domain.PelletReference, error)
 	NextPellet(ctx context.Context, project ResolvedProject, externalID, group *string) (NextSelection, error)
 	StartNextPellet(ctx context.Context, project ResolvedProject, externalID, group *string) (NextSelection, error)

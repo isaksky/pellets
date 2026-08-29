@@ -94,6 +94,43 @@ func (manager PelletManager) Search(
 	return pellets, closePelletRepository(repository, operationErr)
 }
 
+// Purge removes or previews closed pellets for an explicitly selected logical
+// project. It deliberately resolves by code without requiring a current Git
+// repository or registered workspace because purge is a database-level
+// administrative operation.
+func (manager PelletManager) Purge(
+	ctx context.Context,
+	database Database,
+	selectedCode string,
+	options storage.PelletPurgeOptions,
+	dryRun bool,
+) ([]domain.PelletReference, error) {
+	if selectedCode == "" {
+		return nil, domain.NewError(
+			domain.Usage, "missing_required_flag", "purge requires an explicit --project",
+			map[string]any{"flag": "--project"},
+		)
+	}
+	if manager.Open == nil {
+		return nil, pelletManagerConfigurationError()
+	}
+	project, err := manager.Projects.ShowByCode(ctx, database, selectedCode)
+	if err != nil {
+		return nil, err
+	}
+	repository, err := manager.open(ctx, database.Path)
+	if err != nil {
+		return nil, err
+	}
+	var references []domain.PelletReference
+	if dryRun {
+		references, err = repository.PreviewClosedPelletPurge(ctx, project, options)
+	} else {
+		references, err = repository.PurgeClosedPellets(ctx, project, options)
+	}
+	return references, closePelletRepository(repository, err)
+}
+
 func (manager PelletManager) Show(
 	ctx context.Context,
 	database Database,

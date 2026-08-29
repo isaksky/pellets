@@ -477,6 +477,7 @@ func projectTestApp(current *string) *App {
 		InitDBCommand(initializer), InitCommand(manager), ProjectCommand(manager),
 		AddCommand(pelletManager), MoveCommand(pelletManager), ListCommand(pelletManager), ShowCommand(pelletManager),
 		SearchCommand(pelletManager),
+		PurgeCommand(pelletManager),
 		EditCommand(pelletManager), NextCommand(pelletManager), StartCommand(pelletManager),
 		StartNextCommand(pelletManager), ReleaseCommand(pelletManager), CloseCommand(pelletManager),
 		ReopenCommand(pelletManager), DeferCommand(pelletManager),

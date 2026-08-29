@@ -1,0 +1,4 @@
+dry-run-cutoff {"command":"purge","data":{"count":1,"dry_run":true,"project":"main","references":["main-1"]},"schema_version":1}
+dry-run-all {"command":"purge","data":{"count":3,"dry_run":true,"project":"main","references":["main-1","main-2","main-3"]},"schema_version":1}
+confirmed-cutoff {"command":"purge","data":{"count":1,"dry_run":false,"project":"main","references":["main-1"]},"schema_version":1}
+confirmed-all {"command":"purge","data":{"count":2,"dry_run":false,"project":"main","references":["main-2","main-3"]},"schema_version":1}
