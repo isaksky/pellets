@@ -354,6 +354,205 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+
+	t.Run("worktree lifecycle reconciliation is safe", func(t *testing.T) {
+		common := filepath.Join(t.TempDir(), "compiled worktree lifecycle root 界")
+		mainRoot := filepath.Join(common, "main")
+		linkedRoot := filepath.Join(common, "linked original")
+		movedRoot := filepath.Join(common, "linked moved 界")
+		duplicateRoot := filepath.Join(common, "linked duplicate")
+		replacementRoot := filepath.Join(common, "replacement")
+		createFoundationRepository(t, mainRoot)
+		if _, err := foundationGitCommand(mainRoot, "worktree", "list", "--porcelain"); err != nil {
+			t.Skipf("Git worktrees are unavailable: %v", err)
+		}
+		if output, err := foundationGitCommand(
+			mainRoot,
+			"worktree", "add", "--quiet", "-b", "pellets-foundation-lifecycle", linkedRoot,
+		); err != nil {
+			t.Fatalf("add lifecycle worktree: %v\n%s", err, output)
+		}
+
+		mainGitBefore := captureFoundationGitState(t, mainRoot)
+		linkedGitBefore := captureFoundationGitState(t, linkedRoot)
+		excludePath := foundationExcludePath(t, mainRoot)
+		excludeBefore := readFoundationFile(t, excludePath)
+
+		initialized := decodeFoundationSuccess[foundationInitDB](
+			t,
+			runFoundationCLI(t, executable, common, "init-db"),
+			"init-db",
+		)
+		mainProject := decodeFoundationSuccess[foundationProject](
+			t,
+			runFoundationCLI(t, executable, mainRoot, "init", "--code", "shared"),
+			"init",
+		)
+		registered := decodeFoundationSuccess[foundationProject](
+			t,
+			runFoundationCLI(t, executable, linkedRoot, "init", "--code", "shared"),
+			"init",
+		)
+		if len(mainProject.Workspaces) != 1 || len(registered.Workspaces) != 2 {
+			t.Fatalf("registered lifecycle project = %#v then %#v", mainProject, registered)
+		}
+		if !reflect.DeepEqual(registered.Workspaces[0], mainProject.Workspaces[0]) {
+			t.Fatalf("main workspace changed while attaching linked worktree: %#v then %#v", mainProject.Workspaces[0], registered.Workspaces[0])
+		}
+		linkedWorkspace := registered.Workspaces[1]
+		if linkedWorkspace.RootPath != "linked original" || !linkedWorkspace.RootPathRelative || linkedWorkspace.ID == mainProject.Workspaces[0].ID {
+			t.Fatalf("linked workspace = %#v", linkedWorkspace)
+		}
+		assertFoundationTimestamp(t, linkedWorkspace.CreatedAt)
+		assertFoundationTimestamp(t, linkedWorkspace.UpdatedAt)
+		assertFoundationDatabase(t, initialized.DatabasePath, 1)
+		assertFoundationGitStateMatches(t, mainRoot, mainGitBefore)
+		assertFoundationGitStateMatches(t, linkedRoot, linkedGitBefore)
+		if got := readFoundationFile(t, excludePath); !bytes.Equal(got, excludeBefore) {
+			t.Fatalf("common-parent initialization changed local exclude from %q to %q", excludeBefore, got)
+		}
+
+		if err := os.CopyFS(duplicateRoot, os.DirFS(linkedRoot)); err != nil {
+			t.Fatal(err)
+		}
+		duplicateGitBefore := captureFoundationGitState(t, duplicateRoot)
+		databaseBeforeConflict := captureFoundationDatabaseState(t, initialized.DatabasePath)
+		listBeforeConflict := runFoundationCLI(t, executable, common, "project", "list")
+		projectsBeforeConflict := decodeFoundationSuccess[[]foundationProject](t, listBeforeConflict, "project list")
+		if !reflect.DeepEqual(projectsBeforeConflict, []foundationProject{registered}) {
+			t.Fatalf("projects before duplicate conflict = %#v, want %#v", projectsBeforeConflict, []foundationProject{registered})
+		}
+
+		conflict := runFoundationCLI(t, executable, duplicateRoot, "init", "--code", "shared")
+		assertFoundationResult(t, conflict, 4, "", foundationErrorJSON(
+			"workspace_identity_conflict",
+			"the Git worktree root and Git directory do not identify one available workspace",
+			map[string]any{
+				"requested_root_path":  "linked duplicate",
+				"requested_git_dir":    linkedWorkspace.GitDir,
+				"git_dir_workspace_id": linkedWorkspace.ID,
+			},
+		))
+		assertFoundationDatabaseState(t, initialized.DatabasePath, databaseBeforeConflict)
+		listAfterConflict := runFoundationCLI(t, executable, common, "project", "list")
+		if listAfterConflict != listBeforeConflict {
+			t.Fatalf("project list changed after duplicate conflict from %#v to %#v", listBeforeConflict, listAfterConflict)
+		}
+		assertFoundationGitStateMatches(t, mainRoot, mainGitBefore)
+		assertFoundationGitStateMatches(t, linkedRoot, linkedGitBefore)
+		assertFoundationGitStateMatches(t, duplicateRoot, duplicateGitBefore)
+		if got := readFoundationFile(t, excludePath); !bytes.Equal(got, excludeBefore) {
+			t.Fatalf("duplicate conflict changed local exclude from %q to %q", excludeBefore, got)
+		}
+
+		runFoundationGit(t, mainRoot, "worktree", "move", linkedRoot, movedRoot)
+		assertFoundationPathAbsent(t, linkedRoot)
+		mainGitBeforeMoveReconciliation := captureFoundationGitState(t, mainRoot)
+		movedGitBeforeReconciliation := captureFoundationGitState(t, movedRoot)
+		moved := decodeFoundationSuccess[foundationProject](
+			t,
+			runFoundationCLI(t, executable, movedRoot, "init", "--code", "shared"),
+			"init",
+		)
+		if moved.Code != registered.Code || moved.GitCommonDir != registered.GitCommonDir || moved.GitCommonDirRelative != registered.GitCommonDirRelative || moved.CreatedAt != registered.CreatedAt {
+			t.Fatalf("moved project identity = %#v, want identity from %#v", moved, registered)
+		}
+		if len(moved.Workspaces) != 2 || !reflect.DeepEqual(moved.Workspaces[0], registered.Workspaces[0]) {
+			t.Fatalf("workspaces after move = %#v, want unchanged main plus moved linked workspace", moved.Workspaces)
+		}
+		movedWorkspace := moved.Workspaces[1]
+		if movedWorkspace.ID != linkedWorkspace.ID || movedWorkspace.RootPath != "linked moved 界" || !movedWorkspace.RootPathRelative || movedWorkspace.GitDir != linkedWorkspace.GitDir || movedWorkspace.GitDirRelative != linkedWorkspace.GitDirRelative || movedWorkspace.CreatedAt != linkedWorkspace.CreatedAt {
+			t.Fatalf("moved workspace = %#v, want identity from %#v", movedWorkspace, linkedWorkspace)
+		}
+		assertFoundationTimestamp(t, movedWorkspace.UpdatedAt)
+		shownMoved := decodeFoundationSuccess[foundationProject](
+			t,
+			runFoundationCLI(t, executable, movedRoot, "project", "show"),
+			"project show",
+		)
+		if !reflect.DeepEqual(shownMoved, moved) {
+			t.Fatalf("project shown from moved workspace = %#v, want %#v", shownMoved, moved)
+		}
+		assertFoundationGitStateMatches(t, mainRoot, mainGitBeforeMoveReconciliation)
+		assertFoundationGitStateMatches(t, movedRoot, movedGitBeforeReconciliation)
+		if got := readFoundationFile(t, excludePath); !bytes.Equal(got, excludeBefore) {
+			t.Fatalf("move reconciliation changed local exclude from %q to %q", excludeBefore, got)
+		}
+
+		runFoundationGit(t, mainRoot, "worktree", "remove", movedRoot)
+		assertFoundationPathAbsent(t, movedRoot)
+		databaseBeforeStaleRead := captureFoundationDatabaseState(t, initialized.DatabasePath)
+		staleProjects := decodeFoundationSuccess[[]foundationProject](
+			t,
+			runFoundationCLI(t, executable, common, "project", "list"),
+			"project list",
+		)
+		if !reflect.DeepEqual(staleProjects, []foundationProject{moved}) {
+			t.Fatalf("removed workspace was not retained as stale: %#v, want %#v", staleProjects, []foundationProject{moved})
+		}
+		assertFoundationDatabaseState(t, initialized.DatabasePath, databaseBeforeStaleRead)
+
+		if output, err := foundationGitCommand(
+			mainRoot,
+			"worktree", "add", "--quiet", "-b", "pellets-foundation-replacement", replacementRoot,
+		); err != nil {
+			t.Fatalf("add replacement worktree: %v\n%s", err, output)
+		}
+		mainGitBeforeReplacement := captureFoundationGitState(t, mainRoot)
+		replacementGitBefore := captureFoundationGitState(t, replacementRoot)
+		withReplacement := decodeFoundationSuccess[foundationProject](
+			t,
+			runFoundationCLI(t, executable, replacementRoot, "init", "--code", "shared"),
+			"init",
+		)
+		if withReplacement.Code != moved.Code || withReplacement.GitCommonDir != moved.GitCommonDir || withReplacement.GitCommonDirRelative != moved.GitCommonDirRelative || withReplacement.CreatedAt != moved.CreatedAt {
+			t.Fatalf("replacement project identity = %#v, want identity from %#v", withReplacement, moved)
+		}
+		if len(withReplacement.Workspaces) != 3 || !reflect.DeepEqual(withReplacement.Workspaces[0], moved.Workspaces[0]) || !reflect.DeepEqual(withReplacement.Workspaces[1], movedWorkspace) {
+			t.Fatalf("replacement silently changed or removed a stale workspace: %#v", withReplacement.Workspaces)
+		}
+		replacementWorkspace := withReplacement.Workspaces[2]
+		if replacementWorkspace.ID == movedWorkspace.ID || replacementWorkspace.RootPath != "replacement" || !replacementWorkspace.RootPathRelative || replacementWorkspace.GitDir == movedWorkspace.GitDir {
+			t.Fatalf("replacement workspace reused stale identity: replacement %#v, stale %#v", replacementWorkspace, movedWorkspace)
+		}
+		assertFoundationTimestamp(t, replacementWorkspace.CreatedAt)
+		assertFoundationTimestamp(t, replacementWorkspace.UpdatedAt)
+		shownReplacement := decodeFoundationSuccess[foundationProject](
+			t,
+			runFoundationCLI(t, executable, replacementRoot, "project", "show"),
+			"project show",
+		)
+		if !reflect.DeepEqual(shownReplacement, withReplacement) {
+			t.Fatalf("project shown from replacement workspace = %#v, want %#v", shownReplacement, withReplacement)
+		}
+		finalProjects := decodeFoundationSuccess[[]foundationProject](
+			t,
+			runFoundationCLI(t, executable, common, "project", "list"),
+			"project list",
+		)
+		if !reflect.DeepEqual(finalProjects, []foundationProject{withReplacement}) {
+			t.Fatalf("final lifecycle projects = %#v, want %#v", finalProjects, []foundationProject{withReplacement})
+		}
+
+		assertFoundationDatabase(t, initialized.DatabasePath, 1)
+		database, err := sqlite.Open(context.Background(), initialized.DatabasePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertFoundationQueryInt(t, database, "PRAGMA user_version", 3)
+		assertFoundationQueryInt(t, database, "SELECT COUNT(*) FROM project_workspaces", 3)
+		if err := database.Close(); err != nil {
+			t.Fatal(err)
+		}
+		assertFoundationGitStateMatches(t, mainRoot, mainGitBefore)
+		assertFoundationGitStateMatches(t, mainRoot, mainGitBeforeReplacement)
+		assertFoundationGitStateMatches(t, replacementRoot, replacementGitBefore)
+		if got := readFoundationFile(t, excludePath); !bytes.Equal(got, excludeBefore) {
+			t.Fatalf("replacement registration changed local exclude from %q to %q", excludeBefore, got)
+		}
+		assertFoundationPathAbsent(t, filepath.Join(mainRoot, ".gitignore"))
+		assertFoundationPathAbsent(t, filepath.Join(replacementRoot, ".gitignore"))
+	})
 }
 
 type foundationResult struct {
@@ -398,6 +597,17 @@ type foundationError struct {
 		Message string         `json:"message"`
 		Details map[string]any `json:"details,omitempty"`
 	} `json:"error"`
+}
+
+type foundationGitState struct {
+	head   string
+	index  []byte
+	status []byte
+}
+
+type foundationDatabaseState struct {
+	userVersion int
+	tables      map[string][][]string
 }
 
 func buildFoundationExecutable(t *testing.T) string {
@@ -596,6 +806,20 @@ func foundationGitCommand(directory string, args ...string) ([]byte, error) {
 	return command.CombinedOutput()
 }
 
+func captureFoundationGitState(t *testing.T, root string) foundationGitState {
+	t.Helper()
+	return foundationGitState{
+		head:   foundationGitText(t, root, "rev-parse", "HEAD"),
+		index:  foundationGitBytes(t, root, "ls-files", "--stage", "-z"),
+		status: foundationGitBytes(t, root, "status", "--porcelain=v1", "--untracked-files=all"),
+	}
+}
+
+func assertFoundationGitStateMatches(t *testing.T, root string, want foundationGitState) {
+	t.Helper()
+	assertFoundationGitState(t, root, want.head, want.index, want.status)
+}
+
 func foundationExcludePath(t *testing.T, root string) string {
 	t.Helper()
 	path := foundationGitText(t, root, "rev-parse", "--git-path", "info/exclude")
@@ -668,6 +892,83 @@ func assertFoundationDatabase(t *testing.T, databasePath string, projectCount in
 		t.Fatal(err)
 	}
 	assertFoundationMetadataEntries(t, databasePath)
+}
+
+func captureFoundationDatabaseState(t *testing.T, databasePath string) foundationDatabaseState {
+	t.Helper()
+	database, err := sqlite.Open(context.Background(), databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	var state foundationDatabaseState
+	if err := database.QueryRow("PRAGMA user_version").Scan(&state.userVersion); err != nil {
+		t.Fatal(err)
+	}
+	state.tables = make(map[string][][]string)
+	for _, table := range []string{
+		"application_metadata",
+		"projects",
+		"project_workspaces",
+		"pellets",
+		"memories",
+		"sqlite_sequence",
+	} {
+		rows, err := database.Query("SELECT * FROM " + table + " ORDER BY rowid")
+		if err != nil {
+			t.Fatalf("snapshot %s: %v", table, err)
+		}
+		columns, err := rows.Columns()
+		if err != nil {
+			rows.Close()
+			t.Fatalf("snapshot %s columns: %v", table, err)
+		}
+		for rows.Next() {
+			raw := make([]sql.RawBytes, len(columns))
+			destinations := make([]any, len(columns))
+			for index := range raw {
+				destinations[index] = &raw[index]
+			}
+			if err := rows.Scan(destinations...); err != nil {
+				rows.Close()
+				t.Fatalf("snapshot %s row: %v", table, err)
+			}
+			record := make([]string, len(raw))
+			for index, value := range raw {
+				if value == nil {
+					record[index] = "null"
+					continue
+				}
+				encoded, err := json.Marshal(string(value))
+				if err != nil {
+					rows.Close()
+					t.Fatal(err)
+				}
+				record[index] = string(encoded)
+			}
+			state.tables[table] = append(state.tables[table], record)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatalf("close %s snapshot: %v", table, err)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("snapshot %s: %v", table, err)
+		}
+	}
+	return state
+}
+
+func assertFoundationDatabaseState(t *testing.T, databasePath string, want foundationDatabaseState) {
+	t.Helper()
+	got := captureFoundationDatabaseState(t, databasePath)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("database state changed:\n got: %#v\nwant: %#v", got, want)
+	}
 }
 
 func assertFoundationQueryInt(t *testing.T, database *sql.DB, query string, want int) {
