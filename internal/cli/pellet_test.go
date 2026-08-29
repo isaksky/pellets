@@ -215,6 +215,165 @@ func TestPelletCommandsAcrossMainAndLinkedWorktreesJSONGolden(t *testing.T) {
 	}
 }
 
+func TestPelletLifecycleCommandsJSONGolden(t *testing.T) {
+	t.Parallel()
+
+	common := filepath.Join(t.TempDir(), "lifecycle golden database")
+	mainWorkTree := filepath.Join(common, "main")
+	linkedWorkTree := filepath.Join(common, "linked")
+	if err := os.MkdirAll(mainWorkTree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, mainWorkTree, "init", "--quiet")
+	if err := os.WriteFile(filepath.Join(mainWorkTree, "README"), []byte("fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, mainWorkTree, "add", "README")
+	runGitTest(
+		t, mainWorkTree,
+		"-c", "user.name=Pellets Test", "-c", "user.email=pellets@example.invalid",
+		"-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "fixture",
+	)
+	runGitTest(t, mainWorkTree, "worktree", "add", "--quiet", "-b", "lifecycle-golden-linked", linkedWorkTree)
+	if stdout, stderr, exit := runTestApp(initDBTestApp(common), "init-db"); exit != 0 || stderr != "" {
+		t.Fatalf("init-db = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+
+	current := mainWorkTree
+	application := projectTestApp(&current)
+	mainProject := runProjectInit(t, application, "shared")
+	current = linkedWorkTree
+	linkedProject := runProjectInit(t, application, "shared")
+	mainWorkspaceID := mainProject.Workspaces[0].ID
+	linkedWorkspaceID := linkedProject.Workspaces[1].ID
+	if mainWorkspaceID != 1 || linkedWorkspaceID != 2 {
+		t.Fatalf("lifecycle fixture workspace IDs = main %d linked %d, want 1 and 2", mainWorkspaceID, linkedWorkspaceID)
+	}
+
+	for _, title := range []string{"primary lifecycle", "secondary lifecycle", "recovered lifecycle"} {
+		runPelletCommand(t, application, "add", title)
+	}
+	databasePath := discovery.DatabasePath(common)
+	var outputs strings.Builder
+
+	current = mainWorkTree
+	appendPelletGolden(t, &outputs, "start-success", runPelletCommand(t, application, "start", "shared-1"))
+	appendPelletGolden(t, &outputs, "start-idempotent-resume", runPelletCommand(t, application, "start", "shared-1"))
+
+	beforeWorkspaceConflict := capturePelletLogicalState(t, databasePath)
+	appendPelletGolden(t, &outputs, "error-workspace-already-in-progress", runPelletError(t, application, 4, "start", "shared-2"))
+	assertPelletLogicalState(t, databasePath, beforeWorkspaceConflict, "workspace_already_in_progress")
+
+	current = linkedWorkTree
+	beforeElsewhere := capturePelletLogicalState(t, databasePath)
+	appendPelletGolden(t, &outputs, "error-pellet-in-progress-elsewhere", runPelletError(t, application, 4, "start", "shared-1"))
+	appendPelletGolden(t, &outputs, "error-confirmation-required", runPelletError(
+		t, application, 6, "release", "shared-1", "--recover-workspace", strconv.FormatInt(mainWorkspaceID, 10),
+	))
+	appendPelletGolden(t, &outputs, "error-recovery-workspace-mismatch", runPelletError(
+		t, application, 4, "release", "shared-1", "--recover-workspace", strconv.FormatInt(linkedWorkspaceID, 10), "--yes",
+	))
+	assertPelletLogicalState(t, databasePath, beforeElsewhere, "ownership and recovery errors")
+
+	appendPelletGolden(t, &outputs, "release-recovered", runPelletCommand(
+		t, application, "release", "shared-1", "--recover-workspace", strconv.FormatInt(mainWorkspaceID, 10), "--yes",
+	))
+	runPelletCommand(t, application, "start", "shared-2")
+	appendPelletGolden(t, &outputs, "release-owner", runPelletCommand(t, application, "release", "shared-2"))
+
+	appendPelletGolden(t, &outputs, "start-next-open", runPelletCommand(t, application, "start-next"))
+	beforeResume := capturePelletLogicalState(t, databasePath)
+	appendPelletGolden(t, &outputs, "start-next-resume", runPelletCommand(t, application, "start-next", "--external-id", "missing"))
+	assertPelletLogicalState(t, databasePath, beforeResume, "start-next resume")
+	appendPelletGolden(t, &outputs, "close-owner", runPelletCommand(t, application, "close", "shared-1"))
+	appendPelletGolden(t, &outputs, "reopen", runPelletCommand(t, application, "reopen", "shared-1"))
+	beforeNone := capturePelletLogicalState(t, databasePath)
+	appendPelletGolden(t, &outputs, "start-next-none", runPelletCommand(t, application, "start-next", "--external-id", "missing"))
+	assertPelletLogicalState(t, databasePath, beforeNone, "empty start-next")
+
+	runPelletCommand(t, application, "start", "shared-1")
+	appendPelletGolden(t, &outputs, "defer-owner", runPelletCommand(t, application, "defer", "shared-1"))
+
+	current = mainWorkTree
+	runPelletCommand(t, application, "start", "shared-2")
+	current = linkedWorkTree
+	appendPelletGolden(t, &outputs, "close-recovered", runPelletCommand(
+		t, application, "close", "shared-2", "--recover-workspace", strconv.FormatInt(mainWorkspaceID, 10), "--yes",
+	))
+	current = mainWorkTree
+	runPelletCommand(t, application, "start", "shared-3")
+	current = linkedWorkTree
+	appendPelletGolden(t, &outputs, "defer-recovered", runPelletCommand(
+		t, application, "defer", "shared-3", "--recover-workspace", strconv.FormatInt(mainWorkspaceID, 10), "--yes",
+	))
+
+	runPelletCommand(t, application, "add", "retry lifecycle", "--external-id", "Retry:Exact")
+	database, err := sqlite.Open(context.Background(), databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TRIGGER lifecycle_golden_reject_start_next
+		BEFORE UPDATE ON pellets
+		WHEN OLD.status = 'open' AND NEW.status = 'in_progress'
+		BEGIN
+			SELECT RAISE(ABORT, 'forced lifecycle golden retry');
+		END`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	beforeRetry := capturePelletLogicalState(t, databasePath)
+	appendPelletGolden(t, &outputs, "error-start-next-conflict", runPelletError(
+		t, application, 4, "start-next", "--external-id", "Retry:Exact",
+	))
+	assertPelletLogicalState(t, databasePath, beforeRetry, "start_next_conflict")
+	database, err = sqlite.Open(context.Background(), databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec("DROP TRIGGER lifecycle_golden_reject_start_next"); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	beforeBusy := capturePelletLogicalState(t, databasePath)
+	database, err = sqlite.Open(context.Background(), databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := database.Conn(context.Background())
+	if err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if _, err := connection.ExecContext(context.Background(), "BEGIN IMMEDIATE"); err != nil {
+		connection.Close()
+		database.Close()
+		t.Fatal(err)
+	}
+	appendPelletGolden(t, &outputs, "error-database-busy", runPelletError(
+		t, application, 4, "start-next", "--external-id", "Retry:Exact",
+	))
+	if _, err := connection.ExecContext(context.Background(), "ROLLBACK"); err != nil {
+		t.Fatal(err)
+	}
+	if err := connection.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	assertPelletLogicalState(t, databasePath, beforeBusy, "database_busy")
+
+	assertGolden(t, "pellet-lifecycle.golden", outputs.String())
+}
+
 func TestPelletCommandUsageValidationIsStrictAndSideEffectFree(t *testing.T) {
 	t.Parallel()
 
@@ -305,8 +464,20 @@ func runPelletCommand(t *testing.T, application *App, arguments ...string) strin
 	return stdout
 }
 
+func runPelletError(t *testing.T, application *App, wantExit int, arguments ...string) string {
+	t.Helper()
+	stdout, stderr, exit := runTestApp(application, arguments...)
+	if exit != wantExit || stdout != "" || stderr == "" {
+		t.Fatalf("pl %s = exit %d stdout %q stderr %q, want exit %d with stderr only", strings.Join(arguments, " "), exit, stdout, stderr, wantExit)
+	}
+	return stderr
+}
+
 func appendPelletGolden(t *testing.T, output *strings.Builder, label, raw string) {
 	t.Helper()
+	if strings.Count(raw, "\n") != 1 || !strings.HasSuffix(raw, "\n") {
+		t.Fatalf("%s output is not one compact JSON line: %q", label, raw)
+	}
 	var value any
 	if err := json.Unmarshal([]byte(raw), &value); err != nil {
 		t.Fatalf("decode %s JSON %q: %v", label, raw, err)
@@ -319,6 +490,13 @@ func appendPelletGolden(t *testing.T, output *strings.Builder, label, raw string
 		t.Fatal(err)
 	}
 	fmt.Fprintf(output, "%s %s", label, encoded.String())
+}
+
+func assertPelletLogicalState(t *testing.T, path string, want []string, operation string) {
+	t.Helper()
+	if got := capturePelletLogicalState(t, path); !reflect.DeepEqual(got, want) {
+		t.Fatalf("%s changed persistent state:\nbefore=%q\nafter=%q", operation, want, got)
+	}
 }
 
 func normalizePelletTimestamps(value any) {
