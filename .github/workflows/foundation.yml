@@ -1,0 +1,57 @@
+name: Foundation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  foundation-tests:
+    name: Foundation tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Verify native Windows AMD64 runner
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if ((go env GOHOSTOS) -ne "windows" -or (go env GOHOSTARCH) -ne "amd64") {
+            throw "foundation tests require a native Windows AMD64 runner"
+          }
+      - name: Run complete unit and compiled integration suite
+        run: go test ./...
+      - name: Run static analysis
+        run: go vet ./...
+
+  cgo-free-cross-builds:
+    name: CGo-free cross-builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Build and verify target metadata
+        run: bash scripts/verify-cross-builds.sh
