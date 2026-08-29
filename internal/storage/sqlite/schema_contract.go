@@ -22,12 +22,10 @@ var productionSchemaContracts struct {
 	err       error
 }
 
-// verifyProductionSchemaContract compares every required declared object with
-// the endpoint produced by the immutable migrations. Test-only failure
-// injection triggers may coexist with that endpoint; tables, indexes, views,
-// and FTS objects must match. Building the reference in an in-memory database
-// keeps the preflight independent of formatting while the database being
-// opened remains read-only.
+// verifyProductionSchemaContract compares every persistent declared object
+// with the endpoint produced by the immutable migrations. Building the
+// reference in an in-memory database keeps the preflight independent of
+// formatting while the database being opened remains read-only.
 func verifyProductionSchemaContract(ctx context.Context, conn *sql.Conn, version int) error {
 	productionSchemaContracts.Do(buildProductionSchemaContracts)
 	if productionSchemaContracts.err != nil {
@@ -114,7 +112,6 @@ func readSchemaObjectDefinitions(ctx context.Context, conn *sql.Conn) ([]schemaO
 		FROM sqlite_schema
 		WHERE name NOT GLOB 'sqlite_*'
 		  AND sql IS NOT NULL
-		  AND type <> 'trigger'
 		ORDER BY type, name`)
 	if err != nil {
 		return nil, err

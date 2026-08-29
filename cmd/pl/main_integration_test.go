@@ -1197,6 +1197,14 @@ type foundationDatabaseState struct {
 }
 
 func buildFoundationExecutable(t *testing.T) string {
+	return buildFoundationExecutableWithTags(t)
+}
+
+func buildFoundationFailureExecutable(t *testing.T) string {
+	return buildFoundationExecutableWithTags(t, "pellets_test_failure_injection")
+}
+
+func buildFoundationExecutableWithTags(t *testing.T, tags ...string) string {
 	t.Helper()
 	repositoryRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -1207,7 +1215,12 @@ func buildFoundationExecutable(t *testing.T) string {
 		name += ".exe"
 	}
 	executable := filepath.Join(t.TempDir(), name)
-	command := exec.Command("go", "build", "-trimpath", "-o", executable, "./cmd/pl")
+	arguments := []string{"build"}
+	if len(tags) > 0 {
+		arguments = append(arguments, "-tags", strings.Join(tags, ","))
+	}
+	arguments = append(arguments, "-trimpath", "-o", executable, "./cmd/pl")
+	command := exec.Command("go", arguments...)
 	command.Dir = repositoryRoot
 	command.Env = append(
 		os.Environ(),
@@ -1242,6 +1255,20 @@ func buildFoundationExecutable(t *testing.T) string {
 func runFoundationCLI(t *testing.T, executable, directory string, args ...string) foundationResult {
 	t.Helper()
 	command, stdout, stderr := foundationCLICommand(executable, directory, args...)
+	err := command.Run()
+	return foundationProcessResult(t, stdout, stderr, err)
+}
+
+func runFoundationCLIWithTemporaryTrigger(
+	t *testing.T,
+	executable string,
+	directory string,
+	trigger string,
+	args ...string,
+) foundationResult {
+	t.Helper()
+	command, stdout, stderr := foundationCLICommand(executable, directory, args...)
+	command.Env = append(command.Env, "PELLETS_TEST_TEMP_TRIGGER="+trigger)
 	err := command.Run()
 	return foundationProcessResult(t, stdout, stderr, err)
 }

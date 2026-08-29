@@ -435,7 +435,7 @@ func TestWorkspaceMoveRemovalAndDuplicateRegistrationAreSafe(t *testing.T) {
 	}
 }
 
-func projectTestApp(current *string) *App {
+func projectTestApp(current *string, afterPelletOpen ...func(string) error) *App {
 	initializer := app.DatabaseInitializer{
 		Path: discovery.DatabasePath,
 		Open: func(ctx context.Context, path string) (app.DatabaseHandle, error) {
@@ -463,7 +463,17 @@ func projectTestApp(current *string) *App {
 	pelletManager := app.PelletManager{
 		Projects: manager,
 		Open: func(ctx context.Context, path string) (storage.PelletRepository, error) {
-			return sqlite.OpenPelletRepository(ctx, path)
+			repository, err := sqlite.OpenPelletRepository(ctx, path)
+			if err != nil {
+				return nil, err
+			}
+			if len(afterPelletOpen) > 0 {
+				if err := afterPelletOpen[0](path); err != nil {
+					_ = repository.Close()
+					return nil, err
+				}
+			}
+			return repository, nil
 		},
 	}
 	memoryManager := app.MemoryManager{

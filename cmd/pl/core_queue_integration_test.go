@@ -22,6 +22,7 @@ func TestCoreQueueCompiledProcessIntegration(t *testing.T) {
 		t.Fatalf("core queue integration tests require native Git: %v", err)
 	}
 	executable := buildFoundationExecutable(t)
+	failureExecutable := buildFoundationFailureExecutable(t)
 
 	t.Run("concurrent additions preserve project-local allocation and exact filters", func(t *testing.T) {
 		fixture := newCoreQueueCompiledFixture(t, executable, 3)
@@ -111,18 +112,22 @@ func TestCoreQueueCompiledProcessIntegration(t *testing.T) {
 			t.Fatalf("combined filtered next = %#v", next)
 		}
 
-		execCoreQueueSQL(t, fixture.databasePath, `
-			CREATE TRIGGER core_queue_reject_add
+		beforeRollback := captureFoundationDatabaseState(t, fixture.databasePath)
+		failedAdd := runFoundationCLIWithTemporaryTrigger(
+			t,
+			failureExecutable,
+			fixture.roots[0],
+			`CREATE TEMP TRIGGER core_queue_reject_add
 			BEFORE INSERT ON pellets
 			WHEN NEW.title = 'compiled rollback'
 			BEGIN
 				SELECT RAISE(ABORT, 'forced compiled add rollback');
-			END`)
-		beforeRollback := captureFoundationDatabaseState(t, fixture.databasePath)
-		failedAdd := runFoundationCLI(t, executable, fixture.roots[0], "add", "compiled rollback")
+			END`,
+			"add",
+			"compiled rollback",
+		)
 		decodeCoreQueueError(t, failedAdd, 5, "pellet_storage_failed")
 		assertCoreQueueDatabaseState(t, fixture.databasePath, beforeRollback, "failed compiled add")
-		execCoreQueueSQL(t, fixture.databasePath, "DROP TRIGGER core_queue_reject_add")
 	})
 
 	t.Run("start races return stable write-free workspace conflicts", func(t *testing.T) {
@@ -297,18 +302,19 @@ func TestCoreQueueCompiledProcessIntegration(t *testing.T) {
 		}
 		assertCoreQueueDatabaseState(t, fixture.databasePath, beforeResume, "read-only start-next resume")
 
-		execCoreQueueSQL(t, fixture.databasePath, `
-			CREATE TRIGGER core_queue_reject_start_next
+		beforeRetry := captureFoundationDatabaseState(t, fixture.databasePath)
+		retryStarted := time.Now()
+		firstRetry := runFoundationCLIWithTemporaryTrigger(
+			t,
+			failureExecutable,
+			emptyRoot,
+			`CREATE TEMP TRIGGER core_queue_reject_start_next
 			BEFORE UPDATE ON pellets
 			WHEN OLD.status = 'open' AND NEW.status = 'in_progress'
 			BEGIN
 				SELECT RAISE(ABORT, 'forced compiled start-next retry');
-			END`)
-		beforeRetry := captureFoundationDatabaseState(t, fixture.databasePath)
-		retryStarted := time.Now()
-		firstRetry := runFoundationCLI(
-			t, executable, emptyRoot, "start-next",
-			"--external-id", "Retry:Exact", "--group", "Workers/A",
+			END`,
+			"start-next", "--external-id", "Retry:Exact", "--group", "Workers/A",
 		)
 		firstElapsed := time.Since(retryStarted)
 		retryError := decodeCoreQueueError(t, firstRetry, 4, "start_next_conflict")
@@ -316,16 +322,23 @@ func TestCoreQueueCompiledProcessIntegration(t *testing.T) {
 			t.Fatalf("bounded start-next retry = elapsed %s details %#v", firstElapsed, retryError.Error.Details)
 		}
 		assertCoreQueueDatabaseState(t, fixture.databasePath, beforeRetry, "first bounded start-next retry")
-		secondRetry := runFoundationCLI(
-			t, executable, emptyRoot, "start-next",
-			"--external-id", "Retry:Exact", "--group", "Workers/A",
+		secondRetry := runFoundationCLIWithTemporaryTrigger(
+			t,
+			failureExecutable,
+			emptyRoot,
+			`CREATE TEMP TRIGGER core_queue_reject_start_next
+			BEFORE UPDATE ON pellets
+			WHEN OLD.status = 'open' AND NEW.status = 'in_progress'
+			BEGIN
+				SELECT RAISE(ABORT, 'forced compiled start-next retry');
+			END`,
+			"start-next", "--external-id", "Retry:Exact", "--group", "Workers/A",
 		)
 		decodeCoreQueueError(t, secondRetry, 4, "start_next_conflict")
 		if secondRetry != firstRetry {
 			t.Fatalf("deterministic retry changed result:\nfirst=%#v\nsecond=%#v", firstRetry, secondRetry)
 		}
 		assertCoreQueueDatabaseState(t, fixture.databasePath, beforeRetry, "second bounded start-next retry")
-		execCoreQueueSQL(t, fixture.databasePath, "DROP TRIGGER core_queue_reject_start_next")
 
 		database, err := sqlite.Open(context.Background(), fixture.databasePath)
 		if err != nil {
@@ -675,18 +688,6 @@ func decodeCoreQueueError(t *testing.T, result foundationResult, exit int, code 
 		t.Fatalf("compiled error stderr = %q, want compact envelope %q", result.stderr, want)
 	}
 	return envelope
-}
-
-func execCoreQueueSQL(t *testing.T, databasePath, statement string, args ...any) {
-	t.Helper()
-	database, err := sqlite.Open(context.Background(), databasePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer database.Close()
-	if _, err := database.Exec(statement, args...); err != nil {
-		t.Fatalf("execute core queue fixture SQL: %v\n%s", err, statement)
-	}
 }
 
 func assertCoreQueueDatabaseState(

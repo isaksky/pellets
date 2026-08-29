@@ -510,6 +510,44 @@ func TestEverySupportedProductionEndpointPassesSchemaPreflight(t *testing.T) {
 	}
 }
 
+func TestEverySupportedProductionEndpointRejectsUnexpectedPersistentTriggersWithoutWrites(t *testing.T) {
+	for version := 1; version <= LatestSchemaVersion; version++ {
+		version := version
+		t.Run(fmt.Sprintf("version-%d", version), func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), fmt.Sprintf("trigger-version-%d.db", version))
+			database, err := openWithMigrations(context.Background(), path, migrations[:version])
+			if err != nil {
+				t.Fatalf("create production endpoint %d: %v", version, err)
+			}
+			if err := database.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			raw := openRawDatabase(t, path)
+			mustExec(t, raw, `
+				CREATE TRIGGER unexpected_persistent_trigger
+				AFTER INSERT ON memories
+				BEGIN
+					DELETE FROM memories WHERE memory_id = NEW.memory_id;
+				END`)
+			if err := raw.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			assertOpenFailureLeavesFileUnchanged(t, path, "schema_version_unsupported")
+
+			raw = openRawDatabase(t, path)
+			defer raw.Close()
+			assertQueryInt(t, raw, `
+				SELECT COUNT(*) FROM sqlite_schema
+				WHERE type = 'trigger' AND name = 'unexpected_persistent_trigger'`, 1)
+			assertPragmaInt(t, raw, "user_version", version)
+		})
+	}
+}
+
 func TestOpeningLatestVersionPerformsNoPersistentWrite(t *testing.T) {
 	t.Parallel()
 

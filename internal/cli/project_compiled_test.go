@@ -120,3 +120,66 @@ func TestCompiledCLIRejectsPartialCurrentSchemaWithoutWrites(t *testing.T) {
 		}
 	}
 }
+
+func TestCompiledCLIRejectsUnexpectedPersistentTriggerWithoutWrites(t *testing.T) {
+	executable := buildTestExecutable(t)
+	root := t.TempDir()
+	databasePath := discovery.DatabasePath(root)
+	if stdout, stderr, exit := runCompiledCLI(t, executable, root, "init-db"); exit != 0 || stderr != "" {
+		t.Fatalf("compiled init-db = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TRIGGER unexpected_persistent_trigger
+		AFTER INSERT ON memories
+		BEGIN
+			DELETE FROM memories WHERE memory_id = NEW.memory_id;
+		END`); err != nil {
+		database.Close()
+		t.Fatalf("create unexpected persistent trigger: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := os.ReadFile(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, exit := runCompiledCLI(t, executable, root, "project", "list")
+	if exit != 5 || stdout != "" {
+		t.Fatalf("project list = exit %d stdout %q stderr %q, want storage failure", exit, stdout, stderr)
+	}
+	assertCompactErrorCode(t, stderr, "schema_version_unsupported")
+	after, err := os.ReadFile(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("compiled CLI mutated the trigger-bearing database")
+	}
+	for _, suffix := range []string{"-journal", "-wal", "-shm"} {
+		if _, err := os.Stat(databasePath + suffix); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("compiled CLI left unexpected sidecar %q: %v", databasePath+suffix, err)
+		}
+	}
+
+	database, err = sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	var triggerCount int
+	if err := database.QueryRow(`
+		SELECT COUNT(*) FROM sqlite_schema
+		WHERE type = 'trigger' AND name = 'unexpected_persistent_trigger'`).Scan(&triggerCount); err != nil {
+		t.Fatal(err)
+	}
+	if triggerCount != 1 {
+		t.Fatalf("unexpected persistent trigger count = %d, want 1", triggerCount)
+	}
+}

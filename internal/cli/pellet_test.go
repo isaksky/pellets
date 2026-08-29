@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -240,7 +241,28 @@ func TestPelletLifecycleCommandsJSONGolden(t *testing.T) {
 	}
 
 	current := mainWorkTree
-	application := projectTestApp(&current)
+	injectStartNextFailure := false
+	application := projectTestApp(&current, func(path string) error {
+		if !injectStartNextFailure {
+			return nil
+		}
+		injectStartNextFailure = false
+		database, err := sql.Open("sqlite", path)
+		if err != nil {
+			return err
+		}
+		if _, err := database.Exec(`
+			CREATE TRIGGER lifecycle_golden_reject_start_next
+			BEFORE UPDATE ON pellets
+			WHEN OLD.status = 'open' AND NEW.status = 'in_progress'
+			BEGIN
+				SELECT RAISE(ABORT, 'forced lifecycle golden retry');
+			END`); err != nil {
+			database.Close()
+			return err
+		}
+		return database.Close()
+	})
 	mainProject := runProjectInit(t, application, "shared")
 	current = linkedWorkTree
 	linkedProject := runProjectInit(t, application, "shared")
@@ -308,29 +330,10 @@ func TestPelletLifecycleCommandsJSONGolden(t *testing.T) {
 	))
 
 	runPelletCommand(t, application, "add", "retry lifecycle", "--external-id", "Retry:Exact")
-	database, err := sqlite.Open(context.Background(), databasePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.Exec(`
-		CREATE TRIGGER lifecycle_golden_reject_start_next
-		BEFORE UPDATE ON pellets
-		WHEN OLD.status = 'open' AND NEW.status = 'in_progress'
-		BEGIN
-			SELECT RAISE(ABORT, 'forced lifecycle golden retry');
-		END`); err != nil {
-		database.Close()
-		t.Fatal(err)
-	}
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
 	beforeRetry := capturePelletLogicalState(t, databasePath)
-	appendPelletGolden(t, &outputs, "error-start-next-conflict", runPelletError(
-		t, application, 4, "start-next", "--external-id", "Retry:Exact",
-	))
-	assertPelletLogicalState(t, databasePath, beforeRetry, "start_next_conflict")
-	database, err = sqlite.Open(context.Background(), databasePath)
+	injectStartNextFailure = true
+	retryOutput := runPelletError(t, application, 4, "start-next", "--external-id", "Retry:Exact")
+	database, err := sql.Open("sqlite", databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,6 +344,8 @@ func TestPelletLifecycleCommandsJSONGolden(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
+	appendPelletGolden(t, &outputs, "error-start-next-conflict", retryOutput)
+	assertPelletLogicalState(t, databasePath, beforeRetry, "start_next_conflict")
 
 	beforeBusy := capturePelletLogicalState(t, databasePath)
 	database, err = sqlite.Open(context.Background(), databasePath)
