@@ -1,0 +1,58 @@
+package output
+
+import (
+	"bytes"
+	"errors"
+	"io"
+	"strings"
+	"testing"
+
+	"pellets/internal/domain"
+)
+
+func TestWriteErrorDoesNotExposeCause(t *testing.T) {
+	t.Parallel()
+
+	public := domain.WrapError(
+		domain.Storage,
+		"database_failure",
+		"database operation failed",
+		nil,
+		errors.New("SELECT secret FROM internal_table"),
+	)
+	var output bytes.Buffer
+	if err := WriteError(&output, public); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "SELECT") {
+		t.Fatalf("error output exposed cause: %s", output.String())
+	}
+}
+
+func TestJSONEncodingFailureWritesNothing(t *testing.T) {
+	t.Parallel()
+
+	var output bytes.Buffer
+	err := (JSONRenderer{}).Render(&output, "bad", make(chan int))
+	if err == nil {
+		t.Fatal("Render() unexpectedly succeeded")
+	}
+	if output.Len() != 0 {
+		t.Fatalf("Render() wrote partial JSON: %q", output.String())
+	}
+}
+
+func TestWriteFailureIsIdentifiable(t *testing.T) {
+	t.Parallel()
+
+	err := (JSONRenderer{}).Render(failingWriter{}, "status", struct{}{})
+	if !IsWriteFailure(err) {
+		t.Fatalf("IsWriteFailure(%v) = false", err)
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) {
+	return 0, io.ErrClosedPipe
+}

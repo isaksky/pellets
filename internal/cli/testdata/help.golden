@@ -1,0 +1,11 @@
+Pellets is a local task queue for coding agents.
+
+Usage:
+  pl [global-options] <command> [command-options] [arguments]
+
+Global options:
+  --human        Render concise human-readable text instead of JSON.
+  --pretty       Pretty-print JSON (mutually exclusive with --human).
+  --project CODE Select a registered project where the command permits it.
+  --help         Print help and exit.
+  --version      Print executable and JSON schema versions.
