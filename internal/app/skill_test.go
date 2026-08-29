@@ -188,6 +188,10 @@ func TestSkillInstallerApplyIsIdempotentAndRequiresForceForDifferences(t *testin
 	if err := os.Chmod(plan.Targets[0].Path, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	replacementInfo, err := os.Stat(plan.Targets[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	plan, err = installer.Plan(environment, SkillScopePersonal, SkillAgentBoth)
 	if err != nil {
 		t.Fatal(err)
@@ -205,8 +209,8 @@ func TestSkillInstallerApplyIsIdempotentAndRequiresForceForDifferences(t *testin
 	}
 	if info, err := os.Stat(plan.Targets[0].Path); err != nil {
 		t.Fatal(err)
-	} else if info.Mode().Perm() != 0o600 {
-		t.Fatalf("replacement mode = %v; want preserved 0600", info.Mode())
+	} else if info.Mode().Perm() != replacementInfo.Mode().Perm() {
+		t.Fatalf("replacement mode = %v; want preserved platform mode %v", info.Mode(), replacementInfo.Mode())
 	}
 }
 
@@ -232,6 +236,10 @@ func TestSkillInstallerRealFilesystemFullScopeAgentMatrix(t *testing.T) {
 				}
 				unrelated := filepath.Join(root, "unrelated.txt")
 				if err := os.WriteFile(unrelated, []byte("preserve me\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				unrelatedInfo, err := os.Stat(unrelated)
+				if err != nil {
 					t.Fatal(err)
 				}
 				plan, err := (SkillInstaller{}).Plan(
@@ -260,8 +268,8 @@ func TestSkillInstallerRealFilesystemFullScopeAgentMatrix(t *testing.T) {
 				if content, err := os.ReadFile(unrelated); err != nil || string(content) != "preserve me\n" {
 					t.Fatalf("unrelated file = %q, %v", content, err)
 				}
-				if info, err := os.Stat(unrelated); err != nil || info.Mode().Perm() != 0o600 {
-					t.Fatalf("unrelated permissions changed: %v, %v", info, err)
+				if info, err := os.Stat(unrelated); err != nil || info.Mode().Perm() != unrelatedInfo.Mode().Perm() {
+					t.Fatalf("unrelated platform mode changed: before %v, after %v, %v", unrelatedInfo, info, err)
 				}
 				otherRoot := repository
 				if scope == SkillScopeRepository {

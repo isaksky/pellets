@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -20,6 +22,32 @@ import (
 
 	"pellets/internal/domain"
 )
+
+func TestDataSourceNameUsesAbsoluteFileURI(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "database with spaces 界.db")
+	dsn, err := dataSourceName(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("parse data source name %q: %v", dsn, err)
+	}
+	wantPath := filepath.ToSlash(path)
+	if runtime.GOOS == "windows" {
+		wantPath = "/" + wantPath
+	}
+	if parsed.Scheme != "file" || parsed.Path != wantPath || parsed.Host != "" {
+		t.Fatalf("data source name = %q (scheme %q, host %q, path %q), want absolute file URI path %q", dsn, parsed.Scheme, parsed.Host, parsed.Path, wantPath)
+	}
+	if got := parsed.Query()["_pragma"]; !reflect.DeepEqual(got, []string{
+		"busy_timeout(5000)", "foreign_keys(ON)", "synchronous(FULL)", "trusted_schema(OFF)",
+	}) {
+		t.Fatalf("data source pragmas = %q", got)
+	}
+}
 
 func TestOpenMigratesRealFileAndConfiguresRuntime(t *testing.T) {
 	t.Parallel()

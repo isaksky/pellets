@@ -186,9 +186,23 @@ func (owned *initializationOwnership) captureNewCompanions(databasePath string) 
 		if !info.Mode().IsRegular() {
 			return databaseCompanionAlreadyExists(databasePath, path)
 		}
+		file, err := os.Open(path)
+		if err != nil {
+			return databaseCreationFailure(path, err)
+		}
+		stableInfo, statErr := file.Stat()
+		closeErr := file.Close()
+		if statErr != nil || closeErr != nil {
+			return databaseCreationFailure(path, errors.Join(statErr, closeErr))
+		}
+		if !stableInfo.Mode().IsRegular() {
+			return databaseCompanionAlreadyExists(databasePath, path)
+		}
 		// Every companion was proven absent immediately before Open. Record its
-		// identity now so cleanup can remove this file, but never a replacement.
-		owned.files[path] = info
+		// handle-backed identity now so cleanup can remove this file, but never a
+		// replacement. Windows Lstat identities are otherwise resolved lazily by
+		// SameFile and can accidentally resolve to a replacement at cleanup time.
+		owned.files[path] = stableInfo
 	}
 	return nil
 }
@@ -261,7 +275,19 @@ func inspectMetadataDirectory(path string) (os.FileInfo, bool, error) {
 	if !info.IsDir() {
 		return nil, true, databaseCreationFailure(path, errors.New("metadata path is not a directory"))
 	}
-	return info, true, nil
+	directory, err := os.Open(path)
+	if err != nil {
+		return nil, true, databaseCreationFailure(path, err)
+	}
+	stableInfo, statErr := directory.Stat()
+	closeErr := directory.Close()
+	if statErr != nil || closeErr != nil {
+		return nil, true, databaseCreationFailure(path, errors.Join(statErr, closeErr))
+	}
+	if !stableInfo.IsDir() {
+		return nil, true, databaseCreationFailure(path, errors.New("metadata path changed during inspection"))
+	}
+	return stableInfo, true, nil
 }
 
 func verifySameDirectory(path string, original os.FileInfo) error {

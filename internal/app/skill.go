@@ -91,7 +91,10 @@ type SkillInstaller struct {
 
 // PelletsSkillContent returns the exact embedded portable skill artifact.
 func PelletsSkillContent() string {
-	return pelletsSkillTemplate
+	// Git normally checks the template out with LF through .gitattributes, but
+	// normalize defensively so a build from another source archive cannot emit
+	// a platform-dependent Agent Skill artifact.
+	return strings.ReplaceAll(pelletsSkillTemplate, "\r\n", "\n")
 }
 
 // Environment resolves the home directory and optional current Git worktree
@@ -170,7 +173,7 @@ func (installer SkillInstaller) Plan(environment SkillEnvironment, scope SkillSc
 
 	plan := SkillPlan{
 		Scope: scope, Agent: agent, Root: root, RepositoryRoot: repositoryRoot,
-		Content: pelletsSkillTemplate,
+		Content: PelletsSkillContent(),
 	}
 	if agent == SkillAgentCodex || agent == SkillAgentBoth {
 		plan.Targets = append(plan.Targets, SkillTargetPlan{

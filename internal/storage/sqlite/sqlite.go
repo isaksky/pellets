@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"pellets/internal/domain"
@@ -102,7 +103,14 @@ func dataSourceName(path string) (string, error) {
 		return "", fmt.Errorf("resolve database path: %w", err)
 	}
 
-	u := &url.URL{Scheme: "file", Path: filepath.ToSlash(absolute)}
+	uriPath := filepath.ToSlash(absolute)
+	if runtime.GOOS == "windows" && filepath.VolumeName(absolute) != "" && !strings.HasPrefix(uriPath, "/") {
+		// SQLite requires an absolute Windows drive path in a file URI to begin
+		// with /X:/. Without the leading slash, file:C:/... is a relative URI
+		// and fails to open outside the process working directory.
+		uriPath = "/" + uriPath
+	}
+	u := &url.URL{Scheme: "file", Path: uriPath}
 	query := u.Query()
 	// These settings are connection-local, so the driver reapplies them if
 	// database/sql ever has to replace the single idle connection.

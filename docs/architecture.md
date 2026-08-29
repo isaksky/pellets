@@ -78,7 +78,7 @@ The database-independent skill path is `cmd/pl -> cli -> app -> filesystem`, wit
 
 ## Portable agent skill installer
 
-`pl skill install` embeds one version-controlled, instruction-only `SKILL.md` template with portable `name` and `description` frontmatter. Codex and Claude receive byte-identical instructions; only their destination paths differ. No script, plugin manifest, MCP configuration, `AGENTS.md`, `CLAUDE.md`, settings file, runtime download, or prompt-framework dependency is generated.
+`pl skill install` embeds one version-controlled, instruction-only `SKILL.md` template with portable `name` and `description` frontmatter. Its source checkout and installed bytes use LF line endings on every platform, and Codex and Claude receive byte-identical instructions; only their destination paths differ. No script, plugin manifest, MCP configuration, `AGENTS.md`, `CLAUDE.md`, settings file, runtime download, or prompt-framework dependency is generated.
 
 The CLI owns the small line-oriented wizard behind injected input, output, and terminal detection. The default JSON interface never prompts. Interactive `--human` mode prompts only when stdin and stdout are terminals, shows the Git root when repository scope is available, previews exact destinations, and obtains replacement and final-write confirmation separately. Parsing and enum validation occur before working-directory or Git inspection.
 
@@ -104,7 +104,7 @@ All Git commands, canonicalization, existence checks, and stale-path checks fini
 
 ### Keeping the database out of Git
 
-The database and its WAL/SHM/journal companions must never be committed or damaged. If `init-db` or `init` places `.pellets` inside a Git work tree, it adds `.pellets/` to the repository’s local Git exclude file (`.git/info/exclude` or the worktree-equivalent path), not to the committed `.gitignore`. Initialization refuses to proceed if the database or any companion is already tracked, including an index-only or case-equivalent path on a case-insensitive filesystem. It also rejects a symlinked `.pellets` directory and any pre-existing database companion before SQLite opens a file. Failure cleanup removes only files whose identity was recorded as created by that initialization attempt.
+The database and its WAL/SHM/journal companions must never be committed or damaged. If `init-db` or `init` places `.pellets` inside a Git work tree, it adds `.pellets/` to the repository’s local Git exclude file (`.git/info/exclude` or the worktree-equivalent path), not to the committed `.gitignore`. Initialization refuses to proceed if the database or any companion is already tracked, including an index-only or case-equivalent path on a case-insensitive filesystem. It also rejects a symlinked `.pellets` directory and any pre-existing database companion before SQLite opens a file. Failure cleanup removes only files whose handle-backed identity was recorded as created by that initialization attempt, including on Windows where a later path lookup alone cannot identify a replaced file safely.
 
 ## CLI command flow
 
@@ -125,6 +125,8 @@ Expected domain conflicts—missing pellet, wrong status, `workspace_already_in_
 ## SQLite storage boundary
 
 Use `database/sql` with a pinned CGo-free SQLite driver, initially `modernc.org/sqlite`. This keeps macOS/Windows cross-compilation simple and provides SQLite and FTS5 in-process. Pin the driver and its required companion versions exactly; upgrades require migration and cross-platform test runs.
+
+Filesystem database names are opened as absolute SQLite file URIs. Windows drive paths use SQLite's required `/X:/...` URI path form so initialization is independent of the process working directory while spaces and Unicode remain UTF-8 escaped.
 
 Each short-lived CLI process uses one open SQLite connection. Set both maximum open and idle connections to one; this avoids connection-local PRAGMAs silently differing inside a process and is sufficient because a command executes one use case at a time.
 

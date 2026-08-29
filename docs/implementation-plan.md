@@ -189,7 +189,7 @@ Acceptance criteria:
 - JSON never prompts. Noninteractive missing choices and confirmation fail with stable typed errors; interactive choices, exact path preview, replacement confirmation, final confirmation, and cancellation use injected input/output/terminal detection.
 - Dry-run creates no directories or temporary files and returns the complete plan/content. Identical targets are idempotent. Differing files require explicit replacement authority.
 - Complete preflight rejects symlinks, non-regular paths, escapes, and unusable permissions. Atomic per-file writes and injected second-target failures prove Both restores replaced files and removes invocation-created files/directories.
-- Golden frontmatter/body tests plus static positive/negative trigger fixtures preserve the activation boundary. A drift contract parses every documented command example and rejects referenced flags without implemented CLI coverage.
+- Golden frontmatter/body tests plus static positive/negative trigger fixtures preserve the activation boundary. The embedded and installed artifact remains LF-normalized across checkout and filesystem platforms. A drift contract parses every documented command example and rejects referenced flags without implemented CLI coverage.
 - Real-filesystem, CLI-harness, and compiled-executable tests prove no-database operation, scope/agent behavior, Git discovery, protected unrelated files, JSON/error shapes, and full content installation. `CGO_ENABLED=0` macOS and Windows builds add no runtime, prompt, network, or plugin dependency.
 
 ## Milestone 10: release hardening
