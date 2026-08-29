@@ -466,6 +466,12 @@ func projectTestApp(current *string) *App {
 			return sqlite.OpenPelletRepository(ctx, path)
 		},
 	}
+	memoryManager := app.MemoryManager{
+		Projects: manager,
+		Open: func(ctx context.Context, path string) (storage.MemoryRepository, error) {
+			return sqlite.OpenMemoryRepository(ctx, path)
+		},
+	}
 	application := New(
 		"test",
 		InitDBCommand(initializer), InitCommand(manager), ProjectCommand(manager),
@@ -474,6 +480,7 @@ func projectTestApp(current *string) *App {
 		EditCommand(pelletManager), NextCommand(pelletManager), StartCommand(pelletManager),
 		StartNextCommand(pelletManager), ReleaseCommand(pelletManager), CloseCommand(pelletManager),
 		ReopenCommand(pelletManager), DeferCommand(pelletManager),
+		MemoryCommand(memoryManager),
 	)
 	application.workingDirectory = func() (string, error) { return *current, nil }
 	return application

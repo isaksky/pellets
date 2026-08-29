@@ -170,16 +170,14 @@ func (manager ProjectManager) ResolveCurrent(ctx context.Context, database Datab
 	return resolved, closeProjectDatabase(projectDatabase, operationErr)
 }
 
-// ResolvePelletProject resolves the current registered worktree and validates
-// any explicit selection and references against its shared logical project.
-// Pellet commands cannot use --project or a reference to cross repository
-// boundaries silently.
-func (manager ProjectManager) ResolvePelletProject(
+// ResolveSelectedCurrentProject resolves the current registered worktree and
+// validates that an optional explicit selection identifies its logical project.
+// Project-scoped commands cannot use --project to cross repository boundaries.
+func (manager ProjectManager) ResolveSelectedCurrentProject(
 	ctx context.Context,
 	database Database,
 	workingDirectory string,
 	selectedCode string,
-	references ...domain.PelletReference,
 ) (storage.ResolvedProject, error) {
 	if selectedCode != "" {
 		if err := domain.ValidateProjectCode(selectedCode); err != nil {
@@ -197,6 +195,22 @@ func (manager ProjectManager) ResolvePelletProject(
 			"the selected project does not identify the current Git repository",
 			map[string]any{"selected_project": selectedCode, "current_project": resolved.Project.Code},
 		)
+	}
+	return resolved, nil
+}
+
+// ResolvePelletProject additionally validates public pellet references against
+// the already selected current logical project.
+func (manager ProjectManager) ResolvePelletProject(
+	ctx context.Context,
+	database Database,
+	workingDirectory string,
+	selectedCode string,
+	references ...domain.PelletReference,
+) (storage.ResolvedProject, error) {
+	resolved, err := manager.ResolveSelectedCurrentProject(ctx, database, workingDirectory, selectedCode)
+	if err != nil {
+		return storage.ResolvedProject{}, err
 	}
 	for _, reference := range references {
 		if reference.ProjectCode != resolved.Project.Code {

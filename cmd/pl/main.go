@@ -44,6 +44,12 @@ func main() {
 			return sqlite.OpenPelletRepository(ctx, path)
 		},
 	}
+	memoryManager := app.MemoryManager{
+		Projects: projectManager,
+		Open: func(ctx context.Context, path string) (storage.MemoryRepository, error) {
+			return sqlite.OpenMemoryRepository(ctx, path)
+		},
+	}
 	commands := []cli.Command{
 		cli.InitDBCommand(initializer),
 		cli.InitCommand(projectManager),
@@ -61,6 +67,7 @@ func main() {
 		cli.CloseCommand(pelletManager),
 		cli.ReopenCommand(pelletManager),
 		cli.DeferCommand(pelletManager),
+		cli.MemoryCommand(memoryManager),
 	}
 	application := cli.New(version, commands...)
 	os.Exit(application.Run(os.Args[1:], os.Stdout, os.Stderr))

@@ -64,7 +64,7 @@ Avoid:
 
 Each memory row is one independently retrievable idea. The CLI does not automatically chunk text.
 
-Agents should split unrelated facts into separate memories and include enough local context for a search result to make sense alone. No small hard byte limit is required in v1, but the implementation should reject values above a conservative safety limit documented in `pl memory add --help` after performance testing.
+Agents should split unrelated facts into separate memories and include enough local context for a search result to make sense alone. V1 accepts one non-empty, valid UTF-8 value up to 1 MiB (1,048,576 bytes); `pl memory --help` documents this conservative safety limit.
 
 Because each row is atomic and immutable, approval semantics remain clear. Automatic chunking would create hidden child records and is intentionally absent.
 

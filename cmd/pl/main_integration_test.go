@@ -245,6 +245,93 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		}
 	})
 
+	t.Run("compiled project memory workflow", func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), "compiled memory workflow 界")
+		createFoundationRepository(t, root)
+		decodeFoundationSuccess[foundationProject](
+			t, runFoundationCLI(t, executable, root, "init", "--code", "memory"), "init",
+		)
+
+		agent := decodeFoundationSuccess[foundationMemory](
+			t,
+			runFoundationCLI(t, executable, root, "memory", "add", "--text", "memory-123 remains ordinary text"),
+			"memory add",
+		)
+		if agent.ID != 1 || agent.Project != "memory" || agent.CreatedBy != "agent" || agent.HumanApproved || agent.ApprovedAt != nil || agent.CreatedAt != agent.UpdatedAt {
+			t.Fatalf("compiled agent memory = %#v", agent)
+		}
+		assertFoundationTimestamp(t, agent.CreatedAt)
+
+		inputPath := filepath.Join(root, "reviewed memory 世界.txt")
+		if err := os.WriteFile(inputPath, []byte("human-reviewed compiled fact\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		human := decodeFoundationSuccess[foundationMemory](
+			t,
+			runFoundationCLI(t, executable, root, "memory", "add", "--file", inputPath, "--created-by", "human"),
+			"memory add",
+		)
+		if human.ID != 2 || human.CreatedBy != "human" || !human.HumanApproved || human.ApprovedAt == nil || *human.ApprovedAt != human.CreatedAt || human.UpdatedAt != human.CreatedAt {
+			t.Fatalf("compiled human memory = %#v", human)
+		}
+
+		listed := decodeFoundationSuccess[[]foundationMemory](
+			t, runFoundationCLI(t, executable, root, "memory", "list"), "memory list",
+		)
+		if len(listed) != 2 || listed[0].ID != human.ID || listed[1].ID != agent.ID {
+			t.Fatalf("compiled memory list = %#v", listed)
+		}
+		approvedOnly := decodeFoundationSuccess[[]foundationMemory](
+			t,
+			runFoundationCLI(t, executable, root, "memory", "list", "--approved-only", "--limit", "1"),
+			"memory list",
+		)
+		if !reflect.DeepEqual(approvedOnly, []foundationMemory{human}) {
+			t.Fatalf("compiled approved memory list = %#v, want %#v", approvedOnly, human)
+		}
+		shown := decodeFoundationSuccess[foundationMemory](
+			t, runFoundationCLI(t, executable, root, "memory", "show", "1"), "memory show",
+		)
+		if !reflect.DeepEqual(shown, agent) {
+			t.Fatalf("compiled shown memory = %#v, want %#v", shown, agent)
+		}
+		approved := decodeFoundationSuccess[foundationMemory](
+			t, runFoundationCLI(t, executable, root, "memory", "approve", "1"), "memory approve",
+		)
+		if approved.ApprovedAt == nil || !approved.HumanApproved || approved.CreatedBy != "agent" || approved.CreatedAt != agent.CreatedAt || approved.Text != agent.Text || approved.UpdatedAt != *approved.ApprovedAt {
+			t.Fatalf("compiled approved agent memory = %#v", approved)
+		}
+		repeated := decodeFoundationSuccess[foundationMemory](
+			t, runFoundationCLI(t, executable, root, "memory", "approve", "1"), "memory approve",
+		)
+		if !reflect.DeepEqual(repeated, approved) {
+			t.Fatalf("compiled repeated approval = %#v, want %#v", repeated, approved)
+		}
+
+		missing := runFoundationCLI(t, executable, root, "memory", "show", "999")
+		if missing.exit != 3 || missing.stdout != "" || !strings.Contains(missing.stderr, `"code":"memory_not_found"`) {
+			t.Fatalf("compiled missing memory show = %#v", missing)
+		}
+		notYetImplemented := runFoundationCLI(t, executable, root, "memory", "search", "compiled")
+		if notYetImplemented.exit != 2 || notYetImplemented.stdout != "" || !strings.Contains(notYetImplemented.stderr, `"code":"unknown_subcommand"`) {
+			t.Fatalf("compiled out-of-scope memory search = %#v", notYetImplemented)
+		}
+
+		database, err := sqlite.Open(context.Background(), discovery.DatabasePath(root))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertFoundationQueryInt(t, database, "SELECT COUNT(*) FROM memories", 2)
+		assertFoundationQueryInt(t, database, "SELECT COUNT(*) FROM memories_fts", 2)
+		for _, forbidden := range []string{"number", "pellet_id", "external_id", "group_id", "status", "priority", "workspace_id"} {
+			assertFoundationQueryInt(t, database, `
+				SELECT COUNT(*) FROM pragma_table_info('memories') WHERE name = ?`, 0, forbidden)
+		}
+		if err := database.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
 	t.Run("Git root initialization and immutable registration", func(t *testing.T) {
 		repository := filepath.Join(t.TempDir(), "foundation repository with spaces and 世界")
 		createFoundationRepository(t, repository)
@@ -800,6 +887,17 @@ type foundationNext struct {
 	Pellet          *foundationPellet `json:"pellet"`
 }
 
+type foundationMemory struct {
+	ID            int64   `json:"id"`
+	Project       string  `json:"project"`
+	Text          string  `json:"text"`
+	CreatedBy     string  `json:"created_by"`
+	HumanApproved bool    `json:"human_approved"`
+	CreatedAt     string  `json:"created_at"`
+	UpdatedAt     string  `json:"updated_at"`
+	ApprovedAt    *string `json:"approved_at"`
+}
+
 type foundationError struct {
 	SchemaVersion int `json:"schema_version"`
 	Error         struct {
@@ -1193,10 +1291,10 @@ func assertFoundationDatabaseState(t *testing.T, databasePath string, want found
 	}
 }
 
-func assertFoundationQueryInt(t *testing.T, database *sql.DB, query string, want int) {
+func assertFoundationQueryInt(t *testing.T, database *sql.DB, query string, want int, args ...any) {
 	t.Helper()
 	var got int
-	if err := database.QueryRow(query).Scan(&got); err != nil {
+	if err := database.QueryRow(query, args...).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
 	if got != want {
