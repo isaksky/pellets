@@ -16,6 +16,54 @@ type WebExactFilter struct {
 	Value *string
 }
 
+// WebPelletSortColumn names one sortable task-table value. These strings are
+// also the stable URL values used by the local inspector.
+type WebPelletSortColumn string
+
+const (
+	WebPelletSortReference  WebPelletSortColumn = "reference"
+	WebPelletSortTitle      WebPelletSortColumn = "title"
+	WebPelletSortGroup      WebPelletSortColumn = "group"
+	WebPelletSortStatus     WebPelletSortColumn = "status"
+	WebPelletSortPriority   WebPelletSortColumn = "priority"
+	WebPelletSortExternalID WebPelletSortColumn = "external_id"
+	WebPelletSortUpdated    WebPelletSortColumn = "updated"
+)
+
+// WebPelletSortDirection is deliberately limited to SQL-independent URL
+// values. The SQLite implementation maps these values to fixed ORDER BY
+// clauses and never interpolates request input.
+type WebPelletSortDirection string
+
+const (
+	WebPelletSortAscending  WebPelletSortDirection = "asc"
+	WebPelletSortDescending WebPelletSortDirection = "desc"
+)
+
+// WebPelletSort is the normalized ordering state for the task table.
+type WebPelletSort struct {
+	Column    WebPelletSortColumn
+	Direction WebPelletSortDirection
+}
+
+// NormalizeWebPelletSort gives absent or invalid components deterministic,
+// safe defaults while retaining a valid component supplied alongside one.
+func NormalizeWebPelletSort(sort WebPelletSort) WebPelletSort {
+	switch sort.Column {
+	case WebPelletSortReference, WebPelletSortTitle, WebPelletSortGroup,
+		WebPelletSortStatus, WebPelletSortPriority, WebPelletSortExternalID,
+		WebPelletSortUpdated:
+	default:
+		sort.Column = WebPelletSortPriority
+	}
+	switch sort.Direction {
+	case WebPelletSortAscending, WebPelletSortDescending:
+	default:
+		sort.Direction = WebPelletSortAscending
+	}
+	return sort
+}
+
 // WebPelletFilters are the composable, project-scoped filters exposed by the
 // local inspector. Empty Status means every lifecycle state.
 type WebPelletFilters struct {
@@ -23,6 +71,7 @@ type WebPelletFilters struct {
 	ExternalID *string
 	Group      WebExactFilter
 	Query      string
+	Sort       WebPelletSort
 }
 
 // WebProjectSummary combines one authoritative project with materialized

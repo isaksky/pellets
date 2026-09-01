@@ -175,6 +175,7 @@ type pageData struct {
 	Memories         []memoryView
 	Groups           []groupView
 	Filters          filterView
+	SortHeaders      []sortHeaderView
 	SelectedPellet   *pelletView
 	SelectedMemory   *memoryView
 	MoveTargets      []pelletView
@@ -235,6 +236,19 @@ type filterView struct {
 	Group      string
 	ExternalID string
 	Query      string
+	Sort       string
+	Direction  string
+}
+
+type sortHeaderView struct {
+	Key         string
+	Label       string
+	URL         string
+	ActionLabel string
+	AriaSort    string
+	Indicator   string
+	Active      bool
+	TitleColumn bool
 }
 
 type conflictView struct {
@@ -285,6 +299,8 @@ func (h *handler) servePage(response http.ResponseWriter, request *http.Request)
 	templateName := "page"
 	if request.Header.Get("HX-Request") == "true" {
 		switch request.Header.Get("HX-Target") {
+		case "tasks-area":
+			templateName = "tasks-area"
 		case "task-list":
 			templateName = "task-list"
 		case "memory-list":
@@ -376,11 +392,14 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 			return pageData{}, err
 		}
 		data.Filters = view
+		data.TasksURL = taskURL(code, nil, "", filters.Sort)
+		data.CurrentURL = taskURL(code, request.URL.Query(), selectedReferenceText, filters.Sort)
+		data.SortHeaders = makeSortHeaderViews(code, request.URL.Query(), selectedReferenceText, filters.Sort)
 		pellets, err := h.application.Pellets(request.Context(), selected.Project, filters)
 		if err != nil {
 			return pageData{}, err
 		}
-		data.Pellets = makePelletViews(pellets, selected.Project.Code, request.URL.Query(), selectedReferenceText, data.CurrentWorkspace, data.CurrentProject)
+		data.Pellets = makePelletViews(pellets, selected.Project.Code, request.URL.Query(), selectedReferenceText, filters.Sort, data.CurrentWorkspace, data.CurrentProject)
 		groups, err := h.application.Groups(request.Context(), selected.Project)
 		if err != nil {
 			return pageData{}, err
@@ -391,16 +410,16 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 			if err != nil {
 				return pageData{}, err
 			}
-			views := makePelletViews([]storage.Pellet{pellet}, code, request.URL.Query(), selectedReferenceText, data.CurrentWorkspace, data.CurrentProject)
+			views := makePelletViews([]storage.Pellet{pellet}, code, request.URL.Query(), selectedReferenceText, filters.Sort, data.CurrentWorkspace, data.CurrentProject)
 			data.SelectedPellet = &views[0]
-			data.CloseURL = taskURL(code, request.URL.Query(), "")
+			data.CloseURL = taskURL(code, request.URL.Query(), "", filters.Sort)
 			active, err := h.application.Pellets(request.Context(), selected.Project, storage.WebPelletFilters{})
 			if err != nil {
 				return pageData{}, err
 			}
 			for _, candidate := range active {
 				if candidate.Reference != selectedReference && (candidate.Status == domain.PelletOpen || candidate.Status == domain.PelletInProgress) {
-					data.MoveTargets = append(data.MoveTargets, makePelletViews([]storage.Pellet{candidate}, code, nil, "", data.CurrentWorkspace, data.CurrentProject)[0])
+					data.MoveTargets = append(data.MoveTargets, makePelletViews([]storage.Pellet{candidate}, code, nil, "", filters.Sort, data.CurrentWorkspace, data.CurrentProject)[0])
 				}
 			}
 		}
@@ -496,12 +515,12 @@ func (h *handler) projectViews(request *http.Request, projects []storage.WebProj
 	return views, nil
 }
 
-func makePelletViews(pellets []storage.Pellet, code string, query url.Values, selected string, current *storage.Workspace, currentProject bool) []pelletView {
+func makePelletViews(pellets []storage.Pellet, code string, query url.Values, selected string, sort storage.WebPelletSort, current *storage.Workspace, currentProject bool) []pelletView {
 	views := make([]pelletView, 0, len(pellets))
 	for _, pellet := range pellets {
 		view := pelletView{
 			Pellet: pellet, Version: storage.PelletVersion(pellet),
-			URL: taskURL(code, query, pellet.Reference.String()), Selected: pellet.Reference.String() == selected,
+			URL: taskURL(code, query, pellet.Reference.String(), sort), Selected: pellet.Reference.String() == selected,
 			Group: textOrDash(pellet.Group), ExternalID: textOrDash(pellet.ExternalID), Priority: "—",
 			CanLifecycle: currentProject,
 		}
@@ -565,6 +584,12 @@ func parseFilters(values url.Values) (storage.WebPelletFilters, filterView, erro
 		filters.Group = storage.WebExactFilter{Set: true, Value: group}
 	}
 	filters.Query = view.Query
+	filters.Sort = storage.NormalizeWebPelletSort(storage.WebPelletSort{
+		Column:    storage.WebPelletSortColumn(values.Get("sort")),
+		Direction: storage.WebPelletSortDirection(values.Get("direction")),
+	})
+	view.Sort = string(filters.Sort.Column)
+	view.Direction = string(filters.Sort.Direction)
 	return filters, view, nil
 }
 
@@ -590,13 +615,54 @@ func decodeGroup(encoded string) (*string, error) {
 	return &value, nil
 }
 
-func taskURL(code string, values url.Values, reference string) string {
+func makeSortHeaderViews(code string, values url.Values, reference string, requested storage.WebPelletSort) []sortHeaderView {
+	active := storage.NormalizeWebPelletSort(requested)
+	columns := []struct {
+		column storage.WebPelletSortColumn
+		label  string
+	}{
+		{storage.WebPelletSortReference, "Reference"},
+		{storage.WebPelletSortTitle, "Title"},
+		{storage.WebPelletSortGroup, "Group"},
+		{storage.WebPelletSortStatus, "Status"},
+		{storage.WebPelletSortPriority, "Priority"},
+		{storage.WebPelletSortExternalID, "External ID"},
+		{storage.WebPelletSortUpdated, "Updated"},
+	}
+	views := make([]sortHeaderView, 0, len(columns))
+	for _, definition := range columns {
+		direction := storage.WebPelletSortAscending
+		isActive := definition.column == active.Column
+		ariaSort, indicator := "", ""
+		if isActive {
+			if active.Direction == storage.WebPelletSortAscending {
+				direction, ariaSort, indicator = storage.WebPelletSortDescending, "ascending", "↑"
+			} else {
+				direction, ariaSort, indicator = storage.WebPelletSortAscending, "descending", "↓"
+			}
+		}
+		next := storage.WebPelletSort{Column: definition.column, Direction: direction}
+		views = append(views, sortHeaderView{
+			Key: string(definition.column), Label: definition.label, URL: taskURL(code, values, reference, next),
+			ActionLabel: "Sort by " + definition.label + " " + sortDirectionLabel(direction),
+			AriaSort:    ariaSort, Indicator: indicator, Active: isActive,
+			TitleColumn: definition.column == storage.WebPelletSortTitle,
+		})
+	}
+	return views
+}
+
+func sortDirectionLabel(direction storage.WebPelletSortDirection) string {
+	if direction == storage.WebPelletSortDescending {
+		return "descending"
+	}
+	return "ascending"
+}
+
+func taskURL(code string, values url.Values, reference string, requested storage.WebPelletSort) string {
 	path := "/projects/" + url.PathEscape(code) + "/tasks"
 	if reference != "" {
 		path += "/" + url.PathEscape(reference)
-	}
-	if len(values) == 0 {
-		return path
 	}
 	copy := url.Values{}
 	for _, key := range []string{"status", "group", "external_id", "q"} {
@@ -604,6 +670,9 @@ func taskURL(code string, values url.Values, reference string) string {
 			copy.Set(key, value)
 		}
 	}
+	sort := storage.NormalizeWebPelletSort(requested)
+	copy.Set("sort", string(sort.Column))
+	copy.Set("direction", string(sort.Direction))
 	if query := copy.Encode(); query != "" {
 		path += "?" + query
 	}

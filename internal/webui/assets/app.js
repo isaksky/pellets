@@ -73,8 +73,11 @@
 
   var inspectorOpener = null;
   var inspectorOpenerHref = "";
+  var sortOpenerID = "";
   var tableScrollLeft = 0;
   document.addEventListener("click", function (event) {
+    var sorter = event.target.closest(".task-sort");
+    if (sorter) sortOpenerID = sorter.id;
     var opener = event.target.closest(".row-link, .memory-card > a");
     if (!opener) return;
     inspectorOpener = opener;
@@ -161,7 +164,14 @@
     configureInspector(scope);
   }
   initialize(document);
-  document.body.addEventListener("htmx:afterSwap", function (event) { initialize(event.detail.target || document); });
+  document.body.addEventListener("htmx:afterSwap", function (event) {
+    initialize(event.detail.target || document);
+    if (sortOpenerID) {
+      var sorter = document.getElementById(sortOpenerID);
+      if (sorter) sorter.focus({preventScroll: true});
+      sortOpenerID = "";
+    }
+  });
   document.body.addEventListener("htmx:afterSwap", function () {
     if (document.querySelector("[data-inspector], .error-state") || (!inspectorOpener && !inspectorOpenerHref)) return;
     var table = document.querySelector(".table-scroll");

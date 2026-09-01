@@ -150,6 +150,10 @@ input:hover, textarea:hover, select:hover { border-color: color-mix(in srgb, var
 .table-scroll { width: 100%; overflow: auto; }
 table { width: 100%; border-collapse: collapse; font-size: .79rem; }
 th { position: sticky; top: 0; z-index: 1; padding: .58rem .7rem; background: var(--surface-muted); border-bottom: 1px solid var(--border); color: var(--text-muted); text-align: left; font-size: .67rem; text-transform: uppercase; letter-spacing: .055em; white-space: nowrap; }
+.task-sort { display: flex; align-items: center; gap: .34rem; width: 100%; color: inherit; }
+.task-sort:hover, .task-sort.active { color: var(--accent-strong); }
+.task-sort:focus-visible { border-radius: 3px; }
+.sort-indicator { font-size: .82rem; line-height: 1; }
 td { padding: .64rem .7rem; border-bottom: 1px solid var(--border); vertical-align: middle; color: var(--text-muted); white-space: nowrap; }
 tbody tr:last-child td { border-bottom: 0; }
 .task-row { position: relative; cursor: pointer; }

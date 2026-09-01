@@ -283,7 +283,7 @@ func (h *handler) renderMutationError(response http.ResponseWriter, err error, d
 	if errors.As(err, &conflict) {
 		data := pageData{CSRF: h.config.CSRF, Conflict: &conflictView{Draft: draft}, StatusCode: status}
 		if conflict.Pellet != nil {
-			views := makePelletViews([]storage.Pellet{*conflict.Pellet}, conflict.Pellet.Reference.ProjectCode, nil, conflict.Pellet.Reference.String(), nil, false)
+			views := makePelletViews([]storage.Pellet{*conflict.Pellet}, conflict.Pellet.Reference.ProjectCode, nil, conflict.Pellet.Reference.String(), storage.WebPelletSort{}, nil, false)
 			data.SelectedPellet = &views[0]
 			data.Conflict.Kind = "pellet"
 			data.Conflict.Current = fmt.Sprintf("%s · %s · updated %s", conflict.Pellet.Reference, conflict.Pellet.Title, formatTime(conflict.Pellet.UpdatedAt))

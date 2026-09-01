@@ -87,7 +87,7 @@
   <div class="rail-workspaces">{{range .Workspaces}}<div title="{{.GitDir}}"><span class="workspace-dot {{if .Current}}current{{end}}"></span><code>{{.Root}}</code>{{if .Pellet}}<span>{{.Pellet}}</span>{{else}}<span class="quiet">idle</span>{{end}}</div>{{end}}</div>
 </section>{{end}}
 
-{{define "tasks-area"}}<section class="area-content" aria-labelledby="tasks-title">
+{{define "tasks-area"}}<section class="area-content" id="tasks-area" aria-labelledby="tasks-title">
   <div class="section-heading"><div><span class="eyebrow">Queue</span><h2 id="tasks-title">Tasks</h2></div>
     <details class="create-popover"><summary class="primary-button">New task</summary>
       <form hx-post="/projects/{{.Project.Code}}/pellets" hx-target="#inspector-host" hx-swap="innerHTML" class="stack-form">
@@ -101,6 +101,7 @@
     </details>
   </div>
   <form class="filters" action="{{.TasksURL}}" method="get" hx-get="{{.TasksURL}}" hx-target="#task-list" hx-push-url="true" hx-trigger="change from:select, input changed delay:300ms from:input">
+    <input type="hidden" name="sort" value="{{.Filters.Sort}}"><input type="hidden" name="direction" value="{{.Filters.Direction}}">
     <label>Search <input id="search" name="q" type="search" value="{{.Filters.Query}}" placeholder="Title, description, external ID" autocomplete="off"></label>
     <label>Status <select name="status"><option value="" {{if eq .Filters.Status ""}}selected{{end}}>All states</option><option value="open" {{if eq .Filters.Status "open"}}selected{{end}}>Open</option><option value="in_progress" {{if eq .Filters.Status "in_progress"}}selected{{end}}>In progress</option><option value="maybe_later" {{if eq .Filters.Status "maybe_later"}}selected{{end}}>Maybe later</option><option value="closed" {{if eq .Filters.Status "closed"}}selected{{end}}>Closed</option></select></label>
     <label>Group <select name="group">{{range .Groups}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
@@ -111,7 +112,7 @@
 </section>{{end}}
 
 {{define "task-list"}}<div id="task-list" class="table-frame live-fragment" data-live-fragment data-fragment-kind="tasks" hx-get="{{.CurrentURL}}" hx-trigger="pellets:refresh from:body, every 35s" hx-target="this" hx-swap="outerHTML">
-  {{if .Pellets}}<div class="table-scroll"><table><thead><tr><th>Reference</th><th class="task-title-column">Title</th><th>Group</th><th>Status</th><th>Priority</th><th>External ID</th><th>Updated</th></tr></thead><tbody>
+  {{if .Pellets}}<div class="table-scroll"><table><thead><tr>{{range .SortHeaders}}<th scope="col"{{if .TitleColumn}} class="task-title-column"{{end}}{{if .Active}} aria-sort="{{.AriaSort}}"{{end}}><a id="task-sort-{{.Key}}" class="task-sort {{if .Active}}active{{end}}" href="{{.URL}}" hx-get="{{.URL}}" hx-target="#tasks-area" hx-swap="outerHTML" hx-push-url="true" aria-label="{{.ActionLabel}}"><span>{{.Label}}</span>{{if .Indicator}}<span class="sort-indicator" aria-hidden="true">{{.Indicator}}</span>{{end}}</a></th>{{end}}</tr></thead><tbody>
   {{range .Pellets}}<tr class="task-row status-{{.Pellet.Status}} {{if .Selected}}selected{{end}}" data-row-id="{{.Pellet.Reference}}" data-row-version="{{.Version}}">
     <td><a class="row-link" href="{{.URL}}" hx-get="{{.URL}}" hx-target="#inspector-host" hx-swap="innerHTML" hx-push-url="true"><code>{{.Pellet.Reference}}</code></a></td>
     <td class="task-title-column"><span class="task-title">{{.Pellet.Title}}</span>{{if .Owner}}<small>{{.Owner}}</small>{{end}}</td>

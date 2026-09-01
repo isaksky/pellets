@@ -26,6 +26,7 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 		`:root[data-theme="dark"]`, `@media (max-width: 760px)`, `@media (prefers-reduced-motion: reduce)`,
 		`:focus-visible`, `.state-changed`, `.status-in_progress`, `.conflict-state`, `.error-state`, `.drawer-scrim[hidden]`, `.inspector-host.has-inspector`, `.inspector-host:has(.error-state)`,
 		`.task-row { position: relative; cursor: pointer; }`, `.task-row:has(.row-link:focus-visible)`, `.row-link::after { content: ""; position: absolute; inset: 0; }`,
+		`.task-sort { display: flex;`, `.task-sort:hover, .task-sort.active`, `.sort-indicator`,
 	} {
 		if !strings.Contains(css, required) {
 			t.Fatalf("CSS missing %q", required)
@@ -37,6 +38,7 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 		`scope.matches("[data-inspector]")`, `document.querySelector("[data-inspector], .error-state")`, `classList.toggle("has-inspector", hasInspector)`,
 		`closest("form.dirty-track")`, `event.detail.elt === region`,
 		`document.querySelector("#task-list a, #memory-list a, #main")`, `inspectorOpener = null`,
+		`sortOpenerID`, `document.getElementById(sortOpenerID)`, `sorter.focus({preventScroll: true})`,
 		`beforeunload`, `Discard unsaved inspector changes?`, `event.key === "Escape"`,
 		`event.key !== "Tab"`, `drawerFocusable`, `closeDrawer(true)`, `aria-modal`, `prefers-color-scheme`, `htmx:historyRestore`,
 	} {

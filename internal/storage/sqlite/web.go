@@ -196,7 +196,7 @@ func (reader *WebReader) ListWebPellets(ctx context.Context, project storage.Pro
 		query += " AND p.rowid IN (SELECT rowid FROM pellets_fts WHERE pellets_fts MATCH ?)"
 		arguments = append(arguments, escapeFTS5Query(filters.Query))
 	}
-	query += pelletListOrder(storage.PelletListOptions{All: true})
+	query += webPelletOrder(filters.Sort)
 
 	rows, err := reader.db.QueryContext(ctx, query, arguments...)
 	if err != nil {
@@ -218,6 +218,43 @@ func (reader *WebReader) ListWebPellets(ctx context.Context, project storage.Pro
 		return nil, pelletStorageError("iterate web pellets", err)
 	}
 	return pellets, nil
+}
+
+func webPelletOrder(requested storage.WebPelletSort) string {
+	sort := storage.NormalizeWebPelletSort(requested)
+	direction := " ASC"
+	if sort.Direction == storage.WebPelletSortDescending {
+		direction = " DESC"
+	}
+	stable := ", p.number ASC"
+	switch sort.Column {
+	case storage.WebPelletSortReference:
+		return " ORDER BY p.number" + direction
+	case storage.WebPelletSortTitle:
+		return " ORDER BY lower(p.title) COLLATE BINARY" + direction +
+			", p.title COLLATE BINARY" + direction + stable
+	case storage.WebPelletSortGroup:
+		return " ORDER BY p.group_id IS NULL, lower(p.group_id) COLLATE BINARY" + direction +
+			", p.group_id COLLATE BINARY" + direction + stable
+	case storage.WebPelletSortStatus:
+		return ` ORDER BY CASE p.status
+			WHEN 'in_progress' THEN 0
+			WHEN 'open' THEN 1
+			WHEN 'maybe_later' THEN 2
+			ELSE 3 END` + direction + stable
+	case storage.WebPelletSortExternalID:
+		return " ORDER BY p.external_id IS NULL, lower(p.external_id) COLLATE BINARY" + direction +
+			", p.external_id COLLATE BINARY" + direction + stable
+	case storage.WebPelletSortUpdated:
+		return " ORDER BY p.updated_at" + direction + stable
+	default: // Normalization makes this the priority column.
+		return ` ORDER BY p.priority IS NULL,
+			p.priority` + direction + `,
+			CASE WHEN p.priority IS NULL THEN
+				CASE WHEN p.status = 'maybe_later' THEN 0 ELSE 1 END
+			END,
+			CASE WHEN p.priority IS NULL THEN p.updated_at END DESC` + stable
+	}
 }
 
 func (reader *WebReader) ReadWebPellet(ctx context.Context, project storage.Project, reference domain.PelletReference) (storage.Pellet, error) {

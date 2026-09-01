@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -136,6 +137,111 @@ func TestHandlerRendersAuthoritativeResponsiveProjectViewsAndEscapesHTML(t *test
 	response = performRequest(fixture.handler, http.MethodGet, "/projects/project1/memories/"+strconv.FormatInt(memory.ID, 10), "", nil)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Memory inspector") || !strings.Contains(response.Body.String(), `memory-card selected`) {
 		t.Fatalf("memory deep-link response = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestHandlerTaskSortHeadersPreserveFiltersDeepLinksAndDirection(t *testing.T) {
+	t.Parallel()
+	fixture := newHandlerFixture(t, 1)
+	group, externalID := "Sort/Group", "Issue:Sort"
+	titles := []string{"Zulu needle", "Alpha needle", "Middle needle"}
+	created := make([]storage.Pellet, 0, len(titles))
+	for _, title := range titles {
+		pellet, err := fixture.application.CreatePellet(context.Background(), fixture.projects[0], storage.NewPellet{
+			Title: title, Group: &group, ExternalID: &externalID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		created = append(created, pellet)
+	}
+	filters := url.Values{
+		"status": {"open"}, "group": {encodeGroup(&group)}, "external_id": {externalID}, "q": {"needle"},
+		"sort": {"title"}, "direction": {"asc"},
+	}
+	path := "/projects/project1/tasks/" + created[0].Reference.String() + "?" + filters.Encode()
+	response := performRequest(fixture.handler, http.MethodGet, path, "", nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("sorted fragment response = %d %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	assertTextOrder(t, body, "Alpha needle", "Middle needle", "Zulu needle")
+	if !strings.Contains(body, "Task inspector") || !strings.Contains(body, `task-row status-open selected`) {
+		t.Fatalf("sorted selected-task deep link lost its inspector or row selection: %s", body)
+	}
+	if strings.Count(body, `aria-sort="ascending"`) != 1 || !strings.Contains(body, `aria-label="Sort by Title descending"`) {
+		t.Fatalf("active ascending title semantics missing: %s", body)
+	}
+	if strings.Count(body, `scope="col"`) != 7 || strings.Count(body, `class="task-sort `) != 7 {
+		t.Fatalf("sortable header controls = scopes %d links %d, want 7 each", strings.Count(body, `scope="col"`), strings.Count(body, `class="task-sort `))
+	}
+	for _, required := range []string{
+		`name="sort" value="title"`, `name="direction" value="asc"`,
+		`class="sort-indicator" aria-hidden="true">↑</span>`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("sorted fragment missing %q: %s", required, body)
+		}
+	}
+	currentURL := taskURL("project1", filters, created[0].Reference.String(), storage.WebPelletSort{Column: storage.WebPelletSortTitle, Direction: storage.WebPelletSortAscending})
+	if !strings.Contains(body, `data-fragment-kind="tasks" hx-get="`+html.EscapeString(currentURL)+`"`) {
+		t.Fatalf("live task fragment did not retain normalized sort/filter/deep-link URL: %s", body)
+	}
+	clearURL := taskURL("project1", nil, "", storage.WebPelletSort{Column: storage.WebPelletSortTitle, Direction: storage.WebPelletSortAscending})
+	if !strings.Contains(body, `class="quiet-button" href="`+html.EscapeString(clearURL)+`"`) {
+		t.Fatalf("clear-filter link did not retain sort state: %s", body)
+	}
+	titleDescending := taskURL("project1", filters, created[0].Reference.String(), storage.WebPelletSort{Column: storage.WebPelletSortTitle, Direction: storage.WebPelletSortDescending})
+	groupAscending := taskURL("project1", filters, created[0].Reference.String(), storage.WebPelletSort{Column: storage.WebPelletSortGroup, Direction: storage.WebPelletSortAscending})
+	for _, preserved := range []string{titleDescending, groupAscending} {
+		escaped := html.EscapeString(preserved)
+		if !strings.Contains(body, `href="`+escaped+`" hx-get="`+escaped+`"`) {
+			t.Fatalf("sort link did not preserve selected task and filters: want %q in %s", escaped, body)
+		}
+	}
+	for _, pellet := range created {
+		rowURL := taskURL("project1", filters, pellet.Reference.String(), storage.WebPelletSort{Column: storage.WebPelletSortTitle, Direction: storage.WebPelletSortAscending})
+		if !strings.Contains(body, `href="`+html.EscapeString(rowURL)+`"`) {
+			t.Fatalf("row link did not preserve sort/filter state: %s", body)
+		}
+	}
+
+	filters.Set("direction", "desc")
+	response = performRequest(fixture.handler, http.MethodGet, "/projects/project1/tasks?"+filters.Encode(), "", http.Header{
+		"Hx-Request": {"true"}, "Hx-Target": {"tasks-area"},
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("descending response = %d %s", response.Code, response.Body.String())
+	}
+	body = response.Body.String()
+	assertTextOrder(t, body, "Zulu needle", "Middle needle", "Alpha needle")
+	if strings.Contains(body, "<html") || !strings.Contains(body, `id="tasks-area"`) ||
+		strings.Count(body, `aria-sort="descending"`) != 1 || !strings.Contains(body, `aria-label="Sort by Title ascending"`) ||
+		!strings.Contains(body, `name="sort" value="title"`) || !strings.Contains(body, `name="direction" value="desc"`) {
+		t.Fatalf("active descending title semantics missing: %s", body)
+	}
+
+	response = performRequest(fixture.handler, http.MethodGet, "/projects/project1/tasks?sort=not-a-column&direction=sideways", "", nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("invalid sort response = %d %s", response.Code, response.Body.String())
+	}
+	body = response.Body.String()
+	assertTextOrder(t, body, "Zulu needle", "Alpha needle", "Middle needle")
+	if strings.Count(body, `aria-sort="ascending"`) != 1 || !strings.Contains(body, `aria-label="Sort by Priority descending"`) ||
+		!strings.Contains(body, `name="sort" value="priority"`) || !strings.Contains(body, `name="direction" value="asc"`) {
+		t.Fatalf("invalid sort did not fall back to normalized priority ordering: %s", body)
+	}
+}
+
+func assertTextOrder(t *testing.T, text string, values ...string) {
+	t.Helper()
+	previous := -1
+	for _, value := range values {
+		index := strings.Index(text, value)
+		if index < 0 || index <= previous {
+			t.Fatalf("%q does not appear in order %v", value, values)
+		}
+		previous = index
 	}
 }
 

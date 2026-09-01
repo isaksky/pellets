@@ -107,6 +107,96 @@ func TestWebReaderIsQueryOnlyMaterializesRowsAndComposesFilters(t *testing.T) {
 	}
 }
 
+func TestWebReaderSortsEveryTaskColumnWithEmptyValuesAndStableTies(t *testing.T) {
+	t.Parallel()
+	fixture := newPelletRepositoryFixture(t)
+	writer, err := OpenWebWriter(context.Background(), fixture.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alpha, beta, zulu := "alpha", "beta", "Zulu"
+	alphaExternal, betaExternal, capitalAlphaExternal := "alpha", "Beta", "Alpha"
+	inputs := []storage.NewPellet{
+		{Title: "same", Group: &zulu},
+		{Title: "same", ExternalID: &betaExternal},
+		{Title: "alpha", Group: &alpha, ExternalID: &alphaExternal, Status: domain.PelletMaybeLater},
+		{Title: "Bravo", Group: &alpha, Status: domain.PelletMaybeLater},
+		{Title: "bravo", Group: &beta, ExternalID: &capitalAlphaExternal},
+	}
+	created := make([]storage.Pellet, 0, len(inputs))
+	for _, input := range inputs {
+		pellet, createErr := writer.CreateWebPellet(context.Background(), fixture.main.Project, input)
+		if createErr != nil {
+			writer.Close()
+			t.Fatal(createErr)
+		}
+		created = append(created, pellet)
+	}
+	updates := []struct {
+		query string
+		args  []any
+	}{
+		{`UPDATE pellets SET status = 'in_progress', workspace_id = ?, updated_at = julianday('2030-01-05T00:00:00Z') WHERE project_id = ? AND number = ?`, []any{fixture.main.Workspace.ID, fixture.main.Project.ID, created[0].Reference.Number}},
+		{`UPDATE pellets SET updated_at = julianday('2030-01-04T00:00:00Z') WHERE project_id = ? AND number = ?`, []any{fixture.main.Project.ID, created[1].Reference.Number}},
+		{`UPDATE pellets SET updated_at = julianday('2030-01-03T00:00:00Z') WHERE project_id = ? AND number = ?`, []any{fixture.main.Project.ID, created[2].Reference.Number}},
+		{`UPDATE pellets SET updated_at = julianday('2030-01-02T00:00:00Z') WHERE project_id = ? AND number = ?`, []any{fixture.main.Project.ID, created[3].Reference.Number}},
+		{`UPDATE pellets SET status = 'closed', priority = NULL, completed_at = julianday('2030-01-01T00:00:00Z'), updated_at = julianday('2030-01-01T00:00:00Z') WHERE project_id = ? AND number = ?`, []any{fixture.main.Project.ID, created[4].Reference.Number}},
+	}
+	for _, update := range updates {
+		if _, err := writer.db.Exec(update.query, update.args...); err != nil {
+			writer.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reader, err := OpenWebReader(context.Background(), fixture.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	tests := []struct {
+		name      string
+		sort      storage.WebPelletSort
+		wantOrder []int64
+	}{
+		{"reference ascending", storage.WebPelletSort{Column: storage.WebPelletSortReference, Direction: storage.WebPelletSortAscending}, []int64{1, 2, 3, 4, 5}},
+		{"reference descending", storage.WebPelletSort{Column: storage.WebPelletSortReference, Direction: storage.WebPelletSortDescending}, []int64{5, 4, 3, 2, 1}},
+		{"title ascending", storage.WebPelletSort{Column: storage.WebPelletSortTitle, Direction: storage.WebPelletSortAscending}, []int64{3, 4, 5, 1, 2}},
+		{"title descending with stable tie", storage.WebPelletSort{Column: storage.WebPelletSortTitle, Direction: storage.WebPelletSortDescending}, []int64{1, 2, 5, 4, 3}},
+		{"group ascending empty last", storage.WebPelletSort{Column: storage.WebPelletSortGroup, Direction: storage.WebPelletSortAscending}, []int64{3, 4, 5, 1, 2}},
+		{"group descending empty last", storage.WebPelletSort{Column: storage.WebPelletSortGroup, Direction: storage.WebPelletSortDescending}, []int64{1, 5, 3, 4, 2}},
+		{"status ascending", storage.WebPelletSort{Column: storage.WebPelletSortStatus, Direction: storage.WebPelletSortAscending}, []int64{1, 2, 3, 4, 5}},
+		{"status descending", storage.WebPelletSort{Column: storage.WebPelletSortStatus, Direction: storage.WebPelletSortDescending}, []int64{5, 3, 4, 2, 1}},
+		{"priority ascending empty last", storage.WebPelletSort{Column: storage.WebPelletSortPriority, Direction: storage.WebPelletSortAscending}, []int64{1, 2, 3, 4, 5}},
+		{"priority descending empty last", storage.WebPelletSort{Column: storage.WebPelletSortPriority, Direction: storage.WebPelletSortDescending}, []int64{2, 1, 3, 4, 5}},
+		{"external ID ascending empty last", storage.WebPelletSort{Column: storage.WebPelletSortExternalID, Direction: storage.WebPelletSortAscending}, []int64{5, 3, 2, 1, 4}},
+		{"external ID descending empty last", storage.WebPelletSort{Column: storage.WebPelletSortExternalID, Direction: storage.WebPelletSortDescending}, []int64{2, 3, 5, 1, 4}},
+		{"updated ascending", storage.WebPelletSort{Column: storage.WebPelletSortUpdated, Direction: storage.WebPelletSortAscending}, []int64{5, 4, 3, 2, 1}},
+		{"updated descending", storage.WebPelletSort{Column: storage.WebPelletSortUpdated, Direction: storage.WebPelletSortDescending}, []int64{1, 2, 3, 4, 5}},
+		{"invalid pair uses safe defaults", storage.WebPelletSort{Column: "unknown", Direction: "sideways"}, []int64{1, 2, 3, 4, 5}},
+		{"invalid direction retains valid column", storage.WebPelletSort{Column: storage.WebPelletSortTitle, Direction: "sideways"}, []int64{3, 4, 5, 1, 2}},
+		{"invalid column retains valid direction", storage.WebPelletSort{Column: "unknown", Direction: storage.WebPelletSortDescending}, []int64{2, 1, 3, 4, 5}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pellets, err := reader.ListWebPellets(context.Background(), fixture.main.Project, storage.WebPelletFilters{Sort: test.sort})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make([]int64, 0, len(pellets))
+			for _, pellet := range pellets {
+				got = append(got, pellet.Reference.Number)
+			}
+			if !reflect.DeepEqual(got, test.wantOrder) {
+				t.Fatalf("order = %v, want %v", got, test.wantOrder)
+			}
+		})
+	}
+}
+
 func TestDataVersionMonitorUsesOnePinnedConnectionAndObservesBothWriterKinds(t *testing.T) {
 	t.Parallel()
 	fixture := newPelletRepositoryFixture(t)
