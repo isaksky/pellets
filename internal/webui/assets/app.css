@@ -139,6 +139,7 @@ h3 { font-size: .86rem; letter-spacing: .01em; }
 label { display: grid; gap: .32rem; color: var(--text-muted); font-size: .76rem; font-weight: 620; }
 input, textarea, select { width: 100%; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface); padding: .52rem .62rem; font-weight: 450; }
 textarea { resize: vertical; min-height: 3.2rem; }
+.task-description-editor { height: clamp(12rem, 32vh, 24rem); }
 input:hover, textarea:hover, select:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border-strong)); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
 .form-help { color: var(--text-muted); font-size: .76rem; margin: -.25rem 0 0; }

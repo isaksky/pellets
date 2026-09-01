@@ -115,6 +115,23 @@ func TestTaskRowPointerTargetKeepsOneKeyboardAccessibleNativeLink(t *testing.T) 
 	}
 }
 
+func TestTaskDescriptionEditorUsesBoundedViewportResponsiveHeight(t *testing.T) {
+	t.Parallel()
+	css := embeddedText(t, "assets/app.css")
+	templates := embeddedText(t, "templates/main.html")
+
+	const taskEditor = `<textarea class="task-description-editor" name="description" rows="9">`
+	if !strings.Contains(templates, taskEditor) || strings.Count(templates, `task-description-editor`) != 1 {
+		t.Fatal("only the task inspector description textarea must opt into responsive sizing")
+	}
+	if !strings.Contains(css, `.task-description-editor { height: clamp(12rem, 32vh, 24rem); }`) {
+		t.Fatal("task inspector description height must respond to the viewport within useful bounds")
+	}
+	if !strings.Contains(css, `textarea { resize: vertical; min-height: 3.2rem; }`) {
+		t.Fatal("task description editor must retain vertical user resizing")
+	}
+}
+
 func TestThemeTextAndPrimaryControlsMeetWCAGAAContrast(t *testing.T) {
 	t.Parallel()
 	for _, pair := range []struct {

@@ -150,7 +150,7 @@
     <form hx-post="/projects/{{.SelectedPellet.Pellet.Reference.ProjectCode}}/pellets/{{.SelectedPellet.Pellet.Reference}}/edit" hx-target="#inspector-host" hx-swap="innerHTML" class="stack-form dirty-track">
       <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}">
       <label>Title <input name="title" value="{{.SelectedPellet.Pellet.Title}}" required></label>
-      <label>Description <textarea name="description" rows="9">{{.SelectedPellet.Pellet.Description}}</textarea></label>
+      <label>Description <textarea class="task-description-editor" name="description" rows="9">{{.SelectedPellet.Pellet.Description}}</textarea></label>
       <div class="form-grid"><label>External ID <input name="external_id" value="{{text .SelectedPellet.Pellet.ExternalID}}"></label><label>Group <input name="group" value="{{text .SelectedPellet.Pellet.Group}}"></label></div>
       <button class="primary-button" type="submit">Save changes</button>
     </form>
