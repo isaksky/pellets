@@ -25,6 +25,7 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 	for _, required := range []string{
 		`:root[data-theme="dark"]`, `@media (max-width: 760px)`, `@media (prefers-reduced-motion: reduce)`,
 		`:focus-visible`, `.state-changed`, `.status-in_progress`, `.conflict-state`, `.error-state`, `.drawer-scrim[hidden]`, `.inspector-host.has-inspector`, `.inspector-host:has(.error-state)`,
+		`.task-row { position: relative; cursor: pointer; }`, `.task-row:has(.row-link:focus-visible)`, `.row-link::after { content: ""; position: absolute; inset: 0; }`,
 	} {
 		if !strings.Contains(css, required) {
 			t.Fatalf("CSS missing %q", required)
@@ -78,6 +79,39 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 	}
 	if len(htmx) < 45_000 || !strings.Contains(htmx, "var htmx=") || !strings.Contains(license, "Zero-Clause BSD") {
 		t.Fatal("pinned HTMX distribution or license is incomplete")
+	}
+}
+
+func TestTaskRowPointerTargetKeepsOneKeyboardAccessibleNativeLink(t *testing.T) {
+	t.Parallel()
+	css := embeddedText(t, "assets/app.css")
+	templates := embeddedText(t, "templates/main.html")
+
+	rowStart := strings.Index(templates, `<tr class="task-row`)
+	if rowStart < 0 {
+		t.Fatal("task row markup is missing")
+	}
+	rowEnd := strings.Index(templates[rowStart:], ">")
+	if rowEnd < 0 {
+		t.Fatal("task row start tag is incomplete")
+	}
+	rowTag := templates[rowStart : rowStart+rowEnd+1]
+	for _, forbidden := range []string{` role=`, ` tabindex=`, ` hx-get=`, ` onclick=`} {
+		if strings.Contains(rowTag, forbidden) {
+			t.Fatalf("task row must not become a duplicate interactive control: %s", rowTag)
+		}
+	}
+	if strings.Count(templates, `class="row-link"`) != 1 || !strings.Contains(templates, `<a class="row-link" href="{{.URL}}" hx-get="{{.URL}}" hx-target="#inspector-host" hx-swap="innerHTML" hx-push-url="true">`) {
+		t.Fatal("each rendered task row must retain one native, keyboard-accessible inspector link with the complete HTMX and history contract")
+	}
+	for _, required := range []string{
+		`.task-row { position: relative; cursor: pointer; }`,
+		`.row-link::after { content: ""; position: absolute; inset: 0; }`,
+		`.task-row:has(.row-link:focus-visible)`,
+	} {
+		if !strings.Contains(css, required) {
+			t.Fatalf("task row pointer/focus contract missing %q", required)
+		}
 	}
 }
 
