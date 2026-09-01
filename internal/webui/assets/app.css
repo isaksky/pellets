@@ -181,7 +181,7 @@ tbody tr:hover, tbody tr.selected { background: color-mix(in srgb, var(--accent-
 .inspector { position: sticky; top: 0; height: 100vh; overflow: hidden; background: var(--surface-raised); border-left: 1px solid var(--border); box-shadow: -8px 0 28px rgb(20 24 34 / 4%); }
 .inspector > header { min-height: 76px; display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .8rem 1rem; border-bottom: 1px solid var(--border); }
 .inspector-scroll { height: calc(100vh - 76px); overflow: auto; overscroll-behavior: contain; padding: 1rem; }
-.icon-button { width: 36px; height: 36px; padding: 0; border-radius: 50%; font-size: 1.35rem; line-height: 1; }
+.icon-button { display: inline-grid; place-items: center; width: 36px; height: 36px; padding: 0; border-radius: 50%; font-size: 1.35rem; line-height: 1; }
 .inspector-title-row { display: flex; flex-wrap: wrap; gap: .45rem; margin-bottom: 1rem; }
 .inspector section { border-top: 1px solid var(--border); margin-top: 1.2rem; padding-top: 1rem; }
 .metadata dl, .conflict-state dl, .error-state dl { margin: 0; display: grid; gap: .55rem; }

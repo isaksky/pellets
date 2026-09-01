@@ -62,6 +62,12 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 	if strings.Count(templates, `hx-target="#inspector-host" hx-swap="innerHTML" hx-push-url="true"`) != 2 {
 		t.Fatal("task and memory inspector links must override inherited outerHTML swaps")
 	}
+	if strings.Count(templates, `class="icon-button"`) != 2 {
+		t.Fatal("task and memory inspectors must share the corrected close control")
+	}
+	if !strings.Contains(css, `.icon-button { display: inline-grid; place-items: center; width: 36px; height: 36px;`) {
+		t.Fatal("inspector close control must center its glyph in the 36px touch target")
+	}
 	for _, required := range []string{
 		`role="dialog"`, `aria-labelledby="inspector-title"`, `aria-live="polite"`,
 		`aria-label="Close inspector"`, `aria-label="Close projects"`, `Skip to content`, `System`, `Light`, `Dark`,
