@@ -27,7 +27,8 @@ func MemoryCommand(manager app.MemoryManager) Command {
 			"  pl memory approve MEMORY_ID\n" +
 			"  pl memory remove MEMORY_ID --yes\n\n" +
 			"Memory text must be non-empty valid UTF-8 and at most 1,048,576 bytes.",
-		Parse: parseMemory,
+		Parse:                 parseMemory,
+		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
 		ResultName: func(value any) string {
 			return "memory " + value.(memoryInput).Action
 		},

@@ -11,7 +11,7 @@ import (
 	"pellets/internal/storage"
 )
 
-func TestProjectManagerInitResolvesAllGitIdentityBeforeRegistration(t *testing.T) {
+func TestProjectManagerBootstrapResolvesAllGitIdentityBeforeRegistration(t *testing.T) {
 	t.Parallel()
 
 	var calls []string
@@ -56,12 +56,13 @@ func TestProjectManagerInitResolvesAllGitIdentityBeforeRegistration(t *testing.T
 		GitSafety: recordingProjectGitSafety{calls: &calls},
 	}
 
-	project, err := manager.Init(context.Background(), "/workspace/repos/demo/nested", "demo")
+	gotDatabase, err := manager.BootstrapCurrent(context.Background(), "/workspace/repos/demo/nested")
 	if err != nil {
-		t.Fatalf("Init() error = %v", err)
+		t.Fatalf("BootstrapCurrent() error = %v", err)
 	}
-	if !reflect.DeepEqual(project, wantProject) {
-		t.Fatalf("Init() project = %#v, want %#v", project, wantProject)
+	wantDatabase := Database{Root: "/workspace", Path: "/workspace/.pellets/pellets.db"}
+	if !reflect.DeepEqual(gotDatabase, wantDatabase) {
+		t.Fatalf("BootstrapCurrent() database = %#v, want %#v", gotDatabase, wantDatabase)
 	}
 	wantCalls := []string{
 		"find Git identity /workspace/repos/demo/nested",
@@ -70,15 +71,18 @@ func TestProjectManagerInitResolvesAllGitIdentityBeforeRegistration(t *testing.T
 		"normalize /workspace /workspace/repos/demo/.git",
 		"normalize /workspace /workspace/repos/demo",
 		"normalize /workspace /workspace/repos/demo/.git",
+		"open /workspace/.pellets/pellets.db",
+		"resolve repos/demo/.git repos/demo repos/demo/.git",
+		"close",
 		"reject tracked /workspace /workspace/.pellets/pellets.db",
 		"ensure excluded /workspace /workspace/.pellets/pellets.db",
 		"open /workspace/.pellets/pellets.db",
 		"find workspace repos/demo/.git",
-		"register demo repos/demo/.git repos/demo repos/demo/.git move=false",
+		"register auto=demo identity=true:repos/demo/.git repos/demo/.git repos/demo repos/demo/.git move=false",
 		"close",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {
-		t.Fatalf("Init() calls = %#v, want %#v", calls, wantCalls)
+		t.Fatalf("BootstrapCurrent() calls = %#v, want %#v", calls, wantCalls)
 	}
 }
 
@@ -116,12 +120,12 @@ func TestProjectManagerAllowsMovedWorkspaceOnlyWhenOldPathIsGone(t *testing.T) {
 				return test.oldExists, nil
 			}
 
-			_, err := manager.Init(context.Background(), "/working", "demo")
+			_, err := manager.BootstrapCurrent(context.Background(), "/working")
 			if test.wantCode == "" && err != nil {
 				t.Fatal(err)
 			}
 			if test.wantCode != "" && (err == nil || domain.PublicError(err).Code != test.wantCode) {
-				t.Fatalf("Init() error = %v, want %s", err, test.wantCode)
+				t.Fatalf("BootstrapCurrent() error = %v, want %s", err, test.wantCode)
 			}
 			if database.lastRegistration.AllowWorkspaceMove != test.allowMove {
 				t.Fatalf("AllowWorkspaceMove = %v, want %v", database.lastRegistration.AllowWorkspaceMove, test.allowMove)
@@ -193,7 +197,7 @@ func TestResolvePelletProjectValidatesSelectionAndReferences(t *testing.T) {
 	}
 }
 
-func TestProjectManagerInitStopsBeforeSideEffectsOnIdentityFailure(t *testing.T) {
+func TestProjectManagerBootstrapStopsBeforeSideEffectsOnIdentityFailure(t *testing.T) {
 	t.Parallel()
 	crossed := false
 	manager := successfulProjectManager(&fakeProjectDatabase{})
@@ -209,9 +213,9 @@ func TestProjectManagerInitStopsBeforeSideEffectsOnIdentityFailure(t *testing.T)
 		return nil, nil
 	}
 	manager.GitSafety = failingIfCalledProjectGitSafety{called: &crossed}
-	_, err := manager.Init(context.Background(), "/working", "demo")
+	_, err := manager.BootstrapCurrent(context.Background(), "/working")
 	if err == nil || domain.PublicError(err).Code != "git_repository_not_found" || crossed {
-		t.Fatalf("Init() error = %v, crossed=%v", err, crossed)
+		t.Fatalf("BootstrapCurrent() error = %v, crossed=%v", err, crossed)
 	}
 }
 
@@ -283,6 +287,7 @@ type fakeProjectDatabase struct {
 	registerErr      error
 	resolved         storage.ResolvedProject
 	lookupErr        error
+	resolveErr       error
 	closeErr         error
 	registerCalls    int
 	resolveCalls     int
@@ -295,7 +300,11 @@ func (d *fakeProjectDatabase) RegisterProject(_ context.Context, registration st
 	d.registerCalls++
 	d.lastRegistration = registration
 	if d.calls != nil {
-		*d.calls = append(*d.calls, "register "+registration.Code+" "+registration.GitCommonDir.Value+" "+registration.WorkspaceRoot.Value+" "+registration.GitDir.Value+" move="+map[bool]string{true: "true", false: "false"}[registration.AllowWorkspaceMove])
+		code := registration.Code
+		if registration.GenerateCode {
+			code = "auto=" + registration.CodeName + " identity=" + registration.CodeIdentity
+		}
+		*d.calls = append(*d.calls, "register "+code+" "+registration.GitCommonDir.Value+" "+registration.WorkspaceRoot.Value+" "+registration.GitDir.Value+" move="+map[bool]string{true: "true", false: "false"}[registration.AllowWorkspaceMove])
 	}
 	return d.registerProject, d.registerCreated, d.registerErr
 }
@@ -317,9 +326,18 @@ func (d *fakeProjectDatabase) FindWorkspaceByGitDir(_ context.Context, gitDir do
 	}
 	return d.resolved, nil
 }
-func (d *fakeProjectDatabase) ResolveProjectWorkspace(context.Context, domain.LocalPath, domain.LocalPath, domain.LocalPath) (storage.ResolvedProject, error) {
+func (d *fakeProjectDatabase) ResolveProjectWorkspace(_ context.Context, commonDir, rootPath, gitDir domain.LocalPath) (storage.ResolvedProject, error) {
 	d.resolveCalls++
-	return d.resolved, d.lookupErr
+	if d.calls != nil {
+		*d.calls = append(*d.calls, "resolve "+commonDir.Value+" "+rootPath.Value+" "+gitDir.Value)
+	}
+	if d.resolveErr != nil {
+		return storage.ResolvedProject{}, d.resolveErr
+	}
+	if d.resolved.Project.ID == 0 {
+		return storage.ResolvedProject{}, domain.NewError(domain.NotFound, "workspace_not_registered", "missing", nil)
+	}
+	return d.resolved, nil
 }
 func (d *fakeProjectDatabase) Close() error {
 	d.closeCalls++

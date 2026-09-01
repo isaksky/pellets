@@ -23,7 +23,7 @@ func TestPelletCommandsAcrossMainAndLinkedWorktreesJSONGolden(t *testing.T) {
 	t.Parallel()
 
 	common := filepath.Join(t.TempDir(), "pellet worktree database 界")
-	mainWorkTree := filepath.Join(common, "main")
+	mainWorkTree := filepath.Join(common, "shared")
 	linkedWorkTree := filepath.Join(common, "linked")
 	unregisteredWorkTree := filepath.Join(common, "unregistered")
 	if err := os.MkdirAll(mainWorkTree, 0o755); err != nil {
@@ -46,9 +46,9 @@ func TestPelletCommandsAcrossMainAndLinkedWorktreesJSONGolden(t *testing.T) {
 
 	current := mainWorkTree
 	application := projectTestApp(&current)
-	mainProject := runProjectInit(t, application, "shared")
+	mainProject := runCurrentProject(t, application)
 	current = linkedWorkTree
-	linkedProject := runProjectInit(t, application, "shared")
+	linkedProject := runCurrentProject(t, application)
 	if len(linkedProject.Workspaces) != 2 || linkedProject.Workspaces[0].ID != mainProject.Workspaces[0].ID {
 		t.Fatalf("linked registration = %#v", linkedProject)
 	}
@@ -206,21 +206,36 @@ func TestPelletCommandsAcrossMainAndLinkedWorktreesJSONGolden(t *testing.T) {
 
 	runGitTest(t, mainWorkTree, "worktree", "add", "--quiet", "-b", "pellet-command-unregistered", unregisteredWorkTree)
 	current = unregisteredWorkTree
-	stateBeforeUnregistered := capturePelletLogicalState(t, databasePath)
+	stateBeforeBootstrap := capturePelletLogicalState(t, databasePath)
 	stdout, stderr, exit = runTestApp(application, "next")
-	if exit != 3 || stdout != "" || !strings.Contains(stderr, `"code":"workspace_not_registered"`) {
-		t.Fatalf("unregistered next = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	if exit != 0 || stderr != "" || !strings.Contains(stdout, `"selection_reason":"next_open"`) {
+		t.Fatalf("first next in linked worktree = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
-	if stateAfter := capturePelletLogicalState(t, databasePath); !reflect.DeepEqual(stateAfter, stateBeforeUnregistered) {
-		t.Fatalf("unregistered next changed persistent state:\nbefore=%q\nafter=%q", stateBeforeUnregistered, stateAfter)
+	if project := runCurrentProject(t, application); project.Code != linkedProject.Code || len(project.Workspaces) != 3 {
+		t.Fatalf("first next did not attach linked workspace: %#v", project)
 	}
+	if stateAfter := capturePelletLogicalState(t, databasePath); !reflect.DeepEqual(
+		pelletStateRows(stateAfter), pelletStateRows(stateBeforeBootstrap),
+	) {
+		t.Fatalf("first next changed pellet rows after bootstrap:\nbefore=%q\nafter=%q", stateBeforeBootstrap, stateAfter)
+	}
+}
+
+func pelletStateRows(state []string) []string {
+	rows := make([]string, 0, len(state))
+	for _, row := range state {
+		if strings.HasPrefix(row, "pellet|") {
+			rows = append(rows, row)
+		}
+	}
+	return rows
 }
 
 func TestPelletLifecycleCommandsJSONGolden(t *testing.T) {
 	t.Parallel()
 
 	common := filepath.Join(t.TempDir(), "lifecycle golden database")
-	mainWorkTree := filepath.Join(common, "main")
+	mainWorkTree := filepath.Join(common, "shared")
 	linkedWorkTree := filepath.Join(common, "linked")
 	if err := os.MkdirAll(mainWorkTree, 0o755); err != nil {
 		t.Fatal(err)
@@ -263,9 +278,9 @@ func TestPelletLifecycleCommandsJSONGolden(t *testing.T) {
 		}
 		return database.Close()
 	})
-	mainProject := runProjectInit(t, application, "shared")
+	mainProject := runCurrentProject(t, application)
 	current = linkedWorkTree
-	linkedProject := runProjectInit(t, application, "shared")
+	linkedProject := runCurrentProject(t, application)
 	mainWorkspaceID := mainProject.Workspaces[0].ID
 	linkedWorkspaceID := linkedProject.Workspaces[1].ID
 	if mainWorkspaceID != 1 || linkedWorkspaceID != 2 {
@@ -382,7 +397,7 @@ func TestPelletLifecycleCommandsJSONGolden(t *testing.T) {
 func TestPelletSearchCommandJSONGoldenAndHumanEmpty(t *testing.T) {
 	t.Parallel()
 
-	repositoryRoot := filepath.Join(t.TempDir(), "pellet search repository")
+	repositoryRoot := filepath.Join(t.TempDir(), "search")
 	if err := os.MkdirAll(repositoryRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +407,7 @@ func TestPelletSearchCommandJSONGoldenAndHumanEmpty(t *testing.T) {
 	}
 	current := repositoryRoot
 	application := projectTestApp(&current)
-	runProjectInit(t, application, "search")
+	runCurrentProject(t, application)
 
 	runPelletCommand(t, application,
 		"add", "Searchtoken pl-im9 parser_code", "--description", `c++ (broken "quote`,

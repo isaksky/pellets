@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -39,7 +40,7 @@ func TestProjectWorkspaceJSONGolden(t *testing.T) {
 	assertGolden(t, "project-workspaces.golden", rendered.String())
 }
 
-func TestInitCreatesDatabaseAtGitRootAndProjectCommandsResolveCurrent(t *testing.T) {
+func TestFirstCurrentProjectCommandCreatesDatabaseAtGitRoot(t *testing.T) {
 	t.Parallel()
 
 	repository := filepath.Join(t.TempDir(), "Git project with spaces and 世界")
@@ -51,12 +52,12 @@ func TestInitCreatesDatabaseAtGitRootAndProjectCommandsResolveCurrent(t *testing
 
 	current := nested
 	application := projectTestApp(&current)
-	stdout, stderr, exit := runTestApp(application, "init", "--code", "demo-1")
+	stdout, stderr, exit := runTestApp(application, "project", "show")
 	if exit != 0 || stderr != "" {
-		t.Fatalf("init = exit %d stdout %q stderr %q", exit, stdout, stderr)
+		t.Fatalf("project show = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
-	initialized := decodeProjectResult(t, stdout, "init")
-	if initialized.Code != "demo-1" || len(initialized.Workspaces) != 1 || initialized.Workspaces[0].RootPath != "." || initialized.GitCommonDir != ".git" {
+	initialized := decodeProjectResult(t, stdout, "project show")
+	if err := domain.ValidateProjectCode(initialized.Code); err != nil || len(initialized.Workspaces) != 1 || initialized.Workspaces[0].RootPath != "." || initialized.GitCommonDir != ".git" {
 		t.Fatalf("initialized project = %#v", initialized)
 	}
 	if _, err := os.Stat(discovery.DatabasePath(repository)); err != nil {
@@ -75,19 +76,19 @@ func TestInitCreatesDatabaseAtGitRootAndProjectCommandsResolveCurrent(t *testing
 		t.Fatalf("current project = %#v, want %#v", shown, initialized)
 	}
 
-	stdout, stderr, exit = runTestApp(application, "project", "show", "demo-1")
+	stdout, stderr, exit = runTestApp(application, "project", "show", initialized.Code)
 	if exit != 0 || stderr != "" {
-		t.Fatalf("project show demo-1 = exit %d stdout %q stderr %q", exit, stdout, stderr)
+		t.Fatalf("named project show = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 	if named := decodeProjectResult(t, stdout, "project show"); !reflect.DeepEqual(named, initialized) {
 		t.Fatalf("named project = %#v, want %#v", named, initialized)
 	}
 
-	stdout, stderr, exit = runTestApp(application, "init", "--code=demo-1")
+	stdout, stderr, exit = runTestApp(application, "project", "show")
 	if exit != 0 || stderr != "" {
-		t.Fatalf("idempotent init = exit %d stdout %q stderr %q", exit, stdout, stderr)
+		t.Fatalf("repeated project show = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
-	if repeated := decodeProjectResult(t, stdout, "init"); !reflect.DeepEqual(repeated, initialized) {
+	if repeated := decodeProjectResult(t, stdout, "project show"); !reflect.DeepEqual(repeated, initialized) {
 		t.Fatalf("idempotent project = %#v, want unchanged %#v", repeated, initialized)
 	}
 
@@ -96,13 +97,6 @@ func TestInitCreatesDatabaseAtGitRootAndProjectCommandsResolveCurrent(t *testing
 		t.Fatalf("project list = %#v, want one unchanged row", projects)
 	}
 
-	stdout, stderr, exit = runTestApp(application, "init", "--code", "changed")
-	if exit != 4 || stdout != "" || !strings.Contains(stderr, `"code":"project_repository_already_registered"`) {
-		t.Fatalf("changed immutable code = exit %d stdout %q stderr %q", exit, stdout, stderr)
-	}
-	if projects = runProjectList(t, application); !reflect.DeepEqual(projects, projectListData{initialized}) {
-		t.Fatalf("projects changed after conflict: %#v", projects)
-	}
 }
 
 func TestSiblingRepositoriesUseOneDatabaseWithUniqueCodes(t *testing.T) {
@@ -124,36 +118,37 @@ func TestSiblingRepositoriesUseOneDatabaseWithUniqueCodes(t *testing.T) {
 
 	current := first
 	application := projectTestApp(&current)
-	firstProject := runProjectInit(t, application, "svc-a")
+	firstProject := runCurrentProject(t, application)
 	if firstProject.Workspaces[0].RootPath != "service alpha" {
 		t.Fatalf("first root path = %q", firstProject.Workspaces[0].RootPath)
 	}
 	current = second
-	secondProject := runProjectInit(t, application, "svc-b")
+	secondProject := runCurrentProject(t, application)
 	if secondProject.Workspaces[0].RootPath != "service βeta" {
 		t.Fatalf("second root path = %q", secondProject.Workspaces[0].RootPath)
 	}
 
 	current = third
-	stdout, stderr, exit := runTestApp(application, "init", "--code", "svc-a")
-	if exit != 4 || stdout != "" || !strings.Contains(stderr, `"code":"project_code_already_registered"`) {
-		t.Fatalf("duplicate code = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	thirdProject := runCurrentProject(t, application)
+	if firstProject.Code == secondProject.Code || firstProject.Code == thirdProject.Code || secondProject.Code == thirdProject.Code {
+		t.Fatalf("automatically generated codes are not unique: %q %q %q", firstProject.Code, secondProject.Code, thirdProject.Code)
 	}
 
 	current = common
 	projects := runProjectList(t, application)
-	want := projectListData{firstProject, secondProject}
+	want := projectListData{firstProject, secondProject, thirdProject}
+	sort.Slice(want, func(i, j int) bool { return want[i].Code < want[j].Code })
 	if !reflect.DeepEqual(projects, want) {
 		t.Fatalf("project list = %#v, want %#v", projects, want)
 	}
-	stdout, stderr, exit = runTestApp(application, "project", "show", "svc-b")
+	stdout, stderr, exit := runTestApp(application, "project", "show", secondProject.Code)
 	if exit != 0 || stderr != "" {
 		t.Fatalf("named show outside Git = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 	if shown := decodeProjectResult(t, stdout, "project show"); !reflect.DeepEqual(shown, secondProject) {
 		t.Fatalf("shown project = %#v, want %#v", shown, secondProject)
 	}
-	stdout, stderr, exit = runTestApp(application, "--project", "svc-a", "project", "show")
+	stdout, stderr, exit = runTestApp(application, "--project", firstProject.Code, "project", "show")
 	if exit != 0 || stderr != "" {
 		t.Fatalf("global named show = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
@@ -166,7 +161,7 @@ func TestSiblingRepositoriesUseOneDatabaseWithUniqueCodes(t *testing.T) {
 	}
 }
 
-func TestInitRejectsInvalidCodesBeforeCreatingDatabase(t *testing.T) {
+func TestRemovedInitCommandDoesNotCreateDatabase(t *testing.T) {
 	t.Parallel()
 
 	repository := filepath.Join(t.TempDir(), "code validation repository")
@@ -177,26 +172,16 @@ func TestInitRejectsInvalidCodesBeforeCreatingDatabase(t *testing.T) {
 	current := repository
 	application := projectTestApp(&current)
 
-	invalid := []string{"", "-foo", "foo-", "ABCDEFGHIJKLM", "Upper", "foo_bar", "pellet界"}
-	for _, code := range invalid {
-		arguments := []string{"init", "--code", code}
-		if strings.HasPrefix(code, "-") {
-			arguments = []string{"init", "--code=" + code}
-		}
-		stdout, stderr, exit := runTestApp(application, arguments...)
-		if exit != 2 || stdout != "" || !strings.Contains(stderr, `"code":"invalid_project_code"`) && code != "" {
-			t.Errorf("init code %q = exit %d stdout %q stderr %q", code, exit, stdout, stderr)
-		}
-		if code == "" && !strings.Contains(stderr, `"code":"missing_flag_value"`) {
-			t.Errorf("empty code error = %q", stderr)
-		}
+	stdout, stderr, exit := runTestApp(application, "init", "--code", "legacy")
+	if exit != 2 || stdout != "" || !strings.Contains(stderr, `"code":"unknown_command"`) {
+		t.Fatalf("removed init = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 	if _, err := os.Stat(filepath.Join(repository, discovery.MetadataDirectory)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("invalid code created metadata: %v", err)
 	}
 }
 
-func TestInitStoresAbsoluteIdentityWhenRepositoryIsOutsideDatabaseRoot(t *testing.T) {
+func TestBootstrapStoresAbsoluteIdentityWhenRepositoryIsOutsideDatabaseRoot(t *testing.T) {
 	t.Parallel()
 
 	repository := filepath.Join(t.TempDir(), "outer Git repository")
@@ -211,11 +196,11 @@ func TestInitStoresAbsoluteIdentityWhenRepositoryIsOutsideDatabaseRoot(t *testin
 
 	current := databaseRoot
 	application := projectTestApp(&current)
-	stdout, stderr, exit := runTestApp(application, "init", "--code", "outer")
+	stdout, stderr, exit := runTestApp(application, "project", "show")
 	if exit != 0 || stderr != "" {
-		t.Fatalf("outside init = exit %d stdout %q stderr %q", exit, stdout, stderr)
+		t.Fatalf("outside bootstrap = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
-	project := decodeProjectResult(t, stdout, "init")
+	project := decodeProjectResult(t, stdout, "project show")
 	canonicalRepository, err := filepath.EvalSymlinks(repository)
 	if err != nil {
 		t.Fatal(err)
@@ -225,7 +210,7 @@ func TestInitStoresAbsoluteIdentityWhenRepositoryIsOutsideDatabaseRoot(t *testin
 	}
 }
 
-func TestUnregisteredSiblingAndProjectCommandValidationFailCleanly(t *testing.T) {
+func TestUnregisteredSiblingBootstrapsAndProjectValidationFailsCleanly(t *testing.T) {
 	t.Parallel()
 
 	common := t.TempDir()
@@ -242,12 +227,15 @@ func TestUnregisteredSiblingAndProjectCommandValidationFailCleanly(t *testing.T)
 	}
 	current := registered
 	application := projectTestApp(&current)
-	runProjectInit(t, application, "known")
+	registeredProject := runCurrentProject(t, application)
 	current = unregistered
 
 	stdout, stderr, exit := runTestApp(application, "project", "show")
-	if exit != 3 || stdout != "" || !strings.Contains(stderr, `"code":"project_not_registered"`) {
-		t.Fatalf("unregistered show = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	if exit != 0 || stderr != "" {
+		t.Fatalf("unregistered sibling bootstrap = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+	if sibling := decodeProjectResult(t, stdout, "project show"); sibling.Code == registeredProject.Code {
+		t.Fatalf("unrelated sibling reused code %q", sibling.Code)
 	}
 
 	tests := []struct {
@@ -258,9 +246,8 @@ func TestUnregisteredSiblingAndProjectCommandValidationFailCleanly(t *testing.T)
 		{[]string{"project", "wat"}, "unknown_subcommand"},
 		{[]string{"project", "list", "extra"}, "unexpected_argument"},
 		{[]string{"project", "show", "known", "extra"}, "unexpected_argument"},
-		{[]string{"--project", "known", "project", "list"}, "project_not_allowed"},
-		{[]string{"--project", "known", "project", "show", "known"}, "conflicting_project_selection"},
-		{[]string{"--project", "known", "init", "--code", "other"}, "project_not_allowed"},
+		{[]string{"--project", registeredProject.Code, "project", "list"}, "project_not_allowed"},
+		{[]string{"--project", registeredProject.Code, "project", "show", registeredProject.Code}, "conflicting_project_selection"},
 	}
 	for _, test := range tests {
 		stdout, stderr, exit = runTestApp(application, test.args...)
@@ -277,7 +264,6 @@ func TestUsageValidationPrecedesWorkingDirectoryAndDiscovery(t *testing.T) {
 	application := New(
 		"test",
 		InitDBCommand(app.DatabaseInitializer{}),
-		InitCommand(manager),
 		ProjectCommand(manager),
 	)
 	workingDirectoryCalls := 0
@@ -292,7 +278,6 @@ func TestUsageValidationPrecedesWorkingDirectoryAndDiscovery(t *testing.T) {
 		code string
 	}{
 		{name: "init-db project override", args: []string{"--project", "known", "init-db"}, code: "project_not_allowed"},
-		{name: "init project override", args: []string{"--project", "known", "init", "--code", "other"}, code: "project_not_allowed"},
 		{name: "project list override", args: []string{"--project", "known", "project", "list"}, code: "project_not_allowed"},
 		{name: "conflicting show selection", args: []string{"--project", "known", "project", "show", "other"}, code: "conflicting_project_selection"},
 		{name: "malformed global project", args: []string{"--project", "bad_code", "project", "show"}, code: "invalid_project_code"},
@@ -357,11 +342,11 @@ func TestGitLinkedWorktreesShareOneLogicalProject(t *testing.T) {
 
 	current := mainWorkTree
 	application := projectTestApp(&current)
-	mainProject := runProjectInit(t, application, "shared")
+	mainProject := runCurrentProject(t, application)
 	current = linkedWorkTree
-	linkedProject := runProjectInit(t, application, "shared")
+	linkedProject := runCurrentProject(t, application)
 	current = secondLinkedWorkTree
-	allWorkspaces := runProjectInit(t, application, "shared")
+	allWorkspaces := runCurrentProject(t, application)
 	if mainProject.Code != linkedProject.Code || linkedProject.Code != allWorkspaces.Code || len(allWorkspaces.Workspaces) != 3 {
 		t.Fatalf("linked worktree project snapshots = %#v %#v %#v", mainProject, linkedProject, allWorkspaces)
 	}
@@ -403,9 +388,9 @@ func TestWorkspaceMoveRemovalAndDuplicateRegistrationAreSafe(t *testing.T) {
 
 	current := mainRoot
 	application := projectTestApp(&current)
-	runProjectInit(t, application, "shared")
+	runCurrentProject(t, application)
 	current = linkedRoot
-	registered := runProjectInit(t, application, "shared")
+	registered := runCurrentProject(t, application)
 	if len(registered.Workspaces) != 2 {
 		t.Fatalf("registered workspaces = %#v", registered.Workspaces)
 	}
@@ -414,14 +399,14 @@ func TestWorkspaceMoveRemovalAndDuplicateRegistrationAreSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 	current = duplicateRoot
-	stdout, stderr, exit := runTestApp(application, "init", "--code", "shared")
+	stdout, stderr, exit := runTestApp(application, "project", "show")
 	if exit != 4 || stdout != "" || !strings.Contains(stderr, `"code":"workspace_identity_conflict"`) {
-		t.Fatalf("duplicate init = exit %d stdout %q stderr %q", exit, stdout, stderr)
+		t.Fatalf("duplicate bootstrap = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 
 	runGitTest(t, mainRoot, "worktree", "move", linkedRoot, movedRoot)
 	current = movedRoot
-	moved := runProjectInit(t, application, "shared")
+	moved := runCurrentProject(t, application)
 	if len(moved.Workspaces) != 2 || moved.Workspaces[1].RootPath != "linked moved 界" {
 		t.Fatalf("moved workspaces = %#v", moved.Workspaces)
 	}
@@ -429,7 +414,7 @@ func TestWorkspaceMoveRemovalAndDuplicateRegistrationAreSafe(t *testing.T) {
 	runGitTest(t, mainRoot, "worktree", "remove", movedRoot)
 	runGitTest(t, mainRoot, "worktree", "add", "--quiet", "-b", "workspace-replacement", replacementRoot)
 	current = replacementRoot
-	withReplacement := runProjectInit(t, application, "shared")
+	withReplacement := runCurrentProject(t, application)
 	if len(withReplacement.Workspaces) != 3 || withReplacement.Workspaces[1].RootPath != "linked moved 界" || withReplacement.Workspaces[2].RootPath != "replacement" {
 		t.Fatalf("removed/stale registration behavior = %#v", withReplacement.Workspaces)
 	}
@@ -484,7 +469,7 @@ func projectTestApp(current *string, afterPelletOpen ...func(string) error) *App
 	}
 	application := New(
 		"test",
-		InitDBCommand(initializer), InitCommand(manager), ProjectCommand(manager),
+		InitDBCommand(initializer), ProjectCommand(manager),
 		AddCommand(pelletManager), MoveCommand(pelletManager), ListCommand(pelletManager), ShowCommand(pelletManager),
 		SearchCommand(pelletManager),
 		PurgeCommand(pelletManager),
@@ -492,18 +477,21 @@ func projectTestApp(current *string, afterPelletOpen ...func(string) error) *App
 		StartNextCommand(pelletManager), ReleaseCommand(pelletManager), CloseCommand(pelletManager),
 		ReopenCommand(pelletManager), DeferCommand(pelletManager),
 		MemoryCommand(memoryManager),
-	)
+	).WithCurrentWorkspaceBootstrap(func(ctx context.Context, workingDirectory string) (discovery.Database, error) {
+		database, err := manager.BootstrapCurrent(ctx, workingDirectory)
+		return discovery.Database{Root: database.Root, Path: database.Path}, err
+	})
 	application.workingDirectory = func() (string, error) { return *current, nil }
 	return application
 }
 
-func runProjectInit(t *testing.T, application *App, code string) projectData {
+func runCurrentProject(t *testing.T, application *App) projectData {
 	t.Helper()
-	stdout, stderr, exit := runTestApp(application, "init", "--code", code)
+	stdout, stderr, exit := runTestApp(application, "project", "show")
 	if exit != 0 || stderr != "" {
-		t.Fatalf("init %s = exit %d stdout %q stderr %q", code, exit, stdout, stderr)
+		t.Fatalf("project show = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
-	return decodeProjectResult(t, stdout, "init")
+	return decodeProjectResult(t, stdout, "project show")
 }
 
 func runProjectList(t *testing.T, application *App) projectListData {

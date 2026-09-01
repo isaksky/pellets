@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"pellets/internal/domain"
 
@@ -144,34 +145,13 @@ func prepare(ctx context.Context, db *sql.DB, sequence []migration, hooks migrat
 	}
 	defer conn.Close()
 
-	// Inspect the version before any persistent PRAGMA or migration write. This
-	// guarantees that a database from a newer executable is rejected unchanged.
-	version, err := currentSchemaVersion(ctx, conn)
+	version, err := inspectDatabaseSchema(ctx, conn, sequence, latest)
 	if err != nil {
-		return migrationError(err)
-	}
-	if err := validateSchemaVersion(version, latest); err != nil {
-		return err
-	}
-	if err := validateUninitializedDatabase(ctx, conn, version, latest); err != nil {
-		return err
-	}
-	// Run the read-only on-disk diagnostic before journal_mode or migration can
-	// make a persistent change. A corrupt compatible-looking file is therefore
-	// rejected without a partial configuration or migration success.
-	if err := verifyDatabaseIntegrity(ctx, conn); err != nil {
-		return err
-	}
-	if err := verifyCurrentSchema(ctx, conn, sequence, version, latest); err != nil {
 		return err
 	}
 
-	var journalMode string
-	if err := conn.QueryRowContext(ctx, "PRAGMA journal_mode = WAL").Scan(&journalMode); err != nil {
-		return runtimeError("set WAL journal mode", err)
-	}
-	if !strings.EqualFold(journalMode, "wal") {
-		return runtimeError("verify WAL journal mode", fmt.Errorf("journal_mode is %q", journalMode))
+	if err := ensureWALJournalMode(ctx, conn); err != nil {
+		return err
 	}
 	if err := verifyFTS5(ctx, conn); err != nil {
 		return err
@@ -235,6 +215,45 @@ func prepare(ctx context.Context, db *sql.DB, sequence []migration, hooks migrat
 		return err
 	}
 	return nil
+}
+
+func inspectDatabaseSchema(ctx context.Context, conn *sql.Conn, sequence []migration, latest int) (int, error) {
+	// One deferred read transaction keeps user_version, sqlite_schema, and the
+	// integrity/contract checks on the same snapshot while another process may
+	// be completing initialization or a migration.
+	if _, err := conn.ExecContext(ctx, "BEGIN"); err != nil {
+		return 0, migrationError(fmt.Errorf("begin schema inspection: %w", err))
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+
+	version, err := currentSchemaVersion(ctx, conn)
+	if err != nil {
+		return 0, migrationError(err)
+	}
+	if err := validateSchemaVersion(version, latest); err != nil {
+		return 0, err
+	}
+	if err := validateUninitializedDatabase(ctx, conn, version, latest); err != nil {
+		return 0, err
+	}
+	// This diagnostic precedes every persistent PRAGMA or migration write, so a
+	// corrupt compatible-looking file is rejected unchanged.
+	if err := verifyDatabaseIntegrity(ctx, conn); err != nil {
+		return 0, err
+	}
+	if err := verifyCurrentSchema(ctx, conn, sequence, version, latest); err != nil {
+		return 0, err
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return 0, migrationError(fmt.Errorf("commit schema inspection: %w", err))
+	}
+	committed = true
+	return version, nil
 }
 
 func currentSchemaVersion(ctx context.Context, conn *sql.Conn) (int, error) {
@@ -449,6 +468,43 @@ func verifyDatabaseIntegrity(ctx context.Context, conn *sql.Conn) error {
 		)
 	}
 	return nil
+}
+
+func ensureWALJournalMode(ctx context.Context, conn *sql.Conn) error {
+	deadline := time.Now().Add(time.Duration(busyTimeoutMilliseconds) * time.Millisecond)
+	var lastBusy error
+	for {
+		var journalMode string
+		if err := conn.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&journalMode); err != nil {
+			if stable := stableDatabaseError("read WAL journal mode", err); stable == nil || domain.PublicError(stable).Code != "database_busy" {
+				return runtimeError("read WAL journal mode", err)
+			}
+			lastBusy = err
+		} else if strings.EqualFold(journalMode, "wal") {
+			return nil
+		} else if err := conn.QueryRowContext(ctx, "PRAGMA journal_mode = WAL").Scan(&journalMode); err != nil {
+			if stable := stableDatabaseError("set WAL journal mode", err); stable == nil || domain.PublicError(stable).Code != "database_busy" {
+				return runtimeError("set WAL journal mode", err)
+			}
+			lastBusy = err
+		} else if strings.EqualFold(journalMode, "wal") {
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			if lastBusy != nil {
+				return runtimeError("set WAL journal mode", lastBusy)
+			}
+			return runtimeError("set WAL journal mode", fmt.Errorf("journal mode did not become WAL before the busy timeout"))
+		}
+		timer := time.NewTimer(20 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func verifyCurrentSchema(ctx context.Context, conn *sql.Conn, sequence []migration, version, latest int) error {

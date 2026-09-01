@@ -28,7 +28,7 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 8. Store optional project memories, distinguish agent-created memories from human-approved memories, and retrieve them with keyword search.
 9. Use one local database for one repository with several worktrees or for several unrelated sibling repositories.
 10. Let a human inspect and safely edit that same authoritative database through an optional foreground, loopback-only web interface.
-11. Install a narrow, portable Pellets agent skill at repository or personal scope so Codex and Claude can follow the current `pl` contract even when no database has been initialized.
+11. Install a narrow, portable Pellets agent skill at repository or personal scope so Codex and Claude can follow the current `pl` contract before first-use bootstrap.
 
 ## Goals
 
@@ -40,6 +40,7 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 - Preserve closed pellets by default and make destructive cleanup explicit.
 - Support exact filtering by project, optional external ID, and optional group.
 - Discover the nearest database by walking upward from the current directory, similarly to Git.
+- Let an ordinary current-project command automatically create/register local Pellets metadata on first use, without a prerequisite project-initialization command or interactive code prompt.
 - Support one database containing several logical Git projects and several worktree workspaces per project, with short project codes and project-local pellet numbers.
 - Remain local and usable without an account, hosted server, daemon, or external network connection. The optional `pl web` process is a foreground loopback tool, not a runtime dependency.
 - Provide keyword search over pellets and memories through SQLite FTS5.
@@ -116,7 +117,7 @@ The SQLite driver may be a pinned CGo-free Go dependency. “Favor the standard 
 
 The first release is successful when all of the following are true:
 
-- An agent can initialize a project, add pellets, reorder them, start one, close it, and obtain the next pellet without opening a planning file.
+- An agent can begin directly with `pl add`, automatically bootstrap the project/workspace, reorder pellets, start one, close it, and obtain the next pellet without opening a planning file.
 - `pl next` returns the current workspace's in-progress pellet before open work and otherwise returns the lowest-priority eligible open pellet without writing.
 - Concurrent linked worktrees can use `pl start-next` to start distinct pellets while each workspace remains limited to one in-progress pellet.
 - Project, exact external-ID, and exact group filters behave consistently across `list`, `next`, and `search`.
@@ -137,7 +138,7 @@ The first release is successful when all of the following are true:
 - Database path: `.pellets/pellets.db` beneath a selected database root.
 - Logical-project identity: Git's common directory for the repository, normalized relative to the database root when possible.
 - Workspace identity: Git's worktree root together with its worktree-specific Git directory, normalized relative to the database root when possible.
-- Project code: unique within a database, 1–12 lowercase ASCII letters, digits, or internal hyphens.
+- Project code: automatically derived, immutable, unique within a database, and 1–12 lowercase ASCII letters, digits, or internal hyphens.
 - Pellet identity: a positive project-local integer; external reference is `<project-code>-<number>`.
 - Group: at most one optional, opaque, case-sensitive string per pellet, scoped to its project and used only as an exact filter.
 - Statuses: `open`, `in_progress`, `closed`, and `maybe_later`.

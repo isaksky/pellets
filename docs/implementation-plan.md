@@ -9,7 +9,7 @@ The product boundary is in [project-goals.md](project-goals.md), architecture in
 The first release includes:
 
 - CGo-free Go executable for macOS and Windows;
-- upward database discovery plus Git common-directory project and worktree/Git-directory workspace resolution;
+- upward database discovery plus automatic first-use Git common-directory project and worktree/Git-directory workspace bootstrap;
 - one database containing one or more logical projects, each with one or more registered workspaces;
 - project codes and project-local pellet numbers;
 - add, list, next, show, edit, move, start, start-next, release, close, reopen, defer, and confirmed stale-worktree recovery;
@@ -38,21 +38,22 @@ Acceptance criteria:
 - Golden tests cover compact JSON, pretty JSON, human output, help, and errors.
 - Builds succeed with `CGO_ENABLED=0` for macOS and Windows AMD64.
 
-## Milestone 1: database and project initialization
+## Milestone 1: database initialization and automatic project bootstrap
 
-Implement SQLite connection setup, embedded migrations, `init-db`, upward discovery, Git repository/worktree identity, `init --code`, `project list`, and `project show`.
+Implement SQLite connection setup, embedded migrations, `init-db`, upward discovery, Git repository/worktree identity, automatic code generation and current-project bootstrap, `project list`, and `project show`.
 
 Acceptance criteria:
 
 - `init-db` creates exactly `.pellets/pellets.db`, rejects symlink escapes and pre-existing SQLite companions, and does not overwrite or delete any existing path.
-- `init --code foo` registers one logical repository plus its current worktree workspace, using normalized relative paths where possible.
-- With no ancestor database, `init` creates one at the Git root.
-- With a database at a common parent, the main work tree and at least two linked worktrees register as three workspaces of one project/code; unrelated sibling repositories register as separate projects with different codes.
-- Repeating initialization is idempotent. Repository/code reuse, duplicate live worktree identity, cross-project attachment, and inconsistent Git identities are write-free typed conflicts. Moved, removed, and stale paths have the documented behavior.
+- The first valid current-project command registers one logical repository plus its current worktree workspace, using normalized relative paths where possible, and completes the requested operation. No public project-initialization command or required code flag exists.
+- With no ancestor database, first use creates one at the Git worktree root. Parsing/usage failures, help/version, `init-db`, skill installation, and database-level commands do not bootstrap.
+- With a database at a common parent, first use in the main work tree and at least two linked worktrees registers three workspaces of one project and reuses one stored code; unrelated sibling repositories register as separate projects with different generated codes.
+- Generated codes always satisfy the 1–12 lowercase ASCII grammar. Normalization, truncation/empty-name hashing, collision attempts, and the common-directory identity seed are deterministic and documented. Candidate allocation and registration share one immediate transaction.
+- Repeating exact bootstrap resolution is read-only and idempotent. Duplicate live worktree identity, cross-project attachment, and inconsistent Git identities are write-free typed conflicts. Moved, removed, and stale paths have the documented behavior.
 - The nearest ancestor database wins when databases are nested.
 - Duplicate identities and invalid codes fail cleanly; Git locations outside the database root use explicit normalized absolute storage.
-- When either initialization command places `.pellets` inside a Git work tree, it is added to the local Git exclude and not to `.gitignore`.
-- Initialization detects and rejects an already tracked database.
+- When `init-db` or automatic bootstrap places `.pellets` inside a Git work tree, it is added to the local Git exclude and not to `.gitignore`.
+- Both explicit database initialization and automatic bootstrap detect and reject an already tracked database.
 - Foreign keys, trusted-schema hardening, WAL, synchronous mode, busy timeout, and FTS5 capability are verified.
 - `PRAGMA user_version` is the only persisted schema version; a new version-0 database reaches version 1 through embedded migration 1 and contains no migration bookkeeping table.
 - Integration tests pass for paths containing spaces and Unicode on macOS and Windows CI.
@@ -72,7 +73,7 @@ Acceptance criteria:
 - `--all`, status, exact external-ID, and exact group filters behave as specified.
 - A pellet has at most one group; groups are opaque project-scoped strings with no separate table.
 - Editing cannot change project, number, status, or priority.
-- `next` resumes only the current workspace's in-progress pellet, otherwise returns the lowest-priority matching open pellet, and does not mutate or register anything.
+- `next` resumes only the current workspace's in-progress pellet, otherwise returns the lowest-priority matching open pellet, and does not mutate operation state. Its first valid invocation may perform the one-time project/workspace bootstrap; after registration it is wholly write-free.
 - Empty list and next results are successful typed empty values.
 - Timestamps round-trip from Julian storage to UTC RFC 3339 JSON.
 - JSON golden tests lock all object and list shapes.
@@ -202,7 +203,7 @@ Acceptance criteria:
 - Release builds cover macOS AMD64/ARM64 and Windows AMD64 with `CGO_ENABLED=0`.
 - Windows ARM64 is either tested and released or explicitly excluded from the support matrix.
 - Archives contain the executable, licenses, and checksums only.
-- A clean machine can run `pl --version`, initialize, and complete a workflow without a SQLite DLL or network access.
+- A clean machine can run `pl --version`, bootstrap on its first ordinary command, and complete a workflow without a SQLite DLL or network access.
 - The documentation contradiction checklist below passes.
 - Manual macOS smoke tests pass; Windows smoke tests run in CI with retained logs/artifacts.
 
@@ -289,7 +290,7 @@ Because hands-on Windows testing is unavailable, Windows-specific integration te
 | Cross-process live refresh misses or misinterprets changes. | Compare `PRAGMA data_version` only on one pinned monitor connection, treat changes only as invalidation, and retain initial/fallback authoritative GETs. |
 | A moved, copied, or removed worktree presents stale local paths. | Treat Git directory as workspace identity, update only after outside-transaction stale checks, reject live duplicates, retain removed registrations, and require explicit lifecycle recovery. |
 | Windows-only path or locking failures go unnoticed. | Make native Windows CI integration tests release-blocking. |
-| Database is accidentally committed. | Use local Git exclude, check tracking during init, document local-only storage. |
+| Database is accidentally committed. | Use local Git exclude, check tracking during `init-db` and bootstrap, document local-only storage. |
 | FTS derived rows drift. | Explicit same-transaction maintenance plus a tested rebuild command/path. |
 | Project code changes invalidate textual references. | Treat project codes as immutable in v1. |
 | Group grows into an epic or tag subsystem. | Keep it a single nullable exact-filter string with no table, metadata, hierarchy, or behavior. |

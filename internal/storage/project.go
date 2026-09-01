@@ -40,6 +40,9 @@ type ResolvedProject struct {
 // the application before the storage write transaction begins.
 type ProjectRegistration struct {
 	Code               string
+	CodeName           string
+	CodeIdentity       string
+	GenerateCode       bool
 	GitCommonDir       domain.LocalPath
 	WorkspaceRoot      domain.LocalPath
 	GitDir             domain.LocalPath

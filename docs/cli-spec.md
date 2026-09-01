@@ -36,7 +36,15 @@ There is no `--json` flag because JSON is already the default. There is no color
 
 ## Database and project selection
 
-Normal commands walk upward from the current directory and use the nearest `.pellets/pellets.db`. They ask Git for the common directory to find the logical project and for the worktree root plus worktree-specific Git directory to find the current workspace. Walking for the database continues past Git boundaries, which permits one database at a common parent of linked worktrees and unrelated sibling repositories. V1 has no path override: selecting a database is intentionally a property of the working directory.
+After strict parsing and usage validation, commands explicitly classified as needing the current project/workspace walk upward and use the nearest `.pellets/pellets.db`. They ask Git for the common directory to find the logical project and for the worktree root plus worktree-specific Git directory to find the current workspace. Walking for the database continues past Git boundaries, which permits one database at a common parent of linked worktrees and unrelated sibling repositories. V1 has no path override: selecting a database is intentionally a property of the working directory.
+
+If no ancestor database exists, the first valid current-project command creates `.pellets/pellets.db` at the Git worktree root, registers the logical repository and current worktree, and then completes the requested operation in that same invocation. With an existing ancestor database, it adds an unknown repository as a distinct project or attaches an unknown linked worktree to the already-known logical project. `add`, list/search/show/next and lifecycle commands, every `memory` operation, current `project show`, and `web` have this capability. There is no separate project-initialization command.
+
+Bootstrap happens only after parsing and usage validation. Help/version, invalid invocations, `init-db`, `skill install`, `project list`, named or `--project`-selected `project show`, and explicit project-scoped `purge` do not bootstrap. Those database-level commands retain their existing nearest-database semantics and fail with `database_not_found` when none exists.
+
+Project codes are generated without prompting. The logical repository name is the directory containing a `.git` common directory, or a bare common-directory basename with one terminal `.git` removed. Pellets lowercases ASCII letters, preserves ASCII digits, collapses every run of other characters into one hyphen, and trims edge hyphens. A non-empty normalized name of at most 12 bytes is the first candidate. Empty or longer names, and candidates already owned by another repository, use up to three normalized prefix bytes (or `p`), `-`, and the first eight lowercase hexadecimal SHA-256 digits over `true:<relative-common-dir>` or `false:<absolute-common-dir>`, using the same slash/case normalization stored in SQLite. If that candidate is occupied, attempts rehash the identity plus a NUL byte and the increasing canonical decimal attempt. Allocation and registration share one immediate transaction. An already-known common-directory identity ignores new checkout names and always reuses its stored immutable code.
+
+Bootstrap writes are a one-time pre-command effect, not a change to operation semantics. Once the exact project/workspace is registered, `next`, `list`, `search`, `show`, memory reads, named/database-level project reads, and every dry run retain their write-free guarantees. On first use only, a valid current-project command can create the database, update Git's local exclude, and transactionally register the project/workspace before running an otherwise read-only operation. The requested read itself still performs no queue or memory mutation.
 
 `--project CODE` does not silently let a caller mutate an unrelated repository. For pellet mutations, the code in the pellet reference must match the selected/current project. Database-level and read-only administrative commands may operate across registered projects when explicitly documented.
 
@@ -50,23 +58,9 @@ Create `.pellets/pellets.db` beneath the current directory, without registering 
 pl init-db
 ```
 
-Use this at a common parent before registering sibling repositories. Fail if the database, its WAL/SHM/journal companions, or a symlinked `.pellets` metadata directory already exists; never overwrite or remove any of them.
+Use this at a common parent before first use in sibling repositories or linked worktrees. Fail if the database, its WAL/SHM/journal companions, or a symlinked `.pellets` metadata directory already exists; never overwrite or remove any of them.
 
 If the new database is inside a Git work tree, add `.pellets/` to Git’s local exclude file and fail if the database or any SQLite companion path is already tracked. Index-only entries and case-equivalent paths on case-insensitive filesystems count as tracked.
-
-### `pl init`
-
-Register the current Git repository and worktree.
-
-```text
-pl init --code CODE
-```
-
-If an ancestor database exists, use the nearest one. Otherwise create `.pellets/pellets.db` at the current worktree root. Git's common directory identifies one logical project; the worktree root and worktree-specific Git directory identify one workspace. Paths are stored relative to the database root when possible and otherwise as normalized absolute local paths.
-
-When the database lies inside the Git work tree, ensure `.pellets/` is in Git’s local exclude file. Do not edit committed `.gitignore`. Fail if the database is already tracked.
-
-The first invocation creates the project and initial workspace. Running the same command and code in another linked worktree attaches that workspace to the same project; repeating either is idempotent. A different code for the same repository, the same code for an unrelated repository, a live duplicate worktree, one worktree attached to two projects, or inconsistent common/root/Git-directory identity is a typed write-free conflict. `init` may update a moved workspace root when its Git directory is unchanged and the old root is absent. Removed worktrees otherwise remain listed; there is no automatic cleanup. Project codes are immutable in v1.
 
 ### `pl project list`
 
@@ -74,9 +68,9 @@ List registered logical projects and every workspace identity in the selected da
 
 ### `pl project show [CODE]`
 
-Show the current logical project, or a named project when `CODE` is supplied, including its Git common directory and registered workspace IDs, roots, Git directories, relative/absolute flags, and timestamps. Public project codes and pellet references do not change.
+Show the current logical project, or a named project when `CODE` is supplied, including its Git common directory and registered workspace IDs, roots, Git directories, relative/absolute flags, and timestamps. Current `project show` bootstraps on first use; positional `CODE` or global `--project CODE` is a database-level read and never registers the current directory. Public project codes and pellet references do not change.
 
-Project `list`, `show`, and `init` use this data shape (timestamps omitted here only for brevity):
+Project `list` and `show` use this data shape (timestamps omitted here only for brevity):
 
 ```json
 {"code":"foo","git_common_dir":"main/.git","git_common_dir_relative":true,"workspaces":[{"id":1,"root_path":"main","root_path_relative":true,"git_dir":"main/.git","git_dir_relative":true},{"id":2,"root_path":"linked","root_path_relative":true,"git_dir":"main/.git/worktrees/linked","git_dir_relative":true}]}
@@ -124,7 +118,7 @@ Selection is deterministic:
 2. Otherwise return the lowest-priority `open` pellet matching the optional exact external ID and group filters.
 3. Otherwise return a successful empty result.
 
-The current workspace's in-progress pellet wins even when it does not match `--external-id` or `--group`; another workspace's pellet is never resumed. The JSON field `selection_reason` is `resume_in_progress`, `next_open`, or `none`. `next` never registers a workspace or writes. Workers that intend to begin work immediately should use atomic `start-next` rather than composing `next` and `start`.
+The current workspace's in-progress pellet wins even when it does not match `--external-id` or `--group`; another workspace's pellet is never resumed. The JSON field `selection_reason` is `resume_in_progress`, `next_open`, or `none`. After bootstrap, `next` never registers a workspace or changes operation state. On first use it may create/register Pellets metadata before performing this read-only selection. Workers that intend to begin work immediately should use atomic `start-next` rather than composing `next` and `start`.
 
 ### `pl show`
 
@@ -327,7 +321,7 @@ Run the optional local web inspector in the foreground.
 pl [--project CODE] web [--port PORT] [--no-open]
 ```
 
-- Database discovery is identical to normal commands: the nearest ancestor `.pellets/pellets.db` wins. `--project` selects the initial project area when it exists; the interface can inspect every registered project in that database.
+- Database discovery and first-use bootstrap are identical to other current-project commands: the nearest ancestor `.pellets/pellets.db` wins, or a project-local database is created when none exists. `--project` selects the initial project area when it exists; the interface can inspect every registered project in that database.
 - The only listener address is IPv4 `127.0.0.1`. There is no bind-address flag. Omitted `--port`, or explicit canonical port `0`, requests an OS-selected available port; `--port` otherwise accepts 1 through 65535.
 - Print `http://127.0.0.1:PORT` followed by one newline after the listener is ready. This foreground command is the sole exception to the normal JSON-success envelope.
 - Unless `--no-open` is present, open the default browser only after readiness. A launcher failure writes a useful warning to stderr while leaving the printed URL and server usable.
@@ -433,7 +427,7 @@ Specific machine error codes disambiguate cases that share an exit code.
 - `memory remove` requires `--yes`.
 - Cross-workspace recovery requires both the exact stored `--recover-workspace WORKSPACE_ID` and `--yes`; human output does not weaken this rule.
 - Noninteractive `skill install` writes require `--yes`; interactive cancellation is a successful write-free result. Differing skill files additionally require `--force` or the separate interactive replacement confirmation.
-- Initialization never overwrites an existing database.
+- `init-db` and automatic bootstrap never overwrite an existing database.
 - `start`, `close`, `reopen`, and `defer` are idempotent only when the pellet is already in their target status.
 - Repeating `add` is not idempotent and creates another pellet. A future request-id mechanism is out of scope until a real need appears.
 
@@ -442,7 +436,6 @@ Specific machine error codes disambiguate cases that share an exit code.
 ### One repository, one database
 
 ```text
-pl init --code foo
 pl add "Implement parser" --description-file parser.md --external-id "github:acme/foo#84" --group "parser-rollout"
 pl add "Add parser tests" --external-id "github:acme/foo#84" --group "parser-rollout"
 pl add "Migrate existing configs" --external-id "github:acme/foo#85" --group "parser-rollout"
@@ -460,9 +453,9 @@ The example uses a file only as input to `add`; Pellets becomes the authoritativ
 cd common-parent
 pl init-db
 cd service-a
-pl init --code svc-a
+pl add "First service-a pellet"
 cd ../service-b
-pl init --code svc-b
+pl list
 ```
 
 ### Several worktrees, one logical project
@@ -471,14 +464,13 @@ pl init --code svc-b
 cd common-parent
 pl init-db
 cd main-work-tree
-pl init --code foo
+pl list
 git worktree add ../review-work-tree review-branch
 cd ../review-work-tree
-pl init --code foo
 pl start-next --group parser-rollout
 ```
 
-Both worktrees use `foo-N` references, one queue, and one memory store. Each resumes only its own in-progress pellet. If a worktree is later removed while it owns work, another workspace uses the explicit recovery form rather than silently taking it.
+Both worktrees use the same generated `<project-code>-N` references, one queue, and one memory store. Each resumes only its own in-progress pellet. If a worktree is later removed while it owns work, another workspace uses the explicit recovery form rather than silently taking it.
 
 ### Insert discovered work before an existing pellet
 

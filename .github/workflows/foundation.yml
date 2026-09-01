@@ -201,16 +201,12 @@ jobs:
           $env:NO_PROXY = ""
           Push-Location $smokeRoot
           try {
-            $initialized = & $executable init --code smoke | ConvertFrom-Json
-            if ($LASTEXITCODE -ne 0 -or $initialized.command -ne "init" -or $initialized.data.code -ne "smoke") {
-              throw "pl init smoke failed"
-            }
             $added = & $executable add "release archive smoke" | ConvertFrom-Json
-            if ($LASTEXITCODE -ne 0 -or $added.data.id -ne "smoke-1") { throw "pl add smoke failed" }
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($added.data.id)) { throw "pl add smoke failed" }
             $started = & $executable start-next | ConvertFrom-Json
-            if ($LASTEXITCODE -ne 0 -or $started.data.pellet.status -ne "in_progress") { throw "pl start-next smoke failed" }
-            $closed = & $executable close smoke-1 | ConvertFrom-Json
-            if ($LASTEXITCODE -ne 0 -or $closed.data.status -ne "closed") { throw "pl close smoke failed" }
+            if ($LASTEXITCODE -ne 0 -or $started.data.pellet.id -ne $added.data.id -or $started.data.pellet.status -ne "in_progress") { throw "pl start-next smoke failed" }
+            $closed = & $executable close $added.data.id | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $closed.data.id -ne $added.data.id -or $closed.data.status -ne "closed") { throw "pl close smoke failed" }
           } finally {
             Pop-Location
           }

@@ -11,13 +11,13 @@ Each invocation follows the same shape:
 1. Strictly parse global options and the subcommand, then validate all
    usage-only semantics without reading the working directory, performing
    discovery, or causing command side effects.
-2. Locate the nearest `.pellets/pellets.db` by walking from the working directory toward the filesystem root, unless the command is creating a database or installing the portable agent skill.
-3. Ask Git for the worktree root, worktree-specific Git directory, and shared common directory; normalize those paths relative to the database root where possible.
-4. Open SQLite, configure/migrate it, and resolve the common directory to one logical project plus the worktree/Git-directory pair to its registered workspace.
+2. Evaluate the parsed command's explicit current-workspace capability. A current-project command resolves or automatically bootstraps the nearest database, logical repository, and worktree; a database-level command only discovers its existing nearest database; `init-db` and the portable skill installer bypass normal discovery.
+3. For current-project commands, ask Git for the worktree root, worktree-specific Git directory, and shared common directory. Use the nearest ancestor database or create one at the worktree root, normalize the identities relative to its root, reuse an existing logical project's immutable code or allocate a deterministic generated code, and attach the current workspace when needed.
+4. Open/configure/migrate SQLite and resolve the registered current project/workspace for the requested operation.
 5. Execute one application operation through a narrow storage interface.
 6. Emit one compact, versioned JSON result to stdout, or one structured JSON error to stderr.
 
-Commands such as `init-db` and `init` vary in discovery behavior as described in [cli-spec.md](cli-spec.md).
+`init-db`, database-level project inspection/purge, and skill installation vary in discovery behavior as described in [cli-spec.md](cli-spec.md).
 
 ```mermaid
 flowchart LR
@@ -92,7 +92,7 @@ Repository targets are ordinary untracked files. The installer never runs `git a
 
 ### Database discovery
 
-For normal commands, start at the current working directory and test each ancestor for `.pellets/pellets.db`. The nearest database wins. Continue past Git boundaries so a common-parent database can serve sibling repositories.
+Start at the current working directory and test each ancestor for `.pellets/pellets.db`. The nearest database wins. Continue past Git boundaries so a common-parent database can serve sibling repositories. When a current-project command finds none, bootstrap creates the fixed path at Git's current worktree root. `init-db` remains the explicit way to place a database at a common parent before first use in sibling repositories or linked worktrees.
 
 The directory containing `.pellets` is the **database root**. A database may contain unrelated logical projects as well as several workspaces of one project.
 
@@ -100,11 +100,13 @@ The directory containing `.pellets` is the **database root**. A database may con
 
 Use Git's own discovery semantics and `git rev-parse --show-toplevel --absolute-git-dir --git-common-dir` with absolute path formatting. The common directory identifies the logical repository. The worktree root and worktree-specific Git directory together identify the current workspace; linked worktrees therefore share one project without becoming the same workspace. Canonicalize existing prefixes, normalize separators and platform case, and store paths relative to the database root when they are beneath it, otherwise as explicit absolute paths.
 
-All Git commands, canonicalization, existence checks, and stale-path checks finish outside SQLite write transactions. `pl init --code CODE` creates a logical project and its first workspace, attaches another linked worktree with the same code, or updates a moved workspace root only when the old registered root no longer exists. A live duplicate presenting one Git directory at a second root, an unrelated repository reusing a code, or inconsistent common/root/Git-directory identity is a typed conflict with no persistent write. Removed worktrees remain visible as stale registrations so later lifecycle recovery can name their ownership; no read command registers, moves, or removes a workspace implicitly.
+All Git commands, canonicalization, existence checks, and stale-path checks finish outside SQLite write transactions. After parsing and usage validation, a command with the current-workspace capability takes a read-only exact-resolution fast path when the workspace is already known. Otherwise bootstrap creates the logical project and first workspace, attaches a linked worktree to the existing common-directory project while reusing its stored code, or updates a moved workspace root only when the old registered root no longer exists. A live duplicate presenting one Git directory at a second root, one worktree attached to two projects, or inconsistent common/root/Git-directory identity is a typed conflict with no partial project/workspace registration. Removed worktrees remain visible as stale registrations so later lifecycle recovery can name their ownership.
+
+The repository name comes from the basename containing a `.git` common directory, or from a bare common-directory basename with a terminal `.git` removed. Code normalization lowercases ASCII letters, preserves ASCII digits, collapses every run of other characters into one internal hyphen, and trims edge hyphens. A non-empty result of at most 12 bytes is the first candidate. Empty or longer names, and first candidates already owned by another repository, use an identity-hash candidate: up to three normalized prefix bytes (or `p`), `-`, and eight lowercase hexadecimal SHA-256 digits. The hash seed is the stored common-directory identity serialized as `true:<slash-normalized-relative-path>` or `false:<slash-normalized-absolute-path>`. Further collisions rehash that seed plus a NUL byte and the increasing canonical decimal attempt. Candidate lookup and project/workspace insertion occur under the same immediate transaction, so concurrent first commands converge for one identity and different identities cannot commit one code.
 
 ### Keeping the database out of Git
 
-The database and its WAL/SHM/journal companions must never be committed or damaged. If `init-db` or `init` places `.pellets` inside a Git work tree, it adds `.pellets/` to the repository’s local Git exclude file (`.git/info/exclude` or the worktree-equivalent path), not to the committed `.gitignore`. Initialization refuses to proceed if the database or any companion is already tracked, including an index-only or case-equivalent path on a case-insensitive filesystem. It also rejects a symlinked `.pellets` directory and any pre-existing database companion before SQLite opens a file. Failure cleanup removes only files whose handle-backed identity was recorded as created by that initialization attempt, including on Windows where a later path lookup alone cannot identify a replaced file safely.
+The database and its WAL/SHM/journal companions must never be committed or damaged. If `init-db` or automatic bootstrap places `.pellets` inside a Git work tree, it adds `.pellets/` to the repository’s local Git exclude file (`.git/info/exclude` or the worktree-equivalent path), not to the committed `.gitignore`. Bootstrap refuses to register when the database or any companion is already tracked, including an index-only or case-equivalent path on a case-insensitive filesystem. New-database creation also rejects a symlinked `.pellets` directory and any pre-existing database companion before SQLite opens a file. Failure cleanup removes only files whose handle-backed identity was recorded as created by that initialization attempt, including on Windows where a later path lookup alone cannot identify a replaced file safely.
 
 ## CLI command flow
 
@@ -121,6 +123,8 @@ A mutating command such as `pl start foo-12` flows as follows:
 9. Render the result as JSON v1.
 
 Expected domain conflicts—missing pellet, wrong status, `workspace_already_in_progress`, or `pellet_in_progress_elsewhere`—are typed errors. They are not detected by parsing SQLite error strings in the CLI layer.
+
+Bootstrap is a pre-command side effect, not part of queue or memory semantics. Once exact project/workspace resolution succeeds, `next`, list/search/show reads, and dry runs take the existing write-free operation path. On first use, those commands may first create the database and transactionally register the project/workspace, then execute the otherwise read-only operation in the same process. Help/version, parsing or usage failures, `init-db`, skill installation, named/database-level project reads, and explicit project-scoped purge never bootstrap merely because they run inside Git.
 
 ## SQLite storage boundary
 

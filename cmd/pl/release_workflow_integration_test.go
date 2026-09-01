@@ -21,7 +21,7 @@ func TestReleaseEndToEndCompiledWorkflows(t *testing.T) {
 	}
 	executable := buildFoundationExecutable(t)
 
-	t.Run("init from a nested directory places the database at the Git root", func(t *testing.T) {
+	t.Run("first use from a nested directory places the database at the Git root", func(t *testing.T) {
 		repository := filepath.Join(t.TempDir(), "Git root placement with spaces 界")
 		createFoundationRepository(t, repository)
 		nested := filepath.Join(repository, "nested", "deep")
@@ -30,11 +30,11 @@ func TestReleaseEndToEndCompiledWorkflows(t *testing.T) {
 		}
 		initialized := decodeFoundationSuccess[foundationProject](
 			t,
-			runReleaseCLI(t, executable, nested, nil, "init", "--code", "rootdb"),
-			"init",
+			runReleaseCLI(t, executable, nested, nil, "project", "show"),
+			"project show",
 		)
-		if initialized.Code != "rootdb" || len(initialized.Workspaces) != 1 || initialized.Workspaces[0].RootPath != "." {
-			t.Fatalf("Git-root initialization = %#v", initialized)
+		if initialized.Code == "" || len(initialized.Workspaces) != 1 || initialized.Workspaces[0].RootPath != "." {
+			t.Fatalf("Git-root bootstrap = %#v", initialized)
 		}
 		wantDatabase := discovery.DatabasePath(foundationCanonicalPath(t, repository))
 		if _, err := os.Stat(wantDatabase); err != nil {
@@ -47,10 +47,10 @@ func TestReleaseEndToEndCompiledWorkflows(t *testing.T) {
 
 	t.Run("common parent multi-project queue memory purge and recovery", func(t *testing.T) {
 		common := filepath.Join(foundationShortTempDir(t), "release common parent with spaces 世界")
-		mainRoot := filepath.Join(common, "main work tree")
+		mainRoot := filepath.Join(common, "shared")
 		linkedA := filepath.Join(common, "linked alpha ü")
 		linkedB := filepath.Join(common, "linked beta 界")
-		otherRoot := filepath.Join(common, "unrelated sibling Ω")
+		otherRoot := filepath.Join(common, "other")
 		createFoundationRepository(t, mainRoot)
 		if output, err := foundationGitCommand(mainRoot, "worktree", "add", "--quiet", "-b", "release-linked-a", linkedA); err != nil {
 			t.Fatalf("add first release worktree: %v\n%s", err, output)
@@ -78,23 +78,23 @@ func TestReleaseEndToEndCompiledWorkflows(t *testing.T) {
 
 		mainProject := decodeFoundationSuccess[foundationProject](
 			t,
-			runReleaseCLI(t, executable, nested[mainRoot], nil, "init", "--code", "shared"),
-			"init",
+			runReleaseCLI(t, executable, nested[mainRoot], nil, "project", "show"),
+			"project show",
 		)
 		linkedAProject := decodeFoundationSuccess[foundationProject](
 			t,
-			runReleaseCLI(t, executable, nested[linkedA], nil, "init", "--code", "shared"),
-			"init",
+			runReleaseCLI(t, executable, nested[linkedA], nil, "project", "show"),
+			"project show",
 		)
 		linkedBProject := decodeFoundationSuccess[foundationProject](
 			t,
-			runReleaseCLI(t, executable, nested[linkedB], nil, "init", "--code", "shared"),
-			"init",
+			runReleaseCLI(t, executable, nested[linkedB], nil, "project", "show"),
+			"project show",
 		)
 		otherProject := decodeFoundationSuccess[foundationProject](
 			t,
-			runReleaseCLI(t, executable, nested[otherRoot], nil, "init", "--code", "other"),
-			"init",
+			runReleaseCLI(t, executable, nested[otherRoot], nil, "project", "show"),
+			"project show",
 		)
 		if len(mainProject.Workspaces) != 1 || len(linkedAProject.Workspaces) != 2 || len(linkedBProject.Workspaces) != 3 || len(otherProject.Workspaces) != 1 {
 			t.Fatalf("registered release projects = main %#v; linked A %#v; linked B %#v; other %#v", mainProject, linkedAProject, linkedBProject, otherProject)

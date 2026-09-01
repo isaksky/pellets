@@ -43,6 +43,11 @@ type Command struct {
 	Summary               string
 	Usage                 string
 	SkipDatabaseDiscovery bool
+	// NeedsCurrentWorkspace marks commands whose valid operation is scoped to
+	// the current logical Git project/worktree. It is evaluated only after all
+	// parsing and usage validation, so bootstrap can never be triggered by an
+	// invalid invocation.
+	NeedsCurrentWorkspace func(globals GlobalOptions, input any) bool
 	Parse                 func(args []string) (any, error)
 	Validate              func(globals GlobalOptions, input any) error
 	Run                   func(ctx context.Context, invocation Invocation) (any, error)
@@ -56,6 +61,7 @@ type Command struct {
 type App struct {
 	version          string
 	commands         map[string]Command
+	bootstrapCurrent func(context.Context, string) (discovery.Database, error)
 	workingDirectory func() (string, error)
 	stdin            io.Reader
 	isInteractive    func(io.Reader, io.Writer) bool
@@ -80,12 +86,24 @@ func NewWithCommands(version string, commands ...Command) *App {
 		if command.Run != nil && command.RunForeground != nil {
 			panic("cli: command has both Run and RunForeground: " + command.Name)
 		}
+		if command.SkipDatabaseDiscovery && command.NeedsCurrentWorkspace != nil {
+			panic("cli: command both skips database discovery and needs the current workspace: " + command.Name)
+		}
 		registered[command.Name] = command
 	}
 	return &App{
 		version: version, commands: registered, workingDirectory: os.Getwd, stdin: os.Stdin,
 		isInteractive: streamsAreInteractive,
 	}
+}
+
+// WithCurrentWorkspaceBootstrap installs the resolve-or-bootstrap boundary
+// used only by commands that explicitly require the current project/workspace.
+func (a *App) WithCurrentWorkspaceBootstrap(
+	bootstrap func(context.Context, string) (discovery.Database, error),
+) *App {
+	a.bootstrapCurrent = bootstrap
+	return a
 }
 
 // Run executes one CLI invocation and returns its process exit code.
@@ -133,11 +151,25 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 						err,
 					)
 				}
-				if err == nil && !parsed.command.SkipDatabaseDiscovery {
-					var database discovery.Database
-					database, err = discovery.FindDatabase(invocation.WorkingDirectory)
-					if err == nil {
-						invocation.Database = &database
+				if err == nil {
+					needsCurrent := parsed.command.NeedsCurrentWorkspace != nil &&
+						parsed.command.NeedsCurrentWorkspace(parsed.globals, input)
+					if needsCurrent {
+						if a.bootstrapCurrent == nil {
+							err = domain.NewError(domain.Unexpected, "internal_error", "current workspace bootstrap is not configured", nil)
+						} else {
+							var database discovery.Database
+							database, err = a.bootstrapCurrent(context.Background(), invocation.WorkingDirectory)
+							if err == nil {
+								invocation.Database = &database
+							}
+						}
+					} else if !parsed.command.SkipDatabaseDiscovery {
+						var database discovery.Database
+						database, err = discovery.FindDatabase(invocation.WorkingDirectory)
+						if err == nil {
+							invocation.Database = &database
+						}
 					}
 				}
 
@@ -176,6 +208,8 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 	}
 	return 0
 }
+
+func alwaysNeedsCurrentWorkspace(GlobalOptions, any) bool { return true }
 
 func streamsAreInteractive(input io.Reader, outputWriter io.Writer) bool {
 	inputFile, inputOK := input.(*os.File)

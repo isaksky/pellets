@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -24,12 +25,43 @@ func TestCoreQueueCompiledProcessIntegration(t *testing.T) {
 	executable := buildFoundationExecutable(t)
 	failureExecutable := buildFoundationFailureExecutable(t)
 
+	t.Run("concurrent first commands converge on one automatic bootstrap", func(t *testing.T) {
+		root := filepath.Join(foundationShortTempDir(t), "bootstrap")
+		createFoundationRepository(t, root)
+		calls := make([]coreQueueInvocation, 6)
+		for index := range calls {
+			calls[index] = coreQueueInvocation{
+				directory: root,
+				args:      []string{"add", fmt.Sprintf("first-use add %d", index)},
+			}
+		}
+		results := runCoreQueueCLIConcurrently(t, executable, calls)
+		seen := make(map[int64]bool, len(results))
+		for _, result := range results {
+			pellet := decodeFoundationSuccess[foundationPellet](t, result, "add")
+			if pellet.Project != "bootstrap" || seen[pellet.Number] {
+				t.Fatalf("concurrent first-use pellet = %#v; seen=%v", pellet, seen)
+			}
+			seen[pellet.Number] = true
+		}
+		project := decodeFoundationSuccess[foundationProject](
+			t, runFoundationCLI(t, executable, root, "project", "show"), "project show",
+		)
+		if project.Code != "bootstrap" || len(project.Workspaces) != 1 {
+			t.Fatalf("concurrent first-use project = %#v", project)
+		}
+		exclude := string(readFoundationFile(t, foundationExcludePath(t, root)))
+		if strings.Count("\n"+exclude, "\n.pellets/\n") != 1 {
+			t.Fatalf("concurrent first use wrote local exclude %d times: %q", strings.Count(exclude, ".pellets/"), exclude)
+		}
+	})
+
 	t.Run("concurrent additions preserve project-local allocation and exact filters", func(t *testing.T) {
 		fixture := newCoreQueueCompiledFixture(t, executable, 3)
-		otherRoot := filepath.Join(fixture.common, "independent project")
+		otherRoot := filepath.Join(fixture.common, "other")
 		createFoundationRepository(t, otherRoot)
 		decodeFoundationSuccess[foundationProject](
-			t, runFoundationCLI(t, executable, otherRoot, "init", "--code", "other"), "init",
+			t, runFoundationCLI(t, executable, otherRoot, "project", "show"), "project show",
 		)
 
 		calls := make([]coreQueueInvocation, 0, len(fixture.roots)+1)
@@ -517,7 +549,7 @@ func newCoreQueueCompiledFixture(t *testing.T, executable string, workspaceCount
 		t.Fatal("core queue fixture needs at least one workspace")
 	}
 	common := filepath.Join(foundationShortTempDir(t), "core queue compiled")
-	mainRoot := filepath.Join(common, "main")
+	mainRoot := filepath.Join(common, "queue")
 	createFoundationRepository(t, mainRoot)
 	roots := []string{mainRoot}
 	for index := 1; index < workspaceCount; index++ {
@@ -536,7 +568,7 @@ func newCoreQueueCompiledFixture(t *testing.T, executable string, workspaceCount
 	var project foundationProject
 	for _, root := range roots {
 		project = decodeFoundationSuccess[foundationProject](
-			t, runFoundationCLI(t, executable, root, "init", "--code", "queue"), "init",
+			t, runFoundationCLI(t, executable, root, "project", "show"), "project show",
 		)
 	}
 	workspaceIDs := make(map[string]int64, len(roots))

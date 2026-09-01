@@ -23,10 +23,11 @@ type WebRunner func(context.Context, Invocation, WebOptions, io.Writer, io.Write
 // the listener URL; it does not emit a JSON envelope after shutdown.
 func WebCommand(run WebRunner) Command {
 	return Command{
-		Name:    "web",
-		Summary: "Open the foreground local web inspector.",
-		Usage:   "pl [--project CODE] web [--port PORT] [--no-open]",
-		Parse:   parseWebOptions,
+		Name:                  "web",
+		Summary:               "Open the foreground local web inspector.",
+		Usage:                 "pl [--project CODE] web [--port PORT] [--no-open]",
+		Parse:                 parseWebOptions,
+		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
 		Validate: func(globals GlobalOptions, _ any) error {
 			if globals.Human || globals.Pretty {
 				return domain.NewError(domain.Usage, "format_not_supported", "web does not use JSON or human output formatting", nil)

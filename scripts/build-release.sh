@@ -223,13 +223,11 @@ if [[ "$version_output" != "pl $version (JSON schema 1)" ]]; then
 fi
 
 git -C "$smoke_directory" init -q
-smoke_init="$(cd "$smoke_directory" && run_offline "$native_directory/pl" init --code smoke)"
 smoke_add="$(cd "$smoke_directory" && run_offline "$native_directory/pl" add 'release archive smoke')"
 smoke_start="$(cd "$smoke_directory" && run_offline "$native_directory/pl" start-next)"
 smoke_close="$(cd "$smoke_directory" && run_offline "$native_directory/pl" close smoke-1)"
 
 for expected_result in \
-  "$smoke_init|\"command\":\"init\"|\"code\":\"smoke\"" \
   "$smoke_add|\"command\":\"add\"|\"id\":\"smoke-1\"" \
   "$smoke_start|\"command\":\"start-next\"|\"status\":\"in_progress\"" \
   "$smoke_close|\"command\":\"close\"|\"status\":\"closed\""; do
@@ -240,7 +238,7 @@ for expected_result in \
   fi
 done
 if [[ ! -f "$smoke_directory/.pellets/pellets.db" ]]; then
-  printf 'native smoke test did not initialize its isolated database\n' >&2
+  printf 'native smoke test did not bootstrap its isolated database\n' >&2
   exit 1
 fi
 

@@ -22,7 +22,8 @@ func AddCommand(manager app.PelletManager) Command {
 		Summary: "Add a pellet to the current project's queue.",
 		Usage: "pl add TITLE [--description TEXT | --description-file PATH] [--external-id ID] [--group GROUP] " +
 			"[--before PELLET | --after PELLET] [--maybe-later]",
-		Parse: parseAdd,
+		Parse:                 parseAdd,
+		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
 		Run: func(ctx context.Context, invocation Invocation) (any, error) {
 			input := invocation.Input.(addInput)
 			description, err := resolveDescription(input.Description, input.DescriptionFile, invocation.Stdin, invocation.WorkingDirectory)
@@ -47,10 +48,11 @@ func AddCommand(manager app.PelletManager) Command {
 
 func MoveCommand(manager app.PelletManager) Command {
 	return Command{
-		Name:    "move",
-		Summary: "Move an active pellet relative to another active pellet.",
-		Usage:   "pl move PELLET (--before OTHER | --after OTHER)",
-		Parse:   parseMove,
+		Name:                  "move",
+		Summary:               "Move an active pellet relative to another active pellet.",
+		Usage:                 "pl move PELLET (--before OTHER | --after OTHER)",
+		Parse:                 parseMove,
+		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
 		Run: func(ctx context.Context, invocation Invocation) (any, error) {
 			input := invocation.Input.(moveInput)
 			pellet, err := manager.Move(
@@ -67,10 +69,11 @@ func MoveCommand(manager app.PelletManager) Command {
 
 func ListCommand(manager app.PelletManager) Command {
 	return Command{
-		Name:    "list",
-		Summary: "List pellets in deterministic queue order.",
-		Usage:   "pl list [--status STATUS] [--external-id ID] [--group GROUP] [--all] [--limit N]",
-		Parse:   parseList,
+		Name:                  "list",
+		Summary:               "List pellets in deterministic queue order.",
+		Usage:                 "pl list [--status STATUS] [--external-id ID] [--group GROUP] [--all] [--limit N]",
+		Parse:                 parseList,
+		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
 		Run: func(ctx context.Context, invocation Invocation) (any, error) {
 			input := invocation.Input.(listInput)
 			pellets, err := manager.List(
@@ -94,10 +97,11 @@ func ListCommand(manager app.PelletManager) Command {
 
 func SearchCommand(manager app.PelletManager) Command {
 	return Command{
-		Name:    "search",
-		Summary: "Search pellet title, description, and external ID text.",
-		Usage:   "pl search QUERY [--external-id ID] [--group GROUP] [--status STATUS] [--limit N]",
-		Parse:   parseSearch,
+		Name:                  "search",
+		Summary:               "Search pellet title, description, and external ID text.",
+		Usage:                 "pl search QUERY [--external-id ID] [--group GROUP] [--status STATUS] [--limit N]",
+		Parse:                 parseSearch,
+		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
 		Run: func(ctx context.Context, invocation Invocation) (any, error) {
 			input := invocation.Input.(searchInput)
 			pellets, err := manager.Search(
@@ -183,10 +187,11 @@ func PurgeCommand(manager app.PelletManager) Command {
 
 func ShowCommand(manager app.PelletManager) Command {
 	return Command{
-		Name:    "show",
-		Summary: "Show one complete pellet record.",
-		Usage:   "pl show PELLET",
-		Parse:   parseShow,
+		Name:                  "show",
+		Summary:               "Show one complete pellet record.",
+		Usage:                 "pl show PELLET",
+		Parse:                 parseShow,
+		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
 		Run: func(ctx context.Context, invocation Invocation) (any, error) {
 			reference := invocation.Input.(referenceInput).Reference
 			pellet, err := manager.Show(
@@ -206,7 +211,8 @@ func EditCommand(manager app.PelletManager) Command {
 		Summary: "Edit user-controlled pellet fields.",
 		Usage: "pl edit PELLET [--title TEXT] [--description TEXT | --description-file PATH] " +
 			"[--external-id ID | --clear-external-id] [--group GROUP | --clear-group]",
-		Parse: parseEdit,
+		Parse:                 parseEdit,
+		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
 		Run: func(ctx context.Context, invocation Invocation) (any, error) {
 			input := invocation.Input.(editInput)
 			description, err := resolveOptionalDescription(input.Description, input.DescriptionFile, invocation.Stdin, invocation.WorkingDirectory)
@@ -231,10 +237,11 @@ func EditCommand(manager app.PelletManager) Command {
 
 func NextCommand(manager app.PelletManager) Command {
 	return Command{
-		Name:    "next",
-		Summary: "Read the current workspace's next work without reserving it.",
-		Usage:   "pl next [--external-id ID] [--group GROUP]",
-		Parse:   parseNext,
+		Name:                  "next",
+		Summary:               "Read the current workspace's next work without reserving it.",
+		Usage:                 "pl next [--external-id ID] [--group GROUP]",
+		Parse:                 parseNext,
+		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
 		Run: func(ctx context.Context, invocation Invocation) (any, error) {
 			input := invocation.Input.(nextInput)
 			selection, err := manager.Next(
@@ -260,10 +267,11 @@ func StartCommand(manager app.PelletManager) Command {
 
 func StartNextCommand(manager app.PelletManager) Command {
 	return Command{
-		Name:    "start-next",
-		Summary: "Atomically resume or start the current workspace's next work.",
-		Usage:   "pl start-next [--external-id ID] [--group GROUP]",
-		Parse:   parseNext,
+		Name:                  "start-next",
+		Summary:               "Atomically resume or start the current workspace's next work.",
+		Usage:                 "pl start-next [--external-id ID] [--group GROUP]",
+		Parse:                 parseNext,
+		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
 		Run: func(ctx context.Context, invocation Invocation) (any, error) {
 			input := invocation.Input.(nextInput)
 			selection, err := manager.StartNext(
@@ -308,6 +316,7 @@ func pelletLifecycleCommand(manager app.PelletManager, operation storage.PelletL
 	}
 	return Command{
 		Name: string(operation), Summary: summary, Usage: usage, Parse: parse,
+		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
 		Run: func(ctx context.Context, invocation Invocation) (any, error) {
 			input := invocation.Input.(lifecycleInput)
 			result, err := manager.Transition(

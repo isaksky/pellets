@@ -12,79 +12,6 @@ import (
 	"pellets/internal/storage"
 )
 
-// InitCommand registers the current Git worktree as a workspace of one
-// logical project.
-func InitCommand(manager app.ProjectManager) Command {
-	return Command{
-		Name:                  "init",
-		Summary:               "Register the current Git repository and worktree.",
-		Usage:                 "pl init --code CODE",
-		SkipDatabaseDiscovery: true,
-		Validate: func(globals GlobalOptions, _ any) error {
-			if globals.Project != "" {
-				return projectNotAllowed("init")
-			}
-			return nil
-		},
-		Parse: parseInit,
-		Run: func(ctx context.Context, invocation Invocation) (any, error) {
-			input := invocation.Input.(initInput)
-			project, err := manager.Init(ctx, invocation.WorkingDirectory, input.Code)
-			if err != nil {
-				return nil, err
-			}
-			return newProjectData(project), nil
-		},
-	}
-}
-
-type initInput struct {
-	Code string
-}
-
-func parseInit(args []string) (any, error) {
-	var input initInput
-	seenCode := false
-	for len(args) > 0 {
-		argument := args[0]
-		if !strings.HasPrefix(argument, "-") {
-			return nil, unexpectedArgument(argument)
-		}
-		name, value, hasValue := splitOption(argument)
-		if name != "--code" {
-			return nil, unknownFlag(name)
-		}
-		if seenCode {
-			return nil, duplicateCommandFlag(name)
-		}
-		seenCode = true
-		if !hasValue {
-			if len(args) < 2 || strings.HasPrefix(args[1], "-") {
-				return nil, missingFlagValue(name)
-			}
-			value = args[1]
-			args = args[1:]
-		}
-		if value == "" {
-			return nil, missingFlagValue(name)
-		}
-		input.Code = value
-		args = args[1:]
-	}
-	if !seenCode {
-		return nil, domain.NewError(
-			domain.Usage,
-			"missing_required_flag",
-			"flag \"--code\" is required",
-			map[string]any{"flag": "--code"},
-		)
-	}
-	if err := domain.ValidateProjectCode(input.Code); err != nil {
-		return nil, err
-	}
-	return input, nil
-}
-
 // ProjectCommand implements the database-level project list and project show
 // command family.
 func ProjectCommand(manager app.ProjectManager) Command {
@@ -93,6 +20,10 @@ func ProjectCommand(manager app.ProjectManager) Command {
 		Summary: "List or show registered projects.",
 		Usage:   "pl project list\n  pl project show [CODE]",
 		Parse:   parseProject,
+		NeedsCurrentWorkspace: func(globals GlobalOptions, value any) bool {
+			input := value.(projectInput)
+			return input.Action == "show" && input.Code == "" && globals.Project == ""
+		},
 		Validate: func(globals GlobalOptions, value any) error {
 			input := value.(projectInput)
 			switch input.Action {

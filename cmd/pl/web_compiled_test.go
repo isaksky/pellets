@@ -22,16 +22,8 @@ func TestCompiledWebDiscoveryStartupAndCleanShutdown(t *testing.T) {
 		t.Fatalf("compiled web test requires Git: %v", err)
 	}
 	executable := buildFoundationExecutable(t)
-	root := filepath.Join(t.TempDir(), "web compiled 界")
+	root := filepath.Join(t.TempDir(), "webtest")
 	createFoundationRepository(t, root)
-	result := runFoundationCLI(t, executable, root, "init", "--code", "webtest")
-	if result.exit != 0 || result.stderr != "" {
-		t.Fatalf("init = exit %d stdout %q stderr %q", result.exit, result.stdout, result.stderr)
-	}
-	result = runFoundationCLI(t, executable, root, "add", "compiled web task")
-	if result.exit != 0 || result.stderr != "" {
-		t.Fatalf("add = exit %d stdout %q stderr %q", result.exit, result.stdout, result.stderr)
-	}
 	nested := filepath.Join(root, "nested", "deeper")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)
@@ -78,6 +70,13 @@ func TestCompiledWebDiscoveryStartupAndCleanShutdown(t *testing.T) {
 	parsed, err := url.Parse(address)
 	if err != nil || parsed.Scheme != "http" || parsed.Hostname() != "127.0.0.1" || parsed.Port() == "" {
 		t.Fatalf("reported URL = %q, parse error %v", address, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".pellets", "pellets.db")); err != nil {
+		t.Fatalf("first-use web did not bootstrap the project database: %v", err)
+	}
+	result := runFoundationCLI(t, executable, root, "add", "compiled web task")
+	if result.exit != 0 || result.stderr != "" {
+		t.Fatalf("add = exit %d stdout %q stderr %q", result.exit, result.stdout, result.stderr)
 	}
 	client := &http.Client{Timeout: 2 * time.Second}
 	response, err := client.Get(address + "/projects/webtest/tasks")

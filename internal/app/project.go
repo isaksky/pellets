@@ -3,6 +3,10 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"pellets/internal/domain"
 	"pellets/internal/storage"
@@ -36,68 +40,116 @@ type ProjectManager struct {
 	GitSafety  DatabaseGitSafety
 }
 
-func (manager ProjectManager) Init(ctx context.Context, workingDirectory, code string) (storage.Project, error) {
+// BootstrapCurrent ensures that the nearest database, logical Git repository,
+// and current worktree workspace exist before a current-project command runs.
+// An already registered exact workspace takes the read-only fast path.
+func (manager ProjectManager) BootstrapCurrent(ctx context.Context, workingDirectory string) (Database, error) {
 	if err := manager.validate(); err != nil {
-		return storage.Project{}, err
-	}
-	if err := domain.ValidateProjectCode(code); err != nil {
-		return storage.Project{}, err
+		return Database{}, err
 	}
 	identity, err := manager.Discover.FindGitIdentity(ctx, workingDirectory)
 	if err != nil {
-		return storage.Project{}, err
+		return Database{}, err
 	}
 
 	database, err := manager.Discover.FindDatabase(workingDirectory)
 	if err != nil {
 		if domain.PublicError(err).Code != "database_not_found" {
-			return storage.Project{}, err
+			return Database{}, err
 		}
 		initialized, initializeErr := manager.Initialize(ctx, identity.WorkTreeRoot)
 		if initializeErr != nil {
-			return storage.Project{}, initializeErr
+			// Another valid first command may have won the exclusive database
+			// creation race. Rediscovery lets both commands converge on it; every
+			// other initialization failure remains authoritative.
+			if domain.PublicError(initializeErr).Code != "database_already_exists" {
+				return Database{}, initializeErr
+			}
+			database, err = manager.Discover.FindDatabase(workingDirectory)
+			if err != nil {
+				return Database{}, initializeErr
+			}
+		} else {
+			database = Database{Root: initialized.Root, Path: initialized.Path}
 		}
-		database = Database{Root: initialized.Root, Path: initialized.Path}
 	}
-	registration, err := manager.registration(database.Root, identity, code)
+	registration, err := manager.registration(database.Root, identity)
 	if err != nil {
-		return storage.Project{}, err
+		return Database{}, err
 	}
 
-	// Initialization is the only command allowed to update Git's local exclude
-	// and register a workspace. Both safeguards finish before storage writes.
+	projectDatabase, err := manager.openForBootstrap(ctx, database.Path)
+	if err != nil {
+		return Database{}, err
+	}
+	_, resolveErr := projectDatabase.ResolveProjectWorkspace(
+		ctx, registration.GitCommonDir, registration.WorkspaceRoot, registration.GitDir)
+	if resolveErr == nil {
+		return database, closeProjectDatabase(projectDatabase, nil)
+	}
+	resolveCode := domain.PublicError(resolveErr).Code
+	if resolveCode != "project_not_registered" && resolveCode != "workspace_not_registered" {
+		return Database{}, closeProjectDatabase(projectDatabase, resolveErr)
+	}
+	if err := closeProjectDatabase(projectDatabase, nil); err != nil {
+		return Database{}, err
+	}
+
+	// Git and filesystem safeguards finish before the registration write.
 	if err := manager.GitSafety.RejectTracked(ctx, database.Root, database.Path); err != nil {
-		return storage.Project{}, err
+		return Database{}, err
 	}
 	if err := manager.GitSafety.EnsureExcluded(ctx, database.Root, database.Path); err != nil {
-		return storage.Project{}, err
+		return Database{}, err
 	}
 
-	projectDatabase, err := manager.Open(ctx, database.Path)
+	projectDatabase, err = manager.openForBootstrap(ctx, database.Path)
 	if err != nil {
-		return storage.Project{}, err
+		return Database{}, err
 	}
 	if existing, lookupErr := projectDatabase.FindWorkspaceByGitDir(ctx, registration.GitDir); lookupErr == nil {
 		if existing.Workspace.RootPath != registration.WorkspaceRoot {
 			oldRoot, resolveErr := manager.Discover.ResolvePath(database.Root, existing.Workspace.RootPath)
 			if resolveErr != nil {
-				return storage.Project{}, closeProjectDatabase(projectDatabase, resolveErr)
+				return Database{}, closeProjectDatabase(projectDatabase, resolveErr)
 			}
 			exists, existsErr := manager.Discover.PathExists(oldRoot)
 			if existsErr != nil {
-				return storage.Project{}, closeProjectDatabase(projectDatabase, existsErr)
+				return Database{}, closeProjectDatabase(projectDatabase, existsErr)
 			}
 			registration.AllowWorkspaceMove = !exists
 		}
 	} else if domain.PublicError(lookupErr).Code != "workspace_not_registered" {
-		return storage.Project{}, closeProjectDatabase(projectDatabase, lookupErr)
+		return Database{}, closeProjectDatabase(projectDatabase, lookupErr)
 	}
 
-	project, _, operationErr := projectDatabase.RegisterProject(ctx, registration)
-	return project, closeProjectDatabase(projectDatabase, operationErr)
+	_, _, operationErr := projectDatabase.RegisterProject(ctx, registration)
+	return database, closeProjectDatabase(projectDatabase, operationErr)
 }
 
-func (manager ProjectManager) registration(databaseRoot string, identity domain.GitIdentity, code string) (storage.ProjectRegistration, error) {
+func (manager ProjectManager) openForBootstrap(ctx context.Context, path string) (storage.ProjectDatabase, error) {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		database, err := manager.Open(ctx, path)
+		if err == nil {
+			return database, nil
+		}
+		public := domain.PublicError(err)
+		retryable := public.Code == "database_busy" || public.Code == "database_configuration_failed"
+		if !retryable || time.Now().After(deadline) {
+			return nil, err
+		}
+		timer := time.NewTimer(20 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (manager ProjectManager) registration(databaseRoot string, identity domain.GitIdentity) (storage.ProjectRegistration, error) {
 	commonDir, err := manager.Discover.NormalizePath(databaseRoot, identity.GitCommonDir)
 	if err != nil {
 		return storage.ProjectRegistration{}, err
@@ -111,8 +163,23 @@ func (manager ProjectManager) registration(databaseRoot string, identity domain.
 		return storage.ProjectRegistration{}, err
 	}
 	return storage.ProjectRegistration{
-		Code: code, GitCommonDir: commonDir, WorkspaceRoot: workspaceRoot, GitDir: gitDir,
+		CodeName:     logicalRepositoryName(identity.GitCommonDir),
+		CodeIdentity: fmt.Sprintf("%t:%s", commonDir.Relative, commonDir.Value),
+		GenerateCode: true,
+		GitCommonDir: commonDir, WorkspaceRoot: workspaceRoot, GitDir: gitDir,
 	}, nil
+}
+
+func logicalRepositoryName(gitCommonDir string) string {
+	clean := filepath.Clean(gitCommonDir)
+	name := filepath.Base(clean)
+	if strings.EqualFold(name, ".git") {
+		return filepath.Base(filepath.Dir(clean))
+	}
+	if len(name) > len(".git") && strings.EqualFold(name[len(name)-len(".git"):], ".git") {
+		name = name[:len(name)-len(".git")]
+	}
+	return name
 }
 
 func (manager ProjectManager) List(ctx context.Context, database Database) ([]storage.Project, error) {
@@ -157,7 +224,7 @@ func (manager ProjectManager) ResolveCurrent(ctx context.Context, database Datab
 	if err != nil {
 		return storage.ResolvedProject{}, err
 	}
-	registration, err := manager.registration(database.Root, identity, "unused")
+	registration, err := manager.registration(database.Root, identity)
 	if err != nil {
 		return storage.ResolvedProject{}, err
 	}

@@ -94,27 +94,38 @@ From an existing Git worktree:
 
 ```text
 cd path/to/repository
-pl init --code demo
+pl add "First pellet"
 ```
 
-If no ancestor database exists, `pl init` creates one at the current worktree
-root and registers the logical Git repository and current worktree. Project
-codes are immutable, unique within the database, and contain 1–12 lowercase
-letters, digits, or internal hyphens.
+The first valid command that needs the current project creates the database at
+the worktree root when no ancestor database exists, registers the logical Git
+repository and current worktree, and then performs the requested operation.
+There is no separate project-initialization command.
+
+Pellets derives the immutable public project code from the logical repository
+name. It lowercases ASCII, converts each run of other characters to one
+hyphen, trims edge hyphens, and uses the result directly when it is non-empty,
+at most 12 characters, and unclaimed. Empty, longer, or already-claimed names
+use up to three normalized prefix characters (or `p`) plus `-` and the first
+eight hexadecimal digits of SHA-256 over the normalized repository identity.
+If that candidate is also claimed, Pellets deterministically rehashes the
+identity with increasing canonical decimal attempts until it finds a free
+code. Every result uses 1–12 lowercase ASCII letters, digits, or internal
+hyphens. A registered logical repository always reuses its stored code.
 
 ### Several repositories with one common-parent database
 
-Create the database before registering the sibling repositories:
+Create the database before first use in the sibling repositories:
 
 ```text
 cd path/to/common-parent
 pl init-db
 
 cd service-a
-pl init --code svc-a
+pl add "First service-a pellet"
 
 cd ../service-b
-pl init --code svc-b
+pl list
 
 cd ..
 pl project list
@@ -125,9 +136,10 @@ and memories even though SQLite stores them in one file. `pl project show
 svc-a` displays a project's registered workspace identities.
 
 For linked Git worktrees, put the database at a common ancestor of every
-worktree and run `pl init --code CODE` with the same code in each worktree.
-They then share one logical project, queue, and memory store while remaining
-distinct workspaces.
+worktree before first use. The first current-project command in each worktree
+recognizes the shared Git common directory, reuses the logical project's stored
+code, and attaches a distinct workspace. The worktrees share one queue and
+memory store while retaining separate in-progress ownership.
 
 ### Discovery and Git safety
 
@@ -138,10 +150,11 @@ inside sibling repositories. There is no database-path flag; `--project CODE`
 selects a registered project where permitted, not a different database.
 
 The database is local plaintext and must never be committed. When `.pellets`
-is inside a Git worktree, initialization adds `.pellets/` to that worktree's
-local Git exclude file, not its committed `.gitignore`, and refuses to proceed
-if the database or an SQLite companion file is tracked. Do not stage or commit
-`.pellets`, and protect and back it up like any other local SQLite data.
+is inside a Git worktree, `init-db` or automatic bootstrap adds `.pellets/` to
+that worktree's local Git exclude file, not its committed `.gitignore`, and
+refuses to proceed if the database or an SQLite companion file is tracked. Do
+not stage or commit `.pellets`, and protect and back it up like any other local
+SQLite data.
 
 ## Operate the queue
 
@@ -170,6 +183,11 @@ example, the read-only `next` command above returns this shape:
 ```json
 {"schema_version":1,"command":"next","data":{"selection_reason":"next_open","pellet":{"id":"demo-1","project":"demo","number":1,"title":"Implement parser","description":"Reject malformed input.","external_id":"github:acme/demo#84","group":"parser","status":"open","priority":1024,"workspace":null,"created_at":"2026-08-29T20:00:00Z","updated_at":"2026-08-29T20:00:00Z","completed_at":null}}}
 ```
+
+`next`, list/search/show reads, and dry runs do not change operation state once
+the current project/workspace is registered. On first use only, a valid
+current-project command may create and register local Pellets metadata before
+executing its otherwise read-only operation.
 
 An empty selection is also a successful typed result:
 
@@ -320,8 +338,9 @@ pl --project demo web
 ```
 
 `pl web` is an optional foreground operator tool over the same nearest
-database. It listens only on `127.0.0.1`, uses embedded offline assets, and
-stops when interrupted. It can inspect every registered project, workspace,
+database and performs the same automatic first-use bootstrap. It listens only
+on `127.0.0.1`, uses embedded offline assets, and stops when interrupted. It
+can inspect every registered project, workspace,
 pellet state, and memory; it supports routine queue and memory edits with
 optimistic conflict detection. Purge, memory removal, and other irreversible
 actions are intentionally absent.

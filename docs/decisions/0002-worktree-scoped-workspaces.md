@@ -25,10 +25,10 @@ The product still does not need an account, authenticated agent, daemon, lease m
 
 ### Registration and stale paths
 
-- `pl init --code CODE` creates the logical project and initial workspace or attaches a linked worktree to the existing same-code project.
-- Repeated registration is idempotent. The same repository with another code, the same code from another repository, one worktree attached to two projects, and inconsistent common/root/Git-directory identity are typed conflicts without persistent writes.
-- Git and filesystem inspection finishes before SQLite write transactions. Read commands never register or repair a workspace.
-- When one Git-directory identity appears at a new root and the old registered root is absent, explicit `init` updates that workspace path. If the old root still exists, the second path is a duplicate conflict.
+- After parsing and usage validation, the first valid command that needs the current project/workspace creates or discovers the database, generates and transactionally stores an immutable project code, and registers the logical repository plus current workspace before executing the requested operation. No separate project-initialization command or caller-supplied code exists.
+- Repeated exact resolution is read-only and idempotent. A linked worktree attaches to the project found by common-directory identity and reuses its stored code. One worktree attached to two projects and inconsistent common/root/Git-directory identity remain typed conflicts without partial registration.
+- Git and filesystem inspection finishes before SQLite write transactions. Commands that do not need the current workspace never register or repair one. An otherwise read-only current-project command may perform this one-time bootstrap before its operation; subsequent reads remain write-free.
+- When one Git-directory identity appears at a new root and the old registered root is absent, automatic bootstrap updates that workspace path. If the old root still exists, the second path is a duplicate conflict.
 - Removed worktrees remain registered. No timer, heartbeat, background task, or automatic cleanup guesses whether a path is abandoned. Project output exposes enough identity to diagnose stale entries, and lifecycle recovery explicitly names the stored workspace.
 - A manually moved main repository may present a new common-directory path and therefore conflict until an explicit future repository-reassociation design exists; Pellets never silently merges repositories by content or remote URL.
 

@@ -19,7 +19,7 @@ func TestMemoryCommandsJSONV1AcrossLinkedWorktrees(t *testing.T) {
 	t.Parallel()
 
 	common := filepath.Join(t.TempDir(), "memory command database 界")
-	mainWorkTree := filepath.Join(common, "main")
+	mainWorkTree := filepath.Join(common, "shared")
 	linkedWorkTree := filepath.Join(common, "linked")
 	if err := os.MkdirAll(mainWorkTree, 0o755); err != nil {
 		t.Fatal(err)
@@ -41,9 +41,9 @@ func TestMemoryCommandsJSONV1AcrossLinkedWorktrees(t *testing.T) {
 
 	current := mainWorkTree
 	application := projectTestApp(&current)
-	runProjectInit(t, application, "shared")
+	runCurrentProject(t, application)
 	current = linkedWorkTree
-	runProjectInit(t, application, "shared")
+	runCurrentProject(t, application)
 
 	var golden strings.Builder
 	agentRaw := runPelletCommand(

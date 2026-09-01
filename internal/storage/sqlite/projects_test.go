@@ -48,6 +48,50 @@ func TestProjectRegistrationSharesRepositoryAcrossWorkspaces(t *testing.T) {
 	}
 }
 
+func TestAutomaticProjectCodesReuseAndResolveCollisionsTransactionally(t *testing.T) {
+	t.Parallel()
+
+	database, err := OpenProjectDatabase(context.Background(), filepath.Join(t.TempDir(), "automatic-codes.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	first := automaticProjectRegistration("Service API", "first/.git", "first", "first/.git")
+	firstProject, created, err := database.RegisterProject(context.Background(), first)
+	if err != nil || !created || firstProject.Code != "service-api" {
+		t.Fatalf("first automatic registration = (%#v, %v, %v)", firstProject, created, err)
+	}
+
+	linked := first
+	linked.CodeName = "a linked checkout name must not replace the stored code"
+	linked.WorkspaceRoot = relativeProjectPath("first-linked")
+	linked.GitDir = relativeProjectPath("first/.git/worktrees/linked")
+	linkedProject, created, err := database.RegisterProject(context.Background(), linked)
+	if err != nil || !created || linkedProject.Code != firstProject.Code || len(linkedProject.Workspaces) != 2 {
+		t.Fatalf("linked automatic registration = (%#v, %v, %v)", linkedProject, created, err)
+	}
+
+	second := automaticProjectRegistration("Service API", "second/.git", "second", "second/.git")
+	secondProject, created, err := database.RegisterProject(context.Background(), second)
+	if err != nil || !created || secondProject.Code == firstProject.Code {
+		t.Fatalf("colliding automatic registration = (%#v, %v, %v)", secondProject, created, err)
+	}
+	if err := domain.ValidateProjectCode(secondProject.Code); err != nil {
+		t.Fatalf("collision code %q is invalid: %v", secondProject.Code, err)
+	}
+	repeated, created, err := database.RegisterProject(context.Background(), second)
+	if err != nil || created || repeated.Code != secondProject.Code {
+		t.Fatalf("repeated collision registration = (%#v, %v, %v), want stable code %q", repeated, created, err, secondProject.Code)
+	}
+
+	empty := automaticProjectRegistration("界", "unicode/.git", "unicode", "unicode/.git")
+	emptyProject, _, err := database.RegisterProject(context.Background(), empty)
+	if err != nil || domain.ValidateProjectCode(emptyProject.Code) != nil || emptyProject.Code[:2] != "p-" {
+		t.Fatalf("empty normalized name registration = (%#v, %v)", emptyProject, err)
+	}
+}
+
 func TestProjectRegistrationConflictsAreWriteFree(t *testing.T) {
 	t.Parallel()
 
@@ -139,6 +183,13 @@ func TestResolveUnknownWorkspaceDoesNotRegisterIt(t *testing.T) {
 
 func projectRegistration(code, common, root, gitDir string) storage.ProjectRegistration {
 	return storage.ProjectRegistration{Code: code, GitCommonDir: relativeProjectPath(common), WorkspaceRoot: relativeProjectPath(root), GitDir: relativeProjectPath(gitDir)}
+}
+
+func automaticProjectRegistration(name, common, root, gitDir string) storage.ProjectRegistration {
+	return storage.ProjectRegistration{
+		CodeName: name, CodeIdentity: "true:" + common, GenerateCode: true,
+		GitCommonDir: relativeProjectPath(common), WorkspaceRoot: relativeProjectPath(root), GitDir: relativeProjectPath(gitDir),
+	}
 }
 
 func relativeProjectPath(value string) domain.LocalPath {

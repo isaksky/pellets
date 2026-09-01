@@ -41,8 +41,16 @@ func (database *ProjectDatabase) Close() error { return database.db.Close() }
 // RegisterProject atomically creates a logical repository or attaches its
 // current workspace. All Git and filesystem checks have already completed.
 func (database *ProjectDatabase) RegisterProject(ctx context.Context, registration storage.ProjectRegistration) (storage.Project, bool, error) {
-	if err := domain.ValidateProjectCode(registration.Code); err != nil {
-		return storage.Project{}, false, err
+	if registration.GenerateCode {
+		if registration.CodeName == "" || registration.CodeIdentity == "" {
+			return storage.Project{}, false, domain.NewError(
+				domain.Unexpected, "internal_error", "automatic project code source is incomplete", nil)
+		}
+		registration.Code = domain.GenerateProjectCode(registration.CodeName, registration.CodeIdentity, false, 0)
+	} else {
+		if err := domain.ValidateProjectCode(registration.Code); err != nil {
+			return storage.Project{}, false, err
+		}
 	}
 	for label, localPath := range map[string]domain.LocalPath{
 		"git_common_dir": registration.GitCommonDir,
@@ -75,6 +83,9 @@ func (database *ProjectDatabase) RegisterProject(ctx context.Context, registrati
 	if repositoryErr != nil && !errors.Is(repositoryErr, sql.ErrNoRows) {
 		return storage.Project{}, false, projectStorageError("look up Git repository identity", repositoryErr)
 	}
+	if repositoryErr == nil && registration.GenerateCode {
+		registration.Code = byRepository.Code
+	}
 	byCode, codeErr := findProjectRow(ctx, connection, "code = ?", registration.Code)
 	if codeErr != nil && !errors.Is(codeErr, sql.ErrNoRows) {
 		return storage.Project{}, false, projectStorageError("look up project code", codeErr)
@@ -87,6 +98,24 @@ func (database *ProjectDatabase) RegisterProject(ctx context.Context, registrati
 			"the Git repository is already registered with a different immutable code",
 			map[string]any{"existing_code": byRepository.Code, "requested_code": registration.Code},
 		)
+	}
+	if registration.GenerateCode && repositoryErr != nil && codeErr == nil {
+		for attempt := uint64(0); ; attempt++ {
+			candidate := domain.GenerateProjectCode(registration.CodeName, registration.CodeIdentity, true, attempt)
+			if candidate == registration.Code {
+				continue
+			}
+			candidateProject, candidateErr := findProjectRow(ctx, connection, "code = ?", candidate)
+			if errors.Is(candidateErr, sql.ErrNoRows) {
+				registration.Code = candidate
+				codeErr = candidateErr
+				break
+			}
+			if candidateErr != nil {
+				return storage.Project{}, false, projectStorageError("look up generated project code", candidateErr)
+			}
+			_ = candidateProject
+		}
 	}
 	if codeErr == nil && (repositoryErr != nil || byCode.ID != byRepository.ID) {
 		return storage.Project{}, false, domain.NewError(

@@ -89,7 +89,6 @@ func main() {
 	}
 	commands := []cli.Command{
 		cli.InitDBCommand(initializer),
-		cli.InitCommand(projectManager),
 		cli.ProjectCommand(projectManager),
 		cli.AddCommand(pelletManager),
 		cli.MoveCommand(pelletManager),
@@ -118,6 +117,11 @@ func main() {
 			})
 		}),
 	}
-	application := cli.New(version, commands...)
+	application := cli.New(version, commands...).WithCurrentWorkspaceBootstrap(
+		func(ctx context.Context, workingDirectory string) (discovery.Database, error) {
+			database, err := projectManager.BootstrapCurrent(ctx, workingDirectory)
+			return discovery.Database{Root: database.Root, Path: database.Path}, err
+		},
+	)
 	os.Exit(application.Run(os.Args[1:], os.Stdout, os.Stderr))
 }

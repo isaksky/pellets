@@ -1,5 +1,4 @@
 init-db-error exit=2 {"error":{"code":"project_not_allowed","details":{"command":"init-db"},"message":"--project is not valid for init-db"},"schema_version":1}
-init-error exit=2 {"error":{"code":"missing_required_flag","details":{"flag":"--code"},"message":"flag \"--code\" is required"},"schema_version":1}
 project-list-error exit=2 {"error":{"code":"unexpected_argument","details":{"argument":"extra"},"message":"unexpected argument \"extra\""},"schema_version":1}
 project-show-error exit=2 {"error":{"code":"unexpected_argument","details":{"argument":"extra"},"message":"unexpected argument \"extra\""},"schema_version":1}
 add-error exit=2 {"error":{"code":"missing_title","message":"add requires a non-empty TITLE"},"schema_version":1}

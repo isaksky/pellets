@@ -33,9 +33,9 @@ func TestPurgeCommandDryRunAndConfirmedDeletion(t *testing.T) {
 
 	current := mainRoot
 	application := projectTestApp(&current)
-	runProjectInit(t, application, "main")
+	runCurrentProject(t, application)
 	current = otherRoot
-	runProjectInit(t, application, "other")
+	runCurrentProject(t, application)
 
 	current = mainRoot
 	for _, title := range []string{"old closed", "boundary closed", "recent closed"} {

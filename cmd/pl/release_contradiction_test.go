@@ -202,6 +202,26 @@ func TestReleaseContradictionChecklist(t *testing.T) {
 	}
 }
 
+func TestWindowsReleaseSmokeUsesAutomaticallyGeneratedPelletIdentity(t *testing.T) {
+	repositoryRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := readReleaseContractFile(t, filepath.Join(repositoryRoot, ".github", "workflows", "foundation.yml"))
+	for _, required := range []string{
+		`$started.data.pellet.id -ne $added.data.id`,
+		`$executable close $added.data.id`,
+		`$closed.data.id -ne $added.data.id`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Errorf("Windows release smoke does not preserve the generated pellet identity through %q", required)
+		}
+	}
+	if strings.Contains(workflow, `$executable close smoke-1`) {
+		t.Error("Windows release smoke hard-codes a project code instead of using the first-use bootstrap result")
+	}
+}
+
 func releaseTableColumns(t *testing.T, database interface {
 	Query(string, ...any) (*sql.Rows, error)
 }, table string) []string {

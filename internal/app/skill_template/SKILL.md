@@ -12,6 +12,7 @@ Use `pl` as the authoritative local queue and memory interface when the user exp
 - Run `pl --help` and the relevant command's `--help` before relying on remembered syntax. The installed executable is authoritative.
 - Prefer the default compact JSON output for machine parsing; use `--pretty` only when readable JSON helps. Do not scrape `--human` output.
 - Let `pl` discover the nearest database by walking upward. Do not assume it is in the current Git repository.
+- On the first valid current-project command, let `pl` create or discover the database, derive the immutable project code, and register the logical repository and current worktree automatically. No separate project initialization command is required. That one-time bootstrap may create `.pellets/` and add it to Git's local exclude before the requested operation runs.
 - Resolve the current Git worktree before changing work. One logical project is shared across its linked worktrees, but each registered worktree is a distinct workspace with at most one in-progress pellet.
 - Before beginning new work, use atomic selection:
 
@@ -70,4 +71,4 @@ pl memory search "parser identifiers" --approved-only
 - Never edit the SQLite database directly or commit `.pellets` data.
 - Never invent dependencies, blocking graphs, epics, agent/PID ownership, leases, heartbeats, or assignment history.
 - Never maintain a parallel Markdown task queue. Pellets is authoritative once the work is recorded there.
-- Do not change Git state, ignore files, agent configuration, or repository policy unless the user separately requests that work.
+- Do not manually change Git state, ignore files, agent configuration, or repository policy unless the user separately requests that work. Pellets' own first-use local-exclude safeguard is expected.
