@@ -23,10 +23,56 @@ type Workspace struct {
 type Project struct {
 	ID           int64
 	Code         string
+	Redirects    []ProjectCodeRedirect
 	GitCommonDir domain.LocalPath
 	Workspaces   []Workspace
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+// ProjectCodeRedirect reserves one former public project code and points
+// directly to the stable logical project row. Redirects never target another
+// redirect, so resolution is always one lookup.
+type ProjectCodeRedirect struct {
+	Code      string
+	ProjectID int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// ProjectCodeConflict is the public, canonicalized description of a redirect
+// rule whose removal would be required by a rename.
+type ProjectCodeConflict struct {
+	Code          string
+	ProjectID     int64
+	CanonicalCode string
+}
+
+// ProjectRenamePlan is a write-free snapshot used for prompting and for exact
+// conflict-set revalidation inside the eventual rename transaction.
+type ProjectRenamePlan struct {
+	Project   Project
+	NewCode   string
+	Conflicts []ProjectCodeConflict
+}
+
+// ProjectRenameRequest authorizes deletion only of the exact conflicts in the
+// plan shown to the caller. Storage revalidates this set while holding the
+// writer lock before changing any row.
+type ProjectRenameRequest struct {
+	ProjectID                    int64
+	NewCode                      string
+	DeleteConflictingRedirects   bool
+	ExpectedConflictingRedirects []ProjectCodeConflict
+}
+
+// ProjectRenameResult materializes the canonical project after the atomic
+// operation and records exactly which redirect rules were removed.
+type ProjectRenameResult struct {
+	Project          Project
+	PreviousCode     string
+	RemovedConflicts []ProjectCodeConflict
+	Changed          bool
 }
 
 // ResolvedProject identifies both the shared logical project and the current
@@ -55,6 +101,8 @@ type ProjectDatabase interface {
 	RegisterProject(ctx context.Context, registration ProjectRegistration) (project Project, created bool, err error)
 	ListProjects(ctx context.Context) ([]Project, error)
 	FindProjectByCode(ctx context.Context, code string) (Project, error)
+	PlanProjectRename(ctx context.Context, projectID int64, newCode string) (ProjectRenamePlan, error)
+	RenameProject(ctx context.Context, request ProjectRenameRequest) (ProjectRenameResult, error)
 	FindWorkspaceByGitDir(ctx context.Context, gitDir domain.LocalPath) (ResolvedProject, error)
 	ResolveProjectWorkspace(ctx context.Context, commonDir, rootPath, gitDir domain.LocalPath) (ResolvedProject, error)
 	Close() error

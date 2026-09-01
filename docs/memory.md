@@ -22,6 +22,7 @@ Pellets and memories are independent authoritative records:
 - A memory represents searchable knowledge with provenance and approval.
 - A memory has a logical `project_id`, but no workspace owner, pellet number, task foreign key, status, priority, external ID, or group field.
 - References such as `foo-123` are ordinary text and may refer to a current, closed, or purged pellet.
+- Project rename never rewrites memory text. A former project code remains a direct resolver redirect, so old textual references remain searchable as written and continue to resolve when supplied to pellet commands; successful command and memory output uses the project's current canonical code.
 - Closing or purging a pellet never creates, changes, or deletes memory.
 - Memory search never affects `pl next`.
 

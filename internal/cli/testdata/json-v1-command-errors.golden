@@ -1,6 +1,7 @@
 init-db-error exit=2 {"error":{"code":"project_not_allowed","details":{"command":"init-db"},"message":"--project is not valid for init-db"},"schema_version":1}
 project-list-error exit=2 {"error":{"code":"unexpected_argument","details":{"argument":"extra"},"message":"unexpected argument \"extra\""},"schema_version":1}
 project-show-error exit=2 {"error":{"code":"unexpected_argument","details":{"argument":"extra"},"message":"unexpected argument \"extra\""},"schema_version":1}
+project-rename-error exit=2 {"error":{"code":"project_rename_confirmation_flags_required","details":{"flags":["--delete-conflicting-redirects","--yes"]},"message":"--delete-conflicting-redirects and --yes must be supplied together"},"schema_version":1}
 add-error exit=2 {"error":{"code":"missing_title","message":"add requires a non-empty TITLE"},"schema_version":1}
 list-error exit=2 {"error":{"code":"invalid_status","details":{"status":"unknown"},"message":"unknown pellet status \"unknown\""},"schema_version":1}
 next-error exit=2 {"error":{"code":"unexpected_argument","details":{"argument":"extra"},"message":"unexpected argument \"extra\""},"schema_version":1}

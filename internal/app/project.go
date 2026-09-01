@@ -214,6 +214,63 @@ func (manager ProjectManager) ShowCurrent(ctx context.Context, database Database
 	return resolved.Project, err
 }
 
+// PlanRename resolves either the current logical project or an explicit
+// canonical/redirect code, then returns the write-free conflict snapshot used
+// by the CLI confirmation contract.
+func (manager ProjectManager) PlanRename(
+	ctx context.Context,
+	database Database,
+	workingDirectory, selectedCode, newCode string,
+) (storage.ProjectRenamePlan, error) {
+	if err := manager.validateOpen(); err != nil {
+		return storage.ProjectRenamePlan{}, err
+	}
+	if err := domain.ValidateProjectCode(newCode); err != nil {
+		return storage.ProjectRenamePlan{}, err
+	}
+	var project storage.Project
+	var err error
+	if selectedCode == "" {
+		project, err = manager.ShowCurrent(ctx, database, workingDirectory)
+	} else {
+		project, err = manager.ShowByCode(ctx, database, selectedCode)
+	}
+	if err != nil {
+		return storage.ProjectRenamePlan{}, err
+	}
+	projectDatabase, err := manager.Open(ctx, database.Path)
+	if err != nil {
+		return storage.ProjectRenamePlan{}, err
+	}
+	plan, operationErr := projectDatabase.PlanProjectRename(ctx, project.ID, newCode)
+	return plan, closeProjectDatabase(projectDatabase, operationErr)
+}
+
+// Rename applies only the exact destructive redirect conflicts materialized by
+// PlanRename. Stable project identity protects the operation if the selected
+// code itself was renamed between the plan and write phases.
+func (manager ProjectManager) Rename(
+	ctx context.Context,
+	database Database,
+	plan storage.ProjectRenamePlan,
+	deleteConflictingRedirects bool,
+) (storage.ProjectRenameResult, error) {
+	if err := manager.validateOpen(); err != nil {
+		return storage.ProjectRenameResult{}, err
+	}
+	projectDatabase, err := manager.Open(ctx, database.Path)
+	if err != nil {
+		return storage.ProjectRenameResult{}, err
+	}
+	result, operationErr := projectDatabase.RenameProject(ctx, storage.ProjectRenameRequest{
+		ProjectID:                    plan.Project.ID,
+		NewCode:                      plan.NewCode,
+		DeleteConflictingRedirects:   deleteConflictingRedirects,
+		ExpectedConflictingRedirects: append([]storage.ProjectCodeConflict(nil), plan.Conflicts...),
+	})
+	return result, closeProjectDatabase(projectDatabase, operationErr)
+}
+
 // ResolveCurrent is the foundation boundary used by queue and lifecycle
 // services. It is read-only and never registers an unrecognized worktree.
 func (manager ProjectManager) ResolveCurrent(ctx context.Context, database Database, workingDirectory string) (storage.ResolvedProject, error) {
@@ -255,13 +312,19 @@ func (manager ProjectManager) ResolveSelectedCurrentProject(
 	if err != nil {
 		return storage.ResolvedProject{}, err
 	}
-	if selectedCode != "" && selectedCode != resolved.Project.Code {
-		return storage.ResolvedProject{}, domain.NewError(
-			domain.Usage,
-			"project_selection_mismatch",
-			"the selected project does not identify the current Git repository",
-			map[string]any{"selected_project": selectedCode, "current_project": resolved.Project.Code},
-		)
+	if selectedCode != "" {
+		selected, selectErr := manager.ShowByCode(ctx, database, selectedCode)
+		if selectErr != nil || selected.ID != resolved.Project.ID {
+			if selectErr != nil && domain.PublicError(selectErr).Code != "project_not_registered" {
+				return storage.ResolvedProject{}, selectErr
+			}
+			return storage.ResolvedProject{}, domain.NewError(
+				domain.Usage,
+				"project_selection_mismatch",
+				"the selected project does not identify the current Git repository",
+				map[string]any{"selected_project": selectedCode, "current_project": resolved.Project.Code},
+			)
+		}
 	}
 	return resolved, nil
 }
@@ -280,7 +343,11 @@ func (manager ProjectManager) ResolvePelletProject(
 		return storage.ResolvedProject{}, err
 	}
 	for _, reference := range references {
-		if reference.ProjectCode != resolved.Project.Code {
+		referenceProject, lookupErr := manager.ShowByCode(ctx, database, reference.ProjectCode)
+		if lookupErr != nil || referenceProject.ID != resolved.Project.ID {
+			if lookupErr != nil && domain.PublicError(lookupErr).Code != "project_not_registered" {
+				return storage.ResolvedProject{}, lookupErr
+			}
 			return storage.ResolvedProject{}, domain.NewError(
 				domain.Usage,
 				"reference_project_mismatch",

@@ -127,6 +127,10 @@ func (reader *WebReader) ListWebProjects(ctx context.Context) ([]storage.WebProj
 		if err != nil {
 			return nil, projectStorageError("read web project workspaces", err)
 		}
+		project.Redirects, err = loadProjectCodeRedirects(ctx, reader.db, project.ID)
+		if err != nil {
+			return nil, projectStorageError("read web project code redirects", err)
+		}
 		summary := storage.WebProjectSummary{Project: project}
 		if err := reader.db.QueryRowContext(ctx, `
 			SELECT
@@ -155,6 +159,9 @@ func (reader *WebReader) ListWebPellets(ctx context.Context, project storage.Pro
 	if err := validatePelletProject(project); err != nil {
 		return nil, err
 	}
+	if err := ensureStoredProject(ctx, reader.db, project); err != nil {
+		return nil, err
+	}
 	if filters.Status != nil {
 		if err := domain.ValidatePelletStatus(*filters.Status); err != nil {
 			return nil, err
@@ -167,8 +174,8 @@ func (reader *WebReader) ListWebPellets(ctx context.Context, project storage.Pro
 		return nil, invalidPelletField("group", "optional pellet fields must be non-empty")
 	}
 
-	query := pelletSelect + "\n\tWHERE p.project_id = ? AND project.code = ?"
-	arguments := []any{project.ID, project.Code}
+	query := pelletSelect + "\n\tWHERE p.project_id = ?"
+	arguments := []any{project.ID}
 	if filters.Status != nil {
 		query += " AND p.status = ?"
 		arguments = append(arguments, *filters.Status)
@@ -217,10 +224,13 @@ func (reader *WebReader) ReadWebPellet(ctx context.Context, project storage.Proj
 	if err := validatePelletProject(project); err != nil {
 		return storage.Pellet{}, err
 	}
-	if reference.ProjectCode != project.Code || reference.Number <= 0 {
-		return storage.Pellet{}, domain.NewError(domain.Usage, "reference_project_mismatch", "the pellet reference belongs to a different logical project", nil)
+	if err := ensureStoredProject(ctx, reader.db, project); err != nil {
+		return storage.Pellet{}, err
 	}
-	pellet, err := loadPellet(ctx, reader.db, project.ID, project.Code, reference.Number)
+	if err := ensureReferenceProject(ctx, reader.db, project, reference); err != nil {
+		return storage.Pellet{}, err
+	}
+	pellet, err := loadPellet(ctx, reader.db, project.ID, reference.Number)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storage.Pellet{}, pelletNotFound(reference)
 	}
@@ -269,9 +279,12 @@ func (reader *WebReader) ListWebMemories(ctx context.Context, project storage.Pr
 	if err := validateMemoryProject(project); err != nil {
 		return nil, err
 	}
+	if err := ensureStoredMemoryProject(ctx, reader.db, project); err != nil {
+		return nil, err
+	}
 	rows, err := reader.db.QueryContext(ctx, memorySelect+`
-		WHERE memory.project_id = ? AND project.code = ?
-		ORDER BY memory.memory_id DESC`, project.ID, project.Code)
+		WHERE memory.project_id = ?
+		ORDER BY memory.memory_id DESC`, project.ID)
 	if err != nil {
 		return nil, memoryStorageError("list web memories", err)
 	}
@@ -300,7 +313,10 @@ func (reader *WebReader) ReadWebMemory(ctx context.Context, project storage.Proj
 	if err := validateMemoryID(memoryID); err != nil {
 		return storage.Memory{}, err
 	}
-	memory, err := loadMemory(ctx, reader.db, project.ID, project.Code, memoryID)
+	if err := ensureStoredMemoryProject(ctx, reader.db, project); err != nil {
+		return storage.Memory{}, err
+	}
+	memory, err := loadMemory(ctx, reader.db, project.ID, memoryID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storage.Memory{}, memoryNotFound(memoryID)
 	}

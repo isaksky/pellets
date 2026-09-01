@@ -12,7 +12,7 @@ Each invocation follows the same shape:
    usage-only semantics without reading the working directory, performing
    discovery, or causing command side effects.
 2. Evaluate the parsed command's explicit current-workspace capability. A current-project command resolves or automatically bootstraps the nearest database, logical repository, and worktree; a database-level command only discovers its existing nearest database; `init-db` and the portable skill installer bypass normal discovery.
-3. For current-project commands, ask Git for the worktree root, worktree-specific Git directory, and shared common directory. Use the nearest ancestor database or create one at the worktree root, normalize the identities relative to its root, reuse an existing logical project's immutable code or allocate a deterministic generated code, and attach the current workspace when needed.
+3. For current-project commands, ask Git for the worktree root, worktree-specific Git directory, and shared common directory. Use the nearest ancestor database or create one at the worktree root, normalize the identities relative to its root, reuse an existing logical project's current canonical code or allocate a deterministic generated code, and attach the current workspace when needed.
 4. Open/configure/migrate SQLite and resolve the registered current project/workspace for the requested operation.
 5. Execute one application operation through a narrow storage interface.
 6. Emit one compact, versioned JSON result to stdout, or one structured JSON error to stderr.
@@ -102,7 +102,11 @@ Use Git's own discovery semantics and `git rev-parse --show-toplevel --absolute-
 
 All Git commands, canonicalization, existence checks, and stale-path checks finish outside SQLite write transactions. After parsing and usage validation, a command with the current-workspace capability takes a read-only exact-resolution fast path when the workspace is already known. Otherwise bootstrap creates the logical project and first workspace, attaches a linked worktree to the existing common-directory project while reusing its stored code, or updates a moved workspace root only when the old registered root no longer exists. A live duplicate presenting one Git directory at a second root, one worktree attached to two projects, or inconsistent common/root/Git-directory identity is a typed conflict with no partial project/workspace registration. Removed worktrees remain visible as stale registrations so later lifecycle recovery can name their ownership.
 
-The repository name comes from the basename containing a `.git` common directory, or from a bare common-directory basename with a terminal `.git` removed. Code normalization lowercases ASCII letters, preserves ASCII digits, collapses every run of other characters into one internal hyphen, and trims edge hyphens. A non-empty result of at most 12 bytes is the first candidate. Empty or longer names, and first candidates already owned by another repository, use an identity-hash candidate: up to three normalized prefix bytes (or `p`), `-`, and eight lowercase hexadecimal SHA-256 digits. The hash seed is the stored common-directory identity serialized as `true:<slash-normalized-relative-path>` or `false:<slash-normalized-absolute-path>`. Further collisions rehash that seed plus a NUL byte and the increasing canonical decimal attempt. Candidate lookup and project/workspace insertion occur under the same immediate transaction, so concurrent first commands converge for one identity and different identities cannot commit one code.
+The repository name comes from the basename containing a `.git` common directory, or from a bare common-directory basename with a terminal `.git` removed. Code normalization lowercases ASCII letters, preserves ASCII digits, collapses every run of other characters into one internal hyphen, and trims edge hyphens. A non-empty result of at most 12 bytes is the first candidate. Empty or longer names, and first candidates already reserved as canonical codes or redirects, use an identity-hash candidate: up to three normalized prefix bytes (or `p`), `-`, and eight lowercase hexadecimal SHA-256 digits. The hash seed is the stored common-directory identity serialized as `true:<slash-normalized-relative-path>` or `false:<slash-normalized-absolute-path>`. Further collisions rehash that seed plus a NUL byte and the increasing canonical decimal attempt. Candidate lookup and project/workspace insertion occur under the same immediate transaction, so concurrent first commands converge for one identity and different identities cannot commit one code.
+
+Canonical project codes and former-code redirects share one reserved namespace. Redirect rows point directly to stable project IDs, never to another code, and resolution performs exactly one canonical-or-redirect lookup. Project, pellet-reference, filter, lifecycle, memory, and web routes compare stable project IDs after that lookup and render the current canonical code in every successful result. An old web deep link is redirected to the equivalent canonical path before rendering; query parameters are preserved.
+
+Project rename is planned read-only and applied under one immediate transaction. The transaction revalidates the exact planned foreign-redirect conflicts, deletes only those rules when explicitly authorized, promotes an owned redirect when selected, updates the canonical code, and creates a direct redirect from the former code. A current-code rename is idempotent. A foreign canonical code is always a hard conflict. A changed conflict set or any SQL/commit failure is write-free after rollback.
 
 ### Keeping the database out of Git
 
@@ -112,9 +116,9 @@ The database and its WAL/SHM/journal companions must never be committed or damag
 
 A mutating command such as `pl start foo-12` flows as follows:
 
-1. Parse `foo-12` into project code `foo` and number `12`.
+1. Parse `foo-12` into requested project code `foo` and number `12`.
 2. Discover the database and resolve the current logical project and workspace.
-3. Verify that `foo` identifies the resolved project unless an explicit `--project` override is allowed for that command.
+3. Resolve `foo` once as either a canonical code or a direct redirect, compare its stable project ID with the resolved project, and retain the current canonical code for output.
 4. Open and migrate the database.
 5. Begin an immediate write transaction.
 6. Load the pellet and validate the `open -> in_progress` transition against current workspace ownership.

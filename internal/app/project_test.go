@@ -166,15 +166,21 @@ func TestResolvePelletProjectValidatesSelectionAndReferences(t *testing.T) {
 		name       string
 		selected   string
 		references []domain.PelletReference
+		aliases    []string
 		wantCode   string
 	}{
 		{name: "current project"},
 		{name: "matching selection and reference", selected: "foo-bar", references: []domain.PelletReference{{ProjectCode: "foo-bar", Number: 9}}},
+		{name: "redirected selection and reference", selected: "former", references: []domain.PelletReference{{ProjectCode: "former", Number: 9}}, aliases: []string{"former"}},
 		{name: "different selection", selected: "other", wantCode: "project_selection_mismatch"},
 		{name: "different reference", references: []domain.PelletReference{{ProjectCode: "other", Number: 9}}, wantCode: "reference_project_mismatch"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			database := &fakeProjectDatabase{resolved: resolved}
+			projectsByCode := make(map[string]storage.Project, len(test.aliases))
+			for _, alias := range test.aliases {
+				projectsByCode[alias] = resolved.Project
+			}
+			database := &fakeProjectDatabase{resolved: resolved, projectsByCode: projectsByCode}
 			manager := successfulProjectManager(database)
 			got, err := manager.ResolvePelletProject(
 				context.Background(),
@@ -286,6 +292,7 @@ type fakeProjectDatabase struct {
 	registerCreated  bool
 	registerErr      error
 	resolved         storage.ResolvedProject
+	projectsByCode   map[string]storage.Project
 	lookupErr        error
 	resolveErr       error
 	closeErr         error
@@ -311,8 +318,20 @@ func (d *fakeProjectDatabase) RegisterProject(_ context.Context, registration st
 func (*fakeProjectDatabase) ListProjects(context.Context) ([]storage.Project, error) {
 	return nil, errors.New("unexpected")
 }
-func (*fakeProjectDatabase) FindProjectByCode(context.Context, string) (storage.Project, error) {
-	return storage.Project{}, errors.New("unexpected")
+func (d *fakeProjectDatabase) FindProjectByCode(_ context.Context, code string) (storage.Project, error) {
+	if project, ok := d.projectsByCode[code]; ok {
+		return project, nil
+	}
+	if d.resolved.Project.ID > 0 && d.resolved.Project.Code == code {
+		return d.resolved.Project, nil
+	}
+	return storage.Project{}, domain.NewError(domain.NotFound, "project_not_registered", "missing", nil)
+}
+func (*fakeProjectDatabase) PlanProjectRename(context.Context, int64, string) (storage.ProjectRenamePlan, error) {
+	return storage.ProjectRenamePlan{}, errors.New("unexpected")
+}
+func (*fakeProjectDatabase) RenameProject(context.Context, storage.ProjectRenameRequest) (storage.ProjectRenameResult, error) {
+	return storage.ProjectRenameResult{}, errors.New("unexpected")
 }
 func (d *fakeProjectDatabase) FindWorkspaceByGitDir(_ context.Context, gitDir domain.LocalPath) (storage.ResolvedProject, error) {
 	if d.calls != nil {

@@ -264,6 +264,18 @@ func (h *handler) servePage(response http.ResponseWriter, request *http.Request)
 		http.NotFound(response, request)
 		return
 	}
+	selected, err := h.application.Project(request.Context(), code)
+	if err != nil {
+		h.renderError(response, statusForError(err), err, nil)
+		return
+	}
+	if canonicalPath, changed := canonicalProjectDeepLink(segments, selected.Project); changed {
+		if request.URL.RawQuery != "" {
+			canonicalPath += "?" + request.URL.RawQuery
+		}
+		http.Redirect(response, request, canonicalPath, http.StatusTemporaryRedirect)
+		return
+	}
 	data, err := h.loadPage(request, code, area, segments)
 	if err != nil {
 		h.renderError(response, statusForError(err), err, nil)
@@ -304,6 +316,11 @@ func (h *handler) serveRoot(response http.ResponseWriter, request *http.Request)
 	code := h.config.InitialProject
 	if code == "" && h.application.Current != nil {
 		code = h.application.Current.Project.Code
+	}
+	if code != "" {
+		if selected, err := h.application.Project(request.Context(), code); err == nil {
+			code = selected.Project.Code
+		}
 	}
 	if code == "" || !slices.ContainsFunc(projects, func(project storage.WebProjectSummary) bool { return project.Project.Code == code }) {
 		code = projects[0].Project.Code
@@ -348,9 +365,10 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 		selectedReferenceText := ""
 		if len(segments) == 4 {
 			selectedReference, err = domain.ParsePelletReference(segments[3])
-			if err != nil || selectedReference.ProjectCode != code {
+			if err != nil || !projectAcceptsCode(selected.Project, selectedReference.ProjectCode) {
 				return pageData{}, domain.NewError(domain.NotFound, "pellet_not_found", "the pellet does not exist in the selected project", nil)
 			}
+			selectedReference.ProjectCode = selected.Project.Code
 			selectedReferenceText = selectedReference.String()
 		}
 		filters, view, err := parseFilters(request.URL.Query())
@@ -410,6 +428,40 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 		}
 	}
 	return data, nil
+}
+
+func projectAcceptsCode(project storage.Project, code string) bool {
+	if project.Code == code {
+		return true
+	}
+	for _, redirect := range project.Redirects {
+		if redirect.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func canonicalProjectDeepLink(segments []string, project storage.Project) (string, bool) {
+	canonical := append([]string(nil), segments...)
+	changed := canonical[1] != project.Code
+	canonical[1] = project.Code
+	if len(canonical) == 4 && canonical[2] == "tasks" {
+		if reference, err := domain.ParsePelletReference(canonical[3]); err == nil && projectAcceptsCode(project, reference.ProjectCode) {
+			if reference.ProjectCode != project.Code {
+				changed = true
+			}
+			reference.ProjectCode = project.Code
+			canonical[3] = reference.String()
+		}
+	}
+	if !changed {
+		return "", false
+	}
+	for index := range canonical {
+		canonical[index] = url.PathEscape(canonical[index])
+	}
+	return "/" + strings.Join(canonical, "/"), true
 }
 
 func (h *handler) projectViews(request *http.Request, projects []storage.WebProjectSummary, activeCode, area string) ([]projectView, error) {

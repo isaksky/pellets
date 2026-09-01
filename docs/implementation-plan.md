@@ -11,7 +11,7 @@ The first release includes:
 - CGo-free Go executable for macOS and Windows;
 - upward database discovery plus automatic first-use Git common-directory project and worktree/Git-directory workspace bootstrap;
 - one database containing one or more logical projects, each with one or more registered workspaces;
-- project codes and project-local pellet numbers;
+- renameable canonical project codes, direct former-code redirects, and project-local pellet numbers;
 - add, list, next, show, edit, move, start, start-next, release, close, reopen, defer, and confirmed stale-worktree recovery;
 - exact external-ID and group filtering;
 - sparse project-scoped integer priority for the active queue, with transactional rebalancing;
@@ -59,6 +59,23 @@ Acceptance criteria:
 - Integration tests pass for paths containing spaces and Unicode on macOS and Windows CI.
 - Migration 3 upgrades the frozen v1 schema without editing it, creates an initial workspace per project, assigns legacy in-progress rows, preserves authoritative/FTS/application state, and rolls back schema and `user_version` on injected failure.
 - Real-SQLite constraints reject cross-project owners, ownerless in-progress rows, owned non-in-progress rows, and two in-progress rows in one workspace while permitting distinct workspace owners in one project.
+
+## Milestone 1a: project-code rename and redirects
+
+Add migration 4's direct old-code-to-project redirects, unified namespace
+enforcement, `project rename`, redirect-aware resolution, canonical output, and
+web deep-link canonicalization.
+
+Acceptance criteria:
+
+- Migration preserves stable project IDs, project-local pellet numbers, workspaces, pellets, memories, FTS state, metadata, and allocation counters. Redirect rows target project IDs directly and cascade only when a project row is actually deleted.
+- Canonical codes and redirects share one unambiguous namespace under concurrent application or direct SQL writes. Generated-code registration treats redirects as reserved.
+- Every project selection, project/pellet lookup, filter, lifecycle, placement, purge, memory, web query/mutation, and deep-link path resolves a canonical code or exactly one direct redirect, never a redirect chain, and emits the current canonical code.
+- Rename is one immediate transaction. It is idempotent for the current code, safely promotes an owned redirect, creates a direct redirect from the former code, and rolls back completely on failure.
+- Another project's canonical code is a typed hard conflict. Another project's redirect requires a terminal default-no confirmation or the exact noninteractive `--delete-conflicting-redirects --yes` retry; JSON never waits for input.
+- The authorized conflict set is revalidated inside the rename transaction. A changed set fails write-free, and only the displayed rules may be deleted.
+- Project inspection displays redirects; old web project and pellet links temporarily redirect to canonical paths with query strings preserved.
+- Migration, resolution, collision, concurrency, rollback, prompt/EOF/interruption, stale-conflict, linked-worktree, shared-database, web, compiled-executable, JSON compatibility, cross-build, macOS, and native Windows tests cover the contract.
 
 ## Milestone 2: basic pellet queue
 
@@ -230,6 +247,7 @@ Run against temporary real SQLite files, not a mocked SQL interface:
 - workspace ownership constraints and indexes, including direct invalid SQL;
 - transaction rollback and busy behavior;
 - project-local number allocation;
+- project-code migration, direct resolution, atomic rename, conflict revalidation, deletion cascade, and canonical output;
 - sparse ordering and rebalance;
 - transactional FTS maintenance, ranking, and rebuild;
 - purge cascades into derived FTS only;
@@ -246,6 +264,7 @@ Invoke the compiled skill installer in temporary home and repository fixtures wi
 - Randomized ordering operations against a simple slice model.
 - Combined project, external-ID, and group filters across list, next, and search.
 - Concurrent `add` calls within one project.
+- Concurrent canonical/redirect namespace writes and rename conflicts, including stale displayed conflict sets.
 - Concurrent `start-next` calls from distinct linked worktrees selecting distinct pellets; same-pellet and same-workspace races return stable conflict/exhaustion without partial writes.
 - Reads during a write and bounded busy-timeout behavior.
 - Query-only web reads, pinned `data_version` monitoring, multiple/slow SSE clients, burst coalescing, disconnected recovery, zero-client idling, and graceful shutdown.
@@ -292,7 +311,7 @@ Because hands-on Windows testing is unavailable, Windows-specific integration te
 | Windows-only path or locking failures go unnoticed. | Make native Windows CI integration tests release-blocking. |
 | Database is accidentally committed. | Use local Git exclude, check tracking during `init-db` and bootstrap, document local-only storage. |
 | FTS derived rows drift. | Explicit same-transaction maintenance plus a tested rebuild command/path. |
-| Project code changes invalidate textual references. | Treat project codes as immutable in v1. |
+| Project code changes invalidate textual references. | Preserve former codes as direct stable-project redirects, resolve them everywhere, and emit the current canonical code. |
 | Group grows into an epic or tag subsystem. | Keep it a single nullable exact-filter string with no table, metadata, hierarchy, or behavior. |
 | Julian floating-point timestamps surprise API users. | Keep storage internal and render stable UTC RFC 3339 timestamps. |
 | Scope expands toward Beads. | Require a decision record for new core concepts and enforce explicit non-goals. |
@@ -309,7 +328,7 @@ Because hands-on Windows testing is unavailable, Windows-specific integration te
 - Git/database synchronization, import, and export;
 - cloud service or remote API;
 - custom statuses, custom workflows, and plugins;
-- project-code rename and project deletion;
+- project deletion;
 - automatic `VACUUM`;
 - a terminal UI, hosted web service, remote bind address, or daemon (the foreground loopback web inspector is the sole graphical surface).
 
@@ -318,6 +337,7 @@ Because hands-on Windows testing is unavailable, Windows-specific integration te
 Before each release, verify:
 
 - no schema, command, or prose introduces dependency concepts;
+- canonical project codes and direct redirects remain unambiguous; every successful lookup emits the current canonical code;
 - no priority path uses floating-point arithmetic or a linked list;
 - non-null priority remains unique per project, not per database or external ID; only open/in-progress pellets have it;
 - closed and deferred pellets have `NULL` priority and are not reprocessed by active-queue rebalance;

@@ -31,6 +31,11 @@ func (manager PelletManager) Add(
 	if err != nil {
 		return storage.Pellet{}, err
 	}
+	if input.Placement != nil {
+		placement := *input.Placement
+		placement.Target = canonicalPelletReference(resolved.Project, placement.Target)
+		input.Placement = &placement
+	}
 	repository, err := manager.open(ctx, database.Path)
 	if err != nil {
 		return storage.Pellet{}, err
@@ -50,6 +55,8 @@ func (manager PelletManager) Move(
 	if err != nil {
 		return storage.Pellet{}, err
 	}
+	reference = canonicalPelletReference(resolved.Project, reference)
+	placement.Target = canonicalPelletReference(resolved.Project, placement.Target)
 	repository, err := manager.open(ctx, database.Path)
 	if err != nil {
 		return storage.Pellet{}, err
@@ -141,6 +148,7 @@ func (manager PelletManager) Show(
 	if err != nil {
 		return storage.Pellet{}, err
 	}
+	reference = canonicalPelletReference(resolved.Project, reference)
 	repository, err := manager.open(ctx, database.Path)
 	if err != nil {
 		return storage.Pellet{}, err
@@ -160,6 +168,7 @@ func (manager PelletManager) Edit(
 	if err != nil {
 		return storage.Pellet{}, err
 	}
+	reference = canonicalPelletReference(resolved.Project, reference)
 	repository, err := manager.open(ctx, database.Path)
 	if err != nil {
 		return storage.Pellet{}, err
@@ -215,6 +224,7 @@ func (manager PelletManager) Transition(
 	if err != nil {
 		return storage.PelletLifecycleResult{}, err
 	}
+	reference = canonicalPelletReference(resolved.Project, reference)
 	repository, err := manager.open(ctx, database.Path)
 	if err != nil {
 		return storage.PelletLifecycleResult{}, err
@@ -233,6 +243,11 @@ func (manager PelletManager) resolve(
 		return storage.ResolvedProject{}, pelletManagerConfigurationError()
 	}
 	return manager.Projects.ResolvePelletProject(ctx, database, workingDirectory, selectedCode, references...)
+}
+
+func canonicalPelletReference(project storage.Project, reference domain.PelletReference) domain.PelletReference {
+	reference.ProjectCode = project.Code
+	return reference
 }
 
 func (manager PelletManager) open(ctx context.Context, path string) (storage.PelletRepository, error) {

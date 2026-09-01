@@ -72,7 +72,8 @@
 {{define "project-record"}}<details class="project-record live-fragment" id="project-record" hx-get="{{.CurrentURL}}" hx-trigger="pellets:refresh from:body, every 60s" hx-target="this" hx-swap="outerHTML">
   <summary>Project record <code>#{{.Project.ID}}</code></summary>
   <dl>
-    <div><dt>Code</dt><dd><code>{{.Project.Code}}</code></dd></div>
+	    <div><dt>Code</dt><dd><code>{{.Project.Code}}</code></dd></div>
+	    <div><dt>Redirects</dt><dd>{{if .Project.Redirects}}{{range $index, $redirect := .Project.Redirects}}{{if $index}}, {{end}}<code>{{$redirect.Code}}</code> → <code>{{$.Project.Code}}</code>{{end}}{{else}}None{{end}}</dd></div>
     <div><dt>Git common directory</dt><dd><code>{{path .Project.GitCommonDir}}</code></dd></div>
     <div><dt>Created</dt><dd><time datetime="{{.Project.CreatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{formatTime .Project.CreatedAt}}</time></dd></div>
     <div><dt>Updated</dt><dd><time datetime="{{.Project.UpdatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{formatTime .Project.UpdatedAt}}</time></dd></div>

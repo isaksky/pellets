@@ -50,10 +50,11 @@ func (h *handler) serveMutation(response http.ResponseWriter, request *http.Requ
 		h.createPellet(response, request, project)
 	case len(segments) == 5 && segments[2] == "pellets":
 		reference, parseErr := domain.ParsePelletReference(segments[3])
-		if parseErr != nil || reference.ProjectCode != project.Code {
+		if parseErr != nil || !projectAcceptsCode(project, reference.ProjectCode) {
 			h.renderError(response, http.StatusNotFound, requestError("pellet not found"), submittedDraft(request.PostForm))
 			return
 		}
+		reference.ProjectCode = project.Code
 		switch segments[4] {
 		case "edit":
 			h.editPellet(response, request, project, reference)
@@ -139,10 +140,11 @@ func (h *handler) movePellet(response http.ResponseWriter, request *http.Request
 	}
 	version := request.PostForm.Get("version")
 	target, err := domain.ParsePelletReference(request.PostForm.Get("target"))
-	if !validVersion(version) || err != nil || target.ProjectCode != project.Code {
+	if !validVersion(version) || err != nil || !projectAcceptsCode(project, target.ProjectCode) {
 		h.renderError(response, http.StatusUnprocessableEntity, requestError("the reorder request is invalid"), submittedDraft(request.PostForm))
 		return
 	}
+	target.ProjectCode = project.Code
 	direction := request.PostForm.Get("direction")
 	if direction != "before" && direction != "after" {
 		h.renderError(response, http.StatusUnprocessableEntity, requestError("the reorder direction must be before or after"), submittedDraft(request.PostForm))

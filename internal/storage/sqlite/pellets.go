@@ -86,6 +86,9 @@ func (repository *PelletRepository) CreatePellet(ctx context.Context, project st
 		if normalized.Placement == nil {
 			allocated, err = allocateTailPriority(ctx, connection, project.Project.ID)
 		} else {
+			if err := ensureReferenceProject(ctx, connection, project.Project, normalized.Placement.Target); err != nil {
+				return storage.Pellet{}, err
+			}
 			allocated, err = allocatePlacedPriority(ctx, connection, project, *normalized.Placement, 0)
 		}
 		if err != nil {
@@ -125,7 +128,7 @@ func (repository *PelletRepository) CreatePellet(ctx context.Context, project st
 		return storage.Pellet{}, pelletFTSError("index inserted pellet", err)
 	}
 
-	pellet, err := loadPellet(ctx, connection, project.Project.ID, project.Project.Code, number)
+	pellet, err := loadPellet(ctx, connection, project.Project.ID, number)
 	if err != nil {
 		return storage.Pellet{}, pelletStorageError("read inserted pellet", err)
 	}
@@ -206,7 +209,13 @@ func (repository *PelletRepository) movePellet(
 	if err := ensureStoredProject(ctx, connection, project.Project); err != nil {
 		return storage.Pellet{}, err
 	}
-	moving, err := loadPellet(ctx, connection, project.Project.ID, project.Project.Code, reference.Number)
+	if err := ensureReferenceProject(ctx, connection, project.Project, reference); err != nil {
+		return storage.Pellet{}, err
+	}
+	if err := ensureReferenceProject(ctx, connection, project.Project, placement.Target); err != nil {
+		return storage.Pellet{}, err
+	}
+	moving, err := loadPellet(ctx, connection, project.Project.ID, reference.Number)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storage.Pellet{}, pelletNotFound(reference)
 	}
@@ -245,7 +254,7 @@ func (repository *PelletRepository) movePellet(
 		return storage.Pellet{}, pelletStorageError("verify moved pellet update", err)
 	}
 
-	moved, err := loadPellet(ctx, connection, project.Project.ID, project.Project.Code, reference.Number)
+	moved, err := loadPellet(ctx, connection, project.Project.ID, reference.Number)
 	if err != nil {
 		return storage.Pellet{}, pelletStorageError("read moved pellet", err)
 	}
@@ -263,7 +272,13 @@ func (repository *PelletRepository) ReadPellet(ctx context.Context, project stor
 	if err := validateReferenceProject(project, reference); err != nil {
 		return storage.Pellet{}, err
 	}
-	pellet, err := loadPellet(ctx, repository.db, project.Project.ID, project.Project.Code, reference.Number)
+	if err := ensureStoredProject(ctx, repository.db, project.Project); err != nil {
+		return storage.Pellet{}, err
+	}
+	if err := ensureReferenceProject(ctx, repository.db, project.Project, reference); err != nil {
+		return storage.Pellet{}, err
+	}
+	pellet, err := loadPellet(ctx, repository.db, project.Project.ID, reference.Number)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storage.Pellet{}, pelletNotFound(reference)
 	}
@@ -280,6 +295,9 @@ func (repository *PelletRepository) ListPellets(ctx context.Context, project sto
 		return nil, err
 	}
 	if err := validatePelletListOptions(options); err != nil {
+		return nil, err
+	}
+	if err := ensureStoredProject(ctx, repository.db, project.Project); err != nil {
 		return nil, err
 	}
 
@@ -332,6 +350,9 @@ func (repository *PelletRepository) SearchPellets(ctx context.Context, project s
 		return nil, err
 	}
 	if err := validatePelletSearchOptions(options); err != nil {
+		return nil, err
+	}
+	if err := ensureStoredProject(ctx, repository.db, project.Project); err != nil {
 		return nil, err
 	}
 
@@ -448,8 +469,12 @@ func (repository *PelletRepository) PreviewClosedPelletPurge(ctx context.Context
 	if err := ensureStoredProject(ctx, transaction, project); err != nil {
 		return nil, err
 	}
+	canonicalCode, err := storedCanonicalProjectCode(ctx, transaction, project.ID)
+	if err != nil {
+		return nil, pelletStorageError("read canonical project code for purge preview", err)
+	}
 	predicate, arguments := pelletPurgePredicate(project, options)
-	references, err := selectPelletPurgeReferences(ctx, transaction, project.Code, predicate, arguments)
+	references, err := selectPelletPurgeReferences(ctx, transaction, canonicalCode, predicate, arguments)
 	if err != nil {
 		return nil, err
 	}
@@ -485,9 +510,13 @@ func (repository *PelletRepository) PurgeClosedPellets(ctx context.Context, proj
 	if err := ensureStoredProject(ctx, connection, project); err != nil {
 		return nil, err
 	}
+	canonicalCode, err := storedCanonicalProjectCode(ctx, connection, project.ID)
+	if err != nil {
+		return nil, pelletStorageError("read canonical project code for purge", err)
+	}
 
 	predicate, arguments := pelletPurgePredicate(project, options)
-	references, err := selectPelletPurgeReferences(ctx, connection, project.Code, predicate, arguments)
+	references, err := selectPelletPurgeReferences(ctx, connection, canonicalCode, predicate, arguments)
 	if err != nil {
 		return nil, err
 	}
@@ -566,6 +595,9 @@ func (repository *PelletRepository) NextPellet(ctx context.Context, project stor
 		return storage.NextSelection{}, err
 	}
 	if err := validateNullablePelletText("group", group); err != nil {
+		return storage.NextSelection{}, err
+	}
+	if err := ensureStoredProjectWorkspace(ctx, repository.db, project); err != nil {
 		return storage.NextSelection{}, err
 	}
 
@@ -689,7 +721,7 @@ func (repository *PelletRepository) StartNextPellet(ctx context.Context, project
 		if changed != 1 {
 			continue
 		}
-		started, err := loadPellet(ctx, connection, project.Project.ID, project.Project.Code, candidate.Reference.Number)
+		started, err := loadPellet(ctx, connection, project.Project.ID, candidate.Reference.Number)
 		if err != nil {
 			return storage.NextSelection{}, pelletStorageError("read started next pellet", err)
 		}
@@ -753,7 +785,10 @@ func (repository *PelletRepository) transitionPellet(ctx context.Context, projec
 	if err := ensureStoredProjectWorkspace(ctx, connection, project); err != nil {
 		return storage.PelletLifecycleResult{}, err
 	}
-	before, err := loadPellet(ctx, connection, project.Project.ID, project.Project.Code, reference.Number)
+	if err := ensureReferenceProject(ctx, connection, project.Project, reference); err != nil {
+		return storage.PelletLifecycleResult{}, err
+	}
+	before, err := loadPellet(ctx, connection, project.Project.ID, reference.Number)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storage.PelletLifecycleResult{}, pelletNotFound(reference)
 	}
@@ -793,7 +828,7 @@ func (repository *PelletRepository) transitionPellet(ctx context.Context, projec
 			}
 			return storage.PelletLifecycleResult{}, pelletStorageError("verify pellet lifecycle update", err)
 		}
-		after, err = loadPellet(ctx, connection, project.Project.ID, project.Project.Code, reference.Number)
+		after, err = loadPellet(ctx, connection, project.Project.ID, reference.Number)
 		if err != nil {
 			return storage.PelletLifecycleResult{}, pelletStorageError("read transitioned pellet", err)
 		}
@@ -1108,8 +1143,14 @@ func (repository *PelletRepository) updatePellet(ctx context.Context, project st
 			_, _ = connection.ExecContext(context.Background(), "ROLLBACK")
 		}
 	}()
+	if err := ensureStoredProjectWorkspace(ctx, connection, project); err != nil {
+		return storage.Pellet{}, err
+	}
+	if err := ensureReferenceProject(ctx, connection, project.Project, reference); err != nil {
+		return storage.Pellet{}, err
+	}
 
-	before, err := loadPellet(ctx, connection, project.Project.ID, project.Project.Code, reference.Number)
+	before, err := loadPellet(ctx, connection, project.Project.ID, reference.Number)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storage.Pellet{}, pelletNotFound(reference)
 	}
@@ -1151,7 +1192,7 @@ func (repository *PelletRepository) updatePellet(ctx context.Context, project st
 			return storage.Pellet{}, pelletFTSError("index updated pellet", err)
 		}
 	}
-	updated, err := loadPellet(ctx, connection, project.Project.ID, project.Project.Code, reference.Number)
+	updated, err := loadPellet(ctx, connection, project.Project.ID, reference.Number)
 	if err != nil {
 		return storage.Pellet{}, pelletStorageError("read updated pellet", err)
 	}
@@ -1178,6 +1219,10 @@ func ensureStoredProject(ctx context.Context, query projectQuery, project storag
 		return pelletStorageError("verify pellet project", err)
 	}
 	if storedCode != project.Code {
+		resolvedProjectID, resolveErr := resolveProjectCodeID(ctx, query, project.Code)
+		if resolveErr == nil && resolvedProjectID == project.ID {
+			return nil
+		}
 		return domain.NewError(
 			domain.Conflict,
 			"project_identity_mismatch",
@@ -1186,6 +1231,12 @@ func ensureStoredProject(ctx context.Context, query projectQuery, project storag
 		)
 	}
 	return nil
+}
+
+func storedCanonicalProjectCode(ctx context.Context, query projectQuery, projectID int64) (string, error) {
+	var code string
+	err := query.QueryRowContext(ctx, "SELECT code FROM projects WHERE project_id = ?", projectID).Scan(&code)
+	return code, err
 }
 
 func allocateTailPriority(ctx context.Context, query projectQuery, projectID int64) (int64, error) {
@@ -1407,9 +1458,9 @@ func pelletListOrder(options storage.PelletListOptions) string {
 		p.number`
 }
 
-func loadPellet(ctx context.Context, query projectQuery, projectID int64, projectCode string, number int64) (storage.Pellet, error) {
+func loadPellet(ctx context.Context, query projectQuery, projectID, number int64) (storage.Pellet, error) {
 	return scanPellet(query.QueryRowContext(ctx, pelletSelect+`
-		WHERE p.project_id = ? AND project.code = ? AND p.number = ?`, projectID, projectCode, number))
+		WHERE p.project_id = ? AND p.number = ?`, projectID, number))
 }
 
 type pelletScanner interface{ Scan(...any) error }
@@ -1498,21 +1549,45 @@ func validatePelletProject(project storage.Project) error {
 }
 
 func validateReferenceProject(project storage.ResolvedProject, reference domain.PelletReference) error {
-	if reference.ProjectCode == project.Project.Code && reference.Number > 0 {
+	if err := domain.ValidateProjectCode(reference.ProjectCode); err != nil {
+		return err
+	}
+	if reference.Number > 0 {
 		return nil
 	}
-	if reference.ProjectCode != project.Project.Code {
-		return domain.NewError(
-			domain.Usage,
-			"reference_project_mismatch",
-			"the pellet reference belongs to a different logical project",
-			map[string]any{
-				"reference": reference.String(), "reference_project": reference.ProjectCode,
-				"current_project": project.Project.Code,
-			},
-		)
-	}
 	return domain.NewError(domain.Usage, "invalid_reference", "the pellet reference number must be positive", map[string]any{"reference": reference.String()})
+}
+
+func ensureReferenceProject(ctx context.Context, query projectQuery, project storage.Project, reference domain.PelletReference) error {
+	if reference.Number <= 0 {
+		return domain.NewError(domain.Usage, "invalid_reference", "the pellet reference number must be positive", map[string]any{"reference": reference.String()})
+	}
+	projectID, err := resolveProjectCodeID(ctx, query, reference.ProjectCode)
+	if err == nil && projectID == project.ID {
+		return nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return pelletStorageError("resolve pellet reference project", err)
+	}
+	return domain.NewError(
+		domain.Usage,
+		"reference_project_mismatch",
+		"the pellet reference belongs to a different logical project",
+		map[string]any{
+			"reference": reference.String(), "reference_project": reference.ProjectCode,
+			"current_project": project.Code,
+		},
+	)
+}
+
+func resolveProjectCodeID(ctx context.Context, query projectQuery, code string) (int64, error) {
+	var projectID int64
+	err := query.QueryRowContext(ctx, `
+		SELECT project_id FROM projects WHERE code = ?
+		UNION ALL
+		SELECT project_id FROM project_code_redirects WHERE code = ?
+		LIMIT 1`, code, code).Scan(&projectID)
+	return projectID, err
 }
 
 func validateNewPellet(input storage.NewPellet) (storage.NewPellet, error) {

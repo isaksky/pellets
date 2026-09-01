@@ -30,11 +30,12 @@ func TestReleaseContradictionChecklist(t *testing.T) {
 			bullets++
 		}
 	}
-	if bullets != 13 {
-		t.Fatalf("release contradiction checklist has %d items, want 13 explicit contracts", bullets)
+	if bullets != 14 {
+		t.Fatalf("release contradiction checklist has %d items, want 14 explicit contracts", bullets)
 	}
 	for _, contract := range []string{
 		"no schema, command, or prose introduces dependency concepts",
+		"canonical project codes and direct redirects remain unambiguous",
 		"no priority path uses floating-point arithmetic or a linked list",
 		"non-null priority remains unique per project",
 		"group is one optional exact-filter value per pellet",

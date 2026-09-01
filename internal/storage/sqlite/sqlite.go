@@ -20,7 +20,7 @@ import (
 
 const (
 	// LatestSchemaVersion is the newest schema understood by this executable.
-	LatestSchemaVersion     = 3
+	LatestSchemaVersion     = 4
 	driverName              = "sqlite"
 	busyTimeoutMilliseconds = 5000
 )
@@ -33,6 +33,9 @@ var migration2SQL string
 
 //go:embed migrations/0003_project_workspaces.sql
 var migration3SQL string
+
+//go:embed migrations/0004_project_code_redirects.sql
+var migration4SQL string
 
 type migration struct {
 	version    int
@@ -53,6 +56,7 @@ var migrations = []migration{
 	{version: 1, name: "initial", sql: migration1SQL, assert: assertMigration1, preflight: preflightMigration1, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
 	{version: 2, name: "database-identity", sql: migration2SQL, assert: assertMigration2, preflight: preflightMigration2, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
 	{version: 3, name: "project-workspaces", sql: migration3SQL, assert: assertMigration3, preflight: preflightMigration3, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
+	{version: 4, name: "project-code-redirects", sql: migration4SQL, assert: assertMigration4, preflight: preflightMigration4, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
 }
 
 // Open opens path with the required hardened runtime settings and applies all
@@ -385,6 +389,27 @@ func assertMigration3(ctx context.Context, conn *sql.Conn) error {
 
 func preflightMigration3(ctx context.Context, conn *sql.Conn) error {
 	return assertMigration3Schema(ctx, conn)
+}
+
+func assertMigration4(ctx context.Context, conn *sql.Conn) error {
+	return assertMigration4Schema(ctx, conn)
+}
+
+func preflightMigration4(ctx context.Context, conn *sql.Conn) error {
+	return assertMigration4Schema(ctx, conn)
+}
+
+func assertMigration4Schema(ctx context.Context, conn *sql.Conn) error {
+	if err := verifyProductionSchemaContract(ctx, conn, 4); err != nil {
+		return err
+	}
+	if err := assertConnectionRowCount(ctx, conn, `
+		SELECT COUNT(*)
+		FROM project_code_redirects AS redirect
+		JOIN projects AS project ON project.code = redirect.code`, 0); err != nil {
+		return fmt.Errorf("verify unambiguous project-code namespace: %w", err)
+	}
+	return nil
 }
 
 func assertMigration3Schema(ctx context.Context, conn *sql.Conn) error {

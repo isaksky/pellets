@@ -33,6 +33,7 @@ func TestJSONV1ProjectSkillWebAndTypedEmptySuccessGolden(t *testing.T) {
 	current = nested
 	appendCompatibilityResult(t, &success, "project-show", 0, runCompatibilitySuccess(t, application, "project", "show"), common)
 	appendCompatibilityResult(t, &success, "project-list", 0, runCompatibilitySuccess(t, application, "project", "list"), common)
+	appendCompatibilityResult(t, &success, "project-rename", 0, runCompatibilitySuccess(t, application, "project", "rename", "renamed"), common)
 
 	home := filepath.Join(common, "personal home")
 	if err := os.Mkdir(home, 0o755); err != nil {
@@ -120,6 +121,7 @@ func TestJSONV1EveryCommandErrorGoldenAndExitCode(t *testing.T) {
 		{label: "init-db-error", exit: 2, code: "project_not_allowed", args: []string{"--project", "compat", "init-db"}},
 		{label: "project-list-error", exit: 2, code: "unexpected_argument", args: []string{"project", "list", "extra"}},
 		{label: "project-show-error", exit: 2, code: "unexpected_argument", args: []string{"project", "show", "compat", "extra"}},
+		{label: "project-rename-error", exit: 2, code: "project_rename_confirmation_flags_required", args: []string{"project", "rename", "compat", "--yes"}},
 		{label: "add-error", exit: 2, code: "missing_title", args: []string{"add"}},
 		{label: "list-error", exit: 2, code: "invalid_status", args: []string{"list", "--status", "unknown"}},
 		{label: "next-error", exit: 2, code: "unexpected_argument", args: []string{"next", "extra"}},
@@ -175,7 +177,7 @@ func TestJSONV1GoldenManifestCoversEveryPublicResultName(t *testing.T) {
 		fixtures.Write(content)
 	}
 	for _, command := range []string{
-		"init-db", "project list", "project show", "add", "list", "next", "show", "edit", "move",
+		"init-db", "project list", "project show", "project rename", "add", "list", "next", "show", "edit", "move",
 		"start", "start-next", "release", "close", "reopen", "defer", "search", "purge", "memory add",
 		"memory list", "memory show", "memory search", "memory approve", "memory remove", "skill install",
 	} {
@@ -198,7 +200,7 @@ func TestJSONV1GoldenManifestCoversEveryPublicResultName(t *testing.T) {
 		}
 	}
 	for _, label := range []string{
-		"init-db", "project-list", "project-show", "add", "list", "next", "show", "edit", "move",
+		"init-db", "project-list", "project-show", "project-rename", "add", "list", "next", "show", "edit", "move",
 		"start", "start-next", "release", "close", "reopen", "defer", "search", "purge", "memory-add",
 		"memory-list", "memory-show", "memory-search", "memory-approve", "memory-remove", "skill-install", "web",
 	} {

@@ -173,8 +173,12 @@ func PurgeCommand(manager app.PelletManager) Command {
 			if err != nil {
 				return nil, err
 			}
+			canonical, err := manager.Projects.ShowByCode(ctx, invocationDatabase(invocation), project)
+			if err != nil {
+				return nil, err
+			}
 			result := purgeData{
-				DryRun: input.DryRun, Project: project, Count: len(references),
+				DryRun: input.DryRun, Project: canonical.Code, Count: len(references),
 				References: make([]string, len(references)),
 			}
 			for index, reference := range references {

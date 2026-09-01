@@ -34,7 +34,7 @@ func (application *WebApplication) Project(ctx context.Context, code string) (st
 		return storage.WebProjectSummary{}, err
 	}
 	for _, project := range projects {
-		if project.Project.Code == code {
+		if project.Project.Code == code || projectHasRedirect(project.Project, code) {
 			return project, nil
 		}
 	}
@@ -82,7 +82,18 @@ func (application *WebApplication) TransitionPellet(ctx context.Context, project
 			map[string]any{"project": project.Code},
 		)
 	}
-	return application.Writer.TransitionWebPellet(ctx, *application.Current, reference, expectedVersion, request)
+	current := *application.Current
+	current.Project = project
+	return application.Writer.TransitionWebPellet(ctx, current, reference, expectedVersion, request)
+}
+
+func projectHasRedirect(project storage.Project, code string) bool {
+	for _, redirect := range project.Redirects {
+		if redirect.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func (application *WebApplication) CreateMemory(ctx context.Context, project storage.Project, input storage.NewMemory) (storage.Memory, error) {

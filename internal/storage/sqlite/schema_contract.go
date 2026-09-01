@@ -90,6 +90,7 @@ func buildProductionSchemaContracts() {
 		{version: 1, name: "initial", sql: migration1SQL},
 		{version: 2, name: "database-identity", sql: migration2SQL},
 		{version: 3, name: "project-workspaces", sql: migration3SQL},
+		{version: 4, name: "project-code-redirects", sql: migration4SQL},
 	}
 	productionSchemaContracts.byVersion = make(map[int][]schemaObjectDefinition, len(endpoints))
 	for _, endpoint := range endpoints {

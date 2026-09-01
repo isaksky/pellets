@@ -102,16 +102,17 @@ the worktree root when no ancestor database exists, registers the logical Git
 repository and current worktree, and then performs the requested operation.
 There is no separate project-initialization command.
 
-Pellets derives the immutable public project code from the logical repository
-name. It lowercases ASCII, converts each run of other characters to one
-hyphen, trims edge hyphens, and uses the result directly when it is non-empty,
-at most 12 characters, and unclaimed. Empty, longer, or already-claimed names
+Pellets derives the initial canonical public project code from the logical
+repository name. It lowercases ASCII, converts each run of other characters to
+one hyphen, trims edge hyphens, and uses the result directly when it is non-empty,
+at most 12 characters, and unreserved. Empty, longer, or already-reserved names
 use up to three normalized prefix characters (or `p`) plus `-` and the first
 eight hexadecimal digits of SHA-256 over the normalized repository identity.
 If that candidate is also claimed, Pellets deterministically rehashes the
 identity with increasing canonical decimal attempts until it finds a free
 code. Every result uses 1–12 lowercase ASCII letters, digits, or internal
-hyphens. A registered logical repository always reuses its stored code.
+hyphens. A registered logical repository always reuses its stored current
+canonical code.
 
 ### Several repositories with one common-parent database
 
@@ -170,9 +171,40 @@ pl close demo-1
 pl next --group parser
 ```
 
-Pellet references such as `demo-1` contain the project code and a
-monotonically allocated project-local number. Save the `data.id` returned by
-`add` instead of assuming a number in automation.
+Pellet references such as `demo-1` contain a canonical or former project code
+and a monotonically allocated project-local number. Save the `data.id` returned
+by `add` instead of assuming a number in automation.
+
+### Rename a project without breaking old references
+
+Rename the current logical project with:
+
+```text
+pl project rename new-code
+pl project show new-code
+```
+
+The project keeps its stable database identity and pellet numbers. Its former
+code becomes a direct redirect, so old references, scripts, filters, and deep
+links still resolve while successful JSON and human output use `new-code` and
+`new-code-N`. `pl project list` and `pl project show` display each project's
+canonical code and redirects.
+
+A canonical code owned by another project is always a hard conflict. If the
+requested code is another project's redirect, default JSON and other
+noninteractive invocations return `project_rename_confirmation_required` with
+the exact conflicting rules and retry arguments; they never wait for input.
+Review that payload before the explicit automation-safe retry:
+
+```text
+pl --project old-code project rename new-code \
+  --delete-conflicting-redirects --yes
+```
+
+Only terminal `--human` mode offers the equivalent default-no prompt. Deleting
+a conflicting redirect can break or reinterpret references held outside the
+database. The rename revalidates the displayed rules inside one transaction,
+and any changed conflict or failure leaves project and redirect state intact.
 
 ### JSON is the agent interface
 

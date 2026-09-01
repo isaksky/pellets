@@ -4,6 +4,8 @@
 - Date: 2026-08-28
 - Supersedes: the one-active-agent-per-project, project-as-one-root, project-wide-in-progress, and related `next` portions of [ADR 0001](0001-initial-architecture.md)
 
+> [ADR 0004](0004-project-code-redirects.md) supersedes this record's immutable-project-code language. Project and workspace identity rules here remain accepted.
+
 ## Context
 
 Git permits one repository to have a main work tree and several linked worktrees. Treating every checkout as a separate Pellets project gives those worktrees different codes, pellet numbers, queues, groups, search results, and memories even though they operate on the same repository. Treating the whole repository as one active-worker slot prevents independent worktrees from safely progressing different pellets.
@@ -17,7 +19,7 @@ The product still does not need an account, authenticated agent, daemon, lease m
 ### Identity and shared state
 
 - A logical project represents one Git repository and is keyed locally by its normalized Git common-directory identity.
-- A project owns its immutable public code, monotonically allocated pellet numbers, shared active priority order, external IDs, groups, FTS search, and memories.
+- A project owns its current canonical public code and direct former-code redirects as defined by ADR 0004, plus monotonically allocated pellet numbers, shared active priority order, external IDs, groups, FTS search, and memories.
 - A project has an authoritative `project_workspaces` relation containing its main work tree and every registered linked worktree.
 - A workspace is identified by the normalized pair of worktree root and worktree-specific Git directory. Its numeric database ID may appear in diagnostic and ownership output; public pellet references remain `foo-123`.
 - Store slash-normalized paths relative to the database root when possible and marked absolute paths otherwise. Normalize platform case where path identity is case-insensitive.
@@ -25,7 +27,7 @@ The product still does not need an account, authenticated agent, daemon, lease m
 
 ### Registration and stale paths
 
-- After parsing and usage validation, the first valid command that needs the current project/workspace creates or discovers the database, generates and transactionally stores an immutable project code, and registers the logical repository plus current workspace before executing the requested operation. No separate project-initialization command or caller-supplied code exists.
+- After parsing and usage validation, the first valid command that needs the current project/workspace creates or discovers the database, generates and transactionally stores an initial canonical project code, and registers the logical repository plus current workspace before executing the requested operation. No separate project-initialization command or caller-supplied bootstrap code exists.
 - Repeated exact resolution is read-only and idempotent. A linked worktree attaches to the project found by common-directory identity and reuses its stored code. One worktree attached to two projects and inconsistent common/root/Git-directory identity remain typed conflicts without partial registration.
 - Git and filesystem inspection finishes before SQLite write transactions. Commands that do not need the current workspace never register or repair one. An otherwise read-only current-project command may perform this one-time bootstrap before its operation; subsequent reads remain write-free.
 - When one Git-directory identity appears at a new root and the old registered root is absent, automatic bootstrap updates that workspace path. If the old root still exists, the second path is a duplicate conflict.

@@ -11,7 +11,7 @@ pl [global-options] <command> [command-options] [arguments]
 ```
 
 - Commands and long flags use lowercase kebab-case.
-- Mutating pellet commands accept one canonical reference such as `foo-123`.
+- Mutating pellet commands accept a canonical or redirected reference such as `foo-123`; successful output canonicalizes it.
 - Parse a reference at its final hyphen: `foo-bar-123` means project `foo-bar`, pellet number `123`.
 - Pellet numbers are canonical unsigned decimal without leading zeros.
 - Bare numbers are rejected because one database may contain several projects.
@@ -42,11 +42,11 @@ If no ancestor database exists, the first valid current-project command creates 
 
 Bootstrap happens only after parsing and usage validation. Help/version, invalid invocations, `init-db`, `skill install`, `project list`, named or `--project`-selected `project show`, and explicit project-scoped `purge` do not bootstrap. Those database-level commands retain their existing nearest-database semantics and fail with `database_not_found` when none exists.
 
-Project codes are generated without prompting. The logical repository name is the directory containing a `.git` common directory, or a bare common-directory basename with one terminal `.git` removed. Pellets lowercases ASCII letters, preserves ASCII digits, collapses every run of other characters into one hyphen, and trims edge hyphens. A non-empty normalized name of at most 12 bytes is the first candidate. Empty or longer names, and candidates already owned by another repository, use up to three normalized prefix bytes (or `p`), `-`, and the first eight lowercase hexadecimal SHA-256 digits over `true:<relative-common-dir>` or `false:<absolute-common-dir>`, using the same slash/case normalization stored in SQLite. If that candidate is occupied, attempts rehash the identity plus a NUL byte and the increasing canonical decimal attempt. Allocation and registration share one immediate transaction. An already-known common-directory identity ignores new checkout names and always reuses its stored immutable code.
+Project codes are generated without prompting. The logical repository name is the directory containing a `.git` common directory, or a bare common-directory basename with one terminal `.git` removed. Pellets lowercases ASCII letters, preserves ASCII digits, collapses every run of other characters into one hyphen, and trims edge hyphens. A non-empty normalized name of at most 12 bytes is the first candidate. Empty or longer names, and candidates already reserved as either a canonical code or redirect, use up to three normalized prefix bytes (or `p`), `-`, and the first eight lowercase hexadecimal SHA-256 digits over `true:<relative-common-dir>` or `false:<absolute-common-dir>`, using the same slash/case normalization stored in SQLite. If that candidate is occupied, attempts rehash the identity plus a NUL byte and the increasing canonical decimal attempt. Allocation and registration share one immediate transaction. An already-known common-directory identity ignores new checkout names and always reuses its stored current canonical code.
 
 Bootstrap writes are a one-time pre-command effect, not a change to operation semantics. Once the exact project/workspace is registered, `next`, `list`, `search`, `show`, memory reads, named/database-level project reads, and every dry run retain their write-free guarantees. On first use only, a valid current-project command can create the database, update Git's local exclude, and transactionally register the project/workspace before running an otherwise read-only operation. The requested read itself still performs no queue or memory mutation.
 
-`--project CODE` does not silently let a caller mutate an unrelated repository. For pellet mutations, the code in the pellet reference must match the selected/current project. Database-level and read-only administrative commands may operate across registered projects when explicitly documented.
+`--project CODE` and every command input that accepts a project code resolve a canonical code or one direct redirect to the stable project row. Redirects are never followed recursively. `--project CODE` does not silently let a caller mutate an unrelated repository: for pellet mutations, the resolved stable project ID in the pellet reference must match the selected/current project. Database-level and read-only administrative commands may operate across registered projects when explicitly documented. Successful JSON and human output always emits the current canonical project code and pellet references.
 
 ## Commands
 
@@ -68,13 +68,30 @@ List registered logical projects and every workspace identity in the selected da
 
 ### `pl project show [CODE]`
 
-Show the current logical project, or a named project when `CODE` is supplied, including its Git common directory and registered workspace IDs, roots, Git directories, relative/absolute flags, and timestamps. Current `project show` bootstraps on first use; positional `CODE` or global `--project CODE` is a database-level read and never registers the current directory. Public project codes and pellet references do not change.
+Show the current logical project, or a named project when `CODE` is supplied, including its current canonical code, direct redirects, Git common directory, registered workspace IDs, roots, Git directories, relative/absolute flags, and timestamps. Current `project show` bootstraps on first use; positional `CODE` or global `--project CODE` is a database-level read and never registers the current directory. A redirected `CODE` resolves the project but the result emits its current canonical code.
 
 Project `list` and `show` use this data shape (timestamps omitted here only for brevity):
 
 ```json
-{"code":"foo","git_common_dir":"main/.git","git_common_dir_relative":true,"workspaces":[{"id":1,"root_path":"main","root_path_relative":true,"git_dir":"main/.git","git_dir_relative":true},{"id":2,"root_path":"linked","root_path_relative":true,"git_dir":"main/.git/worktrees/linked","git_dir_relative":true}]}
+{"code":"bar","git_common_dir":"main/.git","git_common_dir_relative":true,"workspaces":[{"id":1,"root_path":"main","root_path_relative":true,"git_dir":"main/.git","git_dir_relative":true},{"id":2,"root_path":"linked","root_path_relative":true,"git_dir":"main/.git/worktrees/linked","git_dir_relative":true}],"redirects":[{"code":"foo","created_at":"2026-08-31T12:00:00Z","updated_at":"2026-08-31T12:00:00Z"}]}
 ```
+
+### `pl project rename NEW_CODE`
+
+Change a logical project's canonical public code while preserving its former code as a direct redirect.
+
+```text
+pl [--project CODE] project rename NEW_CODE
+    [--delete-conflicting-redirects --yes]
+```
+
+Without `--project`, rename selects the current logical project and may bootstrap it on first use. `--project CODE` may itself be canonical or redirected and performs a database-level selection. Renaming `foo` to `bar` keeps the stable project ID and all project-local pellet numbers, makes `bar` canonical, and adds the direct redirect `foo -> bar`. Existing `foo-N` inputs continue to resolve, while all successful results emit `bar` and `bar-N`.
+
+Renaming to the current canonical code is an idempotent success. Renaming to a redirect already owned by the same project promotes that code without confirmation and preserves the former canonical code as a redirect. The canonical code of another project is `project_code_already_registered`, a hard conflict that is never eligible for deletion.
+
+If `NEW_CODE` is a redirect owned by another project, JSON and every noninteractive invocation return `project_rename_confirmation_required` without reading stdin. Its details contain every conflicting `code` and `canonical_target`, the warning that deletion can break or reinterpret old pellet references, and the exact `retry_argv`. Automation may retry only with both `--delete-conflicting-redirects --yes`. Those flags must be supplied together. The rename transaction revalidates the complete displayed conflict set and deletes only those rules; a changed set returns `project_redirect_conflicts_changed` without writes.
+
+Only terminal `--human` mode prompts. It lists every conflicting rule and target, repeats the warning, and asks `Delete only these redirect rules and rename OLD_CODE to NEW_CODE? [y/N]:`. Answering no, EOF, or interruption cancels without a write. Answering yes performs the same atomic conflict revalidation and rename. A failed rename leaves project and redirect state unchanged.
 
 ### `pl add`
 
@@ -330,7 +347,7 @@ pl [--project CODE] web [--port PORT] [--no-open]
 
 The browser uses only embedded, offline assets: pinned HTMX 2.0.4 and its license, repository-owned JavaScript/CSS, system fonts, and standard-library HTTP/templates. There is no runtime CDN, font/icon fetch, Node/npm build, WebSocket, service worker, or remote API. A first visit follows `prefers-color-scheme`; the light/dark/system selector persists locally and applies before first paint.
 
-Project pages expose every registered workspace and current pellet, all pellet states, and all authoritative memories. Project/status/exact-group/exact-external-ID/search filters are encoded in the URL; search uses the same escaped safe FTS semantics as `pl search`. Stable project codes, pellet references, and memory IDs form deep links. With one project the header is compact; with several projects a wide sidebar and narrow-screen drawer keep project data separated. Tasks use priority/status ordering and a wide inspector or narrow modal sheet. Browser history, Escape, focus trapping/restoration, scroll preservation, dirty-form warnings, reduced motion, and recovery polling are presentation contracts.
+Project pages expose every registered workspace and current pellet, all pellet states, all direct project redirects, and all authoritative memories. Project/status/exact-group/exact-external-ID/search filters are encoded in the URL; search uses the same escaped safe FTS semantics as `pl search`. Canonical project codes, pellet references, and memory IDs form current deep links. Requests using a direct old-code project or pellet path receive a temporary redirect to the equivalent current canonical path with the query string preserved. With one project the header is compact; with several projects a wide sidebar and narrow-screen drawer keep project data separated. Tasks use priority/status ordering and a wide inspector or narrow modal sheet. Browser history, Escape, focus trapping/restoration, scroll preservation, dirty-form warnings, reduced motion, and recovery polling are presentation contracts.
 
 The permitted mutations are pellet create/scalar edit/reorder/lifecycle, memory create/text edit, and memory approval. Purge, memory removal, project deletion, and any irreversible action are absent. Scalar and memory edits can address a selected project. Lifecycle actions require the server's current registered project workspace. A pellet owned by another workspace disables normal actions; an explicit recovery form names the pellet and stored workspace, explains that it does not authenticate an agent, and requires confirmation.
 
@@ -400,7 +417,7 @@ Never truncate titles or descriptions when stdout is not a terminal. Terminal tr
 
 ## stdin, stdout, and stderr
 
-- stdin is read only when an explicit option names `-`, such as `--description-file -` or `pl memory add --file -`, or by the documented interactive `--human skill install` wizard when both stdin and stdout are terminals.
+- stdin is read only when an explicit option names `-`, such as `--description-file -` or `pl memory add --file -`, or by a documented `--human` wizard or project-rename confirmation when both stdin and stdout are terminals.
 - JSON commands never read stdin implicitly; this prevents an agent invocation from hanging.
 - stdout contains the successful result only. For `pl web`, that result is the ready listener URL rather than JSON.
 - stderr contains the structured error only, plus diagnostics only when an explicit future debug flag is used. A non-fatal `pl web` browser-launch warning is the documented exception.
@@ -426,6 +443,7 @@ Specific machine error codes disambiguate cases that share an exit code.
 - `purge` requires `--yes`; `--human` does not weaken this rule.
 - `memory remove` requires `--yes`.
 - Cross-workspace recovery requires both the exact stored `--recover-workspace WORKSPACE_ID` and `--yes`; human output does not weaken this rule.
+- Project rename deletes foreign redirect conflicts only after terminal human confirmation or an exact noninteractive retry with both `--delete-conflicting-redirects` and `--yes`; the transaction revalidates the displayed set.
 - Noninteractive `skill install` writes require `--yes`; interactive cancellation is a successful write-free result. Differing skill files additionally require `--force` or the separate interactive replacement confirmation.
 - `init-db` and automatic bootstrap never overwrite an existing database.
 - `start`, `close`, `reopen`, and `defer` are idempotent only when the pellet is already in their target status.

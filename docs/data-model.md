@@ -11,13 +11,14 @@ This model intentionally contains no dependency, edge, epic, tag, group, task-no
 - A **logical project** is that repository's shared Pellets queue, code, numbering, ordering, groups, external IDs, search, and memories.
 - A **worktree** is Git's main work tree or one linked worktree.
 - A **workspace** is one worktree registered to a logical project, identified by its worktree root and worktree-specific Git directory.
-- A **project code** is a unique 1–12 character lowercase code such as `foo`.
+- A **canonical project code** is the current unique 1–12 character lowercase code such as `foo` emitted for a project.
+- A **project-code redirect** reserves a former code and maps it directly to a stable `project_id`.
 - A **pellet number** is a positive integer allocated monotonically within one project.
 - A **pellet reference** combines them, for example `foo-123`.
 - A **priority** is an actionable pellet’s unique integer order within its project. Lower comes first. Closed and deferred pellets have no priority.
 - A **group** is one optional opaque string used to filter related pellets across external IDs within the same project.
 
-References split at the final hyphen, so `foo-bar-123` means project `foo-bar` and pellet number `123`. Numbers use canonical decimal without leading zeros. Project codes are immutable in v1 so references remain stable even when embedded in memory text or external systems. Purged pellet numbers are never reused.
+References split at the final hyphen, so `foo-bar-123` means project code `foo-bar` and pellet number `123`. Numbers use canonical decimal without leading zeros. A reference may use either the current canonical code or one of that project's direct redirects. Successful output always uses the current canonical code, so after renaming `foo` to `bar`, both `foo-123` and `bar-123` resolve to and emit `bar-123`. Purged pellet numbers are never reused.
 
 ## Proposed schema
 
@@ -52,6 +53,26 @@ CREATE TABLE projects (
     CHECK (next_pellet_number > 0),
     CHECK (updated_at >= created_at)
 ) STRICT;
+
+CREATE TABLE project_code_redirects (
+    code       TEXT PRIMARY KEY,
+    project_id INTEGER NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+
+    CHECK (length(code) BETWEEN 1 AND 12),
+    CHECK (code = lower(code)),
+    CHECK (code NOT GLOB '*[^a-z0-9-]*'),
+    CHECK (substr(code, 1, 1) <> '-'),
+    CHECK (substr(code, -1, 1) <> '-'),
+    CHECK (updated_at >= created_at)
+) STRICT;
+
+CREATE INDEX project_code_redirects_project_idx
+    ON project_code_redirects(project_id, code);
+
+-- Insert/update triggers on both projects and project_code_redirects reject a
+-- code that exists in the other table, keeping one unambiguous namespace.
 
 CREATE TABLE project_workspaces (
     workspace_id       INTEGER PRIMARY KEY,
@@ -154,7 +175,11 @@ CREATE INDEX memories_project_approval_idx
 
 Each path has a companion `*_relative` flag. A relative slash-normalized value is interpreted from the database root. A Git location outside that root is stored as a normalized absolute path. On platforms with case-insensitive path identity, normalization folds case before comparison. Paths are local diagnostics, not portable repository IDs. Automatic bootstrap updates a moved workspace only after an outside-transaction check establishes that its old root is absent; a live duplicate conflicts. Removed worktrees remain registered and can own in-progress work until explicit recovery. There is no automatic cleanup.
 
-Project-code allocation occurs in the same immediate transaction as logical-project and initial-workspace insertion. An existing `git_common_dir` row always wins and supplies its stored immutable code. A new repository tries the documented normalized-name candidate, then deterministic identity-hash candidates while checking the unique `projects.code` index inside that transaction. Concurrent first commands for the same common-directory identity therefore converge on one project/code, while distinct identities cannot commit one code or a project without its initial workspace.
+Project-code allocation occurs in the same immediate transaction as logical-project and initial-workspace insertion. An existing `git_common_dir` row always wins and supplies its current canonical code. A new repository tries the documented normalized-name candidate, then deterministic identity-hash candidates while checking both canonical codes and redirects inside that transaction. Cross-table triggers enforce the same unified namespace for direct SQL and concurrent writers. Concurrent first commands for the same common-directory identity therefore converge on one project/code, while distinct identities cannot commit one code or a project without its initial workspace.
+
+`project_code_redirects.project_id` targets the stable project row rather than another code, so redirects cannot form chains. Resolution performs one canonical-or-redirect lookup and never recursively follows codes. A rename uses one `BEGIN IMMEDIATE` transaction: it revalidates the complete planned conflict set, optionally deletes only explicitly confirmed foreign redirect rows, promotes an owned redirect when applicable, changes `projects.code`, and stores the former canonical code as a direct redirect. Any failure rolls back every one of those writes without changing the stable project ID, project-local pellet numbers, workspaces, pellets, or memories.
+
+Canonical codes owned by another project are hard conflicts and cannot be deleted by rename. A foreign redirect remains reserved unless the caller confirms the exact displayed conflict set; if that set changes before the transaction obtains the lock, the rename fails write-free. Renaming to the existing canonical code is idempotent, while renaming to a redirect already owned by the project safely swaps which code is canonical. Deleting a project is prevented while its restricted child records exist; once those records are removed and the project row can be deleted, `ON DELETE CASCADE` removes its redirects rather than leaving dangling rows. Purging closed pellets never deletes projects or redirects.
 
 `pellets.group_id` is not a foreign key. There is no groups table: each pellet has zero or one case-sensitive group string, and the same value may appear under several external IDs in that project. Group equality has no meaning across projects.
 
@@ -434,3 +459,5 @@ The executable embeds a consecutive sequence of forward migrations beginning at 
 Opening first reads `user_version` without a persistent write. Negative versions, version 0 with persistent schema, and newer versions fail with stable typed errors. Before changing journal mode, a read-only `integrity_check` rejects corrupt or incompatible files without mutation, and a version-specific read-only schema preflight rejects a supported version stamped onto the wrong schema. An older version is re-read after bounded `BEGIN IMMEDIATE`; all missing migrations, their assertions, each consecutive `user_version` advance, `foreign_key_check`, external-content FTS verification, and a final database integrity check run on one connection in one transaction before commit. A failure rolls back both schema and version, and a concurrent migrator that waited for the lock applies nothing twice. FTS tables are disposable during migration and may be rebuilt with the FTS5 `rebuild` command after authoritative tables are copied or changed; verification uses FTS5 `integrity-check` rank 1 so derived rows are compared with authoritative content. Destructive migrations require a backup mechanism first. See [architecture.md](architecture.md#migration-strategy).
 
 Migration 3 is the consecutive project-workspace migration. It does not modify released migration 1 or the frozen v1 fixture. It deterministically treats every legacy `projects.root_path` as the initial workspace root, derives the legacy common/Git directory as `<root>/.git`, assigns the project's legacy in-progress pellet to that workspace, and preserves project IDs/codes/counters/timestamps, pellet rowids/numbers/order/timestamps, memories including the `AUTOINCREMENT` high-water mark, application metadata including unknown keys, and all authoritative text. It drops `pellets_one_in_progress_idx`, installs the workspace-scoped index and composite foreign key, rebuilds both FTS tables, verifies their integrity, and removes every temporary table. No Git or filesystem command runs in that migration transaction; later automatic bootstrap safely reconciles a moved normal workspace identity.
+
+Migration 4 adds only the strict direct `project_code_redirects` table, its project/code index, and the four cross-table namespace triggers. Existing projects, stable IDs, codes, counters, workspaces, pellet numbers and state, memories, metadata, and both FTS indexes are unchanged. Its assertion verifies the complete version-4 schema contract and that no canonical code equals a redirect code; failure restores the complete version-3 schema and `user_version`.

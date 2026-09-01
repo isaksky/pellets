@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-28
 
-> [ADR 0002](0002-worktree-scoped-workspaces.md) supersedes this record's one-active-agent-per-project, project-as-one-root, project-wide-in-progress, and project-wide `next` decisions. The remaining product, ordering, storage, FTS, memory, JSON, and PID/lease rejection decisions stay accepted.
+> [ADR 0002](0002-worktree-scoped-workspaces.md) supersedes this record's one-active-agent-per-project, project-as-one-root, project-wide-in-progress, and project-wide `next` decisions. [ADR 0004](0004-project-code-redirects.md) supersedes its immutable-project-code decision. The remaining product, ordering, storage, FTS, memory, JSON, and PID/lease rejection decisions stay accepted.
 
 ## Context
 
@@ -92,7 +92,7 @@ Do not implement:
 
 - Two workers using the same worktree are not isolated; distinct registered worktrees coordinate through workspace ownership.
 - SQLite allows only one writer at a time across projects sharing a database, although writes should be short.
-- Project codes cannot be renamed safely while textual references exist, so v1 treats them as immutable.
+- Superseded by ADR 0004: former project codes are direct redirects to the stable project row, allowing safe canonical rename without rewriting textual references.
 - Keyword memory search cannot find purely semantic matches.
 - A locally excluded, unsynchronized database is not automatically available in another checkout or machine.
 - Hands-on Windows testing is unavailable; CI must carry more confidence than usual.
@@ -140,7 +140,7 @@ Rejected because SQLite files and WAL companions are not a merge format. The dat
 
 ## Follow-up decisions
 
-ADR 0002 supplies the accepted multi-worktree coordination model. New decision records are still required before adding agent identity/authentication, PID/session ownership, leases, vector retrieval, synchronization, custom statuses, project-code rename, or any dependency-like relationship.
+ADR 0002 supplies the accepted multi-worktree coordination model, and ADR 0004 supplies project-code rename and redirect semantics. New decision records are still required before adding agent identity/authentication, PID/session ownership, leases, vector retrieval, synchronization, custom statuses, or any dependency-like relationship.
 
 Related documents:
 

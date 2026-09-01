@@ -1069,7 +1069,7 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assertFoundationQueryInt(t, database, "PRAGMA user_version", 3)
+		assertFoundationQueryInt(t, database, "PRAGMA user_version", sqlite.LatestSchemaVersion)
 		assertFoundationQueryInt(t, database, "SELECT COUNT(*) FROM project_workspaces", 3)
 		if err := database.Close(); err != nil {
 			t.Fatal(err)
@@ -1106,8 +1106,15 @@ type foundationProject struct {
 	GitCommonDir         string                `json:"git_common_dir"`
 	GitCommonDirRelative bool                  `json:"git_common_dir_relative"`
 	Workspaces           []foundationWorkspace `json:"workspaces"`
+	Redirects            []foundationRedirect  `json:"redirects"`
 	CreatedAt            string                `json:"created_at"`
 	UpdatedAt            string                `json:"updated_at"`
+}
+
+type foundationRedirect struct {
+	Code      string `json:"code"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 type foundationWorkspace struct {
@@ -1610,6 +1617,7 @@ func captureFoundationDatabaseState(t *testing.T, databasePath string) foundatio
 	}{
 		{name: "application_metadata", order: "rowid"},
 		{name: "projects", order: "rowid"},
+		{name: "project_code_redirects", order: "code"},
 		{name: "project_workspaces", order: "rowid"},
 		{name: "pellets", order: "rowid"},
 		{name: "pellets_fts", order: "rowid"},

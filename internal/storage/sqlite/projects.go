@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,6 +20,10 @@ const projectColumns = `project_id, code, git_common_dir, git_common_dir_relativ
 
 const workspaceColumns = `workspace_id, project_id, root_path, root_path_relative,
 	git_dir, git_dir_relative,
+	strftime('%Y-%m-%dT%H:%M:%fZ', created_at),
+	strftime('%Y-%m-%dT%H:%M:%fZ', updated_at)`
+
+const projectRedirectColumns = `code, project_id,
 	strftime('%Y-%m-%dT%H:%M:%fZ', created_at),
 	strftime('%Y-%m-%dT%H:%M:%fZ', updated_at)`
 
@@ -86,18 +91,24 @@ func (database *ProjectDatabase) RegisterProject(ctx context.Context, registrati
 	if repositoryErr == nil && registration.GenerateCode {
 		registration.Code = byRepository.Code
 	}
-	byCode, codeErr := findProjectRow(ctx, connection, "code = ?", registration.Code)
+	byCode, codeErr := findProjectByAnyCodeRow(ctx, connection, registration.Code)
 	if codeErr != nil && !errors.Is(codeErr, sql.ErrNoRows) {
 		return storage.Project{}, false, projectStorageError("look up project code", codeErr)
 	}
 
 	if repositoryErr == nil && byRepository.Code != registration.Code {
-		return storage.Project{}, false, domain.NewError(
-			domain.Conflict,
-			"project_repository_already_registered",
-			"the Git repository is already registered with a different immutable code",
-			map[string]any{"existing_code": byRepository.Code, "requested_code": registration.Code},
-		)
+		if codeErr == nil && byCode.ID == byRepository.ID {
+			// A former code for this same stable project is a valid selection,
+			// but registration and every successful result remain canonical.
+			registration.Code = byRepository.Code
+		} else {
+			return storage.Project{}, false, domain.NewError(
+				domain.Conflict,
+				"project_repository_already_registered",
+				"the Git repository is already registered with a different canonical code",
+				map[string]any{"existing_code": byRepository.Code, "requested_code": registration.Code},
+			)
+		}
 	}
 	if registration.GenerateCode && repositoryErr != nil && codeErr == nil {
 		for attempt := uint64(0); ; attempt++ {
@@ -105,7 +116,7 @@ func (database *ProjectDatabase) RegisterProject(ctx context.Context, registrati
 			if candidate == registration.Code {
 				continue
 			}
-			candidateProject, candidateErr := findProjectRow(ctx, connection, "code = ?", candidate)
+			candidateProject, candidateErr := findProjectByAnyCodeRow(ctx, connection, candidate)
 			if errors.Is(candidateErr, sql.ErrNoRows) {
 				registration.Code = candidate
 				codeErr = candidateErr
@@ -256,6 +267,11 @@ func (database *ProjectDatabase) ListProjects(ctx context.Context) ([]storage.Pr
 			return nil, projectStorageError("read project workspaces", err)
 		}
 		projects[index].Workspaces = workspaces
+		redirects, err := loadProjectCodeRedirects(ctx, database.db, projects[index].ID)
+		if err != nil {
+			return nil, projectStorageError("read project code redirects", err)
+		}
+		projects[index].Redirects = redirects
 	}
 	if projects == nil {
 		projects = make([]storage.Project, 0)
@@ -264,18 +280,155 @@ func (database *ProjectDatabase) ListProjects(ctx context.Context) ([]storage.Pr
 }
 
 func (database *ProjectDatabase) FindProjectByCode(ctx context.Context, code string) (storage.Project, error) {
-	project, err := findProjectRow(ctx, database.db, "code = ?", code)
+	project, err := findProjectByAnyCodeRow(ctx, database.db, code)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storage.Project{}, projectNotFound(map[string]any{"code": code})
 	}
 	if err != nil {
 		return storage.Project{}, projectStorageError("find project by code", err)
 	}
-	project.Workspaces, err = loadWorkspaces(ctx, database.db, project.ID)
+	project, err = loadProject(ctx, database.db, project.ID)
 	if err != nil {
-		return storage.Project{}, projectStorageError("read project workspaces", err)
+		return storage.Project{}, projectStorageError("read resolved project", err)
 	}
 	return project, nil
+}
+
+// PlanProjectRename performs the write-free lookup used before a human prompt
+// or an automation-safe confirmation-required result.
+func (database *ProjectDatabase) PlanProjectRename(ctx context.Context, projectID int64, newCode string) (storage.ProjectRenamePlan, error) {
+	if projectID <= 0 {
+		return storage.ProjectRenamePlan{}, domain.NewError(domain.Unexpected, "internal_error", "resolved project identity is invalid", nil)
+	}
+	if err := domain.ValidateProjectCode(newCode); err != nil {
+		return storage.ProjectRenamePlan{}, err
+	}
+	plan, err := planProjectRename(ctx, database.db, projectID, newCode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return storage.ProjectRenamePlan{}, projectNotFound(map[string]any{"project_id": projectID})
+	}
+	if err != nil {
+		return storage.ProjectRenamePlan{}, projectStorageError("plan project rename", err)
+	}
+	return plan, nil
+}
+
+// RenameProject revalidates the complete displayed conflict set and applies
+// redirect deletion, canonical-code update, and former-code insertion in one
+// immediate transaction.
+func (database *ProjectDatabase) RenameProject(ctx context.Context, request storage.ProjectRenameRequest) (storage.ProjectRenameResult, error) {
+	if request.ProjectID <= 0 {
+		return storage.ProjectRenameResult{}, domain.NewError(domain.Unexpected, "internal_error", "resolved project identity is invalid", nil)
+	}
+	if err := domain.ValidateProjectCode(request.NewCode); err != nil {
+		return storage.ProjectRenameResult{}, err
+	}
+	for _, conflict := range request.ExpectedConflictingRedirects {
+		if err := domain.ValidateProjectCode(conflict.Code); err != nil || conflict.ProjectID <= 0 || domain.ValidateProjectCode(conflict.CanonicalCode) != nil {
+			return storage.ProjectRenameResult{}, domain.NewError(domain.Unexpected, "internal_error", "expected project redirect conflict is invalid", nil)
+		}
+	}
+
+	connection, err := database.db.Conn(ctx)
+	if err != nil {
+		return storage.ProjectRenameResult{}, projectStorageError("open project rename connection", err)
+	}
+	defer connection.Close()
+	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return storage.ProjectRenameResult{}, projectStorageError("begin project rename", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = connection.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+
+	plan, err := planProjectRename(ctx, connection, request.ProjectID, request.NewCode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return storage.ProjectRenameResult{}, projectNotFound(map[string]any{"project_id": request.ProjectID})
+	}
+	if err != nil {
+		return storage.ProjectRenameResult{}, projectStorageError("revalidate project rename", err)
+	}
+	if len(plan.Conflicts) > 0 && !request.DeleteConflictingRedirects {
+		return storage.ProjectRenameResult{}, projectRenameConfirmationRequired(plan)
+	}
+	if request.DeleteConflictingRedirects {
+		if !slices.Equal(plan.Conflicts, request.ExpectedConflictingRedirects) {
+			return storage.ProjectRenameResult{}, projectRenameConflictSetChanged(request.ExpectedConflictingRedirects, plan.Conflicts)
+		}
+	} else if len(request.ExpectedConflictingRedirects) > 0 {
+		return storage.ProjectRenameResult{}, projectRenameConflictSetChanged(request.ExpectedConflictingRedirects, plan.Conflicts)
+	}
+
+	result := storage.ProjectRenameResult{Project: plan.Project, PreviousCode: plan.Project.Code}
+	if plan.Project.Code == request.NewCode {
+		if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
+			return storage.ProjectRenameResult{}, projectStorageError("commit idempotent project rename", err)
+		}
+		committed = true
+		return result, nil
+	}
+
+	if request.DeleteConflictingRedirects {
+		for _, conflict := range plan.Conflicts {
+			changed, err := connection.ExecContext(ctx, `
+				DELETE FROM project_code_redirects
+				WHERE code = ? AND project_id = ?`, conflict.Code, conflict.ProjectID)
+			if err != nil {
+				return storage.ProjectRenameResult{}, projectStorageError("delete confirmed project code redirect", err)
+			}
+			rows, err := changed.RowsAffected()
+			if err != nil || rows != 1 {
+				if err == nil {
+					err = fmt.Errorf("deleted %d redirect rows, want 1", rows)
+				}
+				return storage.ProjectRenameResult{}, projectStorageError("verify confirmed redirect deletion", err)
+			}
+		}
+		result.RemovedConflicts = append([]storage.ProjectCodeConflict(nil), plan.Conflicts...)
+	}
+
+	// Promotion of a redirect already owned by this project never needs
+	// confirmation. A conflicting redirect was removed above after revalidation.
+	if _, err := connection.ExecContext(ctx, `
+		DELETE FROM project_code_redirects
+		WHERE code = ? AND project_id = ?`, request.NewCode, request.ProjectID); err != nil {
+		return storage.ProjectRenameResult{}, projectStorageError("remove promoted project code redirect", err)
+	}
+	timestamp, err := captureJulianTimestamp(ctx, connection)
+	if err != nil {
+		return storage.ProjectRenameResult{}, projectStorageError("capture project rename timestamp", err)
+	}
+	changed, err := connection.ExecContext(ctx, `
+		UPDATE projects SET code = ?, updated_at = ?
+		WHERE project_id = ? AND code = ?`, request.NewCode, timestamp, request.ProjectID, plan.Project.Code)
+	if err != nil {
+		return storage.ProjectRenameResult{}, projectStorageError("update canonical project code", err)
+	}
+	rows, err := changed.RowsAffected()
+	if err != nil || rows != 1 {
+		if err == nil {
+			err = fmt.Errorf("updated %d project rows, want 1", rows)
+		}
+		return storage.ProjectRenameResult{}, projectStorageError("verify canonical project update", err)
+	}
+	if _, err := connection.ExecContext(ctx, `
+		INSERT INTO project_code_redirects(code, project_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?)`, plan.Project.Code, request.ProjectID, timestamp, timestamp); err != nil {
+		return storage.ProjectRenameResult{}, projectStorageError("preserve former canonical project code", err)
+	}
+	result.Project, err = loadProject(ctx, connection, request.ProjectID)
+	if err != nil {
+		return storage.ProjectRenameResult{}, projectStorageError("read renamed project", err)
+	}
+	result.Changed = true
+	if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
+		return storage.ProjectRenameResult{}, projectStorageError("commit project rename", err)
+	}
+	committed = true
+	return result, nil
 }
 
 func (database *ProjectDatabase) FindWorkspaceByGitDir(ctx context.Context, gitDir domain.LocalPath) (storage.ResolvedProject, error) {
@@ -345,6 +498,19 @@ func findProjectRow(ctx context.Context, query projectQuery, predicate string, a
 	return scanProject(query.QueryRowContext(ctx, "SELECT "+projectColumns+" FROM projects WHERE "+predicate, args...))
 }
 
+// findProjectByAnyCodeRow deliberately performs at most one redirect lookup.
+// Redirect rows target projects.project_id directly, so no recursive traversal
+// or redirect chain can occur.
+func findProjectByAnyCodeRow(ctx context.Context, query projectQuery, code string) (storage.Project, error) {
+	project, err := findProjectRow(ctx, query, "code = ?", code)
+	if err == nil || !errors.Is(err, sql.ErrNoRows) {
+		return project, err
+	}
+	return findProjectRow(ctx, query, `project_id = (
+		SELECT project_id FROM project_code_redirects WHERE code = ?
+	)`, code)
+}
+
 func findWorkspaceRow(ctx context.Context, query projectQuery, predicate string, args ...any) (storage.Workspace, error) {
 	return scanWorkspace(query.QueryRowContext(ctx, "SELECT "+workspaceColumns+" FROM project_workspaces WHERE "+predicate, args...))
 }
@@ -358,6 +524,10 @@ func loadProject(ctx context.Context, query interface {
 		return storage.Project{}, err
 	}
 	project.Workspaces, err = loadWorkspaces(ctx, query, projectID)
+	if err != nil {
+		return storage.Project{}, err
+	}
+	project.Redirects, err = loadProjectCodeRedirects(ctx, query, projectID)
 	return project, err
 }
 
@@ -376,6 +546,23 @@ func loadWorkspaces(ctx context.Context, query rowsQuery, projectID int64) ([]st
 		workspaces = append(workspaces, workspace)
 	}
 	return workspaces, rows.Err()
+}
+
+func loadProjectCodeRedirects(ctx context.Context, query rowsQuery, projectID int64) ([]storage.ProjectCodeRedirect, error) {
+	rows, err := query.QueryContext(ctx, "SELECT "+projectRedirectColumns+" FROM project_code_redirects WHERE project_id = ? ORDER BY code", projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	redirects := make([]storage.ProjectCodeRedirect, 0)
+	for rows.Next() {
+		redirect, err := scanProjectCodeRedirect(rows)
+		if err != nil {
+			return nil, err
+		}
+		redirects = append(redirects, redirect)
+	}
+	return redirects, rows.Err()
 }
 
 type projectScanner interface{ Scan(...any) error }
@@ -418,6 +605,112 @@ func scanWorkspace(scanner projectScanner) (storage.Workspace, error) {
 	}
 	workspace.UpdatedAt, err = parseProjectTimestamp("workspace updated_at", updatedAt)
 	return workspace, err
+}
+
+func scanProjectCodeRedirect(scanner projectScanner) (storage.ProjectCodeRedirect, error) {
+	var redirect storage.ProjectCodeRedirect
+	var createdAt, updatedAt string
+	if err := scanner.Scan(&redirect.Code, &redirect.ProjectID, &createdAt, &updatedAt); err != nil {
+		return storage.ProjectCodeRedirect{}, err
+	}
+	var err error
+	redirect.CreatedAt, err = parseProjectTimestamp("project redirect created_at", createdAt)
+	if err != nil {
+		return storage.ProjectCodeRedirect{}, err
+	}
+	redirect.UpdatedAt, err = parseProjectTimestamp("project redirect updated_at", updatedAt)
+	return redirect, err
+}
+
+func planProjectRename(ctx context.Context, query interface {
+	projectQuery
+	rowsQuery
+}, projectID int64, newCode string) (storage.ProjectRenamePlan, error) {
+	project, err := loadProject(ctx, query, projectID)
+	if err != nil {
+		return storage.ProjectRenamePlan{}, err
+	}
+	plan := storage.ProjectRenamePlan{
+		Project: project, NewCode: newCode, Conflicts: make([]storage.ProjectCodeConflict, 0),
+	}
+	if project.Code == newCode {
+		return plan, nil
+	}
+
+	canonical, err := findProjectRow(ctx, query, "code = ?", newCode)
+	if err == nil {
+		return storage.ProjectRenamePlan{}, domain.NewError(
+			domain.Conflict,
+			"project_code_already_registered",
+			"the requested code is the canonical code of another project",
+			map[string]any{
+				"requested_code":    newCode,
+				"canonical_project": canonical.Code,
+				"project_id":        canonical.ID,
+			},
+		)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return storage.ProjectRenamePlan{}, err
+	}
+
+	var redirectProjectID int64
+	var canonicalCode string
+	err = query.QueryRowContext(ctx, `
+		SELECT redirect.project_id, project.code
+		FROM project_code_redirects AS redirect
+		JOIN projects AS project ON project.project_id = redirect.project_id
+		WHERE redirect.code = ?`, newCode).Scan(&redirectProjectID, &canonicalCode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return plan, nil
+	}
+	if err != nil {
+		return storage.ProjectRenamePlan{}, err
+	}
+	if redirectProjectID != projectID {
+		plan.Conflicts = append(plan.Conflicts, storage.ProjectCodeConflict{
+			Code: newCode, ProjectID: redirectProjectID, CanonicalCode: canonicalCode,
+		})
+	}
+	return plan, nil
+}
+
+func projectRenameConfirmationRequired(plan storage.ProjectRenamePlan) error {
+	return domain.NewError(
+		domain.Confirmation,
+		"project_rename_confirmation_required",
+		"renaming requires explicit confirmation before conflicting redirect rules can be deleted",
+		map[string]any{
+			"project":   plan.Project.Code,
+			"new_code":  plan.NewCode,
+			"conflicts": projectCodeConflictDetails(plan.Conflicts),
+			"retry":     []string{"--delete-conflicting-redirects", "--yes"},
+		},
+	)
+}
+
+func projectRenameConflictSetChanged(expected, actual []storage.ProjectCodeConflict) error {
+	return domain.NewError(
+		domain.Conflict,
+		"project_redirect_conflicts_changed",
+		"the conflicting project redirect rules changed before the rename could be applied",
+		map[string]any{
+			"expected_conflicts": projectCodeConflictDetails(expected),
+			"actual_conflicts":   projectCodeConflictDetails(actual),
+		},
+	)
+}
+
+func projectCodeConflictDetails(conflicts []storage.ProjectCodeConflict) []map[string]any {
+	details := make([]map[string]any, len(conflicts))
+	for index, conflict := range conflicts {
+		details[index] = map[string]any{
+			"code":             conflict.Code,
+			"project_id":       conflict.ProjectID,
+			"canonical_target": conflict.CanonicalCode,
+		}
+	}
+	return details
 }
 
 func parseProjectTimestamp(label, value string) (time.Time, error) {

@@ -155,6 +155,57 @@ func TestHandlerMultiProjectNavigationDoesNotCrossBoundaries(t *testing.T) {
 	}
 }
 
+func TestHandlerRedirectsFormerProjectAndPelletDeepLinksToCanonicalURLs(t *testing.T) {
+	t.Parallel()
+	fixture := newHandlerFixture(t, 1)
+	pellet, err := fixture.application.CreatePellet(context.Background(), fixture.projects[0], storage.NewPellet{Title: "redirected deep link"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects, err := sqlite.OpenProjectDatabase(context.Background(), fixture.databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := projects.PlanProjectRename(context.Background(), fixture.projects[0].ID, "renamed")
+	if err != nil {
+		projects.Close()
+		t.Fatal(err)
+	}
+	if _, err := projects.RenameProject(context.Background(), storage.ProjectRenameRequest{ProjectID: plan.Project.ID, NewCode: plan.NewCode}); err != nil {
+		projects.Close()
+		t.Fatal(err)
+	}
+	if err := projects.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	response := performRequest(fixture.handler, http.MethodGet, "/projects/project1/tasks/"+pellet.Reference.String()+"?q=redirected", "", nil)
+	if response.Code != http.StatusTemporaryRedirect || response.Header().Get("Location") != "/projects/renamed/tasks/renamed-1?q=redirected" {
+		t.Fatalf("former deep link response = %d location=%q body=%s", response.Code, response.Header().Get("Location"), response.Body.String())
+	}
+	response = performRequest(fixture.handler, http.MethodGet, "/projects/renamed/tasks/renamed-1", "", nil)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "redirected deep link") || !strings.Contains(response.Body.String(), "project1") || !strings.Contains(response.Body.String(), "renamed") {
+		t.Fatalf("canonical deep link response = %d %s", response.Code, response.Body.String())
+	}
+
+	canonicalProject, err := fixture.application.Project(context.Background(), "project1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalPellet, err := fixture.application.Pellet(context.Background(), canonicalProject.Project, pellet.Reference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{
+		"_csrf": {testCSRF}, "version": {storage.PelletVersion(canonicalPellet)},
+		"title": {"edited through former link"}, "description": {""}, "external_id": {""}, "group": {""},
+	}
+	response = performMutation(fixture.handler, "/projects/project1/pellets/project1-1/edit", form, testOrigin, true, "application/x-www-form-urlencoded")
+	if response.Code != http.StatusOK || response.Header().Get("HX-Push-Url") != "/projects/renamed/tasks/renamed-1" || !strings.Contains(response.Body.String(), "edited through former link") {
+		t.Fatalf("former mutation link response = %d push=%q body=%s", response.Code, response.Header().Get("HX-Push-Url"), response.Body.String())
+	}
+}
+
 func TestHandlerEmptyNoResultsAndManyOpaqueGroups(t *testing.T) {
 	t.Parallel()
 	empty := newHandlerFixture(t, 0)

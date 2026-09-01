@@ -42,6 +42,7 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 - Discover the nearest database by walking upward from the current directory, similarly to Git.
 - Let an ordinary current-project command automatically create/register local Pellets metadata on first use, without a prerequisite project-initialization command or interactive code prompt.
 - Support one database containing several logical Git projects and several worktree workspaces per project, with short project codes and project-local pellet numbers.
+- Let a logical project rename its public code without changing its stable project identity or invalidating references that use former codes.
 - Remain local and usable without an account, hosted server, daemon, or external network connection. The optional `pl web` process is a foreground loopback tool, not a runtime dependency.
 - Provide keyword search over pellets and memories through SQLite FTS5.
 - Produce self-contained macOS and Windows executables.
@@ -138,7 +139,7 @@ The first release is successful when all of the following are true:
 - Database path: `.pellets/pellets.db` beneath a selected database root.
 - Logical-project identity: Git's common directory for the repository, normalized relative to the database root when possible.
 - Workspace identity: Git's worktree root together with its worktree-specific Git directory, normalized relative to the database root when possible.
-- Project code: automatically derived, immutable, unique within a database, and 1–12 lowercase ASCII letters, digits, or internal hyphens.
+- Project code: automatically derived initially, renameable, unique within a database-wide canonical-and-redirect namespace, and 1–12 lowercase ASCII letters, digits, or internal hyphens. Former canonical codes remain direct redirects to the stable project row.
 - Pellet identity: a positive project-local integer; external reference is `<project-code>-<number>`.
 - Group: at most one optional, opaque, case-sensitive string per pellet, scoped to its project and used only as an exact filter.
 - Statuses: `open`, `in_progress`, `closed`, and `maybe_later`.
@@ -153,6 +154,5 @@ These do not block the initial design:
 - Which Go version becomes the minimum supported version?
 - Is Windows on ARM64 a first-class first-release target or a later target? Windows AMD64 is required.
 - Should release binaries be code-signed in the first release?
-- Should project codes ever be renameable? The first release treats them as immutable because references may appear in memory text and external systems.
 - Is a database backup/export command needed after the first release, despite there being no synchronization feature?
 - What database-size and response-time thresholds should become release gates after realistic agent workloads are measured?

@@ -90,7 +90,7 @@ func (repository *MemoryRepository) CreateMemory(ctx context.Context, project st
 		return storage.Memory{}, memoryFTSError("index inserted memory", err)
 	}
 
-	memory, err := loadMemory(ctx, connection, project.ID, project.Code, memoryID)
+	memory, err := loadMemory(ctx, connection, project.ID, memoryID)
 	if err != nil {
 		return storage.Memory{}, memoryStorageError("read inserted memory", err)
 	}
@@ -114,8 +114,11 @@ func (repository *MemoryRepository) ListMemories(ctx context.Context, project st
 	if err := validateMemoryListOptions(options); err != nil {
 		return nil, err
 	}
-	query := memorySelect + "\n\tWHERE memory.project_id = ? AND project.code = ?"
-	arguments := []any{project.ID, project.Code}
+	if err := ensureStoredMemoryProject(ctx, repository.db, project); err != nil {
+		return nil, err
+	}
+	query := memorySelect + "\n\tWHERE memory.project_id = ?"
+	arguments := []any{project.ID}
 	if options.ApprovedOnly {
 		query += " AND memory.approved_at IS NOT NULL"
 	}
@@ -153,6 +156,9 @@ func (repository *MemoryRepository) SearchMemories(ctx context.Context, project 
 	if err := validateMemorySearchOptions(options); err != nil {
 		return nil, err
 	}
+	if err := ensureStoredMemoryProject(ctx, repository.db, project); err != nil {
+		return nil, err
+	}
 
 	query := `
 		SELECT memory.memory_id, memory.project_id, project.code, memory.text, memory.created_by,
@@ -164,8 +170,8 @@ func (repository *MemoryRepository) SearchMemories(ctx context.Context, project 
 		FROM memories_fts
 		JOIN memories AS memory ON memory.memory_id = memories_fts.rowid
 		JOIN projects AS project ON project.project_id = memory.project_id
-		WHERE memories_fts MATCH ? AND memory.project_id = ? AND project.code = ?`
-	arguments := []any{escapeFTS5Query(options.Query), project.ID, project.Code}
+		WHERE memories_fts MATCH ? AND memory.project_id = ?`
+	arguments := []any{escapeFTS5Query(options.Query), project.ID}
 	if options.ApprovedOnly {
 		query += " AND memory.approved_at IS NOT NULL"
 	}
@@ -239,7 +245,10 @@ func (repository *MemoryRepository) ReadMemory(ctx context.Context, project stor
 	if err := validateMemoryID(memoryID); err != nil {
 		return storage.Memory{}, err
 	}
-	memory, err := loadMemory(ctx, repository.db, project.ID, project.Code, memoryID)
+	if err := ensureStoredMemoryProject(ctx, repository.db, project); err != nil {
+		return storage.Memory{}, err
+	}
+	memory, err := loadMemory(ctx, repository.db, project.ID, memoryID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storage.Memory{}, memoryNotFound(memoryID)
 	}
@@ -286,7 +295,7 @@ func (repository *MemoryRepository) approveMemory(ctx context.Context, project s
 	if err := ensureStoredMemoryProject(ctx, connection, project); err != nil {
 		return storage.Memory{}, err
 	}
-	memory, err := loadMemory(ctx, connection, project.ID, project.Code, memoryID)
+	memory, err := loadMemory(ctx, connection, project.ID, memoryID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storage.Memory{}, memoryNotFound(memoryID)
 	}
@@ -316,7 +325,7 @@ func (repository *MemoryRepository) approveMemory(ctx context.Context, project s
 			}
 			return storage.Memory{}, memoryStorageError("verify memory approval", rowsErr)
 		}
-		memory, err = loadMemory(ctx, connection, project.ID, project.Code, memoryID)
+		memory, err = loadMemory(ctx, connection, project.ID, memoryID)
 		if err != nil {
 			return storage.Memory{}, memoryStorageError("read approved memory", err)
 		}
@@ -369,7 +378,7 @@ func (repository *MemoryRepository) updateMemory(ctx context.Context, project st
 	if err := ensureStoredMemoryProject(ctx, connection, project); err != nil {
 		return storage.Memory{}, err
 	}
-	before, err := loadMemory(ctx, connection, project.ID, project.Code, memoryID)
+	before, err := loadMemory(ctx, connection, project.ID, memoryID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storage.Memory{}, memoryNotFound(memoryID)
 	}
@@ -412,7 +421,7 @@ func (repository *MemoryRepository) updateMemory(ctx context.Context, project st
 		VALUES (?, ?)`, before.ID, text); err != nil {
 		return storage.Memory{}, memoryFTSError("index updated memory", err)
 	}
-	updated, err := loadMemory(ctx, connection, project.ID, project.Code, memoryID)
+	updated, err := loadMemory(ctx, connection, project.ID, memoryID)
 	if err != nil {
 		return storage.Memory{}, memoryStorageError("read updated memory", err)
 	}
@@ -450,7 +459,7 @@ func (repository *MemoryRepository) RemoveMemory(ctx context.Context, project st
 	if err := ensureStoredMemoryProject(ctx, connection, project); err != nil {
 		return storage.Memory{}, err
 	}
-	memory, err := loadMemory(ctx, connection, project.ID, project.Code, memoryID)
+	memory, err := loadMemory(ctx, connection, project.ID, memoryID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storage.Memory{}, memoryNotFound(memoryID)
 	}
@@ -482,10 +491,10 @@ func (repository *MemoryRepository) RemoveMemory(ctx context.Context, project st
 	return memory, nil
 }
 
-func loadMemory(ctx context.Context, query projectQuery, projectID int64, projectCode string, memoryID int64) (storage.Memory, error) {
+func loadMemory(ctx context.Context, query projectQuery, projectID, memoryID int64) (storage.Memory, error) {
 	return scanMemory(query.QueryRowContext(ctx, memorySelect+`
-		WHERE memory.project_id = ? AND project.code = ? AND memory.memory_id = ?`,
-		projectID, projectCode, memoryID))
+		WHERE memory.project_id = ? AND memory.memory_id = ?`,
+		projectID, memoryID))
 }
 
 type memoryScanner interface{ Scan(...any) error }
@@ -629,6 +638,10 @@ func ensureStoredMemoryProject(ctx context.Context, query projectQuery, project 
 		return memoryStorageError("verify memory project", err)
 	}
 	if storedCode != project.Code {
+		resolvedProjectID, resolveErr := resolveProjectCodeID(ctx, query, project.Code)
+		if resolveErr == nil && resolvedProjectID == project.ID {
+			return nil
+		}
 		return domain.NewError(
 			domain.Conflict,
 			"project_identity_mismatch",
