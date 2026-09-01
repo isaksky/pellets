@@ -158,8 +158,9 @@ tbody tr:hover, tbody tr.selected, .task-row:has(.row-link:focus-visible) { back
 .task-row.status-in_progress td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .row-link { display: block; color: var(--accent-strong); font-weight: 650; }
 .row-link::after { content: ""; position: absolute; inset: 0; }
-.task-title { display: block; max-width: 34ch; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: 590; }
-.task-row small { display: block; max-width: 38ch; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); font-size: .68rem; }
+.task-title-column { width: 100%; max-width: 0; }
+.task-title { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: 590; }
+.task-row small { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); font-size: .68rem; }
 .badge, .owner-badge { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 999px; padding: .14rem .45rem; font-size: .67rem; font-weight: 680; white-space: nowrap; }
 .status-badge.open { color: var(--text-muted); }
 .status-badge.in_progress { color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 38%, var(--border)); background: var(--accent-soft); }

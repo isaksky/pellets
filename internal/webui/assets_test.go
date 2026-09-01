@@ -115,6 +115,30 @@ func TestTaskRowPointerTargetKeepsOneKeyboardAccessibleNativeLink(t *testing.T) 
 	}
 }
 
+func TestTaskTitleColumnUsesAvailableWidthBeforeTruncating(t *testing.T) {
+	t.Parallel()
+	css := embeddedText(t, "assets/app.css")
+	templates := embeddedText(t, "templates/main.html")
+
+	if strings.Count(templates, `class="task-title-column"`) != 2 {
+		t.Fatal("task title header and cells must share the flexible column sizing rule")
+	}
+	for _, required := range []string{
+		`.task-title-column { width: 100%; max-width: 0; }`,
+		`.task-title { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis;`,
+		`.task-row small { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis;`,
+	} {
+		if !strings.Contains(css, required) {
+			t.Fatalf("task title sizing contract missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{`.task-title { display: block; max-width:`, `max-width: 34ch`, `max-width: 38ch`} {
+		if strings.Contains(css, forbidden) {
+			t.Fatalf("task title or owner retained a fixed character cap %q", forbidden)
+		}
+	}
+}
+
 func TestTaskDescriptionEditorUsesBoundedViewportResponsiveHeight(t *testing.T) {
 	t.Parallel()
 	css := embeddedText(t, "assets/app.css")
