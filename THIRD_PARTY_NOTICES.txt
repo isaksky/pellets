@@ -762,38 +762,32 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ===============================================================================
-HTMX v2.0.4
+Datastar v1.0.3
 -------------------------------------------------------------------------------
-Asset: HTMX v2.0.4
-Upstream: https://github.com/bigskysoftware/htmx
-Embedded file: internal/webui/assets/htmx-2.0.4.min.js
-Included upstream file: internal/webui/assets/HTMX-LICENSE.txt
-Included repository provenance file: internal/webui/assets/HTMX-NOTICE.txt
+Asset: Datastar v1.0.3
+Upstream: https://github.com/starfederation/datastar
+Embedded file: internal/webui/assets/datastar-1.0.3.js
+Included upstream file: internal/webui/assets/DATASTAR-LICENSE.txt
+Included repository provenance file: internal/webui/assets/DATASTAR-NOTICE.txt
 
-[HTMX-LICENSE.txt]
+[DATASTAR-LICENSE.txt]
 
-Zero-Clause BSD
-=============
+Copyright © Star Federation
 
-Permission to use, copy, modify, and/or distribute this software for
-any purpose with or without fee is hereby granted.
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
-THE SOFTWARE IS PROVIDED “AS IS” AND THE AUTHOR DISCLAIMS ALL
-WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES
-OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE
-FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY
-DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
-AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
-OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
-[HTMX-NOTICE.txt]
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-HTMX 2.0.4
+[DATASTAR-NOTICE.txt]
 
-Upstream project: https://github.com/bigskysoftware/htmx
-Vendored distribution: dist/htmx.min.js from tag v2.0.4
-SHA-256: e209dda5c8235479f3166defc7750e1dbcd5a5c1808b7792fc2e6733768fb447
-License: Zero-Clause BSD; see HTMX-LICENSE.txt in this directory.
+Datastar 1.0.3
+
+Upstream project: https://github.com/starfederation/datastar
+Vendored distribution: bundles/datastar.js from tag v1.0.3 (unmodified)
+SHA-256: 5d6b7794a50a83d82da962aec5e382f5ae83ac7afbc751f903f7a9c6bd433c65
+License: MIT; see DATASTAR-LICENSE.txt in this directory.
 
 The asset is embedded in the pl executable. The running interface does not
 contact the upstream project, a CDN, or any other external host.

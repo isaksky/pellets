@@ -1,21 +1,10 @@
+import { action, actions } from "./datastar-1.0.3.js";
+
 (function () {
   "use strict";
 
   var root = document.documentElement;
   var media = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
-
-  // Keep HTTP error semantics while rendering the two application responses
-  // that intentionally contain actionable inspector fragments. Every other
-  // client/server error retains HTMX's safe no-swap default.
-  if (window.htmx) {
-    window.htmx.config.responseHandling = [
-      {code: "204", swap: false},
-      {code: "409", swap: true, error: true},
-      {code: "422", swap: true, error: true},
-      {code: "[23]..", swap: true},
-      {code: "[45]..", swap: false, error: true}
-    ];
-  }
 
   function applyTheme(choice) {
     if (choice !== "light" && choice !== "dark") choice = "system";
@@ -38,6 +27,7 @@
   });
 
   function markDirty(form) {
+    editRevision += 1;
     form.dataset.dirty = "true";
     var protectedRegion = form.closest("[data-protect-dirty]");
     if (protectedRegion) protectedRegion.classList.add("is-dirty");
@@ -57,19 +47,19 @@
   var historyIndexKey = "pelletsHistoryIndex";
   var currentHistoryIndex = history.state && Number.isInteger(history.state[historyIndexKey]) ? history.state[historyIndexKey] : 0;
   history.replaceState(Object.assign({}, history.state || {}, {[historyIndexKey]: currentHistoryIndex}), "", location.href);
-  document.body.addEventListener("htmx:pushedIntoHistory", function () {
-    currentHistoryIndex += 1;
-    history.replaceState(Object.assign({}, history.state || {}, {[historyIndexKey]: currentHistoryIndex}), "", location.href);
-  });
   var replayingHistory = false;
   window.addEventListener("popstate", function (event) {
     var targetIndex = event.state && Number.isInteger(event.state[historyIndexKey]) ? event.state[historyIndexKey] : currentHistoryIndex - 1;
     if (replayingHistory) { replayingHistory = false; currentHistoryIndex = targetIndex; return; }
-    if (!dirtyInspector() || window.confirm("Discard unsaved inspector changes?")) { currentHistoryIndex = targetIndex; return; }
-    event.stopImmediatePropagation();
+    if (confirmDiscard()) {
+      // Reload authoritative HTML for Back/Forward; never restore stale form drafts.
+      document.querySelectorAll("[data-inspector].is-dirty").forEach(function (el) { el.classList.remove("is-dirty"); });
+      window.location.reload();
+      return;
+    }
     replayingHistory = true;
     history.go(targetIndex < currentHistoryIndex ? 1 : -1);
-  }, true);
+  });
 
   var inspectorOpener = null;
   var inspectorOpenerHref = "";
@@ -86,35 +76,115 @@
     tableScrollLeft = table ? table.scrollLeft : 0;
   });
 
-  document.body.addEventListener("htmx:beforeRequest", function (event) {
-    if (event.detail.elt && ((event.detail.elt.id === "project-drawer" && event.detail.elt.classList.contains("open")) || (event.detail.elt.id === "project-record" && event.detail.elt.open))) {
-      event.preventDefault();
-      return;
+  // These small application actions delegate transport and DOM patches to Datastar.
+  // Request ownership is per destination, so an old poll cannot replace a newer
+  // navigation and independent fragments at the same URL do not cancel each other.
+  var pending = new Map();
+  var requests = new WeakMap();
+  var editRevision = 0;
+  var routeRevision = 0;
+  var refreshTimer;
+
+  function refreshRegions() {
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(function () {
+      document.dispatchEvent(new CustomEvent("pellets-refresh"));
+    }, 120);
+  }
+
+  function protectedTarget(target) {
+    return target && ((target.id === "project-drawer" && target.classList.contains("open")) ||
+      (target.id === "project-record" && target.open));
+  }
+
+  async function request(ctx, targetID, kind) {
+    var el = ctx.el;
+    var automatic = kind === "refresh";
+    var mutation = kind === "submit";
+    if (kind === "navigate") {
+      var evt = ctx.evt;
+      if (evt && (evt.button !== 0 || evt.metaKey || evt.ctrlKey || evt.shiftKey || evt.altKey)) return;
+      if (evt) evt.preventDefault();
     }
-    var region = event.detail.elt && event.detail.elt.closest("[data-protect-dirty]");
-    if (region && region.classList.contains("is-dirty") && !event.detail.elt.closest("form.dirty-track")) {
-      // Never interrupt the user for an automatic refresh. An explicit close
-      // or secondary action may proceed after one discard confirmation.
-      if (event.detail.elt === region || !confirmDiscard()) event.preventDefault();
-      return;
+    var target = document.getElementById(targetID);
+    if (!target || (automatic && (document.hidden || protectedTarget(target)))) return;
+    if (automatic && targetID === "inspector-host" && target.querySelector(".conflict-state, .error-state")) return;
+    var editing = dirtyInspector();
+    if (targetID === "inspector-host" && editing) {
+      if (automatic) return;
+      if (!el.matches("form.dirty-track") && !confirmDiscard()) return;
     }
-    var target = event.detail.target;
-    if (target && target.id === "inspector-host" && dirtyInspector() && !event.detail.elt.closest("form") && !confirmDiscard()) {
-      event.preventDefault();
+    // Do not let a poll interrupt a mutation/navigation or submit the same form twice.
+    var previous = pending.get(targetID);
+    if (previous && (automatic || (mutation && previous.mutation))) return;
+    if (mutation && !el.checkValidity()) { el.reportValidity(); return; }
+    if (previous) previous.controller.abort();
+    if (!automatic) routeRevision += 1;
+    var state = {el: el, targetID: targetID, automatic: automatic, mutation: mutation,
+      revision: editRevision, route: routeRevision, controller: new AbortController(), applied: false};
+    pending.set(targetID, state);
+    requests.set(el, state);
+    var url = automatic ? el.dataset.refreshUrl : mutation || kind === "filter" ? el.action : el.href;
+    if (kind === "filter") {
+      // Sort/filter values are successful form controls; avoid duplicate query keys.
+      url = location.pathname;
+    } else if (kind === "navigate" && targetID === "tasks-area") {
+      // The list may still contain links rendered before the inspector closed.
+      var sorted = new URL(url, location.href);
+      sorted.pathname = location.pathname;
+      url = sorted.pathname + sorted.search;
+    } else if (kind === "navigate" && el.matches("[aria-label='Close inspector']")) {
+      url = new URL(url, location.href).pathname + location.search;
     }
-  });
-  // A refresh can begin while a disclosure is closed and finish after the
-  // user opens it. Guard the swap as well as the request so that an in-flight
-  // response cannot discard the open drawer/details state or strand the
-  // drawer scrim over the page.
-  document.body.addEventListener("htmx:beforeSwap", function (event) {
-    var target = event.detail && event.detail.target;
-    if (!target) return;
-    if ((target.id === "project-drawer" && target.classList.contains("open")) ||
-        (target.id === "project-record" && target.open)) {
-      event.preventDefault();
+    var options = {headers: {"Pellets-Target": targetID}, requestCancellation: state.controller,
+      openWhenHidden: true, retry: "never", retryMaxCount: 0, filterSignals: {include: /^$/}};
+    if (mutation || kind === "filter") options.contentType = "form";
+    try {
+      await actions[mutation ? "post" : "get"](ctx, url, options);
+    } finally {
+      if (pending.get(targetID) === state) pending.delete(targetID);
+      if (requests.get(el) === state) requests.delete(el);
     }
-  });
+  }
+
+  action({name: "navigate", apply: function (ctx, target) { return request(ctx, target, "navigate"); }});
+  action({name: "submit", apply: function (ctx) { return request(ctx, "inspector-host", "submit"); }});
+  action({name: "filter", apply: function (ctx) { return request(ctx, "task-list", "filter"); }});
+  action({name: "refresh", apply: function (ctx, target) { return request(ctx, target || ctx.el.id, "refresh"); }});
+
+  // Capture precedes Datastar's patch watcher, including responses already in flight
+  // when a user opens a disclosure or starts editing.
+  document.addEventListener("datastar-fetch", function (event) {
+    var detail = event.detail;
+    var state = requests.get(detail.el);
+    if (!state) return;
+    if (detail.type === "datastar-patch-elements") {
+      var target = document.getElementById(state.targetID);
+      if (state.controller.signal.aborted || pending.get(state.targetID) !== state || state.route !== routeRevision ||
+          !state.el.isConnected || (state.automatic && protectedTarget(target)) ||
+          (state.targetID === "inspector-host" && ((state.automatic && dirtyInspector()) || state.revision !== editRevision))) {
+        event.stopImmediatePropagation();
+        return;
+      }
+      state.applied = true;
+      queueMicrotask(function () { afterPatch(document.getElementById(state.targetID) || document); });
+    } else if (detail.type === "datastar-patch-signals" && state.applied) {
+      var result = JSON.parse(detail.argsRaw.signals)._webResult;
+      if (!result) return;
+      if (!state.automatic && result.status < 400 && result.url) {
+        var next = new URL(result.url, location.href);
+        if (next.origin === location.origin && next.pathname + next.search !== location.pathname + location.search) {
+          currentHistoryIndex += 1;
+          history.pushState({[historyIndexKey]: currentHistoryIndex}, "", next.pathname + next.search);
+        }
+        document.querySelectorAll("[data-refresh-url]").forEach(function (region) {
+          region.dataset.refreshUrl = next.pathname + next.search;
+        });
+      }
+      if (result.refresh || (!state.automatic && result.status < 400)) refreshRegions();
+    }
+  }, true);
+
   window.addEventListener("beforeunload", function (event) {
     if (!dirtyInspector()) return;
     event.preventDefault();
@@ -139,7 +209,7 @@
       (scope.querySelector ? scope.querySelector("[data-inspector]") : null);
     var host = document.getElementById("inspector-host");
     var shell = document.querySelector(".app-shell");
-    var hasInspector = !!document.querySelector("[data-inspector], .error-state");
+    var hasInspector = !!document.querySelector("#inspector-host [data-inspector], #inspector-host .error-state");
     if (host) host.classList.toggle("has-inspector", hasInspector);
     if (shell) shell.classList.toggle("has-inspector", hasInspector);
     if (!inspector) return;
@@ -164,16 +234,15 @@
     configureInspector(scope);
   }
   initialize(document);
-  document.body.addEventListener("htmx:afterSwap", function (event) {
-    initialize(event.detail.target || document);
+  function afterPatch(scope) {
+    initialize(scope);
     if (sortOpenerID) {
       var sorter = document.getElementById(sortOpenerID);
       if (sorter) sorter.focus({preventScroll: true});
       sortOpenerID = "";
     }
-  });
-  document.body.addEventListener("htmx:afterSwap", function () {
-    if (document.querySelector("[data-inspector], .error-state") || (!inspectorOpener && !inspectorOpenerHref)) return;
+
+    if (document.querySelector("#inspector-host [data-inspector], #inspector-host .error-state") || (!inspectorOpener && !inspectorOpenerHref)) return;
     var table = document.querySelector(".table-scroll");
     if (table) table.scrollLeft = tableScrollLeft;
     if ((!inspectorOpener || !document.contains(inspectorOpener)) && inspectorOpenerHref) {
@@ -188,13 +257,7 @@
     if (focusTarget) focusTarget.focus({preventScroll: true});
     inspectorOpener = null;
     inspectorOpenerHref = "";
-  });
-  document.body.addEventListener("htmx:historyRestore", function () { initialize(document); });
-  document.body.addEventListener("htmx:afterRequest", function (event) {
-    if (event.detail.successful && event.detail.elt && event.detail.elt.matches("form.dirty-track")) {
-      event.detail.elt.dataset.dirty = "false";
-    }
-  });
+  }
 
   function closeDrawer(restoreFocus) {
     var drawer = document.getElementById("project-drawer");
@@ -267,8 +330,12 @@
 
   if (window.EventSource) {
     var source = new EventSource("/events");
+    source.addEventListener("open", refreshRegions);
     source.addEventListener("pellets-invalidate", function () {
-      document.body.dispatchEvent(new CustomEvent("pellets:refresh", {bubbles: true}));
+      refreshRegions();
     });
   }
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) refreshRegions();
+  });
 }());

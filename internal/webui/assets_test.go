@@ -12,8 +12,8 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 	javascript := embeddedText(t, "assets/app.js")
 	preflight := embeddedText(t, "assets/theme-preflight.js")
 	templates := embeddedText(t, "templates/main.html")
-	htmx := embeddedText(t, "assets/htmx-2.0.4.min.js")
-	license := embeddedText(t, "assets/HTMX-LICENSE.txt")
+	datastar := embeddedText(t, "assets/datastar-1.0.3.js")
+	license := embeddedText(t, "assets/DATASTAR-LICENSE.txt")
 
 	for name, content := range map[string]string{"CSS": css, "application JavaScript": javascript, "theme preflight": preflight, "templates": templates} {
 		for _, forbidden := range []string{"https://", "http://", "@import", "fonts.googleapis", "cdn."} {
@@ -33,37 +33,29 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 		}
 	}
 	for _, required := range []string{
-		`new EventSource("/events")`, `pellets-invalidate`, `every 35s`, `id="project-drawer"`, `id="workspace-strip"`, `id="project-record"`, `data-protect-dirty`,
-		`htmx:beforeSwap`, `target.id === "project-drawer"`, `target.id === "project-record"`,
-		`scope.matches("[data-inspector]")`, `document.querySelector("[data-inspector], .error-state")`, `classList.toggle("has-inspector", hasInspector)`,
-		`closest("form.dirty-track")`, `event.detail.elt === region`,
+		`new EventSource("/events")`, `pellets-invalidate`, `data-on-interval__duration.35s`, `id="project-drawer"`, `id="workspace-strip"`, `id="project-record"`, `data-protect-dirty`,
+		`datastar-fetch`, `target.id === "project-drawer"`, `target.id === "project-record"`,
+		`scope.matches("[data-inspector]")`, `document.querySelector("#inspector-host [data-inspector], #inspector-host .error-state")`, `classList.toggle("has-inspector", hasInspector)`,
+		`closest("form.dirty-track")`, `state.automatic && dirtyInspector()`,
 		`document.querySelector("#task-list a, #memory-list a, #main")`, `inspectorOpener = null`,
 		`sortOpenerID`, `document.getElementById(sortOpenerID)`, `sorter.focus({preventScroll: true})`,
 		`beforeunload`, `Discard unsaved inspector changes?`, `event.key === "Escape"`,
-		`event.key !== "Tab"`, `drawerFocusable`, `closeDrawer(true)`, `aria-modal`, `prefers-color-scheme`, `htmx:historyRestore`,
+		`event.key !== "Tab"`, `drawerFocusable`, `closeDrawer(true)`, `aria-modal`, `prefers-color-scheme`, `window.location.reload()`,
 	} {
 		if !strings.Contains(javascript+templates+preflight, required) {
 			t.Fatalf("UI assets missing %q", required)
 		}
 	}
-	responseHandling := `window.htmx.config.responseHandling = [
-      {code: "204", swap: false},
-      {code: "409", swap: true, error: true},
-      {code: "422", swap: true, error: true},
-      {code: "[23]..", swap: true},
-      {code: "[45]..", swap: false, error: true}
-    ];`
-	if !strings.Contains(javascript, responseHandling) {
-		t.Fatal("application JavaScript must swap only intentional 409/422 application errors before the safe 4xx/5xx default")
-	}
 	if !strings.Contains(preflight, `localStorage.getItem("pellets-theme")`) || strings.Index(templates, "theme-preflight.js") > strings.Index(templates, "app.css") {
 		t.Fatal("theme choice is not applied before first stylesheet paint")
 	}
-	if strings.Index(templates, "htmx-2.0.4.min.js") > strings.Index(templates, "app.js") {
-		t.Fatal("HTMX must load before application JavaScript configures response handling")
+	if !strings.Contains(javascript, `import { action, actions } from "./datastar-1.0.3.js"`) || !strings.Contains(templates, `<script type="module" src="/assets/app.js?v=datastar-1.0.3">`) {
+		t.Fatal("application must import the offline Datastar module before registering actions")
 	}
-	if strings.Count(templates, `hx-target="#inspector-host" hx-swap="innerHTML" hx-push-url="true"`) != 2 {
-		t.Fatal("task and memory inspector links must override inherited outerHTML swaps")
+	for _, forbidden := range []string{"hx-", "htmx", "HX-"} {
+		if strings.Contains(templates+javascript, forbidden) {
+			t.Fatalf("UI retains obsolete transport markup %q", forbidden)
+		}
 	}
 	if strings.Count(templates, `class="icon-button"`) != 2 {
 		t.Fatal("task and memory inspectors must share the corrected close control")
@@ -79,8 +71,8 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 			t.Fatalf("markup missing %q", required)
 		}
 	}
-	if len(htmx) < 45_000 || !strings.Contains(htmx, "var htmx=") || !strings.Contains(license, "Zero-Clause BSD") {
-		t.Fatal("pinned HTMX distribution or license is incomplete")
+	if len(datastar) < 30_000 || !strings.Contains(datastar, "Datastar v1.0.3") || !strings.Contains(license, "Copyright © Star Federation") {
+		t.Fatal("pinned Datastar distribution or license is incomplete")
 	}
 }
 
@@ -98,13 +90,13 @@ func TestTaskRowPointerTargetKeepsOneKeyboardAccessibleNativeLink(t *testing.T) 
 		t.Fatal("task row start tag is incomplete")
 	}
 	rowTag := templates[rowStart : rowStart+rowEnd+1]
-	for _, forbidden := range []string{` role=`, ` tabindex=`, ` hx-get=`, ` onclick=`} {
+	for _, forbidden := range []string{` role=`, ` tabindex=`, ` data-on:click=`, ` onclick=`} {
 		if strings.Contains(rowTag, forbidden) {
 			t.Fatalf("task row must not become a duplicate interactive control: %s", rowTag)
 		}
 	}
-	if strings.Count(templates, `class="row-link"`) != 1 || !strings.Contains(templates, `<a class="row-link" href="{{.URL}}" hx-get="{{.URL}}" hx-target="#inspector-host" hx-swap="innerHTML" hx-push-url="true">`) {
-		t.Fatal("each rendered task row must retain one native, keyboard-accessible inspector link with the complete HTMX and history contract")
+	if strings.Count(templates, `class="row-link"`) != 1 || !strings.Contains(templates, `<a class="row-link" href="{{.URL}}" data-on:click="@navigate('inspector-host')">`) {
+		t.Fatal("each rendered task row must retain one native, keyboard-accessible inspector link with the complete Datastar and history contract")
 	}
 	for _, required := range []string{
 		`.task-row { position: relative; cursor: pointer; }`,

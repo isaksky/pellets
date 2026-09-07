@@ -255,8 +255,7 @@ func (h *handler) renderPelletResult(response http.ResponseWriter, request *http
 		h.renderError(response, statusForError(err), err, nil)
 		return
 	}
-	response.Header().Set("HX-Trigger", "pellets:refresh")
-	response.Header().Set("HX-Push-Url", path)
+	response.Header().Set("Content-Location", path)
 	h.render(response, status, "inspector", data)
 }
 
@@ -269,8 +268,7 @@ func (h *handler) renderMemoryResult(response http.ResponseWriter, request *http
 		h.renderError(response, statusForError(err), err, nil)
 		return
 	}
-	response.Header().Set("HX-Trigger", "pellets:refresh")
-	response.Header().Set("HX-Push-Url", path)
+	response.Header().Set("Content-Location", path)
 	h.render(response, status, "inspector", data)
 }
 

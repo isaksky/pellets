@@ -13,7 +13,7 @@ payload.
 The `pl` executable is a statically linked Go program. Its supported CGo-free
 macOS and Windows builds link the Go standard library and third-party Go
 modules, including the translated SQLite implementation. The executable also
-embeds the vendored HTMX 2.0.4 browser asset. Binary distribution therefore
+embeds the vendored Datastar 1.0.3 browser asset. Binary distribution therefore
 has to carry both the Pellets license and the notices required by incorporated
 third-party work.
 
@@ -54,10 +54,10 @@ applicable upstream license and attribution files so an archive does not
 depend on a module cache, network access, or repository-relative links.
 
 The source-only audit inputs
-`internal/webui/assets/HTMX-LICENSE.txt` and
-`internal/webui/assets/HTMX-NOTICE.txt` remain in the repository and embedded
+`internal/webui/assets/DATASTAR-LICENSE.txt` and
+`internal/webui/assets/DATASTAR-NOTICE.txt` remain in the repository and embedded
 binary. They need not be duplicated as separate archive entries because the
-HTMX license and provenance are represented in the consolidated notice.
+Datastar license and provenance are represented in the consolidated notice.
 
 This decision defines archive inputs only. It does not publish an archive or
 add signing, provenance, installers, package-manager metadata, or publishing
@@ -89,7 +89,7 @@ records its exact toolchain version in Go build metadata.
 | `modernc.org/mathutil` | v1.7.1 | BSD-3-Clause | `LICENSE` |
 | `modernc.org/memory` | v1.11.0 | BSD-3-Clause | `LICENSE` and `LICENSE-MMAP-GO` for the Unix mmap implementation linked into macOS binaries |
 | `modernc.org/sqlite` | v1.45.0 | BSD-3-Clause; translated SQLite core is public domain | `LICENSE`; public-domain SQLite adds no required notice |
-| HTMX | v2.0.4 | Zero-Clause BSD | `internal/webui/assets/HTMX-LICENSE.txt`; version, upstream location, embedded path, and pinned digest are recorded by the accompanying HTMX notice |
+| Datastar | v1.0.3 | MIT | `internal/webui/assets/DATASTAR-LICENSE.txt`; version, upstream location, embedded path, and pinned digest are recorded by the accompanying Datastar notice |
 
 Module `AUTHORS` files do not state additional redistribution conditions and
 are not separate archive inputs. Go and `golang.org/x` `PATENTS` files state
@@ -103,8 +103,8 @@ outside the binary notice payload.
 `cmd/pl/license_contract_test.go` protects the decision in three ways:
 
 - fixed SHA-256 values require intentional review when either stable archive
-  file or either HTMX audit input changes;
-- the pinned HTMX asset digest is checked against its provenance notice; and
+  file or either Datastar audit input changes;
+- the pinned Datastar asset digest is checked against its provenance notice; and
 - `go list -deps` is compared with each target's exact audited module/version set, and
   every audited module marker must remain present in the consolidated notice.
 

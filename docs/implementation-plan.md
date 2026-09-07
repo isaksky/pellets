@@ -17,7 +17,7 @@ The first release includes:
 - sparse project-scoped integer priority for the active queue, with transactional rebalancing;
 - FTS5 pellet search;
 - independent FTS5 project memory with provenance and human approval;
-- optional foreground, loopback-only HTMX inspector/editor with optimistic concurrency and invalidation-only live refresh;
+- optional foreground, loopback-only Datastar inspector/editor with optimistic concurrency and invalidation-only live refresh;
 - explicit closed-pellet purge;
 - compact versioned JSON by default and optional human output;
 - embedded forward database migrations;
@@ -181,18 +181,18 @@ Acceptance criteria:
 
 ## Milestone 8: foreground local web inspector
 
-Implement `pl web` with standard-library HTTP/templates/embedding, pinned vendored HTMX, repository CSS and small JavaScript enhancements, a separate read-only/query-only pool, one separate writer connection, and exactly one pinned read-only/query-only `PRAGMA data_version` monitor connection.
+Implement `pl web` with standard-library HTTP/templates/embedding, pinned vendored Datastar, repository CSS and small JavaScript enhancements, a separate read-only/query-only pool, one separate writer connection, and exactly one pinned read-only/query-only `PRAGMA data_version` monitor connection.
 
 Acceptance criteria:
 
 - Normal upward database discovery runs before startup. The listener is hard-coded to `127.0.0.1`, defaults to an OS-selected port, supports `--port`/`--no-open`, prints readiness URL, opens the browser after readiness, warns without exiting on launcher failure, and shuts down cleanly on interruption.
 - Empty, one-project, and multi-project databases render without crossing project boundaries. Wide multi-project navigation, narrow drawer navigation, stable task/memory deep links, task table ordering, composable URL filters, exact ungrouped handling, and safe escaped FTS search are covered with deterministic handlers.
 - The interface displays complete project/workspace ownership, pellet lifecycle/order/identity, and memory provenance/approval/timestamps. It supports pellet create/scalar edit/reorder/lifecycle, memory create/text edit/approve, and explicit named workspace recovery. It exposes no purge or removal.
-- Every existing-row mutation validates a complete-row token under the short writer lock. Concurrent edits yield one commit and one write-free 409 containing current row plus preserved draft. Memory text/FTS changes are atomic and agent-memory approval resets when text changes.
+- Every existing-row mutation validates a complete-row token under the short writer lock. Concurrent edits yield one commit and one write-free conflict containing current row plus preserved draft (application status 409 in a Datastar HTTP 200 SSE response, or HTTP 409 for an ordinary request). Memory text/FTS changes are atomic and agent-memory approval resets when text changes.
 - Every GET uses `mode=ro` plus `query_only=ON`, materializes and closes rows before output, and cannot retain a transaction across a slow response. Mutation parsing/validation finishes before `BEGIN IMMEDIATE`, and commit/rollback finishes before rendering.
-- One pinned monitor connection compares its own `data_version` only while SSE clients exist. External CLI and separate web-writer commits generate coalesced invalidation; rollback/read activity is silent. SSE client queues are bounded and own no database handle. Native EventSource refresh, initial loads, and slower HTMX polling recover missed signals.
+- One pinned monitor connection compares its own `data_version` only while SSE clients exist. External CLI and separate web-writer commits generate coalesced invalidation; rollback/read activity is silent. SSE client queues are bounded and own no database handle. Native EventSource refresh, initial loads, and slower Datastar polling recover missed signals.
 - Exact Host/Origin, per-process CSRF cookie/form capability, method/media-type checks, escaping, CSP, framing/MIME protections, and loopback-only binding protect mutation routes.
-- Vendored HTMX and license work offline. No Node/npm, CDN, external font/icon, SPA/CSS framework, SSE extension, WebSocket, service worker, daemon, or background service is added.
+- Vendored Datastar and license work offline. No Node/npm, CDN, external font/icon, SPA/CSS framework, SSE extension, WebSocket, service worker, daemon, or background service is added.
 - Automated markup/style tests cover system/light/dark pre-paint theming, narrow/wide layouts, visible focus, dialog/focus/dirty behavior, changed-row animation, reduced motion, and WCAG AA palette contrast. A hands-on macOS browser smoke check covers both themes, zoom/reflow, keyboard navigation, deep-link/back/forward behavior, and live external changes.
 
 ## Milestone 9: portable agent skill installer

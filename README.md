@@ -453,6 +453,13 @@ go test ./...
 ./scripts/verify-cross-builds.sh
 ```
 
+The optional browser regression suite uses Playwright and a temporary database:
+`node scripts/test-web-browser.cjs`. Make `playwright` available on Node's module
+path (or set `NODE_PATH`), and set `PLAYWRIGHT_CHANNEL=chrome` to use installed
+Chrome instead of Playwright's Chromium. It covers the Datastar navigation,
+forms, live refresh, conflict handling, and keyboard flows. Node and Playwright
+are development tools only; `pl web` serves embedded assets and works offline.
+
 The cross-build script verifies `CGO_ENABLED=0` artifacts for macOS
 AMD64/ARM64 and Windows AMD64. Stable release automation uses the Go 1.26.5
 toolchain pinned by CI.

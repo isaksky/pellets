@@ -1,0 +1,9 @@
+Datastar 1.0.3
+
+Upstream project: https://github.com/starfederation/datastar
+Vendored distribution: bundles/datastar.js from tag v1.0.3 (unmodified)
+SHA-256: 5d6b7794a50a83d82da962aec5e382f5ae83ac7afbc751f903f7a9c6bd433c65
+License: MIT; see DATASTAR-LICENSE.txt in this directory.
+
+The asset is embedded in the pl executable. The running interface does not
+contact the upstream project, a CDN, or any other external host.

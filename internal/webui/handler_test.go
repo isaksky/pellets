@@ -99,7 +99,7 @@ func TestHandlerRendersAuthoritativeResponsiveProjectViewsAndEscapesHTML(t *test
 		t.Fatalf("GET status = %d; body=%s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	for _, required := range []string{"project1", "workspace-strip", "New task", "All states", "System", "Dark", "Light", "htmx-2.0.4.min.js"} {
+	for _, required := range []string{"project1", "workspace-strip", "New task", "All states", "System", "Dark", "Light", "app.js"} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("page missing %q", required)
 		}
@@ -184,7 +184,7 @@ func TestHandlerTaskSortHeadersPreserveFiltersDeepLinksAndDirection(t *testing.T
 		}
 	}
 	currentURL := taskURL("project1", filters, created[0].Reference.String(), storage.WebPelletSort{Column: storage.WebPelletSortTitle, Direction: storage.WebPelletSortAscending})
-	if !strings.Contains(body, `data-fragment-kind="tasks" hx-get="`+html.EscapeString(currentURL)+`"`) {
+	if !strings.Contains(body, `data-fragment-kind="tasks" data-refresh-url="`+html.EscapeString(currentURL)+`"`) {
 		t.Fatalf("live task fragment did not retain normalized sort/filter/deep-link URL: %s", body)
 	}
 	clearURL := taskURL("project1", nil, "", storage.WebPelletSort{Column: storage.WebPelletSortTitle, Direction: storage.WebPelletSortAscending})
@@ -195,7 +195,7 @@ func TestHandlerTaskSortHeadersPreserveFiltersDeepLinksAndDirection(t *testing.T
 	groupAscending := taskURL("project1", filters, created[0].Reference.String(), storage.WebPelletSort{Column: storage.WebPelletSortGroup, Direction: storage.WebPelletSortAscending})
 	for _, preserved := range []string{titleDescending, groupAscending} {
 		escaped := html.EscapeString(preserved)
-		if !strings.Contains(body, `href="`+escaped+`" hx-get="`+escaped+`"`) {
+		if !strings.Contains(body, `href="`+escaped+`" data-on:click="@navigate('tasks-area')"`) {
 			t.Fatalf("sort link did not preserve selected task and filters: want %q in %s", escaped, body)
 		}
 	}
@@ -208,7 +208,7 @@ func TestHandlerTaskSortHeadersPreserveFiltersDeepLinksAndDirection(t *testing.T
 
 	filters.Set("direction", "desc")
 	response = performRequest(fixture.handler, http.MethodGet, "/projects/project1/tasks?"+filters.Encode(), "", http.Header{
-		"Hx-Request": {"true"}, "Hx-Target": {"tasks-area"},
+		"Datastar-Request": {"true"}, "Pellets-Target": {"tasks-area"},
 	})
 	if response.Code != http.StatusOK {
 		t.Fatalf("descending response = %d %s", response.Code, response.Body.String())
@@ -307,8 +307,8 @@ func TestHandlerRedirectsFormerProjectAndPelletDeepLinksToCanonicalURLs(t *testi
 		"title": {"edited through former link"}, "description": {""}, "external_id": {""}, "group": {""},
 	}
 	response = performMutation(fixture.handler, "/projects/project1/pellets/project1-1/edit", form, testOrigin, true, "application/x-www-form-urlencoded")
-	if response.Code != http.StatusOK || response.Header().Get("HX-Push-Url") != "/projects/renamed/tasks/renamed-1" || !strings.Contains(response.Body.String(), "edited through former link") {
-		t.Fatalf("former mutation link response = %d push=%q body=%s", response.Code, response.Header().Get("HX-Push-Url"), response.Body.String())
+	if response.Code != http.StatusOK || response.Header().Get("Content-Location") != "/projects/renamed/tasks/renamed-1" || !strings.Contains(response.Body.String(), "edited through former link") {
+		t.Fatalf("former mutation link response = %d push=%q body=%s", response.Code, response.Header().Get("Content-Location"), response.Body.String())
 	}
 }
 
@@ -468,22 +468,22 @@ func TestHandlerProjectAndWorkspaceNavigationAreLiveFragments(t *testing.T) {
 		t.Fatal(err)
 	}
 	headers := make(http.Header)
-	headers.Set("HX-Request", "true")
-	headers.Set("HX-Target", "project-drawer")
+	headers.Set("Datastar-Request", "true")
+	headers.Set("Pellets-Target", "project-drawer")
 	response := performRequest(multiple.handler, http.MethodGet, "/projects/project1/tasks", "", headers)
 	body := response.Body.String()
-	if response.Code != http.StatusOK || !strings.Contains(body, `id="project-drawer"`) || !strings.Contains(body, `pellets:refresh`) || !strings.Contains(body, "project2") || strings.Contains(body, "<!doctype html>") {
+	if response.Code != http.StatusOK || !strings.Contains(body, `id="project-drawer"`) || !strings.Contains(body, `pellets-refresh`) || !strings.Contains(body, "project2") || strings.Contains(body, "<!doctype html>") {
 		t.Fatalf("project rail fragment = %d %s", response.Code, body)
 	}
 
 	single := newHandlerFixture(t, 1)
-	headers.Set("HX-Target", "workspace-strip")
+	headers.Set("Pellets-Target", "workspace-strip")
 	response = performRequest(single.handler, http.MethodGet, "/projects/project1/tasks", "", headers)
 	body = response.Body.String()
-	if response.Code != http.StatusOK || !strings.Contains(body, `id="workspace-strip"`) || !strings.Contains(body, `pellets:refresh`) || strings.Contains(body, "<!doctype html>") {
+	if response.Code != http.StatusOK || !strings.Contains(body, `id="workspace-strip"`) || !strings.Contains(body, `pellets-refresh`) || strings.Contains(body, "<!doctype html>") {
 		t.Fatalf("workspace strip fragment = %d %s", response.Code, body)
 	}
-	headers.Set("HX-Target", "project-record")
+	headers.Set("Pellets-Target", "project-record")
 	response = performRequest(single.handler, http.MethodGet, "/projects/project1/tasks", "", headers)
 	body = response.Body.String()
 	if response.Code != http.StatusOK || !strings.Contains(body, `id="project-record"`) || !strings.Contains(body, "Git common directory") || !strings.Contains(body, "Workspace 1") || strings.Contains(body, "<!doctype html>") {

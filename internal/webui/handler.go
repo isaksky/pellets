@@ -2,6 +2,7 @@ package webui
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/subtle"
 	"embed"
 	"encoding/base64"
@@ -67,8 +68,14 @@ func (h *handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	case request.Method == http.MethodGet && request.URL.Path == "/events":
 		h.serveEvents(response, request)
 	case request.Method == http.MethodGet:
+		if request.Header.Get("Datastar-Request") == "true" {
+			response = &datastarResponse{ResponseWriter: response, request: request}
+		}
 		h.servePage(response, request)
 	case request.Method == http.MethodPost:
+		if request.Header.Get("Datastar-Request") == "true" {
+			response = &datastarResponse{ResponseWriter: response, request: request}
+		}
 		h.serveMutation(response, request)
 	default:
 		response.Header().Set("Allow", "GET, POST")
@@ -115,7 +122,10 @@ func (h *handler) serveAsset(response http.ResponseWriter, request *http.Request
 	default:
 		response.Header().Set("Content-Type", "application/octet-stream")
 	}
-	response.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	response.Header().Set("Cache-Control", "no-cache")
+	if name == "datastar-1.0.3.js" {
+		response.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
 	_, _ = response.Write(content)
 }
 
@@ -158,6 +168,7 @@ func (h *handler) serveEvents(response http.ResponseWriter, request *http.Reques
 }
 
 type pageData struct {
+	Nonce            string
 	CSRF             string
 	Projects         []projectView
 	Project          storage.Project
@@ -297,8 +308,8 @@ func (h *handler) servePage(response http.ResponseWriter, request *http.Request)
 	}
 	h.setCSRFCookie(response)
 	templateName := "page"
-	if request.Header.Get("HX-Request") == "true" {
-		switch request.Header.Get("HX-Target") {
+	if request.Header.Get("Datastar-Request") == "true" {
+		switch request.Header.Get("Pellets-Target") {
 		case "tasks-area":
 			templateName = "tasks-area"
 		case "task-list":
@@ -313,6 +324,9 @@ func (h *handler) servePage(response http.ResponseWriter, request *http.Request)
 			templateName = "project-record"
 		case "inspector-host":
 			templateName = "inspector"
+		default:
+			http.Error(response, "invalid fragment target", http.StatusBadRequest)
+			return
 		}
 	}
 	h.render(response, http.StatusOK, templateName, data)
@@ -345,6 +359,11 @@ func (h *handler) serveRoot(response http.ResponseWriter, request *http.Request)
 }
 
 func (h *handler) loadPage(request *http.Request, code, area string, segments []string) (pageData, error) {
+	// Datastar's transport signal parameter is not part of a navigable page URL.
+	pageURL := *request.URL
+	query := pageURL.Query()
+	query.Del("datastar")
+	pageURL.RawQuery = query.Encode()
 	projects, err := h.application.Projects(request.Context())
 	if err != nil {
 		return pageData{}, err
@@ -365,7 +384,7 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 		MultiProject: len(projects) > 1, Area: area,
 		TasksURL:    "/projects/" + url.PathEscape(code) + "/tasks",
 		MemoriesURL: "/projects/" + url.PathEscape(code) + "/memories",
-		CurrentURL:  request.URL.RequestURI(),
+		CurrentURL:  pageURL.RequestURI(),
 	}
 	if h.application.Current != nil && h.application.Current.Project.ID == selected.Project.ID {
 		data.CurrentProject = true
@@ -695,9 +714,23 @@ func (h *handler) setCSRFCookie(response http.ResponseWriter) {
 }
 
 func (h *handler) render(response http.ResponseWriter, status int, name string, data pageData) {
+	if name == "page" {
+		var nonce [24]byte
+		if _, err := rand.Read(nonce[:]); err != nil {
+			http.Error(response, "could not secure local interface", http.StatusInternalServerError)
+			return
+		}
+		data.Nonce = base64.RawStdEncoding.EncodeToString(nonce[:])
+		policy := response.Header().Get("Content-Security-Policy")
+		response.Header().Set("Content-Security-Policy", strings.Replace(policy, "script-src 'self'", "script-src 'self' 'nonce-"+data.Nonce+"'", 1))
+	}
 	var output bytes.Buffer
 	if err := h.templates.ExecuteTemplate(&output, name, data); err != nil {
 		http.Error(response, "could not render local interface", http.StatusInternalServerError)
+		return
+	}
+	if stream, ok := response.(*datastarResponse); ok && name != "page" {
+		stream.render(status, name, data.CurrentURL, output.String())
 		return
 	}
 	response.Header().Set("Content-Type", "text/html; charset=utf-8")

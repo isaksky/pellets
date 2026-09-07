@@ -16,10 +16,10 @@ import (
 
 var releaseLicenseFiles = map[string]string{
 	"LICENSE":                 "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
-	"THIRD_PARTY_NOTICES.txt": "10aea239a00997bcea8a46b8add4357754b4bfdeb693bd161ea341c8f143cbbb",
-	"internal/webui/assets/htmx-2.0.4.min.js": "e209dda5c8235479f3166defc7750e1dbcd5a5c1808b7792fc2e6733768fb447",
-	"internal/webui/assets/HTMX-LICENSE.txt":  "d3d2456f76414f2456104660ebd65aff1c04cd7966b942bdabd63f3cdb316a38",
-	"internal/webui/assets/HTMX-NOTICE.txt":   "b667e742a2f2f354c4699725573e91c49efd57b3eff4a82c278d8a74b71e379e",
+	"THIRD_PARTY_NOTICES.txt": "38a7fe71bff25e88f80e21ff7c86216877896a5dcc0764ad9d09f79c51749208",
+	"internal/webui/assets/datastar-1.0.3.js":    "5d6b7794a50a83d82da962aec5e382f5ae83ac7afbc751f903f7a9c6bd433c65",
+	"internal/webui/assets/DATASTAR-LICENSE.txt": "17da0e216d3c6a819526f5b72a6a44d84d34bcd9beb4191ac6af89c1508ef08f",
+	"internal/webui/assets/DATASTAR-NOTICE.txt":  "3c1dbf2899e94dd1094e52fba4ac34603dbc8886a21e8f45a6ae5c9d2fd857d7",
 }
 
 var auditedReleaseModules = []string{
@@ -54,8 +54,8 @@ func TestReleaseLicensePayloadStaysAudited(t *testing.T) {
 
 	notices := contents["THIRD_PARTY_NOTICES.txt"]
 	for _, path := range []string{
-		"internal/webui/assets/HTMX-LICENSE.txt",
-		"internal/webui/assets/HTMX-NOTICE.txt",
+		"internal/webui/assets/DATASTAR-LICENSE.txt",
+		"internal/webui/assets/DATASTAR-NOTICE.txt",
 	} {
 		if !bytes.Contains(notices, bytes.TrimSpace(contents[path])) {
 			t.Errorf("THIRD_PARTY_NOTICES.txt does not reproduce %s", path)
