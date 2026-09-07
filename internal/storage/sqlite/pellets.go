@@ -80,6 +80,28 @@ func (repository *PelletRepository) CreatePellet(ctx context.Context, project st
 	if err := ensureStoredProject(ctx, connection, project.Project); err != nil {
 		return storage.Pellet{}, err
 	}
+	// Expiration and allocation share the writer transaction. Failed adds roll
+	// cleanup back; successful adds (including unkeyed adds) prune all old receipts.
+	if err := prunePelletAddRequests(ctx, connection, timestamp); err != nil {
+		return storage.Pellet{}, err
+	}
+	fingerprint, err := pelletAddFingerprint(ctx, connection, project, normalized)
+	if err != nil {
+		return storage.Pellet{}, err
+	}
+	if normalized.RequestID != nil {
+		replay, found, err := replayPelletAdd(ctx, connection, project, *normalized.RequestID, fingerprint)
+		if err != nil {
+			return storage.Pellet{}, err
+		}
+		if found {
+			if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
+				return storage.Pellet{}, pelletStorageError("commit pellet add replay", err)
+			}
+			committed = true
+			return replay, nil
+		}
+	}
 	var priority *int64
 	if normalized.Status == domain.PelletOpen {
 		var allocated int64
@@ -131,6 +153,11 @@ func (repository *PelletRepository) CreatePellet(ctx context.Context, project st
 	pellet, err := loadPellet(ctx, connection, project.Project.ID, number)
 	if err != nil {
 		return storage.Pellet{}, pelletStorageError("read inserted pellet", err)
+	}
+	if normalized.RequestID != nil {
+		if err := recordPelletAdd(ctx, connection, project.Project.ID, *normalized.RequestID, fingerprint, pellet, timestamp); err != nil {
+			return storage.Pellet{}, err
+		}
 	}
 	if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
 		return storage.Pellet{}, pelletStorageError("commit pellet creation", err)
@@ -1591,6 +1618,9 @@ func resolveProjectCodeID(ctx context.Context, query projectQuery, code string) 
 }
 
 func validateNewPellet(input storage.NewPellet) (storage.NewPellet, error) {
+	if err := validateNullablePelletText("request_id", input.RequestID); err != nil {
+		return storage.NewPellet{}, err
+	}
 	if input.Status == "" {
 		input.Status = domain.PelletOpen
 	}

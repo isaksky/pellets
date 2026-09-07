@@ -125,7 +125,7 @@ Only terminal `--human` mode prompts. It lists every conflicting rule and target
 Add an open pellet at the end of the project’s active priority order by default.
 
 ```text
-pl add TITLE [--description TEXT | --description-file PATH]
+pl add TITLE [--request-id ID] [--description TEXT | --description-file PATH]
                   [--external-id ID]
                   [--group GROUP]
                   [--before PELLET | --after PELLET]
@@ -136,6 +136,27 @@ pl add TITLE [--description TEXT | --description-file PATH]
 - `--before` and `--after` are mutually exclusive and require an `open` or `in_progress` pellet in the same project.
 - `--maybe-later` creates the pellet in `maybe_later` with `priority: null`; otherwise it is `open`. It is mutually exclusive with `--before` and `--after`.
 - New project-local numbers are monotonically allocated and never reused.
+
+`--request-id` is an optional non-empty, opaque, case-sensitive key scoped to the
+logical project, shared across its worktrees. Within its retention window, the
+same ID and normalized creation inputs return the stored creation snapshot with
+no new allocation. A different title, description content, external ID, group,
+initial status, or relative placement returns `request_id_conflict` (exit 4),
+including `project` and `request_id` in error details. Description filenames,
+flag order, workspace identity, and canonical versus redirect spelling of the
+placement project's code do not change the creation intent.
+
+Every successful add (keyed, unkeyed, or replayed) deletes request records whose
+original creation timestamp is strictly earlier than the transaction's current
+time minus two days (48 hours), across all projects in that database. Cleanup,
+receipt lookup, number allocation, pellet/FTS insertion, and receipt insertion
+are in one immediate transaction; errors roll everything back. Retries never
+extend retention. Expired keys may be reused and create new pellets. Cleanup
+never deletes pellets or memories and requires no scheduled job.
+
+A receipt preserves the original creation response after subsequent edits,
+lifecycle transitions, or purge. Replaying never resurrects purged work. Output
+uses the current canonical project code; `show` retrieves current pellet state.
 
 ### `pl list`
 
@@ -478,7 +499,7 @@ Specific machine error codes disambiguate cases that share an exit code.
 - Noninteractive `skill install` writes require `--yes`; interactive cancellation is a successful write-free result. Differing skill files additionally require `--force` or the separate interactive replacement confirmation.
 - `init-db` and automatic bootstrap never overwrite an existing database.
 - `start`, `close`, `reopen`, and `defer` are idempotent only when the pellet is already in their target status.
-- Repeating `add` is not idempotent and creates another pellet. A future request-id mechanism is out of scope until a real need appears.
+- Repeating `add` without `--request-id` creates another pellet. With a request ID, identical creation inputs replay the original result for two days; conflicting inputs fail. Every successful add prunes older request records without deleting pellets.
 
 ## Common workflows
 

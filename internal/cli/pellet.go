@@ -20,7 +20,7 @@ func AddCommand(manager app.PelletManager) Command {
 	return Command{
 		Name:    "add",
 		Summary: "Add a pellet to the current project's queue.",
-		Usage: "pl add TITLE [--description TEXT | --description-file PATH] [--external-id ID] [--group GROUP] " +
+		Usage: "pl add TITLE [--request-id ID] [--description TEXT | --description-file PATH] [--external-id ID] [--group GROUP] " +
 			"[--before PELLET | --after PELLET] [--maybe-later]",
 		Parse:                 parseAdd,
 		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
@@ -33,7 +33,7 @@ func AddCommand(manager app.PelletManager) Command {
 			pellet, err := manager.Add(
 				ctx, invocationDatabase(invocation), invocation.WorkingDirectory, invocation.Globals.Project,
 				storage.NewPellet{
-					Title: input.Title, Description: description,
+					RequestID: input.RequestID, Title: input.Title, Description: description,
 					ExternalID: input.ExternalID, Group: input.Group,
 					Status: input.Status, Placement: input.Placement,
 				},
@@ -337,6 +337,7 @@ func pelletLifecycleCommand(manager app.PelletManager, operation storage.PelletL
 }
 
 type addInput struct {
+	RequestID       *string
 	Title           string
 	Description     *string
 	DescriptionFile *string
@@ -365,7 +366,7 @@ func parseAdd(args []string) (any, error) {
 		}
 		seen[name] = true
 		switch name {
-		case "--description", "--description-file", "--external-id", "--group", "--before", "--after":
+		case "--request-id", "--description", "--description-file", "--external-id", "--group", "--before", "--after":
 			var err error
 			value, args, err = takeCommandFlagValue(
 				args, name, value, hasValue,
@@ -375,6 +376,8 @@ func parseAdd(args []string) (any, error) {
 				return nil, err
 			}
 			switch name {
+			case "--request-id":
+				input.RequestID = stringPointer(value)
 			case "--description":
 				input.Description = stringPointer(value)
 			case "--description-file":

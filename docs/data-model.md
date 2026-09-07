@@ -461,3 +461,18 @@ Opening first reads `user_version` without a persistent write. Negative versions
 Migration 3 is the consecutive project-workspace migration. It does not modify released migration 1 or the frozen v1 fixture. It deterministically treats every legacy `projects.root_path` as the initial workspace root, derives the legacy common/Git directory as `<root>/.git`, assigns the project's legacy in-progress pellet to that workspace, and preserves project IDs/codes/counters/timestamps, pellet rowids/numbers/order/timestamps, memories including the `AUTOINCREMENT` high-water mark, application metadata including unknown keys, and all authoritative text. It drops `pellets_one_in_progress_idx`, installs the workspace-scoped index and composite foreign key, rebuilds both FTS tables, verifies their integrity, and removes every temporary table. No Git or filesystem command runs in that migration transaction; later automatic bootstrap safely reconciles a moved normal workspace identity.
 
 Migration 4 adds only the strict direct `project_code_redirects` table, its project/code index, and the four cross-table namespace triggers. Existing projects, stable IDs, codes, counters, workspaces, pellet numbers and state, memories, metadata, and both FTS indexes are unchanged. Its assertion verifies the complete version-4 schema contract and that no canonical code equals a redirect code; failure restores the complete version-3 schema and `user_version`.
+
+
+Migration 5 adds `pellet_add_requests`, a strict table keyed by
+`(project_id, request_id)` with a project foreign key, a SHA-256 creation-input
+fingerprint, a versioned JSON creation-result snapshot, and a Julian creation
+timestamp. An index on `created_at` supports database-wide expiration. Existing
+queue, memory, and FTS rows are unchanged. Receipts deliberately have no pellet
+foreign key, so purge does not allow a recent retry to resurrect deleted work.
+
+Each successful add deletes receipts with `created_at < now - 2` in the same
+immediate transaction as lookup and creation. Exactly two-day-old receipts are
+retained; retries do not extend their original timestamp. Expiration removes
+only receipts. Identical retries return the original snapshot (with the current
+canonical project code); mismatched inputs return `request_id_conflict` without
+writes. Number allocation and FTS writes happen only for new requests.

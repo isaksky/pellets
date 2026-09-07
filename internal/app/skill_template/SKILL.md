@@ -39,6 +39,7 @@ Recovery coordinates worktrees; it does not authenticate an agent or transfer a 
 
 ## Maintain the queue
 
+- For retryable creation, supply `pl add --request-id ID` with a fresh ID per intended pellet and reuse it on retries. Matching inputs replay the creation result for two days; changed inputs return `request_id_conflict`. Every successful add expires older retry records without deleting pellets. Use `pl show` for current state after a replay.
 - Use `pl add` for a focused, independently actionable follow-up. Do not encode epics or dependencies in pellets.
 - Use lifecycle commands for status and ordering commands for priority:
 

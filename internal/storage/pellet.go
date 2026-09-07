@@ -27,6 +27,7 @@ type Pellet struct {
 // NewPellet contains the fields accepted when allocating a new pellet. Status
 // may be open or maybe_later; an empty status means open.
 type NewPellet struct {
+	RequestID   *string
 	Title       string
 	Description string
 	ExternalID  *string

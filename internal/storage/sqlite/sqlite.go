@@ -20,7 +20,7 @@ import (
 
 const (
 	// LatestSchemaVersion is the newest schema understood by this executable.
-	LatestSchemaVersion     = 4
+	LatestSchemaVersion     = 5
 	driverName              = "sqlite"
 	busyTimeoutMilliseconds = 5000
 )
@@ -36,6 +36,9 @@ var migration3SQL string
 
 //go:embed migrations/0004_project_code_redirects.sql
 var migration4SQL string
+
+//go:embed migrations/0005_pellet_add_requests.sql
+var migration5SQL string
 
 type migration struct {
 	version    int
@@ -57,6 +60,7 @@ var migrations = []migration{
 	{version: 2, name: "database-identity", sql: migration2SQL, assert: assertMigration2, preflight: preflightMigration2, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
 	{version: 3, name: "project-workspaces", sql: migration3SQL, assert: assertMigration3, preflight: preflightMigration3, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
 	{version: 4, name: "project-code-redirects", sql: migration4SQL, assert: assertMigration4, preflight: preflightMigration4, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
+	{version: 5, name: "pellet-add-requests", sql: migration5SQL, assert: assertMigration5, preflight: assertMigration5, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
 }
 
 // Open opens path with the required hardened runtime settings and applies all
@@ -652,4 +656,8 @@ func runtimeError(action string, err error) error {
 		return stable
 	}
 	return domain.WrapError(domain.Storage, "database_configuration_failed", "could not configure database", nil, fmt.Errorf("%s: %w", action, err))
+}
+
+func assertMigration5(ctx context.Context, conn *sql.Conn) error {
+	return verifyProductionSchemaContract(ctx, conn, 5)
 }

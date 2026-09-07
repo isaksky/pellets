@@ -349,7 +349,7 @@ func TestPelletsSkillReferencedCommandAndFlagContract(t *testing.T) {
 	flagPattern := regexp.MustCompile(`--[a-z][a-z-]*`)
 	supportedFlags := map[string]bool{
 		"--help": true, "--pretty": true, "--human": true, "--project": true,
-		"--external-id": true, "--group": true, "--recover-workspace": true,
+		"--request-id": true, "--external-id": true, "--group": true, "--recover-workspace": true,
 		"--yes": true, "--before": true, "--after": true, "--created-by": true,
 		"--approved-only": true, "--text": true, "--delete-conflicting-redirects": true,
 	}
@@ -360,6 +360,7 @@ func TestPelletsSkillReferencedCommandAndFlagContract(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"--help"}, {"--pretty", "list"}, {"--human", "list"},
+		{"add", "retryable task", "--request-id", "request-1"},
 		{"--project", "foo", "project", "show"},
 		{"--project", "foo", "project", "rename", "bar", "--delete-conflicting-redirects", "--yes"},
 	} {

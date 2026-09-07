@@ -195,6 +195,30 @@ Pellet references such as `demo-1` contain a canonical or former project code
 and a monotonically allocated project-local number. Save the `data.id` returned
 by `add` instead of assuming a number in automation.
 
+### Retry an add safely
+
+Supply a project-scoped request ID when an agent may need to retry after losing
+command output:
+
+```text
+pl add "Implement parser" --request-id "parser-attempt-84" --description "Reject malformed input."
+```
+
+Reusing that ID with the same creation inputs returns the original creation
+result without allocating another pellet. Different inputs return
+`request_id_conflict`. Reuse the same ID across retries; use a new ID for each
+new intended task. `external-id` remains an independent correspondence field.
+
+Every successful add, including an add without a request ID, deletes retry
+records older than two days across the database. This never deletes pellets or
+memory. Age starts at the original creation; retries do not refresh it. Once a
+record expires, that ID is treated as a new request. No background job runs.
+
+Replayed results describe the original creation, even if the pellet was later
+edited, closed, or purged; replay does not undo those actions. Use `pl show` for
+current state. Project references in replayed output use the current canonical
+project code.
+
 ### Rename a project without breaking old references
 
 Rename the current logical project with:
