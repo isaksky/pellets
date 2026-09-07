@@ -713,7 +713,7 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		assertFoundationPathAbsent(t, filepath.Join(repository, ".gitignore"))
 	})
 
-	t.Run("nearest nested database wins", func(t *testing.T) {
+	t.Run("repository binding wins over nested database", func(t *testing.T) {
 		common := filepath.Join(t.TempDir(), "nearest database root 界")
 		repository := filepath.Join(common, "outer repository with spaces")
 		createFoundationRepository(t, repository)
@@ -748,8 +748,8 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 			runFoundationCLI(t, executable, deep, "project", "list"),
 			"project list",
 		)
-		if innerProjects == nil || len(innerProjects) != 0 {
-			t.Fatalf("nearest nested project list = %#v, want []", innerProjects)
+		if !reflect.DeepEqual(innerProjects, []foundationProject{outerProject}) {
+			t.Fatalf("bound nested project list = %#v, want %#v", innerProjects, []foundationProject{outerProject})
 		}
 		outerProjects := decodeFoundationSuccess[[]foundationProject](
 			t,

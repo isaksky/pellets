@@ -11,8 +11,8 @@ Use `pl` as the authoritative local queue and memory interface when the user exp
 
 - Run `pl --help` and the relevant command's `--help` before relying on remembered syntax. The installed executable is authoritative.
 - Prefer the default compact JSON output for machine parsing; use `--pretty` only when readable JSON helps. Do not scrape `--human` output.
-- Let `pl` discover the nearest database by walking upward. Do not assume it is in the current Git repository.
-- On the first valid current-project command, let `pl` create or discover the database, derive the initial canonical project code, and register the logical repository and current worktree automatically. No separate project initialization command is required. That one-time bootstrap may create `.pellets/` and add it to Git's local exclude before the requested operation runs.
+- Let `pl` use the database binding in Git’s common directory, falling back to ancestor/worktree discovery only when unbound. Linked worktrees share that binding even outside the checkout. On `database_binding_unavailable`, restore or coordinate repair of the reported database; never create a replacement queue.
+- On the first valid current-project command, let `pl` create or discover the database, derive the initial canonical project code, and register the logical repository and current worktree automatically. No separate project initialization command is required. That one-time bootstrap may create `.pellets/`, add it to Git's local exclude, and record the shared database binding before the requested operation runs.
 - Treat former project codes as direct redirects. Inputs may use them, but successful output is authoritative and always uses the current canonical project code and pellet reference.
 - Resolve the current Git worktree before changing work. One logical project is shared across its linked worktrees, but each registered worktree is a distinct workspace with at most one in-progress pellet.
 - Before beginning new work, use atomic selection:

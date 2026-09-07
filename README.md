@@ -3,7 +3,7 @@
 Pellets (`pl`) is a local SQLite task queue for coding agents. It keeps a
 deterministic project queue, worktree-scoped in-progress ownership, exact
 external-ID and group filters, FTS5 keyword search, and independent project
-memory in the nearest `.pellets/pellets.db`.
+memory in a shared local `.pellets/pellets.db`.
 
 Pellets is one CGo-free executable with SQLite embedded. It has no account,
 telemetry, cloud synchronization, model, plugin runtime, daemon, or required
@@ -98,7 +98,7 @@ pl add "First pellet"
 ```
 
 The first valid command that needs the current project creates the database at
-the worktree root when no ancestor database exists, registers the logical Git
+the worktree root when no binding or discoverable database exists, registers the logical Git
 repository and current worktree, and then performs the requested operation.
 There is no separate project-initialization command.
 
@@ -136,19 +136,39 @@ Each registered project keeps its own pellet numbers, queue order, filters,
 and memories even though SQLite stores them in one file. `pl project show
 svc-a` displays a project's registered workspace identities.
 
-For linked Git worktrees, put the database at a common ancestor of every
-worktree before first use. The first current-project command in each worktree
-recognizes the shared Git common directory, reuses the logical project's stored
-code, and attaches a distinct workspace. The worktrees share one queue and
-memory store while retaining separate in-progress ownership.
+Linked Git worktrees automatically share the repository's database, even when
+located outside the original checkout. The first current-project command records
+a binding in Git's shared common directory. Each linked worktree uses that
+binding, reuses the logical project's stored code, and attaches a distinct
+workspace. A common-parent database remains useful for sharing across unrelated
+repositories, but is no longer required for linked worktrees.
 
 ### Discovery and Git safety
 
-Normal commands walk upward from the current directory to the filesystem root
-and use the nearest `.pellets/pellets.db`. Discovery continues across Git
-boundaries, which is why a common-parent database works from nested directories
-inside sibling repositories. There is no database-path flag; `--project CODE`
+Inside a Git repository, normal commands first consult
+`pellets-database.json` in Git's common directory. This binding takes precedence
+over any nearer database. Without a binding, discovery walks upward from the
+current directory and also checks registered worktrees for an existing database.
+Multiple different databases across those locations produce
+`database_binding_conflict` instead of choosing a queue. If none exists, a
+current-project command creates the database at its worktree root. Concurrent
+first use is serialized so linked worktrees converge on one database.
+
+Outside Git, commands use the nearest ancestor `.pellets/pellets.db`, preserving
+the common-parent layout. There is no database-path flag; `--project CODE`
 selects a registered project where permitted, not a different database.
+`init-db` explicitly creates a database at the current directory; it does not
+replace an existing repository binding.
+
+Bindings store paths relative to Git's common directory when possible, so moving
+the repository together with its database preserves discovery. An unavailable
+bound database returns `database_binding_unavailable`; Pellets never falls back
+to another queue. Restore the database at the reported path, or deliberately
+repair the JSON binding to its new `.pellets/pellets.db` location after stopping
+Pellets commands. Malformed bindings return `database_binding_failed`.
+A setup interrupted before publishing the binding can leave a
+`pellets-database.json.lock` directory; `database_binding_busy` reports its path.
+Remove that directory only after confirming no Pellets setup is running, then retry.
 
 The database is local plaintext and must never be committed. When `.pellets`
 is inside a Git worktree, `init-db` or automatic bootstrap adds `.pellets/` to
@@ -369,7 +389,7 @@ pl web --port 8123 --no-open
 pl --project demo web
 ```
 
-`pl web` is an optional foreground operator tool over the same nearest
+`pl web` is an optional foreground operator tool over the same resolved
 database and performs the same automatic first-use bootstrap. It listens only
 on `127.0.0.1`, uses embedded offline assets, and stops when interrupted. It
 can inspect every registered project, workspace,

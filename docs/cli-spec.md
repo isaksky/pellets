@@ -36,15 +36,42 @@ There is no `--json` flag because JSON is already the default. There is no color
 
 ## Database and project selection
 
-After strict parsing and usage validation, commands explicitly classified as needing the current project/workspace walk upward and use the nearest `.pellets/pellets.db`. They ask Git for the common directory to find the logical project and for the worktree root plus worktree-specific Git directory to find the current workspace. Walking for the database continues past Git boundaries, which permits one database at a common parent of linked worktrees and unrelated sibling repositories. V1 has no path override: selecting a database is intentionally a property of the working directory.
+After strict parsing and usage validation, commands inside Git first use the
+repository binding, `pellets-database.json` in Git's shared common directory.
+A binding takes precedence over nearer databases. Without one, inspect ancestor
+`.pellets/pellets.db` paths from the current directory and existing registered Git
+worktrees; multiple distinct databases return `database_binding_conflict`.
+Outside Git, use the nearest ancestor database across repository boundaries.
+There is no database-path override; `--project` selects within the resolved database.
 
-If no ancestor database exists, the first valid current-project command creates `.pellets/pellets.db` at the Git worktree root, registers the logical repository and current worktree, and then completes the requested operation in that same invocation. With an existing ancestor database, it adds an unknown repository as a distinct project or attaches an unknown linked worktree to the already-known logical project. `add`, list/search/show/next and lifecycle commands, every `memory` operation, current `project show`, and `web` have this capability. There is no separate project-initialization command.
+If discovery finds no database, the first valid current-project command creates
+`.pellets/pellets.db` at the current Git worktree root. It registers the repository
+and workspace and publishes the binding before executing the requested operation.
+First use is serialized through Git's common directory, so concurrent commands in
+separate worktrees share one queue. Existing installations acquire a binding on
+their first successful current-project bootstrap after upgrading. `add`,
+list/search/show/next and lifecycle commands, every `memory` operation, current
+`project show`, and `web` have this capability.
 
-Bootstrap happens only after parsing and usage validation. Help/version, invalid invocations, `init-db`, `skill install`, `project list`, named or `--project`-selected `project show`, and explicit project-scoped `purge` do not bootstrap. Those database-level commands retain their existing nearest-database semantics and fail with `database_not_found` when none exists.
+Help/version, invalid invocations, `init-db`, and `skill install` do not use this
+bootstrap. `init-db` explicitly creates at the current directory without replacing
+a repository binding. Database-level reads and purge honor existing bindings and
+discovery but do not create bindings or databases; absent databases return
+`database_not_found`.
+
+Bindings contain version-1 JSON with `version` and `path`, relative to Git's
+common directory when possible. An unavailable target returns
+`database_binding_unavailable` (exit 5) with `binding_path` and `database_path`;
+restore the target or repair the binding after stopping Pellets commands. Invalid
+bindings return `database_binding_failed` (exit 5). Neither permits fallback or
+creation. Conflicting discovered databases return `database_binding_conflict`
+(exit 4). Setup lock contention returns `database_binding_busy` (exit 4) after
+five seconds with `lock_path`; retry, or remove a stale lock directory only after
+confirming no setup remains active.
 
 Project codes are generated without prompting. The logical repository name is the directory containing a `.git` common directory, or a bare common-directory basename with one terminal `.git` removed. Pellets lowercases ASCII letters, preserves ASCII digits, collapses every run of other characters into one hyphen, and trims edge hyphens. A non-empty normalized name of at most 12 bytes is the first candidate. Empty or longer names, and candidates already reserved as either a canonical code or redirect, use up to three normalized prefix bytes (or `p`), `-`, and the first eight lowercase hexadecimal SHA-256 digits over `true:<relative-common-dir>` or `false:<absolute-common-dir>`, using the same slash/case normalization stored in SQLite. If that candidate is occupied, attempts rehash the identity plus a NUL byte and the increasing canonical decimal attempt. Allocation and registration share one immediate transaction. An already-known common-directory identity ignores new checkout names and always reuses its stored current canonical code.
 
-Bootstrap writes are a one-time pre-command effect, not a change to operation semantics. Once the exact project/workspace is registered, `next`, `list`, `search`, `show`, memory reads, named/database-level project reads, and every dry run retain their write-free guarantees. On first use only, a valid current-project command can create the database, update Git's local exclude, and transactionally register the project/workspace before running an otherwise read-only operation. The requested read itself still performs no queue or memory mutation.
+Bootstrap writes are a one-time pre-command effect, not a change to operation semantics. Once the repository is bound and the exact project/workspace is registered, `next`, `list`, `search`, `show`, memory reads, named/database-level project reads, and every dry run retain their write-free guarantees. On first use only, a valid current-project command can create the database, update Git's local exclude, publish its shared binding, and transactionally register the project/workspace before running an otherwise read-only operation. The requested read itself still performs no queue or memory mutation.
 
 `--project CODE` and every command input that accepts a project code resolve a canonical code or one direct redirect to the stable project row. Redirects are never followed recursively. `--project CODE` does not silently let a caller mutate an unrelated repository: for pellet mutations, the resolved stable project ID in the pellet reference must match the selected/current project. Database-level and read-only administrative commands may operate across registered projects when explicitly documented. Successful JSON and human output always emits the current canonical project code and pellet references.
 
@@ -338,7 +365,7 @@ Run the optional local web inspector in the foreground.
 pl [--project CODE] web [--port PORT] [--no-open]
 ```
 
-- Database discovery and first-use bootstrap are identical to other current-project commands: the nearest ancestor `.pellets/pellets.db` wins, or a project-local database is created when none exists. `--project` selects the initial project area when it exists; the interface can inspect every registered project in that database.
+- Database discovery and first-use bootstrap are identical to other current-project commands: the repository binding wins, otherwise existing worktree/ancestor databases are discovered, or a project-local database is created when none exists. `--project` selects the initial project area when it exists; the interface can inspect every registered project in that database.
 - The only listener address is IPv4 `127.0.0.1`. There is no bind-address flag. Omitted `--port`, or explicit canonical port `0`, requests an OS-selected available port; `--port` otherwise accepts 1 through 65535.
 - Print `http://127.0.0.1:PORT` followed by one newline after the listener is ready. This foreground command is the sole exception to the normal JSON-success envelope.
 - Unless `--no-open` is present, open the default browser only after readiness. A launcher failure writes a useful warning to stderr while leaving the printed URL and server usable.

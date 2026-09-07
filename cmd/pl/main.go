@@ -119,8 +119,10 @@ func main() {
 	}
 	application := cli.New(version, commands...).WithCurrentWorkspaceBootstrap(
 		func(ctx context.Context, workingDirectory string) (discovery.Database, error) {
-			database, err := projectManager.BootstrapCurrent(ctx, workingDirectory)
-			return discovery.Database{Root: database.Root, Path: database.Path}, err
+			return discovery.WithDatabaseBinding(ctx, workingDirectory, func() (discovery.Database, error) {
+				database, err := projectManager.BootstrapCurrent(ctx, workingDirectory)
+				return discovery.Database{Root: database.Root, Path: database.Path}, err
+			})
 		},
 	)
 	os.Exit(application.Run(os.Args[1:], os.Stdout, os.Stderr))

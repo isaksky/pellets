@@ -11,8 +11,8 @@ Each invocation follows the same shape:
 1. Strictly parse global options and the subcommand, then validate all
    usage-only semantics without reading the working directory, performing
    discovery, or causing command side effects.
-2. Evaluate the parsed command's explicit current-workspace capability. A current-project command resolves or automatically bootstraps the nearest database, logical repository, and worktree; a database-level command only discovers its existing nearest database; `init-db` and the portable skill installer bypass normal discovery.
-3. For current-project commands, ask Git for the worktree root, worktree-specific Git directory, and shared common directory. Use the nearest ancestor database or create one at the worktree root, normalize the identities relative to its root, reuse an existing logical project's current canonical code or allocate a deterministic generated code, and attach the current workspace when needed.
+2. Evaluate the parsed command's explicit current-workspace capability. A current-project command resolves or automatically bootstraps the repository-bound or discovered database, logical repository, and worktree; a database-level command only discovers its existing bound or ancestor database; `init-db` and the portable skill installer bypass normal discovery.
+3. For current-project commands, ask Git for the worktree root, worktree-specific Git directory, and shared common directory. Use the shared repository binding, discover an existing database, or create one at the worktree root, normalize the identities relative to its root, reuse an existing logical project's current canonical code or allocate a deterministic generated code, and attach the current workspace when needed.
 4. Open/configure/migrate SQLite and resolve the registered current project/workspace for the requested operation.
 5. Execute one application operation through a narrow storage interface.
 6. Emit one compact, versioned JSON result to stdout, or one structured JSON error to stderr.
@@ -92,7 +92,30 @@ Repository targets are ordinary untracked files. The installer never runs `git a
 
 ### Database discovery
 
-Start at the current working directory and test each ancestor for `.pellets/pellets.db`. The nearest database wins. Continue past Git boundaries so a common-parent database can serve sibling repositories. When a current-project command finds none, bootstrap creates the fixed path at Git's current worktree root. `init-db` remains the explicit way to place a database at a common parent before first use in sibling repositories or linked worktrees.
+Inside Git, read `pellets-database.json` in the canonical Git common directory
+first. Its version-1 JSON contains `version` and `path`; resolve relative paths
+against that common directory. A binding wins over ancestor databases, and an
+unavailable or malformed target is a hard error, never permission to bootstrap.
+Outside Git, retain nearest-ancestor discovery across Git boundaries.
+
+Without a binding, inspect the current directory's ancestors and the ancestors
+of existing worktrees reported by `git worktree list --porcelain -z`. Reuse a
+single existing database; different databases produce `database_binding_conflict`.
+If none exists, a current-project command creates the fixed path at its worktree
+root. `init-db` can still create a common-parent database before first use across
+unrelated repositories and never changes a repository binding.
+
+The executable wraps current-workspace bootstrap in `WithDatabaseBinding`.
+When unbound, an exclusive directory lock in the Git common directory serializes
+discovery, initialization, registration, and publication across worktrees.
+Publish the complete binding with a rename after successful bootstrap; paths are
+relative to the common directory when possible. Already-bound commands perform
+no binding writes. Lock contention waits at most five seconds and returns
+`database_binding_busy`. A crashed initializer may leave its lock directory;
+manual removal requires first confirming no setup process remains active.
+`database_binding_unavailable` reports the bound target and binding path for
+restoration or deliberate relocation. `database_binding_failed` covers invalid
+binding contents and filesystem failures. No database schema migration is needed.
 
 The directory containing `.pellets` is the **database root**. A database may contain unrelated logical projects as well as several workspaces of one project.
 
@@ -154,7 +177,7 @@ Keep SQL as embedded `.sql` files or focused Go constants. Do not introduce an O
 
 ## Foreground web inspector
 
-`pl web [--port PORT] [--no-open]` uses the same upward nearest-database discovery as ordinary commands. It listens with `tcp4` on exactly `127.0.0.1`; port zero asks the OS for an available port. The URL is printed only after `net.Listen` succeeds and the HTTP server has been scheduled. Unless `--no-open` is supplied, the platform launcher opens that URL after readiness. Launcher failure is a warning and does not stop the server. Interrupt cancellation performs bounded HTTP shutdown and closes every SQLite handle. There is no daemonization, background service, configuration file, or remotely selectable bind address.
+`pl web [--port PORT] [--no-open]` uses the same binding-first database discovery as ordinary commands. It listens with `tcp4` on exactly `127.0.0.1`; port zero asks the OS for an available port. The URL is printed only after `net.Listen` succeeds and the HTTP server has been scheduled. Unless `--no-open` is supplied, the platform launcher opens that URL after readiness. Launcher failure is a warning and does not stop the server. Interrupt cancellation performs bounded HTTP shutdown and closes every SQLite handle. There is no daemonization, background service, configuration file, or remotely selectable bind address.
 
 The web process owns three deliberately separate database paths:
 

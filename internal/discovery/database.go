@@ -41,9 +41,9 @@ func DatabasePaths(databasePath string) []string {
 	return paths
 }
 
-// FindDatabase walks from start to the filesystem root and returns the nearest
+// findAncestorDatabase walks from start to the filesystem root and returns the nearest
 // .pellets/pellets.db. Git repository boundaries do not affect the walk.
-func FindDatabase(start string) (Database, error) {
+func findAncestorDatabase(start string) (Database, error) {
 	absolute, err := filepath.Abs(start)
 	if err != nil {
 		return Database{}, discoveryFailure(start, err)

@@ -50,7 +50,7 @@ func TestPelletsSkillGoldenPortableContract(t *testing.T) {
 
 	body := parts[1]
 	for _, required := range []string{
-		"pl --help", "default compact JSON", "walking upward", "linked worktrees",
+		"pl --help", "default compact JSON", "database binding", "database_binding_unavailable", "linked worktrees",
 		"pl start-next", "pl next", "workspace_already_in_progress",
 		"pellet_in_progress_elsewhere", "--recover-workspace", "Keep retries bounded",
 		"pl add", "pl move", "pl close", "pl defer", "pl reopen",

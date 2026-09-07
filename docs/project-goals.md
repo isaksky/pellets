@@ -39,7 +39,7 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 - Make `pl start-next` atomically resume or claim eligible work so concurrent worktrees cannot both act on one read-only selection.
 - Preserve closed pellets by default and make destructive cleanup explicit.
 - Support exact filtering by project, optional external ID, and optional group.
-- Discover the nearest database by walking upward from the current directory, similarly to Git.
+- Bind each logical repository to one database through Git’s common directory, using ancestor and linked-worktree discovery before first binding.
 - Let an ordinary current-project command automatically create/register local Pellets metadata on first use, without a prerequisite project-initialization command or interactive code prompt.
 - Support one database containing several logical Git projects and several worktree workspaces per project, with short project codes and project-local pellet numbers.
 - Let a logical project rename its public code without changing its stable project identity or invalidating references that use former codes.
@@ -127,7 +127,7 @@ The first release is successful when all of the following are true:
 - Active-queue insertions and moves use integer arithmetic, survive gap exhaustion through transactional rebalancing, and never expose duplicate non-null priorities.
 - Concurrent CLI processes cannot allocate duplicate pellet numbers, assign one pellet twice, or violate the one-in-progress-per-workspace invariant.
 - Agent-created memories can be searched, reviewed, and marked human-approved without being attached to task rows.
-- A human can inspect every project, workspace, pellet state, and memory in the nearest database and perform routine non-destructive edits through `pl web` without weakening queue, ownership, FTS, or concurrency invariants.
+- A human can inspect every project, workspace, pellet state, and memory in the resolved database and perform routine non-destructive edits through `pl web` without weakening queue, ownership, FTS, or concurrency invariants.
 - Core workflows pass automated tests on macOS and Windows.
 - Codex and Claude can discover logically identical repository- or personal-scoped `pellets` skills, and repeated installation is safe and idempotent.
 - No documented or implemented workflow requires dependency concepts, vector search, Git commits, a daemon, or an external network connection.
