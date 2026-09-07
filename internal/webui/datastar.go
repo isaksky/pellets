@@ -20,7 +20,7 @@ func (response *datastarResponse) render(status int, name, path, elements string
 		http.Error(response.ResponseWriter, http.StatusText(status), status)
 		return
 	}
-	selector, mode := "#"+name, "replace"
+	selector, mode := "#"+name, "outer"
 	switch name {
 	case "project-rail":
 		selector = "#project-drawer"
@@ -39,10 +39,19 @@ func (response *datastarResponse) render(status int, name, path, elements string
 			return
 		}
 	}
+	response.start()
+	response.patch(selector, mode, elements)
+	response.result(status, path)
+}
+
+func (response *datastarResponse) start() {
 	response.Header().Set("Content-Type", "text/event-stream")
 	response.Header().Set("Cache-Control", "no-store")
 	response.Header().Set("X-Accel-Buffering", "no")
 	response.WriteHeader(http.StatusOK)
+}
+
+func (response *datastarResponse) patch(selector, mode, elements string) {
 	_, _ = fmt.Fprintf(response, "event: datastar-patch-elements\ndata: selector %s\ndata: mode %s\n", selector, mode)
 	// Each HTML line needs its own SSE data field, including blank lines. Normalize
 	// carriage returns so submitted multiline text cannot become SSE control fields.
@@ -51,10 +60,12 @@ func (response *datastarResponse) render(status int, name, path, elements string
 		_, _ = fmt.Fprintf(response, "data: elements %s\n", line)
 	}
 	_, _ = fmt.Fprint(response, "\n")
+}
+
+func (response *datastarResponse) result(status int, path string) {
 	result, _ := json.Marshal(map[string]any{"_webResult": map[string]any{
-		"status":  status,
-		"url":     path,
-		"refresh": response.request.Method == http.MethodPost && status < 400,
+		"status": status,
+		"url":    path,
 	}})
 	_, _ = fmt.Fprintf(response, "event: datastar-patch-signals\ndata: signals %s\n\n", result)
 }

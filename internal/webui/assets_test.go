@@ -36,7 +36,7 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 		`new EventSource("/events")`, `pellets-invalidate`, `data-on-interval__duration.35s`, `id="project-drawer"`, `id="workspace-strip"`, `id="project-record"`, `data-protect-dirty`,
 		`datastar-fetch`, `target.id === "project-drawer"`, `target.id === "project-record"`,
 		`scope.matches("[data-inspector]")`, `document.querySelector("#inspector-host [data-inspector], #inspector-host .error-state")`, `classList.toggle("has-inspector", hasInspector)`,
-		`closest("form.dirty-track")`, `state.automatic && dirtyInspector()`,
+		`closest("form.dirty-track")`, `state.automatic && (dirtyInspector()`,
 		`document.querySelector("#task-list a, #memory-list a, #main")`, `inspectorOpener = null`,
 		`sortOpenerID`, `document.getElementById(sortOpenerID)`, `sorter.focus({preventScroll: true})`,
 		`beforeunload`, `Discard unsaved inspector changes?`, `event.key === "Escape"`,
@@ -81,7 +81,7 @@ func TestTaskRowPointerTargetKeepsOneKeyboardAccessibleNativeLink(t *testing.T) 
 	css := embeddedText(t, "assets/app.css")
 	templates := embeddedText(t, "templates/main.html")
 
-	rowStart := strings.Index(templates, `<tr class="task-row`)
+	rowStart := strings.Index(templates, `<tr id="task-`)
 	if rowStart < 0 {
 		t.Fatal("task row markup is missing")
 	}

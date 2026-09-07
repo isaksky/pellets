@@ -77,8 +77,8 @@ import { action, actions } from "./datastar-1.0.3.js";
   });
 
   // These small application actions delegate transport and DOM patches to Datastar.
-  // Request ownership is per destination, so an old poll cannot replace a newer
-  // navigation and independent fragments at the same URL do not cancel each other.
+  // One foreground request and one background refresh own complete update bundles.
+  // Foreground work supersedes refreshes; a pending save cannot be interrupted.
   var pending = new Map();
   var requests = new WeakMap();
   var editRevision = 0;
@@ -106,7 +106,8 @@ import { action, actions } from "./datastar-1.0.3.js";
       if (evt && (evt.button !== 0 || evt.metaKey || evt.ctrlKey || evt.shiftKey || evt.altKey)) return;
       if (evt) evt.preventDefault();
     }
-    var target = document.getElementById(targetID);
+    var target = targetID === "live" ? document.body : document.getElementById(targetID);
+    if (automatic && Array.from(pending.values()).some(function (state) { return !state.automatic; })) return;
     if (!target || (automatic && (document.hidden || protectedTarget(target)))) return;
     if (automatic && targetID === "inspector-host" && target.querySelector(".conflict-state, .error-state")) return;
     var editing = dirtyInspector();
@@ -115,16 +116,26 @@ import { action, actions } from "./datastar-1.0.3.js";
       if (!el.matches("form.dirty-track") && !confirmDiscard()) return;
     }
     // Do not let a poll interrupt a mutation/navigation or submit the same form twice.
-    var previous = pending.get(targetID);
-    if (previous && (automatic || (mutation && previous.mutation))) return;
+    var slot = automatic ? "background" : "foreground";
+    var previous = pending.get(slot);
+    if (previous && automatic) return;
+    if (previous && previous.mutation) {
+      // Keep only the latest navigation/filter intent while the save completes.
+      if (!mutation) previous.next = {ctx: ctx, targetID: targetID, kind: kind};
+      return;
+    }
     if (mutation && !el.checkValidity()) { el.reportValidity(); return; }
     if (previous) previous.controller.abort();
-    if (!automatic) routeRevision += 1;
-    var state = {el: el, targetID: targetID, automatic: automatic, mutation: mutation,
+    if (!automatic) {
+      routeRevision += 1;
+      var background = pending.get("background");
+      if (background) background.controller.abort();
+    }
+    var state = {slot: slot, el: el, targetID: targetID, automatic: automatic, mutation: mutation,
       revision: editRevision, route: routeRevision, controller: new AbortController(), applied: false};
-    pending.set(targetID, state);
+    pending.set(slot, state);
     requests.set(el, state);
-    var url = automatic ? el.dataset.refreshUrl : mutation || kind === "filter" ? el.action : el.href;
+    var url = automatic ? location.pathname + location.search : mutation || kind === "filter" ? el.action : el.href;
     if (kind === "filter") {
       // Sort/filter values are successful form controls; avoid duplicate query keys.
       url = location.pathname;
@@ -136,14 +147,40 @@ import { action, actions } from "./datastar-1.0.3.js";
     } else if (kind === "navigate" && el.matches("[aria-label='Close inspector']")) {
       url = new URL(url, location.href).pathname + location.search;
     }
+    if (mutation) url += location.search;
     var options = {headers: {"Pellets-Target": targetID}, requestCancellation: state.controller,
       openWhenHidden: true, retry: "never", retryMaxCount: 0, filterSignals: {include: /^$/}};
     if (mutation || kind === "filter") options.contentType = "form";
+    var feedback = document.getElementById("request-feedback");
+    var buttons = mutation ? Array.from(el.querySelectorAll("button[type=submit], button:not([type])")).filter(function (button) { return !button.disabled; }) : [];
+    if (!automatic) {
+      feedback.hidden = false;
+      feedback.textContent = mutation ? "Saving…" : "Loading…";
+      feedback.classList.remove("request-failed");
+      el.setAttribute("aria-busy", "true");
+    }
     try {
-      await actions[mutation ? "post" : "get"](ctx, url, options);
+      // Datastar serializes successful controls before disabling the submitter.
+      var work = actions[mutation ? "post" : "get"](ctx, url, options);
+      buttons.forEach(function (button) { button.disabled = true; });
+      await work;
+    } catch (_) {
+      // Missing completion is reported below; drafts remain in the DOM.
     } finally {
-      if (pending.get(targetID) === state) pending.delete(targetID);
+      buttons.forEach(function (button) { button.disabled = false; });
+      if (requests.get(el) === state) el.removeAttribute("aria-busy");
+      if (!automatic && pending.get(slot) === state && state.route === routeRevision && !state.controller.signal.aborted) {
+        feedback.hidden = !!state.completed;
+        if (!state.completed) {
+          feedback.classList.add("request-failed");
+          feedback.textContent = mutation ? "Save could not be confirmed. Your draft is preserved. Check the current record before retrying." : "Could not load updates. Please try again.";
+        }
+      }
+      if (pending.get(slot) === state) pending.delete(slot);
       if (requests.get(el) === state) requests.delete(el);
+      if (state.next && state.next.ctx.el.isConnected && state.completed) {
+        request(state.next.ctx, state.next.targetID, state.next.kind);
+      }
     }
   }
 
@@ -159,16 +196,24 @@ import { action, actions } from "./datastar-1.0.3.js";
     var state = requests.get(detail.el);
     if (!state) return;
     if (detail.type === "datastar-patch-elements") {
-      var target = document.getElementById(state.targetID);
-      if (state.controller.signal.aborted || pending.get(state.targetID) !== state || state.route !== routeRevision ||
-          !state.el.isConnected || (state.automatic && protectedTarget(target)) ||
-          (state.targetID === "inspector-host" && ((state.automatic && dirtyInspector()) || state.revision !== editRevision))) {
+      var patchID = (detail.argsRaw.selector || "").replace(/^#/, "");
+      var target = document.getElementById(patchID);
+      var inspector = patchID === "inspector-host";
+      if (state.controller.signal.aborted || pending.get(state.slot) !== state || state.route !== routeRevision ||
+          (!state.applied && !state.el.isConnected) ||
+          (protectedTarget(target) && (state.automatic || patchID !== state.targetID)) ||
+          (inspector && ((state.automatic && (dirtyInspector() || target.querySelector(".conflict-state, .error-state"))) || state.revision !== editRevision))) {
         event.stopImmediatePropagation();
         return;
       }
       state.applied = true;
-      queueMicrotask(function () { afterPatch(document.getElementById(state.targetID) || document); });
-    } else if (detail.type === "datastar-patch-signals" && state.applied) {
+      queueMicrotask(function () { afterPatch(document.getElementById(patchID) || document); });
+    } else if (detail.type === "datastar-patch-signals") {
+      if (!state.applied || state.controller.signal.aborted || state.route !== routeRevision) {
+        event.stopImmediatePropagation();
+        return;
+      }
+      state.completed = true;
       var result = JSON.parse(detail.argsRaw.signals)._webResult;
       if (!result) return;
       if (!state.automatic && result.status < 400 && result.url) {
@@ -177,11 +222,7 @@ import { action, actions } from "./datastar-1.0.3.js";
           currentHistoryIndex += 1;
           history.pushState({[historyIndexKey]: currentHistoryIndex}, "", next.pathname + next.search);
         }
-        document.querySelectorAll("[data-refresh-url]").forEach(function (region) {
-          region.dataset.refreshUrl = next.pathname + next.search;
-        });
       }
-      if (result.refresh || (!state.automatic && result.status < 400)) refreshRegions();
     }
   }, true);
 
@@ -219,7 +260,7 @@ import { action, actions } from "./datastar-1.0.3.js";
     }
     var narrow = window.matchMedia && window.matchMedia("(max-width: 760px)").matches;
     inspector.setAttribute("aria-modal", narrow ? "true" : "false");
-    if (narrow) {
+    if (narrow && !inspector.contains(document.activeElement)) {
       var focusable = inspector.querySelector("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])");
       if (focusable) focusable.focus({preventScroll: true});
     }

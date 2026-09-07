@@ -310,6 +310,8 @@ func (h *handler) servePage(response http.ResponseWriter, request *http.Request)
 	templateName := "page"
 	if request.Header.Get("Datastar-Request") == "true" {
 		switch request.Header.Get("Pellets-Target") {
+		case "live":
+			templateName = "live"
 		case "tasks-area":
 			templateName = "tasks-area"
 		case "task-list":
@@ -724,6 +726,10 @@ func (h *handler) render(response http.ResponseWriter, status int, name string, 
 		policy := response.Header().Get("Content-Security-Policy")
 		response.Header().Set("Content-Security-Policy", strings.Replace(policy, "script-src 'self'", "script-src 'self' 'nonce-"+data.Nonce+"'", 1))
 	}
+	if stream, ok := response.(*datastarResponse); ok && name != "page" && status < 400 {
+		h.renderUpdates(stream, status, name, data)
+		return
+	}
 	var output bytes.Buffer
 	if err := h.templates.ExecuteTemplate(&output, name, data); err != nil {
 		http.Error(response, "could not render local interface", http.StatusInternalServerError)
@@ -812,4 +818,54 @@ func localPath(value domain.LocalPath) string {
 
 func constantEqual(left, right string) bool {
 	return len(left) == len(right) && subtle.ConstantTimeCompare([]byte(left), []byte(right)) == 1
+}
+
+// Render all related regions from one materialized page, before writing any SSE.
+func (h *handler) renderUpdates(response *datastarResponse, status int, primary string, data pageData) {
+	names := []string{}
+	if primary != "live" {
+		names = append(names, primary)
+	}
+	names = append(names, "project-counts", "area-tabs", "project-record")
+	if data.MultiProject {
+		names = append(names, "project-rail")
+	} else {
+		names = append(names, "workspace-strip")
+	}
+	if data.Area == "tasks" && primary != "tasks-area" && primary != "task-list" {
+		names = append(names, "task-list")
+	}
+	if data.Area == "memories" && primary != "memory-list" {
+		names = append(names, "memory-list")
+	}
+	if primary == "live" {
+		names = append(names, "inspector")
+	}
+	type patch struct{ selector, mode, html string }
+	patches := []patch{}
+	seen := map[string]bool{}
+	for _, name := range names {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		var output bytes.Buffer
+		if err := h.templates.ExecuteTemplate(&output, name, data); err != nil {
+			http.Error(response, "could not render local interface", http.StatusInternalServerError)
+			return
+		}
+		selector, mode := "#"+name, "outer"
+		if name == "project-rail" {
+			selector = "#project-drawer"
+		}
+		if name == "inspector" {
+			selector, mode = "#inspector-host", "inner"
+		}
+		patches = append(patches, patch{selector, mode, output.String()})
+	}
+	response.start()
+	for _, patch := range patches {
+		response.patch(patch.selector, patch.mode, patch.html)
+	}
+	response.result(status, data.CurrentURL)
 }

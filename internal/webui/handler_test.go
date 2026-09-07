@@ -472,7 +472,7 @@ func TestHandlerProjectAndWorkspaceNavigationAreLiveFragments(t *testing.T) {
 	headers.Set("Pellets-Target", "project-drawer")
 	response := performRequest(multiple.handler, http.MethodGet, "/projects/project1/tasks", "", headers)
 	body := response.Body.String()
-	if response.Code != http.StatusOK || !strings.Contains(body, `id="project-drawer"`) || !strings.Contains(body, `pellets-refresh`) || !strings.Contains(body, "project2") || strings.Contains(body, "<!doctype html>") {
+	if response.Code != http.StatusOK || !strings.Contains(body, `id="project-drawer"`) || !strings.Contains(body, `data: selector #area-tabs`) || !strings.Contains(body, "project2") || strings.Contains(body, "<!doctype html>") {
 		t.Fatalf("project rail fragment = %d %s", response.Code, body)
 	}
 
@@ -480,7 +480,7 @@ func TestHandlerProjectAndWorkspaceNavigationAreLiveFragments(t *testing.T) {
 	headers.Set("Pellets-Target", "workspace-strip")
 	response = performRequest(single.handler, http.MethodGet, "/projects/project1/tasks", "", headers)
 	body = response.Body.String()
-	if response.Code != http.StatusOK || !strings.Contains(body, `id="workspace-strip"`) || !strings.Contains(body, `pellets-refresh`) || strings.Contains(body, "<!doctype html>") {
+	if response.Code != http.StatusOK || !strings.Contains(body, `id="workspace-strip"`) || !strings.Contains(body, `data: selector #area-tabs`) || strings.Contains(body, "<!doctype html>") {
 		t.Fatalf("workspace strip fragment = %d %s", response.Code, body)
 	}
 	headers.Set("Pellets-Target", "project-record")

@@ -249,7 +249,7 @@ func (h *handler) approveMemory(response http.ResponseWriter, request *http.Requ
 func (h *handler) renderPelletResult(response http.ResponseWriter, request *http.Request, code string, pellet storage.Pellet, status int) {
 	path := "/projects/" + url.PathEscape(code) + "/tasks/" + url.PathEscape(pellet.Reference.String())
 	refresh := request.Clone(request.Context())
-	refresh.URL.Path, refresh.URL.RawQuery = path, ""
+	refresh.URL.Path = path
 	data, err := h.loadPage(refresh, code, "tasks", pathSegments(path))
 	if err != nil {
 		h.renderError(response, statusForError(err), err, nil)
@@ -262,7 +262,7 @@ func (h *handler) renderPelletResult(response http.ResponseWriter, request *http
 func (h *handler) renderMemoryResult(response http.ResponseWriter, request *http.Request, code string, memory storage.Memory, status int) {
 	path := "/projects/" + url.PathEscape(code) + "/memories/" + strconv.FormatInt(memory.ID, 10)
 	refresh := request.Clone(request.Context())
-	refresh.URL.Path, refresh.URL.RawQuery = path, ""
+	refresh.URL.Path = path
 	data, err := h.loadPage(refresh, code, "memories", pathSegments(path))
 	if err != nil {
 		h.renderError(response, statusForError(err), err, nil)

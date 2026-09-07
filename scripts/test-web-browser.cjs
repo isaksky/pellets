@@ -65,7 +65,7 @@ const until = async (predicate, message) => {
   await until(async () => !(await page.locator('[data-inspector].is-dirty').count()), 'Saved inspector stayed dirty');
   await until(async () => (await page.locator('.task-title').allTextContents()).includes('Edited browser task'), 'Save did not refresh list');
 
-  // Close then sort immediately, before the delayed list refresh changes its links.
+  // Close and sort immediately using the canonical inspector-free route.
   await page.getByRole('link', {name: 'Close inspector'}).click();
   await page.locator('[data-inspector]').waitFor({state: 'detached'});
   await page.locator('#task-sort-title').click();
@@ -86,8 +86,27 @@ const until = async (predicate, message) => {
   await page.waitForFunction(() => !document.documentElement.hasAttribute('data-nonce'));
   // Allow the monitor's 300ms initial data_version baseline to be sampled.
   await page.waitForTimeout(450);
+  await page.locator('.row-link').first().focus();
+  await page.evaluate(() => {
+    window.retainedRow = document.querySelector('.task-row');
+    window.retainedTable = document.querySelector('.table-scroll');
+    window.retainedFocus = document.activeElement;
+  });
   cli('add', 'External live update');
   await until(async () => (await page.locator('.task-title').allTextContents()).includes('External live update'), 'CLI commit did not refresh browser');
+
+  assert.equal(await page.locator('#project-counts').textContent(), '3 open · 0 active · 0 memories');
+  assert.equal(await page.locator('#area-tabs a').first().textContent(), 'Tasks 3');
+  assert.equal(await page.evaluate(() => window.retainedRow === document.querySelector('.task-row') && window.retainedTable === document.querySelector('.table-scroll') && window.retainedFocus === document.activeElement), true, 'Live update replaced stable DOM or lost focus');
+  let refreshRequests = 0;
+  const countRefresh = request => {
+    if (request.headers()['pellets-target']) refreshRequests++;
+  };
+  page.on('request', countRefresh);
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('pellets-refresh')));
+  await page.waitForTimeout(250);
+  page.off('request', countRefresh);
+  assert.equal(refreshRequests, 1, 'One invalidation must use one bundled request');
 
   // Hold a completed HTTP response until after a user interaction, to exercise
   // guards at patch time rather than just guards before starting requests.
@@ -96,7 +115,7 @@ const until = async (predicate, message) => {
     const gate = new Promise(resolve => { release = resolve; });
     const ready = new Promise(resolve => { captured = resolve; });
     const handler = async route => {
-      if (route.request().headers()['pellets-target'] !== target) return route.continue();
+      if (route.request().headers()['pellets-target'] !== 'live') return route.continue();
       const response = await route.fetch();
       captured();
       await gate;
@@ -194,9 +213,52 @@ const until = async (predicate, message) => {
   await page.keyboard.press('Escape');
   await page.locator('[data-inspector]').waitFor({state: 'detached'});
   assert.equal(await page.evaluate(() => document.activeElement.matches('.row-link')), true);
-  assert.deepEqual(errors, [], 'Browser errors');
+  // A filter typed during a save is applied after the save's bundle, so its
+  // response cannot suppress the mutation result or leave stale version tokens.
+  await page.locator('.row-link').first().click();
+  await page.locator('form.dirty-track input[name=title]').fill('Queued save');
+  let releaseSave;
+  const saveGate = new Promise(resolve => { releaseSave = resolve; });
+  await page.route('**/pellets/**/edit*', async route => {
+    await saveGate;
+    await route.continue();
+  });
+  await page.getByRole('button', {name: 'Save changes', exact: true}).click();
+  await page.locator('#search').fill('Queued');
+  await page.waitForTimeout(400);
+  releaseSave();
+  await until(async () => page.url().includes('q=Queued') && !(await page.locator('[data-inspector].is-dirty').count()), 'Filter interrupted save or was dropped');
+  assert.equal(await page.locator('.task-title').count(), 1);
+  await page.unroute('**/pellets/**/edit*');
+  await page.goto(origin + base);
+
+  // A failed save must explain the failure without losing the draft or leaving
+  // the submit control disabled. Hold the response to inspect its loading state.
+  await page.locator('.row-link').first().click();
+  await page.locator('form.dirty-track input[name=title]').fill('Retained failed draft');
+  let releaseFailure;
+  const failureGate = new Promise(resolve => { releaseFailure = resolve; });
+  await page.route('**/pellets/**/edit*', async route => {
+    await failureGate;
+    await route.fulfill({status: 503, contentType: 'text/plain', body: 'Service Unavailable'});
+  });
+  const save = page.getByRole('button', {name: 'Save changes', exact: true});
+  await save.click();
+  await until(() => save.isDisabled(), 'Save was not disabled while pending');
+  assert.equal(await page.locator('#request-feedback').textContent(), 'Saving…');
+  releaseFailure();
+  await until(async () => (await page.locator('#request-feedback').textContent()).includes('Save could not be confirmed'), 'Failed save had no feedback');
+  assert.equal(await save.isEnabled(), true);
+  assert.equal(await page.locator('form.dirty-track input[name=title]').inputValue(), 'Retained failed draft');
+  assert.equal(await page.locator('[data-inspector].is-dirty').count(), 1);
+  await page.unroute('**/pellets/**/edit*');
+  await save.click();
+  await until(async () => !(await page.locator('[data-inspector].is-dirty').count()), 'Retry did not save');
+  assert.equal(await page.locator('#request-feedback').isHidden(), true);
+  // Chromium reports the intentionally injected HTTP 503 on its console.
+  assert.deepEqual(errors.filter(message => !message.includes('503 (Service Unavailable)')), [], 'Browser errors');
   assert.deepEqual(external, [], 'Unexpected external requests');
-  console.log('Browser checks passed: navigation, sort/filter/history, task and memory mutations, live refresh, dirty/in-flight guards, conflicts, validation, CSP, and narrow-screen focus.');
+  console.log('Browser checks passed: navigation, sort/filter/history, mutations, bundled refresh/counts, DOM/focus preservation, queued filters, loading/failure/retry, dirty/in-flight guards, conflicts, validation, CSP, and narrow-screen focus.');
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   if (browser) await browser.close();
   if (server && server.exitCode === null) {
