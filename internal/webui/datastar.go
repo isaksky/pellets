@@ -2,9 +2,11 @@ package webui
 
 import (
 	"encoding/json"
-	"fmt"
+	"log"
 	"net/http"
 	"strings"
+
+	"github.com/starfederation/datastar-go/datastar"
 )
 
 // datastarResponse keeps ordinary HTTP responses intact and adapts rendered
@@ -13,6 +15,8 @@ import (
 type datastarResponse struct {
 	http.ResponseWriter
 	request *http.Request
+	stream  *datastar.ServerSentEventGenerator
+	err     error
 }
 
 func (response *datastarResponse) render(status int, name, path, elements string) {
@@ -44,28 +48,46 @@ func (response *datastarResponse) render(status int, name, path, elements string
 	response.result(status, path)
 }
 
+// The SDK flushes headers immediately. Keep our no-store policy by applying it
+// after its defaults, and pass the underlying writer so flushing is supported.
 func (response *datastarResponse) start() {
-	response.Header().Set("Content-Type", "text/event-stream")
-	response.Header().Set("Cache-Control", "no-store")
 	response.Header().Set("X-Accel-Buffering", "no")
-	response.WriteHeader(http.StatusOK)
+	response.stream = datastar.NewSSE(response.ResponseWriter, response.request, func(*datastar.ServerSentEventGenerator) {
+		response.Header().Set("Cache-Control", "no-store")
+	})
 }
 
 func (response *datastarResponse) patch(selector, mode, elements string) {
-	_, _ = fmt.Fprintf(response, "event: datastar-patch-elements\ndata: selector %s\ndata: mode %s\n", selector, mode)
-	// Each HTML line needs its own SSE data field, including blank lines. Normalize
-	// carriage returns so submitted multiline text cannot become SSE control fields.
-	elements = strings.ReplaceAll(strings.ReplaceAll(elements, "\r\n", "\n"), "\r", "\n")
-	for _, line := range strings.Split(elements, "\n") {
-		_, _ = fmt.Fprintf(response, "data: elements %s\n", line)
+	if response.err != nil {
+		return
 	}
-	_, _ = fmt.Fprint(response, "\n")
+	// Normalize submitted carriage returns before the SDK splits SSE data lines.
+	elements = strings.ReplaceAll(strings.ReplaceAll(elements, "\r\n", "\n"), "\r", "\n")
+	response.recordError(response.stream.PatchElements(elements,
+		datastar.WithSelector(selector), datastar.WithMode(datastar.ElementPatchMode(mode))))
 }
 
 func (response *datastarResponse) result(status int, path string) {
-	result, _ := json.Marshal(map[string]any{"_webResult": map[string]any{
-		"status": status,
-		"url":    path,
+	if response.err != nil {
+		return
+	}
+	result, err := json.Marshal(map[string]any{"_webResult": map[string]any{
+		"status": status, "url": path,
 	}})
-	_, _ = fmt.Fprintf(response, "event: datastar-patch-signals\ndata: signals %s\n\n", result)
+	if err != nil {
+		response.recordError(err)
+		return
+	}
+	response.recordError(response.stream.PatchSignals(result))
+}
+
+// Stop a partially delivered bundle on its first write/flush failure. In
+// particular, never send a completion signal after a failed element patch.
+func (response *datastarResponse) recordError(err error) {
+	if err != nil {
+		response.err = err
+		if response.request.Context().Err() == nil {
+			log.Printf("web UI SSE response failed: %v", err)
+		}
+	}
 }

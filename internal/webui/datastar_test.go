@@ -3,6 +3,7 @@ package webui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"html"
 	"net/http"
 	"net/http/httptest"
@@ -153,4 +154,61 @@ func TestDatastarLiveResponseBundlesRelatedRegions(t *testing.T) {
 	if strings.Count(body, "event: datastar-patch-signals") != 1 {
 		t.Fatal("bundle must have one completion result")
 	}
+}
+
+// SDK failures must stop the bundle, including its success/completion signal.
+func TestDatastarStopsBundleOnDeliveryFailure(t *testing.T) {
+	for _, failure := range []string{"write", "flush", "cancel"} {
+		t.Run(failure, func(t *testing.T) {
+			sentinel := errors.New("delivery failed")
+			writer := &failingSSEWriter{ResponseRecorder: httptest.NewRecorder(), failure: failure, err: sentinel}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			response := &datastarResponse{ResponseWriter: writer, request: httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx)}
+			response.start()
+			if failure == "cancel" {
+				cancel()
+				sentinel = context.Canceled
+			}
+			response.patch("#task-list", "outer", "<div id=task-list>updated</div>")
+			response.patch("#area-tabs", "outer", "<nav id=area-tabs></nav>")
+			response.result(http.StatusOK, "/")
+			if !errors.Is(response.err, sentinel) {
+				t.Fatalf("delivery error = %v, want %v", response.err, sentinel)
+			}
+			wantWrites := 1
+			if failure == "cancel" {
+				wantWrites = 0
+			}
+			if writer.writes != wantWrites || strings.Contains(writer.Body.String(), "datastar-patch-signals") {
+				t.Fatalf("bundle continued after failure: writes=%d body=%s", writer.writes, writer.Body.String())
+			}
+			if writer.Result().Header.Get("Cache-Control") != "no-store" {
+				t.Fatal("SDK initialization lost no-store policy")
+			}
+		})
+	}
+}
+
+type failingSSEWriter struct {
+	*httptest.ResponseRecorder
+	failure         string
+	err             error
+	writes, flushes int
+}
+
+func (w *failingSSEWriter) Write(data []byte) (int, error) {
+	w.writes++
+	if w.failure == "write" {
+		return 0, w.err
+	}
+	return w.ResponseRecorder.Write(data)
+}
+func (w *failingSSEWriter) FlushError() error {
+	w.flushes++
+	if w.failure == "flush" && w.flushes > 1 {
+		return w.err
+	}
+	w.ResponseRecorder.Flush()
+	return nil
 }

@@ -16,18 +16,23 @@ import (
 
 var releaseLicenseFiles = map[string]string{
 	"LICENSE":                 "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
-	"THIRD_PARTY_NOTICES.txt": "38a7fe71bff25e88f80e21ff7c86216877896a5dcc0764ad9d09f79c51749208",
+	"THIRD_PARTY_NOTICES.txt": "a9a3e8bc229e5cd2ef5caaf2377f3aceb998598778692962b368f281caa9376d",
 	"internal/webui/assets/datastar-1.0.3.js":    "5d6b7794a50a83d82da962aec5e382f5ae83ac7afbc751f903f7a9c6bd433c65",
 	"internal/webui/assets/DATASTAR-LICENSE.txt": "17da0e216d3c6a819526f5b72a6a44d84d34bcd9beb4191ac6af89c1508ef08f",
 	"internal/webui/assets/DATASTAR-NOTICE.txt":  "3c1dbf2899e94dd1094e52fba4ac34603dbc8886a21e8f45a6ae5c9d2fd857d7",
 }
 
 var auditedReleaseModules = []string{
+	"github.com/CAFxX/httpcompression v0.0.9",
+	"github.com/andybalholm/brotli v1.2.0",
 	"github.com/dustin/go-humanize v1.0.1",
 	"github.com/google/uuid v1.6.0",
+	"github.com/klauspost/compress v1.18.0",
 	"github.com/mattn/go-isatty v0.0.20",
 	"github.com/ncruces/go-strftime v1.0.0",
 	"github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec",
+	"github.com/starfederation/datastar-go v1.2.2",
+	"github.com/valyala/bytebufferpool v1.0.0",
 	"golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546",
 	"golang.org/x/sys v0.37.0",
 	"modernc.org/libc v1.67.6",
@@ -89,7 +94,7 @@ func TestReleaseLicensePayloadStaysAudited(t *testing.T) {
 func auditedReleaseModulesForTarget(goos string) []string {
 	modules := slices.Clone(auditedReleaseModules)
 	if goos == "windows" {
-		modules = slices.Delete(modules, 1, 2)
+		modules = slices.DeleteFunc(modules, func(module string) bool { return strings.HasPrefix(module, "github.com/google/uuid ") })
 	}
 	return modules
 }

@@ -89,6 +89,11 @@ records its exact toolchain version in Go build metadata.
 | `modernc.org/mathutil` | v1.7.1 | BSD-3-Clause | `LICENSE` |
 | `modernc.org/memory` | v1.11.0 | BSD-3-Clause | `LICENSE` and `LICENSE-MMAP-GO` for the Unix mmap implementation linked into macOS binaries |
 | `modernc.org/sqlite` | v1.45.0 | BSD-3-Clause; translated SQLite core is public domain | `LICENSE`; public-domain SQLite adds no required notice |
+| `github.com/starfederation/datastar-go` | v1.2.2 | MIT | `LICENSE` |
+| `github.com/CAFxX/httpcompression` | v0.0.9 | Apache-2.0 | `LICENSE` |
+| `github.com/andybalholm/brotli` | v1.2.0 | MIT | `LICENSE` |
+| `github.com/klauspost/compress` | v1.18.0 | BSD-3-Clause and bundled permissive notices | Complete root `LICENSE`, plus linked `internal/snapref/LICENSE` and `zstd/internal/xxhash/LICENSE.txt` |
+| `github.com/valyala/bytebufferpool` | v1.0.0 | MIT | `LICENSE` |
 | Datastar | v1.0.3 | MIT | `internal/webui/assets/DATASTAR-LICENSE.txt`; version, upstream location, embedded path, and pinned digest are recorded by the accompanying Datastar notice |
 
 Module `AUTHORS` files do not state additional redistribution conditions and
