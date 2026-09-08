@@ -111,9 +111,13 @@ import { action, actions } from "./datastar-1.0.3.js";
     if (!target || (automatic && (document.hidden || protectedTarget(target)))) return;
     if (automatic && targetID === "inspector-host" && target.querySelector(".conflict-state, .error-state")) return;
     var editing = dirtyInspector();
+    var discard = false;
     if (targetID === "inspector-host" && editing) {
       if (automatic) return;
-      if (!el.matches("form.dirty-track") && !confirmDiscard()) return;
+      if (!el.matches("form.dirty-track")) {
+        if (!confirmDiscard()) return;
+        discard = true;
+      }
     }
     // Do not let a poll interrupt a mutation/navigation or submit the same form twice.
     var slot = automatic ? "background" : "foreground";
@@ -131,8 +135,8 @@ import { action, actions } from "./datastar-1.0.3.js";
       var background = pending.get("background");
       if (background) background.controller.abort();
     }
-    var state = {slot: slot, el: el, targetID: targetID, automatic: automatic, mutation: mutation,
-      revision: editRevision, route: routeRevision, controller: new AbortController(), applied: false};
+    var state = {slot: slot, el: el, targetID: targetID, automatic: automatic, mutation: mutation, navigation: kind === "navigate",
+      revision: editRevision, route: routeRevision, controller: new AbortController(), applied: false, discard: discard};
     pending.set(slot, state);
     requests.set(el, state);
     var url = automatic ? location.pathname + location.search : mutation || kind === "filter" ? el.action : el.href;
@@ -199,14 +203,25 @@ import { action, actions } from "./datastar-1.0.3.js";
       var patchID = (detail.argsRaw.selector || "").replace(/^#/, "");
       var target = document.getElementById(patchID);
       var inspector = patchID === "inspector-host";
-      if (state.controller.signal.aborted || pending.get(state.slot) !== state || state.route !== routeRevision ||
+      // A navigation bundle describes one destination. If newer edits reject its
+      // first (inspector) patch, its list selection must not move there either.
+      if (inspector && state.navigation && state.revision !== editRevision) state.rejected = true;
+      if (state.rejected || state.controller.signal.aborted || pending.get(state.slot) !== state || state.route !== routeRevision ||
           (!state.applied && !state.el.isConnected) ||
           (protectedTarget(target) && (state.automatic || patchID !== state.targetID)) ||
           (inspector && ((state.automatic && (dirtyInspector() || target.querySelector(".conflict-state, .error-state"))) || state.revision !== editRevision))) {
         event.stopImmediatePropagation();
         return;
       }
+      // Morphing preserves live values when server defaults are unchanged. Apply
+      // confirmed discard only once a current response can replace the inspector,
+      // so failed requests and edits made in flight retain their drafts.
+      if (inspector && state.discard) {
+        target.querySelectorAll("form.dirty-track").forEach(function (form) { form.reset(); });
+        state.discard = false;
+      }
       state.applied = true;
+      if (patchID === state.targetID) state.primaryApplied = true;
       queueMicrotask(function () { afterPatch(document.getElementById(patchID) || document); });
     } else if (detail.type === "datastar-patch-signals") {
       if (!state.applied || state.controller.signal.aborted || state.route !== routeRevision) {
@@ -216,7 +231,9 @@ import { action, actions } from "./datastar-1.0.3.js";
       state.completed = true;
       var result = JSON.parse(detail.argsRaw.signals)._webResult;
       if (!result) return;
-      if (!state.automatic && result.status < 400 && result.url) {
+      // Related regions can refresh even when newer edits reject the inspector.
+      // Advance history only if the requested destination was actually accepted.
+      if (!state.automatic && state.primaryApplied && result.status < 400 && result.url) {
         var next = new URL(result.url, location.href);
         if (next.origin === location.origin && next.pathname + next.search !== location.pathname + location.search) {
           currentHistoryIndex += 1;

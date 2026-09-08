@@ -255,10 +255,96 @@ const until = async (predicate, message) => {
   await save.click();
   await until(async () => !(await page.locator('[data-inspector].is-dirty').count()), 'Retry did not save');
   assert.equal(await page.locator('#request-feedback').isHidden(), true);
+  // Confirmed discard must clear live values even when both records have the
+  // same server defaults. Keying only list rows does not protect inspector forms.
+  await page.setViewportSize({width: 1440, height: 1000});
+  await page.goto(origin + base);
+  await page.locator('.row-link').first().click();
+  const firstInspector = await page.locator('[data-inspector]').getAttribute('id');
+  const description = page.locator('form.dirty-track textarea[name=description]');
+  assert.equal(await description.inputValue(), '');
+  await description.fill('Discard this task description');
+  page.once('dialog', dialog => dialog.dismiss());
+  await page.locator('.row-link').nth(1).click();
+  assert.equal(await description.inputValue(), 'Discard this task description');
+  assert.equal(await page.locator('[data-inspector]').getAttribute('id'), firstInspector);
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('.row-link').nth(1).click();
+  await until(async () => await page.locator('[data-inspector]').getAttribute('id') !== firstInspector, 'Task inspector did not switch');
+  assert.equal(await description.inputValue(), '');
+  assert.equal(await page.locator('[data-inspector].is-dirty').count(), 0);
+
+  // A failed lifecycle request must not reset the confirmed draft preemptively.
+  await description.fill('Keep this draft on failure');
+  await page.route('**/pellets/**/transition*', route => route.fulfill({status: 503, contentType: 'text/plain', body: 'Service Unavailable'}));
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', {name: 'Start', exact: true}).click();
+  await until(async () => (await page.locator('#request-feedback').textContent()).includes('Save could not be confirmed'), 'Failed lifecycle had no feedback');
+  assert.equal(await description.inputValue(), 'Keep this draft on failure');
+  assert.equal(await page.locator('[data-inspector].is-dirty').count(), 1);
+  await page.unroute('**/pellets/**/transition*');
+  // The same record keeps its identity during a lifecycle patch, so discard also
+  // needs an explicit reset after the patch guards accept the response.
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', {name: 'Start', exact: true}).click();
+  await page.getByRole('button', {name: 'Release', exact: true}).waitFor();
+  assert.equal(await description.inputValue(), '');
+  assert.equal(await page.locator('[data-inspector].is-dirty').count(), 0);
+  await page.getByRole('button', {name: 'Release', exact: true}).click();
+  await page.getByRole('button', {name: 'Start', exact: true}).waitFor();
+
+  // Edits made after discard confirmation supersede that confirmation. Delay the
+  // navigation response and verify neither reset nor morph consumes newer text.
+  await description.fill('Draft at confirmation');
+  const protectedInspector = await page.locator('[data-inspector]').getAttribute('id');
+  const protectedURL = page.url();
+  let releaseNavigation;
+  const navigationGate = new Promise(resolve => { releaseNavigation = resolve; });
+  await page.route('**/projects/**/tasks/**', async route => {
+    if (route.request().headers()['pellets-target'] === 'inspector-host') await navigationGate;
+    await route.continue();
+  });
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('.row-link').first().click();
+  await description.fill('Newer draft after confirmation');
+  releaseNavigation();
+  await until(async () => (await page.locator('#request-feedback').textContent()).includes('Could not load updates'), 'Rejected navigation did not finish');
+  assert.equal(await page.locator('[data-inspector]').getAttribute('id'), protectedInspector);
+  assert.equal(page.url(), protectedURL);
+  assert.equal(await page.locator('.task-row.selected').getAttribute('id'), protectedInspector.replace('inspector-', ''));
+  assert.equal(await description.inputValue(), 'Newer draft after confirmation');
+  assert.equal(await page.locator('[data-inspector].is-dirty').count(), 1);
+  await page.unroute('**/projects/**/tasks/**');
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('link', {name: 'Close inspector'}).click();
+  await page.locator('[data-inspector]').waitFor({state: 'detached'});
+
+  // Memory text is required: use two records with the same nonempty baseline.
+  await page.goto(origin + `/projects/${first.project}/memories`);
+  const memoryCreation = await page.locator('.create-popover form').evaluate(form => ({
+    action: form.action, fields: Object.fromEntries(new FormData(form))
+  }));
+  for (let i = 0; i < 2; i++) {
+    const created = await page.request.post(memoryCreation.action, {
+      headers: {Origin: origin}, form: {...memoryCreation.fields, text: 'Shared memory baseline'}
+    });
+    assert.equal(created.status(), 201);
+  }
+  await page.reload();
+  const matchingMemories = page.locator('.memory-card').filter({has: page.getByText('Shared memory baseline', {exact: true})});
+  assert.equal(await matchingMemories.count(), 2);
+  await matchingMemories.nth(0).locator('a').click();
+  const firstMemoryInspector = await page.locator('[data-inspector]').getAttribute('id');
+  await page.locator('form.dirty-track textarea').fill('Discard this memory text');
+  page.once('dialog', dialog => dialog.accept());
+  await matchingMemories.nth(1).locator('a').click();
+  await until(async () => await page.locator('[data-inspector]').getAttribute('id') !== firstMemoryInspector, 'Memory inspector did not switch');
+  assert.equal(await page.locator('form.dirty-track textarea').inputValue(), 'Shared memory baseline');
+  assert.equal(await page.locator('[data-inspector].is-dirty').count(), 0);
   // Chromium reports the intentionally injected HTTP 503 on its console.
   assert.deepEqual(errors.filter(message => !message.includes('503 (Service Unavailable)')), [], 'Browser errors');
   assert.deepEqual(external, [], 'Unexpected external requests');
-  console.log('Browser checks passed: navigation, sort/filter/history, mutations, bundled refresh/counts, DOM/focus preservation, queued filters, loading/failure/retry, dirty/in-flight guards, conflicts, validation, CSP, and narrow-screen focus.');
+  console.log('Browser checks passed: navigation, sort/filter/history, mutations, bundled refresh/counts, DOM/focus preservation, queued filters, loading/failure/retry, dirty/in-flight guards, confirmed discard across tasks/memories/lifecycle, conflicts, validation, CSP, and narrow-screen focus.');
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   if (browser) await browser.close();
   if (server && server.exitCode === null) {
