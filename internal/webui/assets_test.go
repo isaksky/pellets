@@ -25,7 +25,7 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 	for _, required := range []string{
 		`:root[data-theme="dark"]`, `@media (max-width: 760px)`, `@media (prefers-reduced-motion: reduce)`,
 		`:focus-visible`, `.state-changed`, `.status-in_progress`, `.conflict-state`, `.error-state`, `.drawer-scrim[hidden]`, `.inspector-host.has-inspector`, `.inspector-host:has(.error-state)`,
-		`.task-row { position: relative; cursor: pointer; }`, `.task-row:has(.row-link:focus-visible)`, `.row-link::after { content: ""; position: absolute; inset: 0; }`,
+		`.task-row { position: relative; cursor: pointer; }`, `.task-row:has(.row-link:focus-visible)`,
 		`.task-sort { display: flex;`, `.task-sort:hover, .task-sort.active`, `.sort-indicator`,
 	} {
 		if !strings.Contains(css, required) {
@@ -81,6 +81,9 @@ func TestTaskRowPointerTargetKeepsOneKeyboardAccessibleNativeLink(t *testing.T) 
 	css := embeddedText(t, "assets/app.css")
 	templates := embeddedText(t, "templates/main.html")
 
+	if strings.Contains(css, ".row-link::after") {
+		t.Fatal("row hit targets must not depend on positioned table-row overlays")
+	}
 	rowStart := strings.Index(templates, `<tr id="task-`)
 	if rowStart < 0 {
 		t.Fatal("task row markup is missing")
@@ -100,7 +103,6 @@ func TestTaskRowPointerTargetKeepsOneKeyboardAccessibleNativeLink(t *testing.T) 
 	}
 	for _, required := range []string{
 		`.task-row { position: relative; cursor: pointer; }`,
-		`.row-link::after { content: ""; position: absolute; inset: 0; }`,
 		`.task-row:has(.row-link:focus-visible)`,
 	} {
 		if !strings.Contains(css, required) {

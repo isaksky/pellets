@@ -161,7 +161,6 @@ tbody tr:hover, tbody tr.selected, .task-row:has(.row-link:focus-visible) { back
 .task-row:has(.row-link:focus-visible) { outline: 3px solid color-mix(in srgb, var(--focus) 72%, transparent); outline-offset: -3px; }
 .task-row.status-in_progress td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .row-link { display: block; color: var(--accent-strong); font-weight: 650; }
-.row-link::after { content: ""; position: absolute; inset: 0; }
 .task-title-column { width: 100%; max-width: 0; }
 .task-title { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: 590; }
 .task-row small { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); font-size: .68rem; }

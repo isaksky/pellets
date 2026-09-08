@@ -1,11 +1,12 @@
 // Optional browser regression suite. Requires Playwright on Node's module path.
 // NODE_PATH=/path/to/node_modules PLAYWRIGHT_CHANNEL=chrome node scripts/test-web-browser.cjs
+// Use PLAYWRIGHT_BROWSER=webkit to check the Safari browser engine.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium} = require('playwright');
+const {chromium, webkit} = require('playwright');
 
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-browser-'));
@@ -39,7 +40,8 @@ const until = async (predicate, message) => {
     server.once('error', reject);
     server.once('exit', code => { clearTimeout(timeout); reject(new Error(`Server exited: ${code}`)); });
   });
-  browser = await chromium.launch({headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {})});
+  const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
+  browser = await engine.launch({headless: true, ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {})});
   const page = await browser.newPage();
   page.setDefaultTimeout(10000);
   const errors = [], external = [];
@@ -57,7 +59,32 @@ const until = async (predicate, message) => {
   const base = `/projects/${first.project}/tasks`;
   assert.equal(await page.locator('.row-link').count(), 2);
 
-  await page.locator('.row-link').first().click();
+  // Check actual pointer hit targets across every cell, not just the ID link.
+  const hitTargets = await page.locator('.task-row').evaluateAll(rows => rows.flatMap(row =>
+    Array.from(row.cells).map(cell => {
+      const box = cell.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return {expected: row.dataset.rowId, actual: hit?.closest('.task-row')?.dataset.rowId};
+    })
+  ));
+  for (const hit of hitTargets) assert.equal(hit.actual, hit.expected, 'Cell hit target belongs to another row');
+  // Physical clicks in the bottom row's status and the top row's title must
+  // resolve to their own records, including after opening/closing an inspector.
+  const modifiedURL = await page.locator('.row-link').first().getAttribute('href');
+  const popupReady = page.context().waitForEvent('page');
+  await page.locator('.task-row').first().locator('td').nth(1).click({modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control']});
+  const popup = await popupReady;
+  await popup.waitForLoadState();
+  assert.equal(new URL(popup.url()).pathname, new URL(modifiedURL, origin).pathname, 'Modified cell click opened a different record');
+  await popup.close();
+  const bottomReference = await page.locator('.task-row').last().getAttribute('data-row-id');
+  const bottomStatusBox = await page.locator('.task-row').last().locator('td').nth(3).boundingBox();
+  await page.mouse.click(bottomStatusBox.x + bottomStatusBox.width / 2, bottomStatusBox.y + bottomStatusBox.height / 2);
+  await until(async () => await page.locator('#inspector-title').textContent() === bottomReference, 'Bottom cell opened a different row');
+  await page.getByRole('link', {name: 'Close inspector'}).click();
+  await page.locator('[data-inspector]').waitFor({state: 'detached'});
+  const firstTitleBox = await page.locator('.task-row').first().locator('td').nth(1).boundingBox();
+  await page.mouse.click(firstTitleBox.x + firstTitleBox.width / 2, firstTitleBox.y + firstTitleBox.height / 2);
   await page.locator('[data-inspector]').waitFor();
   await until(() => page.url().includes(first.id), 'Inspector did not update history');
   await page.locator('form.dirty-track input[name=title]').fill('Edited browser task');

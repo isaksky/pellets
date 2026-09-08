@@ -65,6 +65,25 @@ import { action, actions } from "./datastar-1.0.3.js";
   var inspectorOpenerHref = "";
   var sortOpenerID = "";
   var tableScrollLeft = 0;
+  // Forward clicks in non-interactive cells to that row's native link. A
+  // positioned overlay on <tr> is not a reliable hit target across browsers.
+  document.addEventListener("click", function (event) {
+    var row = event.target.closest(".task-row");
+    if (!row || event.defaultPrevented || event.button !== 0 ||
+        event.target.closest("a, button, input, select, textarea, summary, [contenteditable]")) return;
+    if (window.getSelection && !window.getSelection().isCollapsed) return;
+    var link = row.querySelector(".row-link");
+    if (!link) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey) {
+      window.open(link.href, "_blank", "noopener");
+      return;
+    }
+    link.dispatchEvent(new MouseEvent("click", {
+      bubbles: true, cancelable: true, view: window,
+      ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey, altKey: event.altKey
+    }));
+  });
+
   document.addEventListener("click", function (event) {
     var sorter = event.target.closest(".task-sort");
     if (sorter) sortOpenerID = sorter.id;
