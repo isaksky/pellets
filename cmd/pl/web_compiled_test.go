@@ -89,6 +89,18 @@ func TestCompiledWebDiscoveryStartupAndCleanShutdown(t *testing.T) {
 	if response.StatusCode != http.StatusOK || !strings.Contains(body.String(), "compiled web task") {
 		t.Fatalf("GET = %d %q", response.StatusCode, body.String())
 	}
+	// Keep the browser's persistent stream open while interrupting the server.
+	stream, err := http.Get(address + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Body.Close()
+	if stream.StatusCode != http.StatusOK {
+		t.Fatalf("events status = %d", stream.StatusCode)
+	}
+	if _, err := bufio.NewReader(stream.Body).ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
 	if err := command.Process.Signal(os.Interrupt); err != nil {
 		t.Fatal(err)
 	}
@@ -100,10 +112,10 @@ func TestCompiledWebDiscoveryStartupAndCleanShutdown(t *testing.T) {
 		if err != nil {
 			t.Fatalf("compiled web shutdown = %v; stderr=%s", err, stderr.String())
 		}
-	case <-time.After(7 * time.Second):
+	case <-time.After(time.Second):
 		t.Fatal("compiled web command did not shut down after interrupt")
 	}
-	if stderr.Len() != 0 {
+	if stderr.String() != "Stopping web server… Press Ctrl+C again to force exit.\n" {
 		t.Fatalf("compiled --no-open stderr = %q", stderr.String())
 	}
 

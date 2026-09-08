@@ -177,7 +177,7 @@ Keep SQL as embedded `.sql` files or focused Go constants. Do not introduce an O
 
 ## Foreground web inspector
 
-`pl web [--port PORT] [--no-open]` uses the same binding-first database discovery as ordinary commands. It listens with `tcp4` on exactly `127.0.0.1`; port zero asks the OS for an available port. The URL is printed only after `net.Listen` succeeds and the HTTP server has been scheduled. Unless `--no-open` is supplied, the platform launcher opens that URL after readiness. Launcher failure is a warning and does not stop the server. Interrupt cancellation performs bounded HTTP shutdown and closes every SQLite handle. There is no daemonization, background service, configuration file, or remotely selectable bind address.
+`pl web [--port PORT] [--no-open]` uses the same binding-first database discovery as ordinary commands. It listens with `tcp4` on exactly `127.0.0.1`; port zero asks the OS for an available port. The URL is printed only after `net.Listen` succeeds and the HTTP server has been scheduled. Unless `--no-open` is supplied, the platform launcher opens that URL after readiness. Launcher failure is a warning and does not stop the server. The first Ctrl+C immediately acknowledges shutdown on stderr and restores the default interrupt action, allowing a second Ctrl+C to force exit. Cancellation ends SSE streams and the database monitor before bounded HTTP shutdown, so open browser streams do not consume the five-second grace period. Ordinary request contexts remain active while draining; shutdown then closes every SQLite handle. There is no daemonization, background service, configuration file, or remotely selectable bind address.
 
 The web process owns three deliberately separate database paths:
 

@@ -28,6 +28,7 @@ var embeddedFiles embed.FS
 const csrfCookieName = "pl_web_csrf"
 
 type handlerConfig struct {
+	Stopping       <-chan struct{}
 	Host           string
 	Origin         string
 	CSRF           string
@@ -150,6 +151,8 @@ func (h *handler) serveEvents(response http.ResponseWriter, request *http.Reques
 	for {
 		select {
 		case <-request.Context().Done():
+			return
+		case <-h.config.Stopping:
 			return
 		case <-events:
 			_ = controller.SetWriteDeadline(time.Now().Add(2 * time.Second))

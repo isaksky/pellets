@@ -391,14 +391,23 @@ func TestRunnerBindsLoopbackPrintsReadyURLWarnsOnBrowserFailureAndStops(t *testi
 	if !strings.Contains(stderr.String(), "warning:") {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
+	// An open EventSource must not keep graceful shutdown waiting for its timeout.
+	stream, err := http.Get(printed + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Body.Close()
+	if stream.StatusCode != http.StatusOK {
+		t.Fatalf("events status = %d", stream.StatusCode)
+	}
 	cancel()
 	select {
 	case err := <-result:
 		if err != nil {
 			t.Fatalf("runner shutdown error = %v", err)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("runner did not shut down after cancellation")
+	case <-time.After(time.Second):
+		t.Fatal("runner did not shut down with an open event stream")
 	}
 	if !monitor.closed {
 		t.Fatal("runner did not close monitor")

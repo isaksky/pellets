@@ -421,6 +421,11 @@ pellet state, and memory; it supports routine queue and memory edits with
 optimistic conflict detection. Purge, memory removal, and other irreversible
 actions are intentionally absent.
 
+Press Ctrl+C to stop. Pellets immediately acknowledges the interrupt on stderr,
+closes live-update streams, and allows ordinary requests up to five seconds to
+finish. A second Ctrl+C forces exit if shutdown stalls. Stdout remains reserved
+for the listener URL.
+
 There is no user login. The loopback listener, exact Host/Origin checks, and a
 per-process CSRF capability protect against ordinary cross-site browser
 mutation, but not against another process running as the same local user or

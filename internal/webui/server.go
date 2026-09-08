@@ -110,6 +110,7 @@ func (runner Runner) Run(ctx context.Context, options Options) error {
 
 	handler, err := newHandler(application, hub, handlerConfig{
 		Host: host, Origin: baseURL, CSRF: csrf, InitialProject: options.InitialProject,
+		Stopping: monitorContext.Done(),
 	})
 	if err != nil {
 		return err
@@ -141,6 +142,9 @@ func (runner Runner) Run(ctx context.Context, options Options) error {
 
 	select {
 	case <-ctx.Done():
+		// End persistent streams before draining ordinary requests. Shutdown
+		// does not cancel active HTTP request contexts itself.
+		cancelMonitor()
 		shutdownContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		shutdownErr := httpServer.Shutdown(shutdownContext)
 		cancel()

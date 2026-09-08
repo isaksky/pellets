@@ -1,11 +1,18 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"io"
+	"os"
+	"os/exec"
 	"reflect"
+	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"pellets/internal/domain"
 )
@@ -77,4 +84,80 @@ func publicCode(err error) string {
 		return ""
 	}
 	return domain.PublicError(err).Code
+}
+
+func TestWebInterruptHelper(t *testing.T) {
+	if os.Getenv("PELLETS_TEST_WEB_INTERRUPT") != "1" {
+		return
+	}
+	command := WebCommand(func(ctx context.Context, _ Invocation, _ WebOptions, stdout, _ io.Writer) error {
+		fmt.Fprintln(stdout, "ready")
+		<-ctx.Done()
+		fmt.Fprintln(stdout, "draining")
+		time.Sleep(time.Hour) // Simulate shutdown that cannot finish gracefully.
+		return nil
+	})
+	_ = command.RunForeground(context.Background(), Invocation{Input: WebOptions{}}, os.Stdout, os.Stderr)
+}
+
+func TestWebSecondInterruptForcesExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows cannot send os.Interrupt to a child process")
+	}
+	command := exec.Command(os.Args[0], "-test.run=^TestWebInterruptHelper$")
+	command.Env = append(os.Environ(), "PELLETS_TEST_WEB_INTERRUPT=1")
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := command.StderrPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	defer command.Process.Kill()
+	lines := func(reader io.Reader) <-chan string {
+		result := make(chan string, 4)
+		go func() {
+			defer close(result)
+			scanner := bufio.NewScanner(reader)
+			for scanner.Scan() {
+				result <- scanner.Text()
+			}
+		}()
+		return result
+	}
+	output, feedback := lines(stdout), lines(stderr)
+	expect := func(ch <-chan string, want string) {
+		t.Helper()
+		select {
+		case got := <-ch:
+			if got != want {
+				t.Fatalf("output = %q, want %q", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for %q", want)
+		}
+	}
+	expect(output, "ready")
+	if err := command.Process.Signal(os.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	expect(feedback, "Stopping web server… Press Ctrl+C again to force exit.")
+	expect(output, "draining")
+	if err := command.Process.Signal(os.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "interrupt") {
+			t.Fatalf("force exit = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("second interrupt did not force exit")
+	}
 }

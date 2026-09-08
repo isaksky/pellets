@@ -38,9 +38,29 @@ func WebCommand(run WebRunner) Command {
 			return nil
 		},
 		RunForeground: func(ctx context.Context, invocation Invocation, stdout, stderr io.Writer) error {
-			notifyContext, stop := signal.NotifyContext(ctx, os.Interrupt)
-			defer stop()
-			return run(notifyContext, invocation, invocation.Input.(WebOptions), stdout, stderr)
+			runContext, cancel := context.WithCancel(ctx)
+			interrupts := make(chan os.Signal, 1)
+			signal.Notify(interrupts, os.Interrupt)
+			finished, signalDone := make(chan struct{}), make(chan struct{})
+			go func() {
+				defer close(signalDone)
+				select {
+				case <-interrupts:
+					// Restore the default action before starting graceful shutdown,
+					// so another Ctrl+C can terminate an unresponsive process.
+					signal.Stop(interrupts)
+					fmt.Fprintln(stderr, "Stopping web server… Press Ctrl+C again to force exit.")
+					cancel()
+				case <-finished:
+				}
+			}()
+			defer func() {
+				close(finished)
+				signal.Stop(interrupts)
+				<-signalDone
+				cancel()
+			}()
+			return run(runContext, invocation, invocation.Input.(WebOptions), stdout, stderr)
 		},
 	}
 }
