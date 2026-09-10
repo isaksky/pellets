@@ -12,28 +12,29 @@ import (
 	"pellets/internal/domain"
 )
 
-type WebOptions struct {
+type ServerOptions struct {
 	Port   uint16
 	NoOpen bool
 }
 
-type WebRunner func(context.Context, Invocation, WebOptions, io.Writer, io.Writer) error
+type ServerRunner func(context.Context, Invocation, ServerOptions, io.Writer, io.Writer) error
 
-// WebCommand creates the only foreground/raw-output command. Its stdout is
+// ServerCommand creates the only foreground/raw-output command. Its stdout is
 // the listener URL; it does not emit a JSON envelope after shutdown.
-func WebCommand(run WebRunner) Command {
+func ServerCommand(run ServerRunner) Command {
 	return Command{
-		Name:                  "web",
-		Summary:               "Open the foreground local web inspector.",
-		Usage:                 "pl [--project CODE] web [--port PORT] [--no-open]",
-		Parse:                 parseWebOptions,
+		Name:                  "server",
+		Aliases:               []string{"web"},
+		Summary:               "Run the foreground local server.",
+		Usage:                 "pl [--project CODE] server [--port PORT] [--no-open]",
+		Parse:                 parseServerOptions,
 		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
 		Validate: func(globals GlobalOptions, _ any) error {
 			if globals.Human || globals.Pretty {
-				return domain.NewError(domain.Usage, "format_not_supported", "web does not use JSON or human output formatting", nil)
+				return domain.NewError(domain.Usage, "format_not_supported", "server does not use JSON or human output formatting", nil)
 			}
 			if run == nil {
-				return domain.NewError(domain.Unexpected, "internal_error", "web command is not configured", nil)
+				return domain.NewError(domain.Unexpected, "internal_error", "server command is not configured", nil)
 			}
 			return nil
 		},
@@ -49,7 +50,7 @@ func WebCommand(run WebRunner) Command {
 					// Restore the default action before starting graceful shutdown,
 					// so another Ctrl+C can terminate an unresponsive process.
 					signal.Stop(interrupts)
-					fmt.Fprintln(stderr, "Stopping web server… Press Ctrl+C again to force exit.")
+					fmt.Fprintln(stderr, "Stopping server… Press Ctrl+C again to force exit.")
 					cancel()
 				case <-finished:
 				}
@@ -60,13 +61,13 @@ func WebCommand(run WebRunner) Command {
 				<-signalDone
 				cancel()
 			}()
-			return run(runContext, invocation, invocation.Input.(WebOptions), stdout, stderr)
+			return run(runContext, invocation, invocation.Input.(ServerOptions), stdout, stderr)
 		},
 	}
 }
 
-func parseWebOptions(arguments []string) (any, error) {
-	var options WebOptions
+func parseServerOptions(arguments []string) (any, error) {
+	var options ServerOptions
 	seen := make(map[string]bool)
 	for len(arguments) > 0 {
 		name, value, hasValue := splitOption(arguments[0])
@@ -103,3 +104,14 @@ func parseWebOptions(arguments []string) (any, error) {
 	}
 	return options, nil
 }
+
+// WebOptions and WebRunner keep internal callers source-compatible while the
+// public command spelling is migrated to server.
+type WebOptions = ServerOptions
+type WebRunner = ServerRunner
+
+// WebCommand is retained for callers that construct the command directly.
+// It returns the canonical server command and its deprecated web alias.
+func WebCommand(run WebRunner) Command { return ServerCommand(run) }
+
+func parseWebOptions(arguments []string) (any, error) { return parseServerOptions(arguments) }

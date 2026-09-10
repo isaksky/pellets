@@ -308,6 +308,7 @@ func TestPelletsSkillReferencedCommandAndFlagContract(t *testing.T) {
 		ReleaseCommand(app.PelletManager{}), CloseCommand(app.PelletManager{}),
 		DeferCommand(app.PelletManager{}), ReopenCommand(app.PelletManager{}),
 		MemoryCommand(app.MemoryManager{}), ProjectCommand(app.ProjectManager{}),
+		ServerCommand(func(context.Context, Invocation, ServerOptions, io.Writer, io.Writer) error { return nil }),
 	}
 	application := NewWithCommands("test", commands...)
 	parsedExamples := 0
@@ -352,6 +353,7 @@ func TestPelletsSkillReferencedCommandAndFlagContract(t *testing.T) {
 		"--request-id": true, "--external-id": true, "--group": true, "--recover-workspace": true,
 		"--yes": true, "--before": true, "--after": true, "--created-by": true,
 		"--approved-only": true, "--text": true, "--delete-conflicting-redirects": true,
+		"--port": true, "--no-open": true,
 	}
 	for _, flag := range flagPattern.FindAllString(app.PelletsSkillContent(), -1) {
 		if !supportedFlags[flag] {
@@ -363,6 +365,7 @@ func TestPelletsSkillReferencedCommandAndFlagContract(t *testing.T) {
 		{"add", "retryable task", "--request-id", "request-1"},
 		{"--project", "foo", "project", "show"},
 		{"--project", "foo", "project", "rename", "bar", "--delete-conflicting-redirects", "--yes"},
+		{"server", "--port", "0", "--no-open"},
 	} {
 		if _, err := application.parse(args); err != nil {
 			t.Errorf("implemented global parser rejected referenced flag invocation %v: %v", args, err)

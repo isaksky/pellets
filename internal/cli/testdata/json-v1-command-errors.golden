@@ -23,4 +23,4 @@ memory-search-error exit=2 {"error":{"code":"missing_query","message":"memory se
 memory-approve-error exit=2 {"error":{"code":"invalid_memory_id","details":{"memory_id":"01"},"message":"memory ID \"01\" must be a positive canonical decimal integer"},"schema_version":1}
 memory-remove-error exit=6 {"error":{"code":"confirmation_required","details":{"memory_id":1},"message":"memory removal requires --yes"},"schema_version":1}
 skill-install-error exit=2 {"error":{"code":"missing_skill_choices","details":{"missing":["--scope","--agent"]},"message":"skill install requires --scope and --agent when prompts are unavailable"},"schema_version":1}
-web-error exit=2 {"error":{"code":"invalid_port","details":{"port":"080"},"message":"port must be a canonical integer from 0 through 65535"},"schema_version":1}
+server-error exit=2 {"error":{"code":"invalid_port","details":{"port":"080"},"message":"port must be a canonical integer from 0 through 65535"},"schema_version":1}

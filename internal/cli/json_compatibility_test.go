@@ -15,7 +15,7 @@ import (
 	"pellets/internal/discovery"
 )
 
-func TestJSONV1ProjectSkillWebAndTypedEmptySuccessGolden(t *testing.T) {
+func TestJSONV1ProjectSkillServerAndTypedEmptySuccessGolden(t *testing.T) {
 	common := filepath.Join(t.TempDir(), "JSON v1 compatibility with spaces 界")
 	repository := filepath.Join(common, "repository ü")
 	nested := filepath.Join(repository, "nested", "working")
@@ -50,18 +50,18 @@ func TestJSONV1ProjectSkillWebAndTypedEmptySuccessGolden(t *testing.T) {
 		common,
 	)
 
-	web := New("test", WebCommand(func(_ context.Context, _ Invocation, _ WebOptions, stdout, _ io.Writer) error {
+	server := New("test", ServerCommand(func(_ context.Context, _ Invocation, _ ServerOptions, stdout, _ io.Writer) error {
 		_, err := io.WriteString(stdout, "http://127.0.0.1:43123\n")
 		return err
 	})).WithCurrentWorkspaceBootstrap(func(context.Context, string) (discovery.Database, error) {
 		return discovery.Database{Root: common, Path: discovery.DatabasePath(common)}, nil
 	})
-	web.workingDirectory = func() (string, error) { return nested, nil }
-	stdout, stderr, exit := runTestApp(web, "web", "--port", "43123", "--no-open")
+	server.workingDirectory = func() (string, error) { return nested, nil }
+	stdout, stderr, exit := runTestApp(server, "server", "--port", "43123", "--no-open")
 	if exit != 0 || stderr != "" || stdout != "http://127.0.0.1:43123\n" {
-		t.Fatalf("web success = exit %d stdout %q stderr %q", exit, stdout, stderr)
+		t.Fatalf("server success = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
-	fmt.Fprintf(&success, "web exit=0 %s", stdout)
+	fmt.Fprintf(&success, "server exit=0 %s", stdout)
 	assertGolden(t, "json-v1-command-success.golden", success.String())
 
 	var empty strings.Builder
@@ -104,7 +104,7 @@ func TestJSONV1EveryCommandErrorGoldenAndExitCode(t *testing.T) {
 		PurgeCommand(emptyPelletManager()),
 		MemoryCommand(app.MemoryManager{}),
 		SkillCommand(app.SkillInstaller{}),
-		WebCommand(func(context.Context, Invocation, WebOptions, io.Writer, io.Writer) error { return nil }),
+		ServerCommand(func(context.Context, Invocation, ServerOptions, io.Writer, io.Writer) error { return nil }),
 	)
 	workingDirectoryCalls := 0
 	application.workingDirectory = func() (string, error) {
@@ -143,7 +143,7 @@ func TestJSONV1EveryCommandErrorGoldenAndExitCode(t *testing.T) {
 		{label: "memory-approve-error", exit: 2, code: "invalid_memory_id", args: []string{"memory", "approve", "01"}},
 		{label: "memory-remove-error", exit: 6, code: "confirmation_required", args: []string{"memory", "remove", "1"}},
 		{label: "skill-install-error", exit: 2, code: "missing_skill_choices", args: []string{"skill", "install"}},
-		{label: "web-error", exit: 2, code: "invalid_port", args: []string{"web", "--port", "080"}},
+		{label: "server-error", exit: 2, code: "invalid_port", args: []string{"server", "--port", "080"}},
 	}
 
 	var golden strings.Builder
@@ -186,7 +186,7 @@ func TestJSONV1GoldenManifestCoversEveryPublicResultName(t *testing.T) {
 		}
 	}
 	for _, rawContract := range []string{
-		"web exit=0 http://127.0.0.1:43123\n",
+		"server exit=0 http://127.0.0.1:43123\n",
 		"Pellets is a local task queue for coding agents.",
 		"pl test (JSON schema 1)\n",
 	} {
@@ -202,7 +202,7 @@ func TestJSONV1GoldenManifestCoversEveryPublicResultName(t *testing.T) {
 	for _, label := range []string{
 		"init-db", "project-list", "project-show", "project-rename", "add", "list", "next", "show", "edit", "move",
 		"start", "start-next", "release", "close", "reopen", "defer", "search", "purge", "memory-add",
-		"memory-list", "memory-show", "memory-search", "memory-approve", "memory-remove", "skill-install", "web",
+		"memory-list", "memory-show", "memory-search", "memory-approve", "memory-remove", "skill-install", "server",
 	} {
 		if !strings.Contains(fixtures.String(), label+"-error exit=") {
 			t.Errorf("JSON v1 golden fixtures do not cover error/exit contract %q", label)

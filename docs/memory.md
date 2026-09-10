@@ -35,7 +35,7 @@ Every memory records `created_by` as `agent` or `human`.
 - Agent-created memory begins unapproved.
 - Human-created memory is approved immediately.
 - `pl memory approve` adds a human approval timestamp to agent-created memory.
-- CLI memory commands do not edit text. The foreground `pl web` editor may replace text under full-row optimistic concurrency. Changing approved agent-created text clears approval; changing human-created text records a new human approval/update instant.
+- CLI memory commands do not edit text. The foreground `pl server` editor may replace text under full-row optimistic concurrency. Changing approved agent-created text clears approval; changing human-created text records a new human approval/update instant.
 - The first release records approval state and time, not human identity or a full approval history.
 
 Approval means “a human has reviewed this text,” not “this statement is guaranteed true.” Search results expose provenance and approval so an agent can weigh them appropriately.
@@ -67,7 +67,7 @@ Each memory row is one independently retrievable idea. The CLI does not automati
 
 Agents should split unrelated facts into separate memories and include enough local context for a search result to make sense alone. V1 accepts one non-empty, valid UTF-8 value up to 1 MiB (1,048,576 bytes); `pl memory --help` documents this conservative safety limit.
 
-Because each row is independently retrieved and a web text replacement is one atomic authoritative/FTS transaction, approval semantics remain clear. Automatic chunking would create hidden child records and is intentionally absent.
+Because each row is independently retrieved and a server text replacement is one atomic authoritative/FTS transaction, approval semantics remain clear. Automatic chunking would create hidden child records and is intentionally absent.
 
 ## Keyword retrieval with FTS5
 
@@ -129,9 +129,9 @@ pl memory approve MEMORY_ID
 
 Set `approved_at` and `updated_at` if approval is absent. Repeating approval is idempotent and retains the original approval and update times. The command represents an explicit human action; Pellets has no authentication layer.
 
-### Web editing
+### Server editing
 
-`pl web` can create memory, replace memory text, and approve current text. Browser creation is always server-assigned `human` provenance and is immediately approved; the client cannot submit a different provenance. The web tool does not expose removal. Each edit or approval submits an opaque token for the complete authoritative memory row; storage validates it after acquiring the short writer transaction. A stale editor receives HTTP 409 with the current row and preserved draft, and no authoritative or FTS write occurs.
+`pl server` can create memory, replace memory text, and approve current text. Browser creation is always server-assigned `human` provenance and is immediately approved; the client cannot submit a different provenance. The server does not expose removal. Each edit or approval submits an opaque token for the complete authoritative memory row; storage validates it after acquiring the short writer transaction. A stale editor receives HTTP 409 with the current row and preserved draft, and no authoritative or FTS write occurs.
 
 Text replacement sends the old text to the external-content FTS delete command, updates the authoritative row, and inserts the new FTS text in one immediate transaction. An approved agent-created memory becomes unapproved after its statement changes. A human-created memory remains human-approved and receives the edit timestamp as its new approval/update time because the web action is explicitly human-facing. Pellets records no editor identity or revision history.
 
@@ -156,7 +156,7 @@ Search results may add `rank` and `snippet`. The authoritative full `text` remai
 ## Privacy and local behavior
 
 - Memory text remains in the discovered local SQLite database.
-- `pl` performs no external network request, telemetry, embedding, or external indexing. `pl web` serves only its local browser over loopback from embedded assets.
+- `pl` performs no external network request, telemetry, embedding, or external indexing. `pl server` serves only its local browser over loopback from embedded assets.
 - The database is locally excluded from Git and must not be committed.
 - Anyone who can read the database file can read memory; encryption at rest is not provided.
 - Purge of closed pellets does not remove memory. Users must remove sensitive or obsolete memory explicitly.

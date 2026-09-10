@@ -29,7 +29,7 @@ const until = async (predicate, message) => {
   execFileSync('git', ['init', '-q'], {cwd: fixture});
   const first = cli('add', 'Alpha browser task').data;
   cli('add', 'Zulu browser task');
-  server = spawn(binary, ['web', '--port', '0', '--no-open'], {cwd: fixture});
+  server = spawn(binary, ['server', '--port', '0', '--no-open'], {cwd: fixture});
   const origin = await new Promise((resolve, reject) => {
     let output = '';
     const timeout = setTimeout(() => reject(new Error('Server did not start')), 10000);

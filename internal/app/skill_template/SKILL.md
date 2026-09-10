@@ -75,3 +75,9 @@ pl memory search "parser identifiers" --approved-only
 - Never invent dependencies, blocking graphs, epics, agent/PID ownership, leases, heartbeats, or assignment history.
 - Never maintain a parallel Markdown task queue. Pellets is authoritative once the work is recorded there.
 - Do not manually change Git state, ignore files, agent configuration, or repository policy unless the user separately requests that work. Pellets' own first-use local-exclude safeguard is expected.
+
+## Optional foreground server
+
+- Use `pl server [--port PORT] [--no-open]` for the local foreground inspector. `pl web` is a deprecated compatibility alias; use `server` in new commands and examples.
+- The server is loopback-only and foreground-bound. It owns the browser UI and any Codex execution it starts: closing a browser tab does not stop work, while stopping the server does. Do not treat it as a daemon, persistent worker, remote service, or worktree manager.
+- Queue and memory commands remain usable without Codex installed or authenticated. If the server supervises Codex, it reuses the installed runtime's credentials, configuration, instructions, and tools; never assume blanket approval or a disabled sandbox.

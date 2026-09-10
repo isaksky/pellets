@@ -27,8 +27,9 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 7. Defer a pellet to `maybe_later` for human review without making it executable work.
 8. Store optional project memories, distinguish agent-created memories from human-approved memories, and retrieve them with keyword search.
 9. Use one local database for one repository with several worktrees or for several unrelated sibling repositories.
-10. Let a human inspect and safely edit that same authoritative database through an optional foreground, loopback-only web interface.
+10. Let a human inspect and safely edit that same authoritative database through an optional foreground, loopback-only server.
 11. Install a narrow, portable Pellets agent skill at repository or personal scope so Codex and Claude can follow the current `pl` contract before first-use bootstrap.
+12. Optionally let that foreground server supervise Codex work in a selected existing worktree, preserving concise durable run state and explicit review checkpoints without turning Pellets into a general orchestrator.
 
 ## Goals
 
@@ -43,7 +44,7 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 - Let an ordinary current-project command automatically create/register local Pellets metadata on first use, without a prerequisite project-initialization command or interactive code prompt.
 - Support one database containing several logical Git projects and several worktree workspaces per project, with short project codes and project-local pellet numbers.
 - Let a logical project rename its public code without changing its stable project identity or invalidating references that use former codes.
-- Remain local and usable without an account, hosted server, daemon, or external network connection. The optional `pl web` process is a foreground loopback tool, not a runtime dependency.
+- Remain local and usable without Codex, an account, a hosted server, daemon, or external network connection. The optional `pl server` process is a foreground loopback tool, not a runtime dependency.
 - Provide keyword search over pellets and memories through SQLite FTS5.
 - Produce self-contained macOS and Windows executables.
 - Install an instruction-only `pellets` Agent Skill for Codex, Claude, or both without opening a database, changing Git state, or requiring a network connection.
@@ -55,7 +56,9 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 - Agent accounts, assignment history, PID/process ownership, sessions, leases, heartbeats, expiry, orchestration, or background cleanup.
 - More than one in-progress pellet per workspace. Different workspaces of one project may progress different pellets.
 - Cloud synchronization, automatic Git synchronization, or committing the database to Git.
-- A hosted or remotely reachable server, daemon, account system, or network API. `pl web` is intentionally loopback-only and foreground-bound.
+- A hosted or remotely reachable server, daemon, account system, or network API. `pl server` is intentionally loopback-only and foreground-bound.
+- A separate persistent worker, automatic worktree creation, automatic restart, or automatic resume of Codex work. The foreground server owns only the execution it starts.
+- A general dependency graph, plugin framework, full Git UI, push/PR workflow, or Claude execution integration.
 - Tags, separate task notes, or an automatic task event/history log.
 - Multiple groups per pellet, a group table, or behavior attached to a group.
 - Custom workflows or custom statuses in the first release.
@@ -85,7 +88,7 @@ An `in_progress` pellet names exactly one registered workspace from its project.
 
 ### Local means local
 
-The database is never committed to Git. `pl` does not send task or memory contents over an external network. The web inspector serves only the local browser over `127.0.0.1`, performs no runtime network fetch, and stops with its foreground process. Pellets performs no telemetry.
+The database is never committed to Git. `pl` does not send task or memory contents over an external network. The server serves only the local browser over `127.0.0.1`, performs no runtime network fetch, and stops with its foreground process. Optional Codex supervision reuses the installed runtime's credentials, configuration, instructions, and tools; it does not create a second integration or change ordinary CLI requirements. Pellets performs no telemetry.
 
 The optional skill installer uses one embedded instruction template and local filesystem operations. Repository-scoped skills are ordinary files the user may choose to commit; `pl` never stages or commits them. Personal-scoped skills stay under the platform-resolved home directory. Installation does not inspect or open `.pellets` data.
 
@@ -103,7 +106,7 @@ For Pellets, “lightweight” means:
 
 - one `pl` executable;
 - one SQLite file for one or more nearby projects;
-- no required or background long-running process; `pl web` runs only while its foreground command remains active;
+- no required or background long-running process; `pl server` runs only while its foreground command remains active;
 - no required configuration file;
 - no hosted runtime, daemon, container, account, or external-network dependency;
 - no model downloads or native vector extensions;
@@ -127,10 +130,12 @@ The first release is successful when all of the following are true:
 - Active-queue insertions and moves use integer arithmetic, survive gap exhaustion through transactional rebalancing, and never expose duplicate non-null priorities.
 - Concurrent CLI processes cannot allocate duplicate pellet numbers, assign one pellet twice, or violate the one-in-progress-per-workspace invariant.
 - Agent-created memories can be searched, reviewed, and marked human-approved without being attached to task rows.
-- A human can inspect every project, workspace, pellet state, and memory in the resolved database and perform routine non-destructive edits through `pl web` without weakening queue, ownership, FTS, or concurrency invariants.
+- A human can inspect every project, workspace, pellet state, and memory in the resolved database and perform routine non-destructive edits through `pl server` without weakening queue, ownership, FTS, or concurrency invariants.
+- Optional Codex runs have compact durable records and at most one active run per worktree. They stop with the foreground server, never resume automatically after restart, and expose questions, steering, stopping, and explicit resumption rather than hidden background control.
+- Ordinary work remains test → commit → close. A review checkpoint has explicit scope, uses a separate Codex review context, and deduplicates any focused follow-up pellets; it does not introduce a dependency graph or a general event log.
 - Core workflows pass automated tests on macOS and Windows.
 - Codex and Claude can discover logically identical repository- or personal-scoped `pellets` skills, and repeated installation is safe and idempotent.
-- No documented or implemented workflow requires dependency concepts, vector search, Git commits, a daemon, or an external network connection.
+- No documented or implemented Pellets operation requires dependency concepts, vector search, a daemon, or an external network connection; the server never performs Git commits automatically.
 
 ## Constraints
 

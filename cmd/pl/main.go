@@ -106,9 +106,9 @@ func main() {
 		cli.DeferCommand(pelletManager),
 		cli.MemoryCommand(memoryManager),
 		cli.SkillCommand(skillInstaller),
-		cli.WebCommand(func(ctx context.Context, invocation cli.Invocation, options cli.WebOptions, stdout, stderr io.Writer) error {
+		cli.ServerCommand(func(ctx context.Context, invocation cli.Invocation, options cli.ServerOptions, stdout, stderr io.Writer) error {
 			if invocation.Database == nil {
-				return errors.New("web command database discovery did not run")
+				return errors.New("server command database discovery did not run")
 			}
 			return webRunner.Run(ctx, webui.Options{
 				DatabaseRoot: invocation.Database.Root, DatabasePath: invocation.Database.Path, WorkingDirectory: invocation.WorkingDirectory,

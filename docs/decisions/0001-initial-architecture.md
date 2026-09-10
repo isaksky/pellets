@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-28
 
-> [ADR 0002](0002-worktree-scoped-workspaces.md) supersedes this record's one-active-agent-per-project, project-as-one-root, project-wide-in-progress, and project-wide `next` decisions. [ADR 0004](0004-project-code-redirects.md) supersedes its immutable-project-code decision. The remaining product, ordering, storage, FTS, memory, JSON, and PID/lease rejection decisions stay accepted.
+> [ADR 0002](0002-worktree-scoped-workspaces.md) supersedes this record's one-active-agent-per-project, project-as-one-root, project-wide-in-progress, and project-wide `next` decisions. [ADR 0004](0004-project-code-redirects.md) supersedes its immutable-project-code decision. [ADR 0005](0005-foreground-codex-server.md) supersedes its rejection of a foreground local server and optional Codex-runtime boundary. The remaining product, ordering, storage, FTS, memory, JSON, and PID/lease rejection decisions stay accepted.
 
 ## Context
 
@@ -72,7 +72,7 @@ Do not implement:
 - dependencies, edges, blocking, graphs, epics, subtasks, or milestones;
 - multi-agent assignment, PID ownership, claiming, leases, or orchestration;
 - tags, multiple groups, a group entity or hierarchy, task notes, or an automatic task event/history table;
-- a daemon, server, account, network requirement, cloud synchronization, or automatic Git synchronization;
+- a daemon, account, network requirement, cloud synchronization, or automatic Git synchronization; a foreground loopback server and optional Codex supervision are governed narrowly by ADR 0005;
 - committing the database to Git;
 - plugins or custom workflow machinery.
 
@@ -140,7 +140,7 @@ Rejected because SQLite files and WAL companions are not a merge format. The dat
 
 ## Follow-up decisions
 
-ADR 0002 supplies the accepted multi-worktree coordination model, and ADR 0004 supplies project-code rename and redirect semantics. New decision records are still required before adding agent identity/authentication, PID/session ownership, leases, vector retrieval, synchronization, custom statuses, or any dependency-like relationship.
+ADR 0002 supplies the accepted multi-worktree coordination model, ADR 0004 supplies project-code rename and redirect semantics, and ADR 0005 supplies the foreground-server boundary. New decision records are still required before adding agent identity/authentication, PID/session ownership, leases, vector retrieval, synchronization, custom statuses, or any dependency-like relationship.
 
 Related documents:
 

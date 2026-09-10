@@ -6,8 +6,10 @@ external-ID and group filters, FTS5 keyword search, and independent project
 memory in a shared local `.pellets/pellets.db`.
 
 Pellets is one CGo-free executable with SQLite embedded. It has no account,
-telemetry, cloud synchronization, model, plugin runtime, daemon, or required
-service. Git must be available for repository and worktree discovery.
+telemetry, cloud synchronization, plugin runtime, daemon, or required service.
+Git must be available for repository and worktree discovery. Its optional
+foreground server can later supervise an already-installed Codex runtime, but
+ordinary queue, memory, and inspection use never require Codex or an account.
 
 ## Install
 
@@ -404,22 +406,26 @@ The installed skill activates implicitly only when a prompt explicitly names
 `pl` or Pellet/Pellets. Generic task, issue, backlog, project-management, or
 memory requests are deliberately excluded.
 
-## Local web inspector
+## Local foreground server
 
 ```text
-pl web
-pl web --no-open
-pl web --port 8123 --no-open
-pl --project demo web
+pl server
+pl server --no-open
+pl server --port 8123 --no-open
+pl --project demo server
 ```
 
-`pl web` is an optional foreground operator tool over the same resolved
+`pl server` is an optional foreground operator tool over the same resolved
 database and performs the same automatic first-use bootstrap. It listens only
 on `127.0.0.1`, uses embedded offline assets, and stops when interrupted. It
-can inspect every registered project, workspace,
-pellet state, and memory; it supports routine queue and memory edits with
-optimistic conflict detection. Purge, memory removal, and other irreversible
-actions are intentionally absent.
+owns the browser UI and any Codex execution it starts: closing a browser tab
+does not stop that work, while stopping the server does. It can inspect every
+registered project, workspace, pellet state, and memory; it supports routine
+queue and memory edits with optimistic conflict detection. Purge, memory
+removal, and other irreversible actions are intentionally absent.
+
+`pl web` remains a deprecated compatibility alias with the same options and
+foreground behavior. New scripts and documentation must use `pl server`.
 
 Press Ctrl+C to stop. Pellets immediately acknowledges the interrupt on stderr,
 closes live-update streams, and allows ordinary requests up to five seconds to
@@ -441,7 +447,9 @@ Pellets is deliberately a local ordered queue, not a general project manager:
 - It has no tags, multiple groups, custom statuses, task notes, event history,
   agent identity, leases, heartbeats, or background orchestration.
 - It has no cloud or Git synchronization, remote API, hosted service, daemon,
-  account system, or general plugin framework.
+  account system, or general plugin framework. Optional Codex execution is
+  local, foreground-server-owned supervision of the installed runtime, not a
+  persistent worker or an alternative agent integration.
 - Memory is free-form keyword-searchable project knowledge, not task history,
   a dependency mechanism, or automatically generated content.
 - Workspace ownership identifies a registered Git worktree only. Two workers
@@ -463,7 +471,7 @@ The optional browser regression suite uses Playwright and a temporary database:
 path (or set `NODE_PATH`), and set `PLAYWRIGHT_CHANNEL=chrome` to use installed
 Chrome instead of Playwright's Chromium. It covers the Datastar navigation,
 forms, live refresh, conflict handling, and keyboard flows. Node and Playwright
-are development tools only; `pl web` serves embedded assets and works offline.
+are development tools only; `pl server` serves embedded assets and works offline.
 
 The cross-build script verifies `CGO_ENABLED=0` artifacts for macOS
 AMD64/ARM64 and Windows AMD64. Stable release automation uses the Go 1.26.5

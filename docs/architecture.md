@@ -1,6 +1,13 @@
 # Architecture
 
-Pellets is a single-process Go CLI around a local SQLite database. Its optional `pl web` command is a foreground, loopback-only HTTP process over that same database. It is not a daemon or remote service, and Pellets has no external network client, plugin loader, or embedding runtime.
+Pellets is a single-process Go CLI around a local SQLite database. Its optional
+`pl server` command is a foreground, loopback-only HTTP process over that same
+database. It owns the local browser UI and any Codex execution it starts; a
+browser tab closing is not a process-lifecycle event, while server cancellation
+stops its supervised execution. It is not a daemon or remote service, and
+Pellets has no external network client, plugin loader, or embedding runtime.
+`pl web` is a deprecated compatibility alias; the canonical command, help, and
+examples use `server`.
 
 See [project-goals.md](project-goals.md) for the product boundary, [data-model.md](data-model.md) for schema and ordering invariants, [cli-spec.md](cli-spec.md) for the public interface, [0001-initial-architecture.md](decisions/0001-initial-architecture.md) for the initial decision, and [0002-worktree-scoped-workspaces.md](decisions/0002-worktree-scoped-workspaces.md) for its worktree supersession.
 
@@ -127,7 +134,7 @@ All Git commands, canonicalization, existence checks, and stale-path checks fini
 
 The repository name comes from the basename containing a `.git` common directory, or from a bare common-directory basename with a terminal `.git` removed. Code normalization lowercases ASCII letters, preserves ASCII digits, collapses every run of other characters into one internal hyphen, and trims edge hyphens. A non-empty result of at most 12 bytes is the first candidate. Empty or longer names, and first candidates already reserved as canonical codes or redirects, use an identity-hash candidate: up to three normalized prefix bytes (or `p`), `-`, and eight lowercase hexadecimal SHA-256 digits. The hash seed is the stored common-directory identity serialized as `true:<slash-normalized-relative-path>` or `false:<slash-normalized-absolute-path>`. Further collisions rehash that seed plus a NUL byte and the increasing canonical decimal attempt. Candidate lookup and project/workspace insertion occur under the same immediate transaction, so concurrent first commands converge for one identity and different identities cannot commit one code.
 
-Canonical project codes and former-code redirects share one reserved namespace. Redirect rows point directly to stable project IDs, never to another code, and resolution performs exactly one canonical-or-redirect lookup. Project, pellet-reference, filter, lifecycle, memory, and web routes compare stable project IDs after that lookup and render the current canonical code in every successful result. An old web deep link is redirected to the equivalent canonical path before rendering; query parameters are preserved.
+Canonical project codes and former-code redirects share one reserved namespace. Redirect rows point directly to stable project IDs, never to another code, and resolution performs exactly one canonical-or-redirect lookup. Project, pellet-reference, filter, lifecycle, memory, and server routes compare stable project IDs after that lookup and render the current canonical code in every successful result. An old server deep link is redirected to the equivalent canonical path before rendering; query parameters are preserved.
 
 Project rename is planned read-only and applied under one immediate transaction. The transaction revalidates the exact planned foreign-redirect conflicts, deletes only those rules when explicitly authorized, promotes an owned redirect when selected, updates the canonical code, and creates a direct redirect from the former code. A current-code rename is idempotent. A foreign canonical code is always a hard conflict. A changed conflict set or any SQL/commit failure is write-free after rollback.
 
@@ -175,17 +182,40 @@ Also verify that FTS5 is available by executing a small capability check. Failur
 
 Keep SQL as embedded `.sql` files or focused Go constants. Do not introduce an ORM or a general query builder.
 
-## Foreground web inspector
+## Foreground server
 
-`pl web [--port PORT] [--no-open]` uses the same binding-first database discovery as ordinary commands. It listens with `tcp4` on exactly `127.0.0.1`; port zero asks the OS for an available port. The URL is printed only after `net.Listen` succeeds and the HTTP server has been scheduled. Unless `--no-open` is supplied, the platform launcher opens that URL after readiness. Launcher failure is a warning and does not stop the server. The first Ctrl+C immediately acknowledges shutdown on stderr and restores the default interrupt action, allowing a second Ctrl+C to force exit. Cancellation ends SSE streams and the database monitor before bounded HTTP shutdown, so open browser streams do not consume the five-second grace period. Ordinary request contexts remain active while draining; shutdown then closes every SQLite handle. There is no daemonization, background service, configuration file, or remotely selectable bind address.
+`pl server [--port PORT] [--no-open]` uses the same binding-first database discovery as ordinary commands. It listens with `tcp4` on exactly `127.0.0.1`; port zero asks the OS for an available port. The URL is printed only after `net.Listen` succeeds and the HTTP server has been scheduled. Unless `--no-open` is supplied, the platform launcher opens that URL after readiness. Launcher failure is a warning and does not stop the server. The first Ctrl+C immediately acknowledges shutdown on stderr and restores the default interrupt action, allowing a second Ctrl+C to force exit. Cancellation ends SSE streams, supervised Codex execution, and the database monitor before bounded HTTP shutdown, so open browser streams do not consume the five-second grace period. Ordinary request contexts remain active while draining; shutdown then closes every SQLite handle. There is no daemonization, background service, configuration file, or remotely selectable bind address. `pl web` accepts the same options as a deprecated alias but its command help renders the canonical `server` usage.
 
-The web process owns three deliberately separate database paths:
+The server process owns three deliberately separate database paths:
 
 1. A read pool opens the file with URI `mode=ro` and connection-local `query_only=ON`, `trusted_schema=OFF`, and the normal bounded busy timeout. Every GET, initial page, Datastar fragment, and recovery poll uses this pool. Query rows are always scanned into Go values and closed before template or network output begins.
 2. One writer pool has one connection and uses the existing immediate-transaction queue and memory helpers. Form parsing and usage validation finish before a writer transaction starts. The writer commits or rolls back before any template, SSE, browser, or network work.
 3. Exactly one monitor pool has one connection and one pinned `*sql.Conn`. It also uses `mode=ro` and `query_only=ON`. Only while SSE clients exist, the monitor issues one immediate `PRAGMA data_version` query at a bounded interval. It never begins an explicit transaction and holds no rows between checks.
 
-SQLite documents that [`PRAGMA data_version`](https://sqlite.org/pragma.html#pragma_data_version) values are meaningful only when two values come from the same connection. A change means that some other connection committed; it does not identify a table, row, order, or number of commits. The web writer is intentionally a different connection, so both its commits and commits from CLI processes change the pinned monitor's observation. Rollbacks and reads do not. The monitor therefore treats a changed value only as an invalidation signal, coalesces bursts, and broadcasts a bounded `pellets-invalidate` SSE message containing no row data, database path, or capability. Each visible page then performs one authoritative Datastar GET for all live regions. Native `EventSource` reconnect plus a single slower page refresh interval and initial loads repair missed messages.
+SQLite documents that [`PRAGMA data_version`](https://sqlite.org/pragma.html#pragma_data_version) values are meaningful only when two values come from the same connection. A change means that some other connection committed; it does not identify a table, row, order, or number of commits. The server writer is intentionally a different connection, so both its commits and commits from CLI processes change the pinned monitor's observation. Rollbacks and reads do not. The monitor therefore treats a changed value only as an invalidation signal, coalesces bursts, and broadcasts a bounded `pellets-invalidate` SSE message containing no row data, database path, or capability. Each visible page then performs one authoritative Datastar GET for all live regions. Native `EventSource` reconnect plus a single slower page refresh interval and initial loads repair missed messages.
+
+### Optional Codex execution boundary
+
+The foreground server is the sole supervisor for optional Codex execution. It
+starts only the installed local Codex runtime and reuses that runtime's
+credentials, configuration, instructions, and tools; queue and memory commands
+and the inspector remain usable when Codex is absent or unauthenticated. The
+server never creates a worktree, remote listener, daemon, background start/stop
+service, or persistent worker.
+
+The execution model reserves one active run per registered worktree. A durable
+run record preserves the concise activity, conversation linkage, selected
+worktree, state, and explicit stop/interruption outcome needed to inspect an
+interrupted run, but restart never resumes it automatically. Questions,
+steering, stopping, and resuming are explicit user actions. The automatic
+approval mode is `REVIEW`: it is neither blanket approval nor a disabled
+sandbox.
+
+Ordinary server-supervised work follows test → commit → close. A review
+checkpoint has explicit scope and a separate Codex review context; it can
+produce deduplicated focused follow-up pellets, but it does not create a
+general dependency graph, generic event stream, Git UI, push/PR operation, or
+plugin framework.
 
 Do not replace this design with SQLite update, pre-update, WAL, commit, or filesystem hooks. SQLite's [`sqlite3_update_hook`](https://sqlite.org/c3ref/update_hook.html) is connection-local, omits several write classes, and cannot observe other processes as the source of truth. Pellets adds no change-log table, notification trigger, watcher, or notification-only write.
 

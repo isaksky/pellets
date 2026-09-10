@@ -27,9 +27,9 @@ former code as a direct alias of that stable row.
   direct SQL and concurrent writes.
 - Resolution checks canonical codes and direct redirects once. Redirects never
   target codes, so chains and recursive lookup do not exist.
-- Every successful CLI, application, storage, memory, lifecycle, filter, web,
+- Every successful CLI, application, storage, memory, lifecycle, filter, server,
   and deep-link result emits the current canonical code or pellet reference.
-  Old web paths temporarily redirect to their canonical equivalent.
+  Old server paths temporarily redirect to their canonical equivalent.
 - Rename uses one immediate transaction and preserves project IDs, pellet
   numbers, workspaces, queue state, memories, and FTS content. It updates the
   canonical code and creates a direct redirect for the former code atomically.

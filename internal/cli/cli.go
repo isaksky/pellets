@@ -39,7 +39,11 @@ type Invocation struct {
 // globals and command input. Neither function may perform discovery or command
 // side effects. Run does not render or write process output.
 type Command struct {
-	Name                  string
+	Name string
+	// Aliases are accepted command spellings that dispatch to Name. They are
+	// deliberately omitted from the main help listing so help presents the
+	// canonical command surface while allowing a bounded compatibility window.
+	Aliases               []string
 	Summary               string
 	Usage                 string
 	SkipDatabaseDiscovery bool
@@ -61,6 +65,7 @@ type Command struct {
 type App struct {
 	version          string
 	commands         map[string]Command
+	aliases          map[string]string
 	bootstrapCurrent func(context.Context, string) (discovery.Database, error)
 	workingDirectory func() (string, error)
 	stdin            io.Reader
@@ -76,12 +81,16 @@ func New(version string, commands ...Command) *App {
 // Later milestones register their commands here; tests use it as the command harness.
 func NewWithCommands(version string, commands ...Command) *App {
 	registered := make(map[string]Command, len(commands))
+	aliases := make(map[string]string)
 	for _, command := range commands {
 		if command.Name == "" {
 			panic("cli: command has an empty name")
 		}
 		if _, exists := registered[command.Name]; exists {
 			panic("cli: duplicate command " + command.Name)
+		}
+		if _, exists := aliases[command.Name]; exists {
+			panic("cli: command name conflicts with alias " + command.Name)
 		}
 		if command.Run != nil && command.RunForeground != nil {
 			panic("cli: command has both Run and RunForeground: " + command.Name)
@@ -90,9 +99,24 @@ func NewWithCommands(version string, commands ...Command) *App {
 			panic("cli: command both skips database discovery and needs the current workspace: " + command.Name)
 		}
 		registered[command.Name] = command
+		for _, alias := range command.Aliases {
+			if alias == "" {
+				panic("cli: command has an empty alias")
+			}
+			if alias == command.Name {
+				panic("cli: command alias repeats command name " + alias)
+			}
+			if _, exists := registered[alias]; exists {
+				panic("cli: command alias conflicts with command name " + alias)
+			}
+			if _, exists := aliases[alias]; exists {
+				panic("cli: duplicate command alias " + alias)
+			}
+			aliases[alias] = command.Name
+		}
 	}
 	return &App{
-		version: version, commands: registered, workingDirectory: os.Getwd, stdin: os.Stdin,
+		version: version, commands: registered, aliases: aliases, workingDirectory: os.Getwd, stdin: os.Stdin,
 		isInteractive: streamsAreInteractive,
 	}
 }
@@ -264,6 +288,11 @@ func (a *App) parse(args []string) (parsedInvocation, error) {
 				return parsedInvocation{}, unexpectedArgument(arg)
 			}
 			command, ok := a.commands[arg]
+			if !ok {
+				if canonical, isAlias := a.aliases[arg]; isAlias {
+					command, ok = a.commands[canonical]
+				}
+			}
 			if !ok {
 				return parsedInvocation{}, domain.NewError(
 					domain.Usage,

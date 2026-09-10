@@ -4,7 +4,7 @@ Implement Pellets as small vertical slices. Each milestone must leave the execut
 
 The product boundary is in [project-goals.md](project-goals.md), architecture in [architecture.md](architecture.md), schema in [data-model.md](data-model.md), and public command contract in [cli-spec.md](cli-spec.md).
 
-## Minimal first-release scope
+## Core first-release scope and authorized server extension
 
 The first release includes:
 
@@ -17,13 +17,17 @@ The first release includes:
 - sparse project-scoped integer priority for the active queue, with transactional rebalancing;
 - FTS5 pellet search;
 - independent FTS5 project memory with provenance and human approval;
-- optional foreground, loopback-only Datastar inspector/editor with optimistic concurrency and invalidation-only live refresh;
+- optional foreground, loopback-only `pl server` Datastar inspector/editor with optimistic concurrency and invalidation-only live refresh (`pl web` is a deprecated alias);
 - explicit closed-pellet purge;
 - compact versioned JSON by default and optional human output;
 - embedded forward database migrations;
-- a database-independent installer for one embedded portable Pellets Agent Skill shared by Codex and Claude.
+- a database-independent installer for one embedded portable Pellets Agent Skill shared by Codex and Claude;
+- the narrowly scoped server-execution slices below: durable per-run state, foreground lifecycle ownership, installed-Codex supervision, and explicit review checkpoints.
 
-Anything outside this list is deferred unless required to satisfy an invariant or acceptance test.
+The inspector and command rename are complete before execution work begins. The
+execution slices are deliberately planned follow-on milestones, not behavior
+provided by the rename alone. Anything outside this list is deferred unless
+required to satisfy an invariant or acceptance test.
 
 ## Milestone 0: executable and contract harness
 
@@ -64,18 +68,18 @@ Acceptance criteria:
 
 Add migration 4's direct old-code-to-project redirects, unified namespace
 enforcement, `project rename`, redirect-aware resolution, canonical output, and
-web deep-link canonicalization.
+server deep-link canonicalization.
 
 Acceptance criteria:
 
 - Migration preserves stable project IDs, project-local pellet numbers, workspaces, pellets, memories, FTS state, metadata, and allocation counters. Redirect rows target project IDs directly and cascade only when a project row is actually deleted.
 - Canonical codes and redirects share one unambiguous namespace under concurrent application or direct SQL writes. Generated-code registration treats redirects as reserved.
-- Every project selection, project/pellet lookup, filter, lifecycle, placement, purge, memory, web query/mutation, and deep-link path resolves a canonical code or exactly one direct redirect, never a redirect chain, and emits the current canonical code.
+- Every project selection, project/pellet lookup, filter, lifecycle, placement, purge, memory, server query/mutation, and deep-link path resolves a canonical code or exactly one direct redirect, never a redirect chain, and emits the current canonical code.
 - Rename is one immediate transaction. It is idempotent for the current code, safely promotes an owned redirect, creates a direct redirect from the former code, and rolls back completely on failure.
 - Another project's canonical code is a typed hard conflict. Another project's redirect requires a terminal default-no confirmation or the exact noninteractive `--delete-conflicting-redirects --yes` retry; JSON never waits for input.
 - The authorized conflict set is revalidated inside the rename transaction. A changed set fails write-free, and only the displayed rules may be deleted.
-- Project inspection displays redirects; old web project and pellet links temporarily redirect to canonical paths with query strings preserved.
-- Migration, resolution, collision, concurrency, rollback, prompt/EOF/interruption, stale-conflict, linked-worktree, shared-database, web, compiled-executable, JSON compatibility, cross-build, macOS, and native Windows tests cover the contract.
+- Project inspection displays redirects; old server project and pellet links temporarily redirect to canonical paths with query strings preserved.
+- Migration, resolution, collision, concurrency, rollback, prompt/EOF/interruption, stale-conflict, linked-worktree, shared-database, server, compiled-executable, JSON compatibility, cross-build, macOS, and native Windows tests cover the contract.
 
 ## Milestone 2: basic pellet queue
 
@@ -179,9 +183,9 @@ Acceptance criteria:
 - A read-only integrity diagnostic rejects corrupt and incompatible files before journal-mode or migration writes and emits no partial success.
 - Busy errors, including migration-lock contention, stop within the configured five-second bound and map to the stable `database_busy` response.
 
-## Milestone 8: foreground local web inspector
+## Milestone 8: foreground local server and inspector
 
-Implement `pl web` with standard-library HTTP/templates/embedding, pinned vendored Datastar, repository CSS and small JavaScript enhancements, a separate read-only/query-only pool, one separate writer connection, and exactly one pinned read-only/query-only `PRAGMA data_version` monitor connection.
+Implement `pl server` with standard-library HTTP/templates/embedding, pinned vendored Datastar, repository CSS and small JavaScript enhancements, a separate read-only/query-only pool, one separate writer connection, and exactly one pinned read-only/query-only `PRAGMA data_version` monitor connection. Keep `pl web` only as a deprecated compatibility alias.
 
 Acceptance criteria:
 
@@ -190,10 +194,83 @@ Acceptance criteria:
 - The interface displays complete project/workspace ownership, pellet lifecycle/order/identity, and memory provenance/approval/timestamps. It supports pellet create/scalar edit/reorder/lifecycle, memory create/text edit/approve, and explicit named workspace recovery. It exposes no purge or removal.
 - Every existing-row mutation validates a complete-row token under the short writer lock. Concurrent edits yield one commit and one write-free conflict containing current row plus preserved draft (application status 409 in a Datastar HTTP 200 SSE response, or HTTP 409 for an ordinary request). Memory text/FTS changes are atomic and agent-memory approval resets when text changes.
 - Every GET uses `mode=ro` plus `query_only=ON`, materializes and closes rows before output, and cannot retain a transaction across a slow response. Mutation parsing/validation finishes before `BEGIN IMMEDIATE`, and commit/rollback finishes before rendering.
-- One pinned monitor connection compares its own `data_version` only while SSE clients exist. External CLI and separate web-writer commits generate coalesced invalidation; rollback/read activity is silent. SSE client queues are bounded and own no database handle. Native EventSource refresh, initial loads, and slower Datastar polling recover missed signals.
+- One pinned monitor connection compares its own `data_version` only while SSE clients exist. External CLI and separate server-writer commits generate coalesced invalidation; rollback/read activity is silent. SSE client queues are bounded and own no database handle. Native EventSource refresh, initial loads, and slower Datastar polling recover missed signals.
 - Exact Host/Origin, per-process CSRF cookie/form capability, method/media-type checks, escaping, CSP, framing/MIME protections, and loopback-only binding protect mutation routes.
 - Vendored Datastar and license work offline. No Node/npm, CDN, external font/icon, SPA/CSS framework, SSE extension, WebSocket, service worker, daemon, or background service is added.
 - Automated markup/style tests cover system/light/dark pre-paint theming, narrow/wide layouts, visible focus, dialog/focus/dirty behavior, changed-row animation, reduced motion, and WCAG AA palette contrast. A hands-on macOS browser smoke check covers both themes, zoom/reflow, keyboard navigation, deep-link/back/forward behavior, and live external changes.
+
+## Milestone 8a: canonical server command boundary
+
+Rename the inspector entrypoint to `pl server` while retaining `pl web` as a
+deprecated compatibility alias. This slice changes no execution protocol and
+does not add a Codex runner.
+
+Acceptance criteria:
+
+- Main help, command help, examples, errors, and compiled-command checks use
+  the canonical `server` spelling; alias help renders canonical usage.
+- The alias preserves port selection, `--no-open`, project selection, listener
+  URL on stdout, loopback Host/Origin/CSRF protections, offline assets, and
+  foreground interruption behavior.
+- The server remains usable without Codex installed or authenticated.
+
+## Milestone 8b: durable server-run model
+
+Add a migration and a small application/storage boundary for durable
+server-supervised run records. This is not a general event stream, task history,
+agent identity system, lease, or background job table.
+
+Acceptance criteria:
+
+- A run records only the selected registered worktree, optional pellet/context
+  linkage, concise activity, state, and explicit stop/interruption outcome.
+- Database constraints and application transitions permit at most one active
+  run per worktree while preserving the existing one-in-progress-pellet rule.
+- Restarted servers display interrupted/completed records but never resume a
+  run automatically. Normal queue and memory operations still work with no
+  Codex binary or credentials.
+- Migration rollback, concurrent active-run attempts, state transitions, and
+  compact record rendering have real-SQLite and compiled-command coverage.
+
+## Milestone 8c: foreground Codex supervision
+
+Implement the optional runner as a child owned by the foreground server. It
+uses the installed Codex runtime rather than creating credentials,
+configuration, instructions, tools, a worktree, or a second integration.
+
+Acceptance criteria:
+
+- Starting a run is explicit. The server reports a clear actionable failure
+  when Codex is unavailable or unauthenticated, without degrading queue,
+  memory, or inspector use.
+- Closing a browser tab does not stop a run. Server cancellation stops every
+  child it owns, waits for bounded cleanup, records the outcome, and leaves no
+  daemon, separate persistent worker, remote listener, or automatic restart.
+- Questions, steering, stopping, and explicit resume are distinct user actions;
+  no restart or reconnect path silently resumes interrupted work.
+- The default automatic approval mode is `REVIEW`; tests reject blanket
+  approval and disabled-sandbox configuration.
+- Deterministic fake child processes may test lifecycle edges, while an
+  installed-runtime integration check verifies the actual invocation/config
+  contract without requiring Codex for ordinary test runs.
+
+## Milestone 8d: scoped review checkpoints
+
+Add narrow review checkpoints for server-supervised work. They are separate
+Codex review contexts, not a Git UI, pull-request workflow, dependency graph,
+or general workflow framework.
+
+Acceptance criteria:
+
+- A checkpoint requires explicit scope and records only its relationship to the
+  run and concise outcome; normal work remains test → commit → close.
+- Review starts a separate Codex context and cannot change the run's worktree
+  or silently alter queue lifecycle state.
+- Focused follow-up pellets are deduplicated before creation and retain the
+  ordinary queue model; no dependency, parent/child, or epic edge is stored.
+- Tests cover scope validation, separate-context construction, duplicate
+  follow-up prevention, interrupted review cleanup, and unchanged ordinary
+  queue semantics.
 
 ## Milestone 9: portable agent skill installer
 
@@ -267,8 +344,12 @@ Invoke the compiled skill installer in temporary home and repository fixtures wi
 - Concurrent canonical/redirect namespace writes and rename conflicts, including stale displayed conflict sets.
 - Concurrent `start-next` calls from distinct linked worktrees selecting distinct pellets; same-pellet and same-workspace races return stable conflict/exhaustion without partial writes.
 - Reads during a write and bounded busy-timeout behavior.
-- Query-only web reads, pinned `data_version` monitoring, multiple/slow SSE clients, burst coalescing, disconnected recovery, zero-client idling, and graceful shutdown.
-- Concurrent web edits, current/foreign workspace lifecycle controls, memory text/FTS replacement, security headers/CSRF/origin rejection, and compiled foreground command startup/interruption.
+- Query-only server reads, pinned `data_version` monitoring, multiple/slow SSE clients, burst coalescing, disconnected recovery, zero-client idling, and graceful shutdown.
+- Concurrent server edits, current/foreign workspace lifecycle controls, memory text/FTS replacement, security headers/CSRF/origin rejection, and compiled foreground command startup/interruption.
+- Run-record migration/rollback, one-active-run-per-worktree races, explicit
+  stop/interruption persistence, browser-close independence, server-stop child
+  cleanup, Codex availability/configuration failures, `REVIEW` approval, and
+  scoped-review follow-up deduplication.
 - Two independent processes racing from the same old schema version, with the lock waiter applying nothing twice.
 - Independent activity in different projects sharing the same SQLite file.
 
@@ -319,7 +400,10 @@ Because hands-on Windows testing is unavailable, Windows-specific integration te
 ## Features deliberately deferred
 
 - dependencies, blocking, graphs, epics, subtasks, and milestones;
-- agent accounts, PID/session ownership, claiming, leases, heartbeats, expiry, assignment history, and orchestration;
+- agent accounts, PID/session ownership, claiming, leases, heartbeats, expiry,
+  assignment history, and general orchestration; the narrow foreground
+  server-run records and supervision described in milestones 8b–8d are not
+  this category;
 - tags, separate notes, and automatic task history;
 - multiple groups per pellet or a group entity;
 - archive state and arbitrary task deletion;
@@ -330,7 +414,7 @@ Because hands-on Windows testing is unavailable, Windows-specific integration te
 - custom statuses, custom workflows, and plugins;
 - project deletion;
 - automatic `VACUUM`;
-- a terminal UI, hosted web service, remote bind address, or daemon (the foreground loopback web inspector is the sole graphical surface).
+- a terminal UI, hosted web service, remote bind address, or daemon (the foreground loopback server inspector is the sole graphical surface).
 
 ## Contradiction checklist
 
@@ -345,8 +429,8 @@ Before each release, verify:
 - `next` is read-only and resumes only the current workspace; `start-next` is the atomic begin-work path;
 - the database supports several projects but pellet numbers are project-local;
 - one logical repository has shared project state across worktrees, at most one worker is assumed per worktree, and each workspace owns at most one in-progress pellet;
-- no schema or prose invents an agent/PID/session/lease/heartbeat/expiry ownership model;
+- no schema or prose invents an agent/PID/session/lease/heartbeat/expiry ownership model; narrowly defined durable server-run records remain limited to milestones 8b–8d;
 - memory has no task foreign key and uses FTS5 only;
-- no core behavior needs external network access or a vector capability; the optional web inspector uses loopback only;
+- no core behavior needs external network access or a vector capability; the optional server inspector uses loopback only;
 - the database is never part of a Git synchronization workflow;
 - JSON v1 fixtures and exit codes match [cli-spec.md](cli-spec.md).

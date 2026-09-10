@@ -14,10 +14,11 @@ import (
 	"testing"
 	"time"
 
+	"pellets/internal/discovery"
 	"pellets/internal/domain"
 )
 
-func TestParseWebOptionsStrictly(t *testing.T) {
+func TestParseServerOptionsStrictly(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
 		name string
@@ -35,24 +36,24 @@ func TestParseWebOptionsStrictly(t *testing.T) {
 		{name: "positional", args: []string{"extra"}, code: "unexpected_argument"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			parsed, err := parseWebOptions(test.args)
+			parsed, err := parseServerOptions(test.args)
 			if test.code != "" {
 				if err == nil || publicCode(err) != test.code {
-					t.Fatalf("parseWebOptions() error = %v, want %s", err, test.code)
+					t.Fatalf("parseServerOptions() error = %v, want %s", err, test.code)
 				}
 				return
 			}
 			if err != nil || !reflect.DeepEqual(parsed, test.want) {
-				t.Fatalf("parseWebOptions() = (%#v, %v), want %#v", parsed, err, test.want)
+				t.Fatalf("parseServerOptions() = (%#v, %v), want %#v", parsed, err, test.want)
 			}
 		})
 	}
 }
 
-func TestWebCommandForegroundOwnsOutputAndRejectsFormatGlobals(t *testing.T) {
+func TestServerCommandForegroundOwnsOutputAndRejectsFormatGlobals(t *testing.T) {
 	t.Parallel()
 	var got WebOptions
-	command := WebCommand(func(_ context.Context, invocation Invocation, options WebOptions, stdout, stderr io.Writer) error {
+	command := ServerCommand(func(_ context.Context, invocation Invocation, options ServerOptions, stdout, stderr io.Writer) error {
 		got = options
 		_, _ = io.WriteString(stdout, "http://127.0.0.1:8123\n")
 		_, _ = io.WriteString(stderr, "warning: test\n")
@@ -62,7 +63,7 @@ func TestWebCommandForegroundOwnsOutputAndRejectsFormatGlobals(t *testing.T) {
 		return nil
 	})
 	if command.Run != nil || command.RunForeground == nil {
-		t.Fatal("web command did not use the foreground boundary")
+		t.Fatal("server command did not use the foreground boundary")
 	}
 	if err := command.Validate(GlobalOptions{Pretty: true}, WebOptions{}); err == nil || publicCode(err) != "format_not_supported" {
 		t.Fatalf("pretty validation error = %v", err)
@@ -79,6 +80,32 @@ func TestWebCommandForegroundOwnsOutputAndRejectsFormatGlobals(t *testing.T) {
 	}
 }
 
+func TestWebIsCompatibilityAliasForCanonicalServerCommand(t *testing.T) {
+	t.Parallel()
+	command := ServerCommand(func(_ context.Context, _ Invocation, _ ServerOptions, stdout, _ io.Writer) error {
+		_, err := io.WriteString(stdout, "http://127.0.0.1:8123\n")
+		return err
+	})
+	application := New("test", command).WithCurrentWorkspaceBootstrap(func(context.Context, string) (discovery.Database, error) {
+		return discovery.Database{}, nil
+	})
+	workingDirectory := t.TempDir()
+	application.workingDirectory = func() (string, error) { return workingDirectory, nil }
+
+	stdout, stderr, exit := runTestApp(application, "web", "--port", "8123", "--no-open")
+	if exit != 0 || stderr != "" || stdout != "http://127.0.0.1:8123\n" {
+		t.Fatalf("web alias = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+	stdout, stderr, exit = runTestApp(application, "web", "--help")
+	if exit != 0 || stderr != "" || stdout != "Usage:\n  pl [--project CODE] server [--port PORT] [--no-open]\n" {
+		t.Fatalf("web alias help = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+	stdout, stderr, exit = runTestApp(application, "--help")
+	if exit != 0 || stderr != "" || !strings.Contains(stdout, "  server       Run the foreground local server.\n") || strings.Contains(stdout, "  web") {
+		t.Fatalf("canonical help = exit %d stdout %q stderr %q", exit, stdout, stderr)
+	}
+}
+
 func publicCode(err error) string {
 	if err == nil {
 		return ""
@@ -86,11 +113,11 @@ func publicCode(err error) string {
 	return domain.PublicError(err).Code
 }
 
-func TestWebInterruptHelper(t *testing.T) {
+func TestServerInterruptHelper(t *testing.T) {
 	if os.Getenv("PELLETS_TEST_WEB_INTERRUPT") != "1" {
 		return
 	}
-	command := WebCommand(func(ctx context.Context, _ Invocation, _ WebOptions, stdout, _ io.Writer) error {
+	command := ServerCommand(func(ctx context.Context, _ Invocation, _ ServerOptions, stdout, _ io.Writer) error {
 		fmt.Fprintln(stdout, "ready")
 		<-ctx.Done()
 		fmt.Fprintln(stdout, "draining")
@@ -100,11 +127,11 @@ func TestWebInterruptHelper(t *testing.T) {
 	_ = command.RunForeground(context.Background(), Invocation{Input: WebOptions{}}, os.Stdout, os.Stderr)
 }
 
-func TestWebSecondInterruptForcesExit(t *testing.T) {
+func TestServerSecondInterruptForcesExit(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows cannot send os.Interrupt to a child process")
 	}
-	command := exec.Command(os.Args[0], "-test.run=^TestWebInterruptHelper$")
+	command := exec.Command(os.Args[0], "-test.run=^TestServerInterruptHelper$")
 	command.Env = append(os.Environ(), "PELLETS_TEST_WEB_INTERRUPT=1")
 	stdout, err := command.StdoutPipe()
 	if err != nil {
@@ -147,7 +174,7 @@ func TestWebSecondInterruptForcesExit(t *testing.T) {
 	if err := command.Process.Signal(os.Interrupt); err != nil {
 		t.Fatal(err)
 	}
-	expect(feedback, "Stopping web server… Press Ctrl+C again to force exit.")
+	expect(feedback, "Stopping server… Press Ctrl+C again to force exit.")
 	expect(output, "draining")
 	if err := command.Process.Signal(os.Interrupt); err != nil {
 		t.Fatal(err)

@@ -51,7 +51,7 @@ First use is serialized through Git's common directory, so concurrent commands i
 separate worktrees share one queue. Existing installations acquire a binding on
 their first successful current-project bootstrap after upgrading. `add`,
 list/search/show/next and lifecycle commands, every `memory` operation, current
-`project show`, and `web` have this capability.
+`project show`, and `server` have this capability.
 
 Help/version, invalid invocations, `init-db`, and `skill install` do not use this
 bootstrap. `init-db` explicitly creates at the current directory without replacing
@@ -378,20 +378,24 @@ Before any multi-target write, every destination, existing parent, file type, pe
 
 The embedded artifact contains only portable instructions and narrow `name: pellets`/`description` frontmatter. Its implicit trigger applies only when a prompt explicitly names the `pl` command or Pellet/Pellets. It explicitly rejects generic task, issue, ticket, queue, backlog, project, project-management, and memory requests that do not name `pl`/Pellets. Explicit skill invocation remains available. See the current official [OpenAI Codex skill guidance](https://developers.openai.com/codex/skills) and [Claude Code skill guidance](https://code.claude.com/docs/en/skills).
 
-### `pl web`
+### `pl server`
 
-Run the optional local web inspector in the foreground.
+Run the optional local server and inspector in the foreground.
 
 ```text
-pl [--project CODE] web [--port PORT] [--no-open]
+pl [--project CODE] server [--port PORT] [--no-open]
 ```
 
 - Database discovery and first-use bootstrap are identical to other current-project commands: the repository binding wins, otherwise existing worktree/ancestor databases are discovered, or a project-local database is created when none exists. `--project` selects the initial project area when it exists; the interface can inspect every registered project in that database.
 - The only listener address is IPv4 `127.0.0.1`. There is no bind-address flag. Omitted `--port`, or explicit canonical port `0`, requests an OS-selected available port; `--port` otherwise accepts 1 through 65535.
 - Print `http://127.0.0.1:PORT` followed by one newline after the listener is ready. This foreground command is the sole exception to the normal JSON-success envelope.
 - Unless `--no-open` is present, open the default browser only after readiness. A launcher failure writes a useful warning to stderr while leaving the printed URL and server usable.
-- Remain in the foreground until interrupted. Interruption performs bounded graceful shutdown; `pl web` never installs, daemonizes, or registers a background service.
+- Remain in the foreground until interrupted. Interruption performs bounded graceful shutdown; `pl server` never installs, daemonizes, or registers a background service. It owns any Codex execution it starts, so closing a browser tab does not stop work and stopping the server does.
 - `--human` and `--pretty` are rejected because the command owns its foreground output.
+
+`pl web [--port PORT] [--no-open]` remains a deprecated compatibility alias.
+It has identical parsing and foreground behavior, but its `--help` output uses
+the canonical `pl server` usage. New automation must invoke `pl server`.
 
 The browser uses only embedded, offline assets: pinned Datastar 1.0.3 and its license, repository-owned JavaScript/CSS, system fonts, and standard-library HTTP/templates. There is no runtime CDN, font/icon fetch, Node/npm build, WebSocket, service worker, or remote API. A first visit follows `prefers-color-scheme`; the light/dark/system selector persists locally and applies before first paint.
 
@@ -471,8 +475,8 @@ Never truncate titles or descriptions when stdout is not a terminal. Terminal tr
 
 - stdin is read only when an explicit option names `-`, such as `--description-file -` or `pl memory add --file -`, or by a documented `--human` wizard or project-rename confirmation when both stdin and stdout are terminals.
 - JSON commands never read stdin implicitly; this prevents an agent invocation from hanging.
-- stdout contains the successful result only. For `pl web`, that result is the ready listener URL rather than JSON.
-- stderr contains the structured error only, plus diagnostics only when an explicit future debug flag is used. A non-fatal `pl web` browser-launch warning is the documented exception.
+- stdout contains the successful result only. For `pl server`, that result is the ready listener URL rather than JSON.
+- stderr contains the structured error only, plus diagnostics only when an explicit future debug flag is used. A non-fatal `pl server` browser-launch warning is the documented exception.
 - Help and version text go to stdout with exit code 0.
 - Broken-pipe errors terminate quietly with a nonzero operational exit.
 

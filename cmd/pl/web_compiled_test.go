@@ -14,12 +14,12 @@ import (
 	"time"
 )
 
-func TestCompiledWebDiscoveryStartupAndCleanShutdown(t *testing.T) {
+func TestCompiledServerDiscoveryStartupAndCleanShutdown(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows cannot deliver os.Interrupt to a child process; Windows build coverage is in verify-cross-builds.sh")
 	}
 	if _, err := exec.LookPath("git"); err != nil {
-		t.Fatalf("compiled web test requires Git: %v", err)
+		t.Fatalf("compiled server test requires Git: %v", err)
 	}
 	executable := buildFoundationExecutable(t)
 	root := filepath.Join(t.TempDir(), "webtest")
@@ -29,7 +29,7 @@ func TestCompiledWebDiscoveryStartupAndCleanShutdown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	command := exec.Command(executable, "web", "--port", "0", "--no-open")
+	command := exec.Command(executable, "server", "--port", "0", "--no-open")
 	command.Dir = nested
 	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
 	stdout, err := command.StdoutPipe()
@@ -63,30 +63,30 @@ func TestCompiledWebDiscoveryStartupAndCleanShutdown(t *testing.T) {
 	select {
 	case address = <-line:
 	case err := <-readErrors:
-		t.Fatalf("read web URL: %v; stderr=%s", err, stderr.String())
+		t.Fatalf("read server URL: %v; stderr=%s", err, stderr.String())
 	case <-time.After(5 * time.Second):
-		t.Fatal("compiled web command did not report readiness")
+		t.Fatal("compiled server command did not report readiness")
 	}
 	parsed, err := url.Parse(address)
 	if err != nil || parsed.Scheme != "http" || parsed.Hostname() != "127.0.0.1" || parsed.Port() == "" {
 		t.Fatalf("reported URL = %q, parse error %v", address, err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".pellets", "pellets.db")); err != nil {
-		t.Fatalf("first-use web did not bootstrap the project database: %v", err)
+		t.Fatalf("first-use server did not bootstrap the project database: %v", err)
 	}
-	result := runFoundationCLI(t, executable, root, "add", "compiled web task")
+	result := runFoundationCLI(t, executable, root, "add", "compiled server task")
 	if result.exit != 0 || result.stderr != "" {
 		t.Fatalf("add = exit %d stdout %q stderr %q", result.exit, result.stdout, result.stderr)
 	}
 	client := &http.Client{Timeout: 2 * time.Second}
 	response, err := client.Get(address + "/projects/webtest/tasks")
 	if err != nil {
-		t.Fatalf("GET ready web server: %v", err)
+		t.Fatalf("GET ready server: %v", err)
 	}
 	body := new(bytes.Buffer)
 	_, _ = body.ReadFrom(response.Body)
 	response.Body.Close()
-	if response.StatusCode != http.StatusOK || !strings.Contains(body.String(), "compiled web task") {
+	if response.StatusCode != http.StatusOK || !strings.Contains(body.String(), "compiled server task") {
 		t.Fatalf("GET = %d %q", response.StatusCode, body.String())
 	}
 	// Keep the browser's persistent stream open while interrupting the server.
@@ -110,17 +110,22 @@ func TestCompiledWebDiscoveryStartupAndCleanShutdown(t *testing.T) {
 	case err := <-done:
 		finished = true
 		if err != nil {
-			t.Fatalf("compiled web shutdown = %v; stderr=%s", err, stderr.String())
+			t.Fatalf("compiled server shutdown = %v; stderr=%s", err, stderr.String())
 		}
 	case <-time.After(time.Second):
-		t.Fatal("compiled web command did not shut down after interrupt")
+		t.Fatal("compiled server command did not shut down after interrupt")
 	}
-	if stderr.String() != "Stopping web server… Press Ctrl+C again to force exit.\n" {
+	if stderr.String() != "Stopping server… Press Ctrl+C again to force exit.\n" {
 		t.Fatalf("compiled --no-open stderr = %q", stderr.String())
 	}
 
-	invalid := runFoundationCLI(t, executable, root, "web", "--port", "080", "--no-open")
+	invalid := runFoundationCLI(t, executable, root, "server", "--port", "080", "--no-open")
 	if invalid.exit != 2 || !strings.Contains(invalid.stderr, `"code":"invalid_port"`) || invalid.stdout != "" {
 		t.Fatalf("invalid port = exit %d stdout %q stderr %q", invalid.exit, invalid.stdout, invalid.stderr)
+	}
+
+	alias := runFoundationCLI(t, executable, root, "web", "--port", "080", "--no-open")
+	if alias.exit != 2 || !strings.Contains(alias.stderr, `"code":"invalid_port"`) || alias.stdout != "" {
+		t.Fatalf("web compatibility alias invalid port = exit %d stdout %q stderr %q", alias.exit, alias.stdout, alias.stderr)
 	}
 }
