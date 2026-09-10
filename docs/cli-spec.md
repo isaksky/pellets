@@ -130,6 +130,7 @@ pl add TITLE [--request-id ID] [--description TEXT | --description-file PATH]
                   [--group GROUP]
                   [--before PELLET | --after PELLET]
                   [--maybe-later]
+                  [--review-targets PELLET,PELLET]
 ```
 
 - `--description-file -` reads the description from stdin.
@@ -157,6 +158,51 @@ never deletes pellets or memories and requires no scheduled job.
 A receipt preserves the original creation response after subsequent edits,
 lifecycle transitions, or purge. Replaying never resurrects purged work. Output
 uses the current canonical project code; `show` retrieves current pellet state.
+
+`--review-targets` creates the narrow `review_checkpoint` kind. Supply 1–1000
+distinct, explicit ordinary Pellet references in one project; a single target
+is valid. Empty, missing, cross-project, or checkpoint targets are rejected.
+This flag cannot combine with `--before`, `--after`, or `--maybe-later`.
+Target order and project-code aliases do not affect retry identity. A different
+target set conflicts with the same `--request-id`.
+
+Creation validates and snapshots the exact selected targets, then inserts the
+checkpoint immediately after the last selected active target in authoritative
+priority/number order, all under one writer transaction. If no selected target
+is active, it appends to the active queue. Closed and deferred targets are
+allowed. Unselected rows between selected targets never enter the scope.
+Reordering the checkpoint or its targets does not change the selection.
+
+Checkpoint records add `kind: "review_checkpoint"` and a `checkpoint` object
+to JSON v1 on add/show/list/search/next/start-next/lifecycle responses. Ordinary
+records retain their existing shape (absent kind means ordinary). The nested
+contract is explicitly versioned: `checkpoint.version` is 1, `ready` is a
+boolean, and `targets` is ordered by stable target number. Each target includes
+`project_id`, `number`, current canonical `reference`, immutable
+`selected_reference`, selected `title`/`description`/nullable `external_id` and
+`group`, current nullable `status` and `implementation_revision`, `reason`, and
+nullable `evidence`. Evidence contains `run_id`, `workspace_id`, `starting_head`,
+and `result_commit`; it identifies exact implementations, never a broad Git
+range inferred from queue positions. Purged targets retain their selected
+identity and scope and report `target_missing`.
+
+Readiness requires every selected target to retain its selected scope and be
+closed with a successful completed implementation attempt, verified commit,
+finalization and Codex conversation evidence for its current implementation
+revision. The other waiting reasons are `scope_changed`, `target_incomplete`,
+and `evidence_missing`; a usable target reports `ready`. Closing queue rows
+alone never supplies evidence. Reopen, release, defer, or scope edits invalidate
+earlier implementation evidence. A continuation retains its original revision;
+it cannot turn an old attempt into evidence for a new lifecycle generation.
+Legacy attempts with an unknown revision cannot establish checkpoint readiness.
+
+`next` and `start-next` skip waiting open checkpoints while preserving exact
+filters and workspace ownership rules. Checkpoints use the existing four
+lifecycle statuses. Direct start/close checks readiness transactionally and
+returns `review_checkpoint_not_ready` (exit 4) if needed. Once a review attempt
+captures scope, close and run completion also reject changed scope or evidence
+with `execution_run_conflict`. A read or add receipt is an observation, not
+permission to reuse stale evidence. Use `show` to refresh current readiness.
 
 ### `pl list`
 

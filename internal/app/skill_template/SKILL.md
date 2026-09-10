@@ -56,6 +56,14 @@ pl reopen foo-13
 - Preserve one optional opaque `external-id` for correspondence with an outside system and one optional opaque `group` for exact filtering. A group is not an epic, dependency, hierarchy, or tag set.
 - Lower priority order means earlier work; do not invent or edit raw priorities.
 
+## Review checkpoints
+
+- Create only an explicitly requested review of selected ordinary Pellets with `pl add "Review selected changes" --review-targets foo-12,foo-15 --request-id REVIEW_ID`. Select 1–1000 distinct references in one project. Checkpoint targets are forbidden; this is not a dependency or epic mechanism. Do not combine review targets with manual placement or `--maybe-later`.
+- Creation atomically inserts after the last selected active target; with no active targets it appends. Completed and deferred targets are allowed. Only the explicit set is reviewed, never all adjacent rows or an inferred broad commit range. Reordering preserves this scope.
+- Read `pl show` for the current `kind` and `checkpoint.version: 1` contract. Checkpoint targets include stable project ID/number, current and originally selected references, immutable scope, live status/revision, a readiness reason, and exact implementation run/workspace/starting-head/result-commit evidence. Ordinary JSON omits these additive fields.
+- A ready checkpoint requires every selected ordinary Pellet to be closed with matching retained successful implementation evidence. Queue closure alone is insufficient across worktrees. Reopen, release, defer, edits, missing/purged targets, or missing evidence can make it wait; never treat that as successful review or substitute different targets. `next`/`start-next` skip waiting open checkpoints for unrelated eligible work.
+- A selected checkpoint requires the separate Codex review policy and context, exact selected Pellet/commit scope, and deduplicated review follow-ups. Do not run it as ordinary implementation work. The review driver must resolve the recorded Git commits before reviewing them; unavailable objects are missing evidence. An absent policy, `review_checkpoint_not_ready`, or `execution_run_conflict` requires preserving the exact work and refreshing/reconciling its evidence, not broadening scope. This creation/read contract does not authorize review, triage writes, or closure beyond the user's request.
+
 ## Use project memory correctly
 
 - Record only durable, self-contained knowledge. Future work belongs in a focused pellet.

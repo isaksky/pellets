@@ -10,30 +10,66 @@ import (
 // Pellet is one authoritative queue record. Workspace is non-nil exactly
 // while Status is in_progress.
 type Pellet struct {
-	ProjectID   int64
-	Reference   domain.PelletReference
-	Title       string
-	Description string
-	ExternalID  *string
-	Group       *string
-	Status      domain.PelletStatus
-	Priority    *int64
-	Workspace   *Workspace
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	CompletedAt *time.Time
+	Kind                   domain.PelletKind
+	ImplementationRevision int64
+	Checkpoint             *ReviewCheckpoint `json:",omitempty"`
+	ProjectID              int64
+	Reference              domain.PelletReference
+	Title                  string
+	Description            string
+	ExternalID             *string
+	Group                  *string
+	Status                 domain.PelletStatus
+	Priority               *int64
+	Workspace              *Workspace
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	CompletedAt            *time.Time
 }
 
 // NewPellet contains the fields accepted when allocating a new pellet. Status
 // may be open or maybe_later; an empty status means open.
 type NewPellet struct {
-	RequestID   *string
-	Title       string
-	Description string
-	ExternalID  *string
-	Group       *string
-	Status      domain.PelletStatus
-	Placement   *PelletPlacement
+	Kind          domain.PelletKind        `json:",omitempty"`
+	ReviewTargets []domain.PelletReference `json:",omitempty"`
+	RequestID     *string
+	Title         string
+	Description   string
+	ExternalID    *string
+	Group         *string
+	Status        domain.PelletStatus
+	Placement     *PelletPlacement
+}
+
+// ReviewCheckpoint is the versioned, materialized read contract. Targets are
+// immutable selections, never inferred from queue adjacency. Readiness is a
+// current observation; start and execution completion recheck it atomically.
+type ReviewCheckpoint struct {
+	Version int            `json:"version"`
+	Ready   bool           `json:"ready"`
+	Targets []ReviewTarget `json:"targets"`
+}
+
+type ReviewTarget struct {
+	ProjectID              int64                `json:"project_id"`
+	Number                 int64                `json:"number"`
+	Reference              string               `json:"reference"`
+	SelectedReference      string               `json:"selected_reference"`
+	Title                  string               `json:"title"`
+	Description            string               `json:"description"`
+	ExternalID             *string              `json:"external_id"`
+	Group                  *string              `json:"group"`
+	Status                 *domain.PelletStatus `json:"status"`
+	ImplementationRevision *int64               `json:"implementation_revision"`
+	Reason                 string               `json:"reason"`
+	Evidence               *ReviewEvidence      `json:"evidence"`
+}
+
+type ReviewEvidence struct {
+	RunID        int64  `json:"run_id"`
+	WorkspaceID  int64  `json:"workspace_id"`
+	StartingHead string `json:"starting_head"`
+	ResultCommit string `json:"result_commit"`
 }
 
 // PelletPlacement positions a new open pellet relative to an existing active

@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -24,7 +25,8 @@ const pelletSelect = `
 	       workspace.root_path, workspace.root_path_relative,
 	       workspace.git_dir, workspace.git_dir_relative,
 	       strftime('%Y-%m-%dT%H:%M:%fZ', workspace.created_at),
-	       strftime('%Y-%m-%dT%H:%M:%fZ', workspace.updated_at)
+	       strftime('%Y-%m-%dT%H:%M:%fZ', workspace.updated_at),
+	       p.kind, p.implementation_revision, ` + checkpointJSONSQL + `
 	FROM pellets AS p
 	JOIN projects AS project ON project.project_id = p.project_id
 	LEFT JOIN project_workspaces AS workspace
@@ -102,6 +104,10 @@ func (repository *PelletRepository) CreatePellet(ctx context.Context, project st
 			return replay, nil
 		}
 	}
+	targets, err := prepareCheckpoint(ctx, connection, project, &normalized)
+	if err != nil {
+		return storage.Pellet{}, err
+	}
 	var priority *int64
 	if normalized.Status == domain.PelletOpen {
 		var allocated int64
@@ -132,17 +138,24 @@ func (repository *PelletRepository) CreatePellet(ctx context.Context, project st
 	result, err := connection.ExecContext(ctx, `
 		INSERT INTO pellets(
 			project_id, workspace_id, number, title, description, external_id,
-			group_id, status, priority, created_at, updated_at, completed_at
-		) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+			group_id, status, priority, created_at, updated_at, completed_at, kind
+		) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, COALESCE(NULLIF(?,''),'ordinary'))`,
 		project.Project.ID, number, normalized.Title, normalized.Description,
 		nullableTextValue(normalized.ExternalID), nullableTextValue(normalized.Group),
-		normalized.Status, nullableInt64Value(priority), timestamp, timestamp)
+		normalized.Status, nullableInt64Value(priority), timestamp, timestamp, normalized.Kind)
 	if err != nil {
 		return storage.Pellet{}, pelletStorageError("insert pellet", err)
 	}
 	rowID, err := result.LastInsertId()
 	if err != nil {
 		return storage.Pellet{}, pelletStorageError("read inserted pellet row identity", err)
+	}
+	if normalized.Kind == domain.PelletReviewCheckpoint {
+		for i, target := range targets {
+			if _, err := connection.ExecContext(ctx, `INSERT INTO review_checkpoint_targets(project_id,checkpoint_number,target_number,ordinal,selected_reference,title,description,external_id,group_id) VALUES(?,?,?,?,?,?,?,?,?)`, project.Project.ID, number, target.Reference.Number, i, target.Reference.String(), target.Title, target.Description, target.ExternalID, target.Group); err != nil {
+				return storage.Pellet{}, pelletStorageError("save review target", err)
+			}
+		}
 	}
 	if _, err := connection.ExecContext(ctx, `
 		INSERT INTO pellets_fts(rowid, title, description, external_id)
@@ -394,7 +407,8 @@ func (repository *PelletRepository) SearchPellets(ctx context.Context, project s
 		       workspace.root_path, workspace.root_path_relative,
 		       workspace.git_dir, workspace.git_dir_relative,
 		       strftime('%Y-%m-%dT%H:%M:%fZ', workspace.created_at),
-		       strftime('%Y-%m-%dT%H:%M:%fZ', workspace.updated_at)
+		       strftime('%Y-%m-%dT%H:%M:%fZ', workspace.updated_at),
+		       p.kind, p.implementation_revision, ` + checkpointJSONSQL + `
 		FROM pellets_fts
 		JOIN pellets AS p ON p.rowid = pellets_fts.rowid
 		JOIN projects AS project ON project.project_id = p.project_id
@@ -632,7 +646,7 @@ func (repository *PelletRepository) NextPellet(ctx context.Context, project stor
 	WHERE p.project_id = ?
 	  AND (
 	        (p.status = 'in_progress' AND p.workspace_id = ?)
-	        OR (p.status = 'open'`
+	        OR (p.status = 'open' AND ` + checkpointEligibleSQL
 	arguments := []any{project.Project.ID, project.Workspace.ID}
 	if externalID != nil {
 		query += " AND p.external_id = ?"
@@ -714,6 +728,9 @@ func (repository *PelletRepository) startNextPellet(ctx context.Context, project
 	for attempt := 0; attempt < attempts; attempt++ {
 		owned, err := loadWorkspaceInProgressPellet(ctx, connection, project)
 		if err == nil {
+			if err := requireCheckpointReady(owned); err != nil {
+				return storage.NextSelection{}, err
+			}
 			if scheduled != nil {
 				if scheduled.ResumePellet == nil || *scheduled.ResumePellet != owned.Reference.Number {
 					return storage.NextSelection{}, domain.NewError(domain.Conflict, "schedule_resume_required", "explicit Resume of the exact in-progress pellet is required", map[string]any{"pellet": owned.Reference.String()})
@@ -919,6 +936,16 @@ func applyPelletLifecycleTransition(
 	pellet storage.Pellet,
 	request storage.PelletLifecycleRequest,
 ) (storage.Pellet, *storage.Workspace, bool, error) {
+	if request.Operation == storage.PelletStart || request.Operation == storage.PelletClose {
+		if err := requireCheckpointReady(pellet); err != nil {
+			return storage.Pellet{}, nil, false, err
+		}
+	}
+	if request.Operation == storage.PelletClose {
+		if err := validateCheckpointClose(ctx, query, pellet); err != nil {
+			return storage.Pellet{}, nil, false, err
+		}
+	}
 	switch request.Operation {
 	case storage.PelletStart:
 		switch pellet.Status {
@@ -1066,7 +1093,7 @@ func loadWorkspaceInProgressPellet(ctx context.Context, query projectQuery, proj
 
 func loadNextOpenPellet(ctx context.Context, query projectQuery, project storage.ResolvedProject, externalID, group *string) (storage.Pellet, error) {
 	statement := pelletSelect + `
-		WHERE p.project_id = ? AND p.status = 'open'`
+		WHERE p.project_id = ? AND p.status = 'open' AND ` + checkpointEligibleSQL
 	arguments := []any{project.Project.ID}
 	if externalID != nil {
 		statement += " AND p.external_id = ?"
@@ -1545,16 +1572,32 @@ func scanPellet(scanner pelletScanner) (storage.Pellet, error) {
 	var workspaceID, workspaceProjectID sql.NullInt64
 	var rootPath, gitDir, workspaceCreatedAt, workspaceUpdatedAt sql.NullString
 	var rootRelative, gitDirRelative sql.NullInt64
+	var checkpointJSON string
 	if err := scanner.Scan(
 		&pellet.ProjectID, &projectCode, &pellet.Reference.Number,
 		&pellet.Title, &pellet.Description, &externalID, &group,
 		&status, &priority, &createdAt, &updatedAt, &completedAt,
 		&workspaceID, &workspaceProjectID, &rootPath, &rootRelative,
 		&gitDir, &gitDirRelative, &workspaceCreatedAt, &workspaceUpdatedAt,
+		&pellet.Kind, &pellet.ImplementationRevision, &checkpointJSON,
 	); err != nil {
 		return storage.Pellet{}, err
 	}
 	pellet.Reference.ProjectCode = projectCode
+	if pellet.Kind == domain.PelletReviewCheckpoint {
+		pellet.Checkpoint = &storage.ReviewCheckpoint{Version: 1, Ready: true}
+		if err := json.Unmarshal([]byte(checkpointJSON), &pellet.Checkpoint.Targets); err != nil {
+			return storage.Pellet{}, err
+		}
+		if len(pellet.Checkpoint.Targets) == 0 {
+			pellet.Checkpoint.Ready = false
+		}
+		for _, target := range pellet.Checkpoint.Targets {
+			if target.Reason != "ready" {
+				pellet.Checkpoint.Ready = false
+			}
+		}
+	}
 	pellet.Status = domain.PelletStatus(status)
 	pellet.ExternalID = nullableTextPointer(externalID)
 	pellet.Group = nullableTextPointer(group)
@@ -1667,6 +1710,9 @@ func validateNewPellet(input storage.NewPellet) (storage.NewPellet, error) {
 	}
 	if input.Status == "" {
 		input.Status = domain.PelletOpen
+	}
+	if err := validateCheckpointInput(&input); err != nil {
+		return storage.NewPellet{}, err
 	}
 	if input.Status != domain.PelletOpen && input.Status != domain.PelletMaybeLater {
 		return storage.NewPellet{}, domain.NewError(

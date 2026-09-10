@@ -31,7 +31,7 @@ func TestRecoveryMigrationRollbackAndSavedIntent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertPragmaInt(t, migrated, "user_version", 11)
+	assertPragmaInt(t, migrated, "user_version", LatestSchemaVersion)
 	migrated.Close()
 
 	db, run, _ := createTestRun(t)

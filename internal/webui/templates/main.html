@@ -120,6 +120,8 @@
       <form action="/projects/{{.Project.Code}}/pellets" method="post" data-on:submit="@submit()" class="stack-form">
         <input type="hidden" name="_csrf" value="{{.CSRF}}">
         <label>Title <input name="title" required autofocus></label>
+        <label>Review targets (optional) <input name="review_targets" placeholder="project-12,project-15" aria-describedby="review-targets-help"></label>
+        <small id="review-targets-help">Select exact Pellet references to create a review checkpoint after their last active queue position. Leave blank for ordinary work.</small>
         <label>Description <textarea name="description" rows="4"></textarea></label>
         <div class="form-grid"><label>External ID <input name="external_id"></label><label>Group <input name="group"></label></div>
         <label>Status <select name="status"><option value="open">Open</option><option value="maybe_later">Maybe later</option></select></label>
@@ -142,7 +144,7 @@
   {{if .Pellets}}<div id="task-table-scroll" class="table-scroll"><table><thead><tr>{{range .SortHeaders}}<th scope="col"{{if .TitleColumn}} class="task-title-column"{{end}}{{if .Active}} aria-sort="{{.AriaSort}}"{{end}}><a id="task-sort-{{.Key}}" class="task-sort {{if .Active}}active{{end}}" href="{{.URL}}" data-on:click="@navigate('tasks-area')" aria-label="{{.ActionLabel}}"><span>{{.Label}}</span>{{if .Indicator}}<span class="sort-indicator" aria-hidden="true">{{.Indicator}}</span>{{end}}</a></th>{{end}}</tr></thead><tbody>
   {{range .Pellets}}<tr id="task-{{.Pellet.Reference}}" class="task-row status-{{.Pellet.Status}} {{if .Selected}}selected{{end}}" data-row-id="{{.Pellet.Reference}}" data-row-version="{{.Version}}">
     <td><a class="row-link" href="{{.URL}}" data-on:click="@navigate('inspector-host')"><code>{{.Pellet.Reference}}</code></a></td>
-    <td class="task-title-column"><span class="task-title">{{.Pellet.Title}}</span>{{if .Owner}}<small>{{.Owner}}</small>{{end}}</td>
+    <td class="task-title-column"><span class="task-title">{{.Pellet.Title}}</span>{{if .Pellet.Checkpoint}}<small>Review checkpoint · {{if .Pellet.Checkpoint.Ready}}ready{{else}}waiting{{end}}</small>{{end}}{{if .Owner}}<small>{{.Owner}}</small>{{end}}</td>
     <td>{{.Group}}</td><td><span class="badge status-badge {{.Pellet.Status}}">{{statusLabel .Pellet.Status}}</span></td><td><code>{{.Priority}}</code></td><td><code>{{.ExternalID}}</code></td><td><time datetime="{{.Pellet.UpdatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{formatTime .Pellet.UpdatedAt}}</time></td>
   </tr>{{end}}</tbody></table></div>
   {{else}}<div class="empty-state"><h3>No tasks match</h3><p>Try clearing a filter or create the first task in this project.</p></div>{{end}}
@@ -175,6 +177,7 @@
   <header><div><span class="eyebrow">Task inspector</span><h2 id="inspector-title">{{.SelectedPellet.Pellet.Reference}}</h2></div>{{if .CloseURL}}<a class="icon-button" href="{{.CloseURL}}" data-on:click="@navigate('inspector-host')" aria-label="Close inspector">×</a>{{end}}</header>
   <div class="inspector-scroll">
     <div class="inspector-title-row"><span class="badge status-badge {{.SelectedPellet.Pellet.Status}}">{{statusLabel .SelectedPellet.Pellet.Status}}</span>{{if .SelectedPellet.Owner}}<span class="owner-badge">{{.SelectedPellet.Owner}}</span>{{end}}</div>
+    {{with .SelectedPellet.Pellet.Checkpoint}}<section><h3>Review checkpoint</h3><p>{{if .Ready}}Ready: all selected targets have implementation evidence.{{else}}Waiting for the selected targets and implementation evidence.{{end}}</p><ul>{{range .Targets}}<li><code>{{.Reference}}</code> · {{.Title}} · {{.Reason}}{{if .Evidence}}<br>Commit <code>{{.Evidence.ResultCommit}}</code> (run {{.Evidence.RunID}}, workspace {{.Evidence.WorkspaceID}}){{end}}</li>{{end}}</ul></section>{{end}}
     <form id="edit-task-{{.SelectedPellet.Pellet.Reference}}" action="/projects/{{.SelectedPellet.Pellet.Reference.ProjectCode}}/pellets/{{.SelectedPellet.Pellet.Reference}}/edit" method="post" data-on:submit="@submit()" class="stack-form dirty-track">
       <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}">
       <label>Title <input name="title" value="{{.SelectedPellet.Pellet.Title}}" required></label>

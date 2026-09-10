@@ -138,12 +138,14 @@ type RunActivity struct {
 }
 
 type ExecutionRun struct {
-	ID               int64  `json:"id"`
-	Attempt          int64  `json:"attempt"`
-	Revision         int64  `json:"revision"`
-	PendingOperation string `json:"pending_operation,omitempty"`
-	PendingRevision  int64  `json:"pending_revision,omitempty"`
-	PendingTurnID    string `json:"-"`
+	ImplementationRevision int64             `json:"implementation_revision"`
+	CheckpointScope        *ReviewCheckpoint `json:"checkpoint_scope,omitempty"`
+	ID                     int64             `json:"id"`
+	Attempt                int64             `json:"attempt"`
+	Revision               int64             `json:"revision"`
+	PendingOperation       string            `json:"pending_operation,omitempty"`
+	PendingRevision        int64             `json:"pending_revision,omitempty"`
+	PendingTurnID          string            `json:"-"`
 	RunCapture
 	RunProgress
 	ProjectCode       string           `json:"project_code"`

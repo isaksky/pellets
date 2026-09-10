@@ -66,6 +66,7 @@ func TestReleaseContradictionChecklist(t *testing.T) {
 		"rowid:INTEGER", "project_id:INTEGER", "workspace_id:INTEGER", "number:INTEGER", "title:TEXT",
 		"description:TEXT", "external_id:TEXT", "group_id:TEXT", "status:TEXT", "priority:INTEGER",
 		"created_at:REAL", "updated_at:REAL", "completed_at:REAL",
+		"kind:TEXT", "implementation_revision:INTEGER",
 	}
 	wantMemoryColumns := []string{
 		"memory_id:INTEGER", "project_id:INTEGER", "text:TEXT", "created_by:TEXT", "approved_at:REAL",
@@ -95,6 +96,7 @@ func TestReleaseContradictionChecklist(t *testing.T) {
 	}
 	pelletSchema = strings.Join(strings.Fields(pelletSchema), " ")
 	for _, invariant := range []string{
+		"kind in ('ordinary', 'review_checkpoint')",
 		"status in ('open', 'in_progress', 'closed', 'maybe_later')",
 		"status in ('open', 'in_progress') and priority is not null and priority > 0",
 		"status in ('closed', 'maybe_later') and priority is null",

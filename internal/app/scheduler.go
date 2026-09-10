@@ -373,6 +373,9 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 			}
 			selection := storage.ScheduleSelection{ExternalID: request.ExternalID, Group: request.Group, ResumePellet: request.ResumePellet}
 			selection.Ready = func(ctx context.Context, p storage.Pellet) (bool, error) {
+				if p.Kind == domain.PelletReviewCheckpoint && request.ResumeFrom == nil && (s.options.Checkpoints == nil || s.options.Checkpoints.Drive == nil) {
+					return false, scheduleError("checkpoint_policy_required", "checkpoint execution requires the separate review policy")
+				}
 				if request.ResumePellet == nil && !s.isCheckpoint(p) {
 					root, err := executionRoot(ctx, s.options.Database, storage.ExecutionRun{WorkspaceRoot: request.Selected.Workspace.RootPath, WorkspaceGitDir: request.Selected.Workspace.GitDir, GitCommonDir: request.Selected.Project.GitCommonDir})
 					if err != nil {
@@ -538,5 +541,5 @@ func (s *Scheduler) validateResult(ctx context.Context, run storage.ExecutionRun
 }
 
 func (s *Scheduler) isCheckpoint(p storage.Pellet) bool {
-	return s.options.Checkpoints != nil && s.options.Checkpoints.Matches != nil && s.options.Checkpoints.Matches(p)
+	return p.Kind == domain.PelletReviewCheckpoint || (s.options.Checkpoints != nil && s.options.Checkpoints.Matches != nil && s.options.Checkpoints.Matches(p))
 }

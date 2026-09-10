@@ -149,7 +149,10 @@ func (h *handler) submitRunAction(response http.ResponseWriter, request *http.Re
 }
 
 func (h *handler) createPellet(response http.ResponseWriter, request *http.Request, project storage.Project) {
-	if err := requireFields(request.PostForm, []string{"_csrf", "title", "description", "external_id", "group", "status"}); err != nil {
+	if _, present := request.PostForm["review_targets"]; !present {
+		request.PostForm.Set("review_targets", "")
+	}
+	if err := requireFields(request.PostForm, []string{"_csrf", "title", "description", "external_id", "group", "status", "review_targets"}); err != nil {
 		h.renderError(response, http.StatusUnprocessableEntity, err, submittedDraft(request.PostForm))
 		return
 	}
@@ -162,6 +165,17 @@ func (h *handler) createPellet(response http.ResponseWriter, request *http.Reque
 		Title: request.PostForm.Get("title"), Description: request.PostForm.Get("description"),
 		ExternalID: nullableInput(request.PostForm.Get("external_id")), Group: nullableInput(request.PostForm.Get("group")),
 		Status: status,
+	}
+	if selected := strings.TrimSpace(request.PostForm.Get("review_targets")); selected != "" {
+		input.Kind = domain.PelletReviewCheckpoint
+		for _, value := range strings.Split(selected, ",") {
+			ref, err := domain.ParsePelletReference(strings.TrimSpace(value))
+			if err != nil {
+				h.renderMutationError(response, err, submittedDraft(request.PostForm))
+				return
+			}
+			input.ReviewTargets = append(input.ReviewTargets, ref)
+		}
 	}
 	pellet, err := h.application.CreatePellet(request.Context(), project, input)
 	if err != nil {

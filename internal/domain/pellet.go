@@ -9,6 +9,14 @@ import (
 // PelletStatus is one of the four persisted lifecycle states.
 type PelletStatus string
 
+// PelletKind is deliberately limited to ordinary work and explicit review checkpoints.
+type PelletKind string
+
+const (
+	PelletOrdinary         PelletKind = "ordinary"
+	PelletReviewCheckpoint PelletKind = "review_checkpoint"
+)
+
 const (
 	PelletOpen       PelletStatus = "open"
 	PelletInProgress PelletStatus = "in_progress"

@@ -24,6 +24,7 @@ func (manager PelletManager) Add(
 	input storage.NewPellet,
 ) (storage.Pellet, error) {
 	var references []domain.PelletReference
+	references = append(references, input.ReviewTargets...)
 	if input.Placement != nil {
 		references = append(references, input.Placement.Target)
 	}
@@ -35,6 +36,12 @@ func (manager PelletManager) Add(
 		placement := *input.Placement
 		placement.Target = canonicalPelletReference(resolved.Project, placement.Target)
 		input.Placement = &placement
+	}
+	if input.ReviewTargets != nil {
+		input.ReviewTargets = append([]domain.PelletReference{}, input.ReviewTargets...)
+		for i, ref := range input.ReviewTargets {
+			input.ReviewTargets[i] = canonicalPelletReference(resolved.Project, ref)
+		}
 	}
 	repository, err := manager.open(ctx, database.Path)
 	if err != nil {

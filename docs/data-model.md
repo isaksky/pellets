@@ -628,3 +628,42 @@ receive no row and therefore retain normal Codex defaults. Its foreign key uses
 the stable workspace identity, and existing projects, codes and redirects,
 queue and memory rows, request receipts, metadata, and FTS indexes are unchanged.
 Migration assertion failure restores the complete version-5 schema and version.
+
+Migration 12 adds `pellets.kind` (`ordinary` by default or `review_checkpoint`)
+and a positive implementation revision. Scope edits and lifecycle transitions
+back to open or maybe-later increment that revision, including change-and-revert
+sequences. Starting, closing, and reordering preserve it. `execution_runs`
+captures this revision and a versioned checkpoint scope JSON snapshot; migrated
+attempts retain revision 0 (unknown), and continuations preserve the original
+attempt revision. Activity retention does not remove this evidence.
+
+The strict `review_checkpoint_targets` table stores project ID, checkpoint and
+target numbers, deterministic ordinal, original reference, and immutable scope
+snapshots. A composite FK cascades when the checkpoint itself is purged. There
+is deliberately no target FK: purged targets remain diagnosable. A before-delete
+trigger captures the exact currently matching execution receipt in
+`purged_evidence_run_id`, independently of the disappearing target revision.
+Missing targets retain that receipt's run/workspace/commit evidence while
+remaining unready; missing evidence stays missing rather than falling back to
+an earlier lifecycle generation. Insert checks
+allow only ordinary targets in the same project, and the kind is immutable;
+checkpoint-to-checkpoint edges and cycles cannot be constructed. These rows
+are a narrow review selection, not generic dependencies or an epic graph.
+
+`review_checkpoint_readiness` derives live target state and the newest matching
+successful completed implementation receipt. It requires a verified distinct
+result commit, finalization, conversation identities, no pending operation,
+and the current implementation revision. Both queue eligibility and the
+materialized checkpoint JSON use this view within the same SQLite snapshot.
+Creation and relative insertion/rebalancing share `BEGIN IMMEDIATE`.
+Start/close and review run capture/completion recheck readiness under their
+writer transactions. Frozen review scope compares stable identities, selected
+content, revisions and evidence; only canonical display-reference changes from
+project rename are ignored. Reordering never broadens the target set.
+
+The shared `NewPellet` application/storage input exposes `Kind` and
+`ReviewTargets`; `CreatePellet` and `CreateWebPellet` share validation and
+transactional creation. Existing web create forms may omit the optional
+`review_targets` comma-separated field. Inspector and list reads expose current
+checkpoint state; complete-row optimistic tokens also include that observation,
+so a stale UI operation cannot ignore intervening target changes.

@@ -21,7 +21,7 @@ func AddCommand(manager app.PelletManager) Command {
 		Name:    "add",
 		Summary: "Add a pellet to the current project's queue.",
 		Usage: "pl add TITLE [--request-id ID] [--description TEXT | --description-file PATH] [--external-id ID] [--group GROUP] " +
-			"[--before PELLET | --after PELLET] [--maybe-later]",
+			"[--before PELLET | --after PELLET] [--maybe-later] [--review-targets PELLET,PELLET]",
 		Parse:                 parseAdd,
 		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
 		Run: func(ctx context.Context, invocation Invocation) (any, error) {
@@ -36,6 +36,7 @@ func AddCommand(manager app.PelletManager) Command {
 					RequestID: input.RequestID, Title: input.Title, Description: description,
 					ExternalID: input.ExternalID, Group: input.Group,
 					Status: input.Status, Placement: input.Placement,
+					Kind: input.Kind, ReviewTargets: input.ReviewTargets,
 				},
 			)
 			if err != nil {
@@ -337,6 +338,8 @@ func pelletLifecycleCommand(manager app.PelletManager, operation storage.PelletL
 }
 
 type addInput struct {
+	Kind            domain.PelletKind
+	ReviewTargets   []domain.PelletReference
 	RequestID       *string
 	Title           string
 	Description     *string
@@ -366,7 +369,7 @@ func parseAdd(args []string) (any, error) {
 		}
 		seen[name] = true
 		switch name {
-		case "--request-id", "--description", "--description-file", "--external-id", "--group", "--before", "--after":
+		case "--request-id", "--description", "--description-file", "--external-id", "--group", "--before", "--after", "--review-targets":
 			var err error
 			value, args, err = takeCommandFlagValue(
 				args, name, value, hasValue,
@@ -376,6 +379,15 @@ func parseAdd(args []string) (any, error) {
 				return nil, err
 			}
 			switch name {
+			case "--review-targets":
+				input.Kind = domain.PelletReviewCheckpoint
+				for _, part := range strings.Split(value, ",") {
+					ref, err := domain.ParsePelletReference(part)
+					if err != nil {
+						return nil, err
+					}
+					input.ReviewTargets = append(input.ReviewTargets, ref)
+				}
 			case "--request-id":
 				input.RequestID = stringPointer(value)
 			case "--description":
@@ -414,6 +426,14 @@ func parseAdd(args []string) (any, error) {
 	}
 	if input.Status == domain.PelletMaybeLater && input.Placement != nil {
 		return nil, conflictingFlags("--maybe-later", placementFlagName(*input.Placement))
+	}
+	if input.Kind == domain.PelletReviewCheckpoint {
+		if input.Status == domain.PelletMaybeLater {
+			return nil, conflictingFlags("--review-targets", "--maybe-later")
+		}
+		if input.Placement != nil {
+			return nil, conflictingFlags("--review-targets", placementFlagName(*input.Placement))
+		}
 	}
 	return input, nil
 }
@@ -1003,19 +1023,21 @@ func invalidLimit(value string) error {
 }
 
 type pelletData struct {
-	ID          string               `json:"id"`
-	Project     string               `json:"project"`
-	Number      int64                `json:"number"`
-	Title       string               `json:"title"`
-	Description string               `json:"description"`
-	ExternalID  *string              `json:"external_id"`
-	Group       *string              `json:"group"`
-	Status      domain.PelletStatus  `json:"status"`
-	Priority    *int64               `json:"priority"`
-	Workspace   *pelletWorkspaceData `json:"workspace"`
-	CreatedAt   string               `json:"created_at"`
-	UpdatedAt   string               `json:"updated_at"`
-	CompletedAt *string              `json:"completed_at"`
+	Kind        domain.PelletKind         `json:"kind,omitempty"`
+	Checkpoint  *storage.ReviewCheckpoint `json:"checkpoint,omitempty"`
+	ID          string                    `json:"id"`
+	Project     string                    `json:"project"`
+	Number      int64                     `json:"number"`
+	Title       string                    `json:"title"`
+	Description string                    `json:"description"`
+	ExternalID  *string                   `json:"external_id"`
+	Group       *string                   `json:"group"`
+	Status      domain.PelletStatus       `json:"status"`
+	Priority    *int64                    `json:"priority"`
+	Workspace   *pelletWorkspaceData      `json:"workspace"`
+	CreatedAt   string                    `json:"created_at"`
+	UpdatedAt   string                    `json:"updated_at"`
+	CompletedAt *string                   `json:"completed_at"`
 }
 
 type pelletWorkspaceData struct {
@@ -1032,6 +1054,10 @@ func newPelletData(pellet storage.Pellet) pelletData {
 		Title: pellet.Title, Description: pellet.Description,
 		ExternalID: pellet.ExternalID, Group: pellet.Group, Status: pellet.Status, Priority: pellet.Priority,
 		CreatedAt: output.FormatTimestamp(pellet.CreatedAt), UpdatedAt: output.FormatTimestamp(pellet.UpdatedAt),
+	}
+	if pellet.Kind == domain.PelletReviewCheckpoint {
+		data.Kind = pellet.Kind
+		data.Checkpoint = pellet.Checkpoint
 	}
 	if pellet.Workspace != nil {
 		data.Workspace = &pelletWorkspaceData{

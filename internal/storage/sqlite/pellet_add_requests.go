@@ -28,6 +28,15 @@ func pelletAddFingerprint(ctx context.Context, query projectQuery, project stora
 	// placement identity. Filename, flag order, workspace, and project aliases
 	// are not part of the creation intent.
 	input.RequestID = nil
+	if input.ReviewTargets != nil {
+		input.ReviewTargets = append([]domain.PelletReference{}, input.ReviewTargets...)
+		for i, ref := range input.ReviewTargets {
+			if err := ensureReferenceProject(ctx, query, project.Project, ref); err != nil {
+				return "", err
+			}
+			input.ReviewTargets[i].ProjectCode = ""
+		}
+	}
 	if input.Placement != nil {
 		if err := ensureReferenceProject(ctx, query, project.Project, input.Placement.Target); err != nil {
 			return "", err
@@ -70,6 +79,14 @@ func replayPelletAdd(ctx context.Context, query projectQuery, project storage.Re
 	// Creation results are snapshots, but public references always use the
 	// current canonical code even if the project has since been renamed.
 	receipt.Pellet.Reference.ProjectCode = project.Project.Code
+	if receipt.Pellet.Kind == "" {
+		receipt.Pellet.Kind = domain.PelletOrdinary
+	}
+	if receipt.Pellet.Checkpoint != nil {
+		for i := range receipt.Pellet.Checkpoint.Targets {
+			receipt.Pellet.Checkpoint.Targets[i].Reference = domain.PelletReference{ProjectCode: project.Project.Code, Number: receipt.Pellet.Checkpoint.Targets[i].Number}.String()
+		}
+	}
 	return receipt.Pellet, true, nil
 }
 

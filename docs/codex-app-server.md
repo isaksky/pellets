@@ -396,12 +396,26 @@ durable filter model, so its Run one/Drain/Watch controls are disabled and a
 crafted `group_scope=ungrouped` request is rejected rather than widened to an
 unfiltered run.
 
-`SchedulerOptions.Ready` is the narrow checkpoint integration hook. It receives
-the exact candidate under the queue writer transaction, must perform read-only
-checks, and returns false to leave an unready candidate untouched. Run one and
-Drain then stop with `checkpoint_not_ready`; Watch waits for invalidation or
-bounded recovery. The checkpoint owner will supply readiness semantics and
-review dispatch; this hook introduces no checkpoint schema or dependency graph.
+Checkpoint readiness is now enforced by shared storage before scheduler
+selection: waiting open checkpoints are skipped for unrelated eligible work,
+under the captured exact filters. `SchedulerOptions.Ready` remains an additional
+read-only policy hook for the candidate selected under the writer transaction;
+false leaves that candidate untouched. Run one and Drain stop with
+`checkpoint_not_ready` for that additional policy; Watch waits for invalidation
+or bounded recovery.
+
+The persisted `review_checkpoint` kind always routes to the separate checkpoint
+policy. An absent review driver produces `checkpoint_policy_required` before
+claiming it, and the recorder rejects capture through an implementation mode.
+Capture freezes the exact selected Pellet identities, implementation revisions,
+and retained run/commit evidence, with a 1 MiB encoded snapshot bound. Resume,
+close, and completed saves recheck the same scope; changed evidence is a conflict.
+Queue/database readiness supplies exact commit identities across worktrees. The
+review driver must additionally resolve those Git objects and validate the
+actual review and deduplicated triage receipts before claiming review success.
+Production Codex review/triage execution is a separate integration from this
+metadata/readiness contract; no new lifecycle status, lease, or generic
+dependency graph is introduced.
 
 ## Run settings, authentication, and policy
 

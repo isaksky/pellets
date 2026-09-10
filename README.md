@@ -315,6 +315,27 @@ mechanism. Recovery from a removed worktree requires the explicit stored
 workspace ID and `--yes`; see the `release`, `close`, and `defer` forms in the
 [CLI specification](docs/cli-spec.md#pl-release).
 
+### Review selected implementations
+
+```text
+pl add "Review parser changes" --review-targets foo-12,foo-15 --request-id parser-review-1
+pl show foo-16
+```
+
+A review checkpoint retains exactly the selected ordinary Pellets and their
+scope, and is inserted after their last active queue position. Completed
+targets are allowed. Readiness requires every selected target to be closed
+with matching durable implementation-run and verified commit evidence, even
+when implementation happened in another worktree. Queue closure alone is
+insufficient. Waiting checkpoints are skipped for unrelated eligible work.
+
+Checkpoint JSON adds `kind: "review_checkpoint"` and a versioned `checkpoint`
+object containing readiness, target identities, waiting reasons, and exact
+run/commit evidence. Ordinary command output is unchanged. The server's New
+task form accepts optional Review targets and its inspector shows this scope.
+Execution requires the separate checkpoint review policy; an absent policy is
+reported before dispatch. See [the CLI contract](docs/cli-spec.md#pl-add).
+
 ## Search tasks and operate memory
 
 Task search covers title, description, and external-ID text across every

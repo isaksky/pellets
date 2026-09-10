@@ -29,12 +29,32 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 		var title, description, status string
 		var workspace sql.NullInt64
 		var externalID, group sql.NullString
-		err := conn.QueryRowContext(ctx, `SELECT title, description, status, workspace_id, external_id, group_id FROM pellets WHERE project_id = ? AND number = ?`, c.ProjectID, c.PelletNumber).Scan(&title, &description, &status, &workspace, &externalID, &group)
+		var pellet storage.Pellet
+		err := conn.QueryRowContext(ctx, `SELECT title, description, status, workspace_id, external_id, group_id, kind, implementation_revision FROM pellets WHERE project_id = ? AND number = ?`, c.ProjectID, c.PelletNumber).Scan(&title, &description, &status, &workspace, &externalID, &group, &pellet.Kind, &pellet.ImplementationRevision)
 		if errors.Is(err, sql.ErrNoRows) {
 			return storage.InvalidExecutionRun("the exact pellet no longer exists")
 		}
 		if err != nil {
 			return err
+		}
+		implementationRevision := pellet.ImplementationRevision
+		if pellet.Kind == domain.PelletReviewCheckpoint {
+			pellet, err = loadPellet(ctx, conn, c.ProjectID, c.PelletNumber)
+			if err != nil {
+				return err
+			}
+			if c.Mode != "review_checkpoint" {
+				return storage.InvalidExecutionRun("review checkpoints require the separate review driver")
+			}
+			if err := requireCheckpointReady(pellet); err != nil {
+				return err
+			}
+			if !(c.ResumeFrom != nil && status == "closed") && (status != "in_progress" || workspace.Int64 != c.WorkspaceID) {
+				return storage.InvalidExecutionRun("review must use this workspace's in-progress checkpoint")
+			}
+			if !storage.MatchesSchedule(pellet, c.ExternalID, c.Group) {
+				return storage.InvalidExecutionRun("checkpoint no longer matches captured filters")
+			}
 		}
 		resumingClosed := c.ResumeFrom != nil && status == "closed"
 		if resumingClosed {
@@ -72,6 +92,13 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 				return err
 			}
 			completedReceipt := previous.State == "completed" && resumingClosed && previous.Finalization != nil && previous.ResultCommit != "" && previous.Phase == "finalization"
+			if (pellet.Kind == domain.PelletReviewCheckpoint && previous.ImplementationRevision != pellet.ImplementationRevision) || !storage.SameReviewScope(previous.CheckpointScope, pellet.Checkpoint) {
+				return storage.ExecutionRunConflict(previous.ID)
+			}
+			// A continuation retains the generation it actually implemented,
+			// including unknown legacy generations. Resume cannot manufacture
+			// fresh review evidence after a reopen or scope edit.
+			implementationRevision = previous.ImplementationRevision
 			if previous.ProjectID != c.ProjectID || previous.WorkspaceID != c.WorkspaceID || previous.PelletNumber != c.PelletNumber || storage.RunActive(previous.State) || previous.State == "completed" && !completedReceipt {
 				return storage.ExecutionRunConflict(previous.ID)
 			}
@@ -151,6 +178,16 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 		}
 		id, err := result.LastInsertId()
 		if err != nil {
+			return err
+		}
+		scopeJSON, err := json.Marshal(pellet.Checkpoint)
+		if err != nil {
+			return err
+		}
+		if len(scopeJSON) > storage.MaxRunSnapshotBytes {
+			return storage.InvalidExecutionRun("review scope exceeds the snapshot storage bound; it cannot be silently truncated")
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE execution_runs SET implementation_revision=?, checkpoint_scope_json=? WHERE run_id=?`, implementationRevision, string(scopeJSON), id); err != nil {
 			return err
 		}
 		if err := appendRunActivity(ctx, conn, id, 1, now, storage.RunProgress{Phase: phase, State: "running"}); err != nil {
@@ -238,6 +275,18 @@ func (db *ProjectDatabase) UpdateExecutionRun(ctx context.Context, request stora
 			return storage.ExecutionRunConflict(current.ID)
 		}
 		p := request.Progress
+		if p.State == "completed" && current.CheckpointScope != nil {
+			pellet, err := loadPellet(ctx, conn, current.ProjectID, current.PelletNumber)
+			if err != nil {
+				return err
+			}
+			if err := requireCheckpointReady(pellet); err != nil {
+				return err
+			}
+			if pellet.ImplementationRevision != current.ImplementationRevision || !storage.SameReviewScope(pellet.Checkpoint, current.CheckpointScope) {
+				return storage.ExecutionRunConflict(current.ID)
+			}
+		}
 		if current.Finalization != nil && !reflect.DeepEqual(current.Finalization, p.Finalization) {
 			return storage.ExecutionRunConflict(current.ID)
 		}
@@ -502,21 +551,21 @@ type runQuery interface {
 }
 
 func readExecutionRun(ctx context.Context, q runQuery, id int64) (run storage.ExecutionRun, err error) {
-	var settings, promptPrefix, finalization, interaction, created, updated string
+	var settings, promptPrefix, finalization, interaction, created, updated, checkpointScope string
 	var finished, verified sql.NullString
 	err = q.QueryRowContext(ctx, `SELECT r.run_id, r.attempt, r.revision, r.project_id, r.workspace_id, r.pellet_number,
 		r.resume_from, r.mode, r.external_id, r.group_id, r.settings_json, r.prompt_prefix_json, r.starting_head, r.pellet_title, r.pellet_description,
 		r.phase, r.state, r.thread_id, r.turn_id, r.outcome, r.error_code, r.summary, r.cached_input_tokens, r.finalization_json, r.result_commit,
 		r.interaction_json, r.commit_verified_at, r.created_at, r.updated_at, r.finished_at, r.activity_pruned, p.code, r.pending_operation, r.pending_revision, r.pending_turn_id,
 		EXISTS(SELECT 1 FROM pellets WHERE project_id=r.project_id AND number=r.pellet_number),
-		w.root_path, w.root_path_relative, w.git_dir, w.git_dir_relative, p.git_common_dir, p.git_common_dir_relative, r.starting_ref, r.schedule_mode, r.schedule_remaining
+		w.root_path, w.root_path_relative, w.git_dir, w.git_dir_relative, p.git_common_dir, p.git_common_dir_relative, r.starting_ref, r.schedule_mode, r.schedule_remaining, r.implementation_revision, r.checkpoint_scope_json
 		FROM execution_runs r JOIN projects p ON p.project_id=r.project_id
 		JOIN project_workspaces w ON w.workspace_id=r.workspace_id WHERE r.run_id=?`, id).Scan(
 		&run.ID, &run.Attempt, &run.Revision, &run.ProjectID, &run.WorkspaceID, &run.PelletNumber,
 		&run.ResumeFrom, &run.Mode, &run.ExternalID, &run.Group, &settings, &promptPrefix, &run.StartingHead, &run.PelletTitle, &run.PelletDescription,
 		&run.Phase, &run.State, &run.ThreadID, &run.TurnID, &run.Outcome, &run.ErrorCode, &run.Summary, &run.CachedInputTokens, &finalization, &run.ResultCommit,
 		&interaction, &verified, &created, &updated, &finished, &run.ActivityPruned, &run.ProjectCode, &run.PendingOperation, &run.PendingRevision, &run.PendingTurnID, &run.PelletPresent,
-		&run.WorkspaceRoot.Value, &run.WorkspaceRoot.Relative, &run.WorkspaceGitDir.Value, &run.WorkspaceGitDir.Relative, &run.GitCommonDir.Value, &run.GitCommonDir.Relative, &run.StartingRef, &run.ScheduleMode, &run.ScheduleRemaining)
+		&run.WorkspaceRoot.Value, &run.WorkspaceRoot.Relative, &run.WorkspaceGitDir.Value, &run.WorkspaceGitDir.Relative, &run.GitCommonDir.Value, &run.GitCommonDir.Relative, &run.StartingRef, &run.ScheduleMode, &run.ScheduleRemaining, &run.ImplementationRevision, &checkpointScope)
 	if errors.Is(err, sql.ErrNoRows) {
 		return run, storage.ExecutionRunNotFound(id)
 	}
@@ -524,6 +573,9 @@ func readExecutionRun(ctx context.Context, q runQuery, id int64) (run storage.Ex
 		return run, err
 	}
 	if err := json.Unmarshal([]byte(settings), &run.Settings); err != nil {
+		return run, err
+	}
+	if err := json.Unmarshal([]byte(checkpointScope), &run.CheckpointScope); err != nil {
 		return run, err
 	}
 	if err := json.Unmarshal([]byte(promptPrefix), &run.PromptPrefix); err != nil {

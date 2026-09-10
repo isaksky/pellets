@@ -1553,10 +1553,12 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 		"project_code_redirects",
 		"project_workspaces",
 		"projects",
+		"review_checkpoint_targets",
 		"workspace_run_settings",
 	}
 	wantIndexes := []string{
 		"execution_runs_retention_idx",
+		"execution_runs_review_evidence",
 		"execution_runs_workspace_active_idx",
 		"execution_runs_workspace_recent_idx",
 		"memories_project_approval_idx",
@@ -1569,10 +1571,15 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 	assertObjectNames(t, db, "table", wantTables)
 	assertObjectNames(t, db, "index", wantIndexes)
 	assertObjectNames(t, db, "trigger", []string{
+		"pellets_implementation_revision",
+		"pellets_kind_immutable",
 		"project_code_redirects_canonical_namespace_insert",
 		"project_code_redirects_canonical_namespace_update",
 		"projects_code_redirect_namespace_insert",
 		"projects_code_redirect_namespace_update",
+		"review_checkpoint_preserve_purged_evidence",
+		"review_checkpoint_target_kind",
+		"review_checkpoint_targets_immutable",
 	})
 }
 
@@ -1605,7 +1612,7 @@ func assertObjectNames(t *testing.T, db *sql.DB, objectType string, want []strin
 
 func assertStrictTables(t *testing.T, db *sql.DB) {
 	t.Helper()
-	want := []string{"application_metadata", "execution_run_activity", "execution_runs", "memories", "pellet_add_requests", "pellets", "project_code_redirects", "project_workspaces", "projects", "workspace_run_settings"}
+	want := []string{"application_metadata", "execution_run_activity", "execution_runs", "memories", "pellet_add_requests", "pellets", "project_code_redirects", "project_workspaces", "projects", "review_checkpoint_targets", "workspace_run_settings"}
 	rows, err := db.Query("PRAGMA table_list")
 	if err != nil {
 		t.Fatal(err)
