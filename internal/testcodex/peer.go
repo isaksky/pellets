@@ -190,6 +190,10 @@ func Run() bool {
 			if mode == "review_findings_triage_side_effect" {
 				must(os.WriteFile("triage-side-effect.txt", []byte("changed"), 0600))
 			}
+			if mode == "review_findings_triage_gate" {
+				must(os.WriteFile("fake-triage-ready", []byte("ready"), 0600))
+				waitFile("fake-complete")
+			}
 			if mode == "review_findings_triage_interaction" {
 				write(map[string]any{"id": "triage-request", "method": "item/tool/requestUserInput", "params": map[string]any{"threadId": params.ThreadID, "turnId": "turn", "questions": []any{}}})
 			}

@@ -440,6 +440,19 @@ entries, tracked and unignored worktree contents, repository refs, and
 checkpoint scope did not change, and records the successful reviewer terminal
 receipt before entering the separate triage phase.
 
+Branches already checked out in other worktrees may advance through ordinary
+commits during review, triage, and explicit Resume. The immutable snapshot
+records those worktrees' branch tips and HEAD reflog fingerprints. An advance
+is accepted only when the original reflog prefix survives and the appended
+records prove an uninterrupted single-parent commit chain whose final tip equals
+the branch tip. Capture and verification reread refs and retry at most three
+times for concurrent commits; a historical intermediate match cannot justify
+an unattributed rewind or force update.
+The review worktree's HEAD binding, index and contents, exact selected commit
+objects, and all other refs remain protected. New refs, resets, missing or
+rewritten reflogs, and changes without worktree attribution stop for attention.
+Older snapshots without attribution evidence retain the strict all-refs check.
+
 Each unfinished distinct finding is assessed in a fresh read-only Codex thread,
 with a structured final answer and exact successful terminal event required.
 The assessor inspects current code, applicable repository instructions, the

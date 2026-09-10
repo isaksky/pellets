@@ -103,9 +103,25 @@ type ReviewSnapshot struct {
 	RepositoryHead         string              `json:"repository_head"`
 	RepositoryStatusSHA256 string              `json:"repository_status_sha256"`
 	RepositoryRefsSHA256   string              `json:"repository_refs_sha256"`
+	RepositoryRefContext   *ReviewRefContext   `json:"repository_ref_context,omitempty"`
 	Targets                []ReviewTarget      `json:"targets"`
 	Commits                []ReviewCommit      `json:"commits"`
 	Instructions           []ReviewInstruction `json:"instructions"`
+}
+
+// ReviewRefContext attributes ordinary branch advances to another worktree.
+// Older snapshots lack this evidence and retain the strict all-refs check.
+type ReviewRefContext struct {
+	HeadReference string              `json:"head_reference"`
+	Worktrees     []ReviewWorktreeRef `json:"worktrees"`
+}
+
+type ReviewWorktreeRef struct {
+	Root          string `json:"root"`
+	Branch        string `json:"branch"`
+	Head          string `json:"head"`
+	HeadLogBytes  int64  `json:"head_log_bytes"`
+	HeadLogSHA256 string `json:"head_log_sha256"`
 }
 
 type ReviewCommit struct {
@@ -408,6 +424,18 @@ func ValidateReviewSnapshot(snapshot *ReviewSnapshot) error {
 	}
 	if snapshot.Version != 1 || !IsFullCommitID(snapshot.RepositoryHead) || !hexDigest.MatchString(snapshot.RepositoryStatusSHA256) || !hexDigest.MatchString(snapshot.RepositoryRefsSHA256) || len(snapshot.Targets) == 0 || len(snapshot.Targets) > 1000 || len(snapshot.Commits) != len(snapshot.Targets) {
 		return InvalidExecutionRun("invalid immutable review snapshot")
+	}
+	if refs := snapshot.RepositoryRefContext; refs != nil {
+		if refs.HeadReference != "HEAD" && !strings.HasPrefix(refs.HeadReference, "refs/heads/") {
+			return InvalidExecutionRun("invalid immutable review HEAD reference")
+		}
+		seen := map[string]bool{}
+		for _, worktree := range refs.Worktrees {
+			if worktree.Root == "" || strings.ContainsRune(worktree.Root, 0) || !utf8.ValidString(worktree.Root) || !strings.HasPrefix(worktree.Branch, "refs/heads/") || strings.ContainsAny(worktree.Branch, "\x00\n") || worktree.Branch == refs.HeadReference || seen[worktree.Branch] || !IsFullCommitID(worktree.Head) || worktree.HeadLogBytes < 1 || !hexDigest.MatchString(worktree.HeadLogSHA256) {
+				return InvalidExecutionRun("invalid immutable review worktree reference")
+			}
+			seen[worktree.Branch] = true
+		}
 	}
 	resultCommits := make(map[string]bool, len(snapshot.Commits))
 	for i, commit := range snapshot.Commits {

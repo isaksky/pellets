@@ -193,12 +193,15 @@ func (r *checkpointReviewer) verifyUnchanged(ctx context.Context, run storage.Ex
 	if err != nil {
 		return err
 	}
-	head, statusHash, refsHash, err := reviewRepositoryState(ctx, root)
+	head, statusHash, refs, err := reviewRepositoryState(ctx, root)
 	if err != nil {
 		return err
 	}
-	if run.ReviewSnapshot == nil || head != run.ReviewSnapshot.RepositoryHead || statusHash != run.ReviewSnapshot.RepositoryStatusSHA256 || refsHash != run.ReviewSnapshot.RepositoryRefsSHA256 {
-		return scheduleError("review_side_effect_detected", "repository HEAD, index, or worktree changed during the read-only review; preserve and inspect the changes")
+	if run.ReviewSnapshot == nil || head != run.ReviewSnapshot.RepositoryHead || statusHash != run.ReviewSnapshot.RepositoryStatusSHA256 {
+		return reviewSideEffect()
+	}
+	if err := verifyReviewRefs(ctx, root, refs, run.ReviewSnapshot); err != nil {
+		return err
 	}
 	for _, commit := range run.ReviewSnapshot.Commits {
 		if err := verifyRunCommit(ctx, root, commit.StartingHead); err != nil {
@@ -212,11 +215,15 @@ func (r *checkpointReviewer) verifyUnchanged(ctx context.Context, run storage.Ex
 }
 
 func buildReviewSnapshot(ctx context.Context, root string, run storage.ExecutionRun) (*storage.ReviewSnapshot, error) {
-	head, statusHash, refsHash, err := reviewRepositoryState(ctx, root)
+	head, statusHash, refs, err := reviewRepositoryState(ctx, root)
 	if err != nil {
 		return nil, err
 	}
-	snapshot := &storage.ReviewSnapshot{Version: 1, RepositoryHead: head, RepositoryStatusSHA256: statusHash, RepositoryRefsSHA256: refsHash, Targets: slices.Clone(run.CheckpointScope.Targets)}
+	refContext, refs, err := captureReviewRefContext(ctx, root, refs)
+	if err != nil {
+		return nil, err
+	}
+	snapshot := &storage.ReviewSnapshot{Version: 1, RepositoryHead: head, RepositoryStatusSHA256: statusHash, RepositoryRefsSHA256: reviewRefsDigest(refs), RepositoryRefContext: refContext, Targets: slices.Clone(run.CheckpointScope.Targets)}
 	seenInstructions := map[string]bool{}
 	for _, target := range snapshot.Targets {
 		if target.Reason != "ready" || target.Evidence == nil {
@@ -283,12 +290,11 @@ func reviewRepositoryState(ctx context.Context, root string) (string, string, st
 	if err != nil {
 		return "", "", "", err
 	}
-	refs, err := executionGitRaw(ctx, root, "for-each-ref", "--format=%(refname)%00%(objectname)%00")
+	refs, err := reviewRepositoryRefs(ctx, root)
 	if err != nil {
 		return "", "", "", err
 	}
-	refsDigest := sha256.Sum256([]byte(refs))
-	return head, stateDigest, hex.EncodeToString(refsDigest[:]), nil
+	return head, stateDigest, refs, nil
 }
 
 // Porcelain status does not identify the contents of an already-dirty file.
