@@ -158,12 +158,15 @@ const (
 	PelletDefer   PelletLifecycleOperation = "defer"
 )
 
-// PelletLifecycleRequest carries the only optional ownership override. The
+// PelletLifecycleRequest carries the optional ownership override. The
 // CLI requires explicit confirmation before it constructs a non-nil recovery
 // workspace ID, and storage still verifies that ID against the stored owner.
 type PelletLifecycleRequest struct {
 	Operation           PelletLifecycleOperation
 	RecoveryWorkspaceID *int64
+	// ExpectedImplementationRevision binds server finalization to its captured
+	// generation under the lifecycle writer lock. It requires an owned close.
+	ExpectedImplementationRevision *int64
 }
 
 // PelletLifecycleResult identifies an explicitly recovered owner when a

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"pellets/internal/domain"
 	"pellets/internal/storage"
@@ -16,6 +17,161 @@ import (
 type finalizationFailureDatabase struct {
 	storage.ExecutionRunDatabase
 	fail func(storage.UpdateExecutionRun) bool
+}
+
+type finalizationRaceQueue struct {
+	storage.SchedulerQueue
+	beforeClose func()
+}
+
+func (q finalizationRaceQueue) TransitionPellet(ctx context.Context, selected storage.ResolvedProject, ref domain.PelletReference, request storage.PelletLifecycleRequest) (storage.PelletLifecycleResult, error) {
+	if request.Operation == storage.PelletClose {
+		q.beforeClose()
+	}
+	return q.SchedulerQueue.TransitionPellet(ctx, selected, ref, request)
+}
+
+func TestSchedulerFinalizationRejectsReplacementAtMutationBoundaries(t *testing.T) {
+	executable := installSupervisorPeer(t)
+	for _, boundary := range []string{"verification", "commit", "verified_commit", "close", "atomic_close", "completed"} {
+		t.Run(boundary, func(t *testing.T) {
+			s, request, q := schedulerFixture(t, executable, "schedule_success")
+			ctx := context.Background()
+			ref := domain.PelletReference{ProjectCode: request.Selected.Project.Code, Number: 1}
+			var replaced atomic.Bool
+			var replacement storage.Pellet
+			replace := func() {
+				if !replaced.CompareAndSwap(false, true) {
+					return
+				}
+				first := storage.PelletRelease
+				if boundary == "completed" {
+					first = storage.PelletReopen
+				}
+				for _, operation := range []storage.PelletLifecycleOperation{first, storage.PelletStart} {
+					if _, err := q.TransitionPellet(ctx, request.Selected, ref, storage.PelletLifecycleRequest{Operation: operation}); err != nil {
+						t.Error(err)
+						return
+					}
+				}
+				var err error
+				replacement, err = q.ReadPellet(ctx, request.Selected, ref)
+				if err != nil {
+					t.Error(err)
+				}
+			}
+			openRun := s.options.Supervisor.options.Recorder.Open
+			s.options.Supervisor.options.Recorder.Open = func(ctx context.Context, path string) (storage.ExecutionRunDatabase, error) {
+				db, err := openRun(ctx, path)
+				if err != nil {
+					return nil, err
+				}
+				return finalizationFailureDatabase{ExecutionRunDatabase: db, fail: func(update storage.UpdateExecutionRun) bool {
+					if boundary == update.Progress.Phase || boundary == "verified_commit" && update.VerifiedCommit != "" || boundary == "completed" && update.Progress.State == "completed" {
+						replace()
+					}
+					return false
+				}}, nil
+			}
+			if boundary == "atomic_close" {
+				openQueue := s.options.OpenQueue
+				s.options.OpenQueue = func(ctx context.Context, path string) (storage.SchedulerQueue, error) {
+					queue, err := openQueue(ctx, path)
+					return finalizationRaceQueue{SchedulerQueue: queue, beforeClose: replace}, err
+				}
+			}
+			status := awaitSchedule(t, startSchedule(t, s, request))
+			if status.State != "needs_attention" || !replaced.Load() || status.Completed != 0 {
+				t.Fatalf("stale finalization accepted: %+v", status)
+			}
+			run, err := s.options.Supervisor.options.Recorder.Read(ctx, s.options.Database, status.RunID)
+			if err != nil || run.State != "needs_attention" || run.ImplementationRevision+1 != replacement.ImplementationRevision {
+				t.Fatalf("stale attempt evidence: %+v %v", run, err)
+			}
+			after, err := q.ReadPellet(ctx, request.Selected, ref)
+			if err != nil || storage.PelletVersion(after) != storage.PelletVersion(replacement) {
+				t.Fatalf("replacement altered: %+v %v", after, err)
+			}
+			count := "1"
+			if boundary == "verification" || boundary == "commit" {
+				count = "0"
+			}
+			if got := gitForExecutionTest(t, s.options.Database.Root, "rev-list", "--count", run.StartingHead+"..HEAD"); got != count {
+				t.Fatalf("commit count = %s, want %s", got, count)
+			}
+			if boundary == "verified_commit" {
+				if run.ResultCommit != "" || run.Finalization == nil {
+					t.Fatalf("ambiguous commit evidence lost or adopted: %+v", run)
+				}
+				// Reconciliation of the committed tree must still reject the
+				// replacement generation, without another implementation turn.
+				request.ResumePellet, request.ResumeFrom = &run.PelletNumber, &run.ID
+				resumed := awaitSchedule(t, startSchedule(t, s, request))
+				if resumed.State != "needs_attention" || resumed.Completed != 0 {
+					t.Fatalf("stale commit reconciled: %+v", resumed)
+				}
+				if got := gitForExecutionTest(t, s.options.Database.Root, "rev-list", "--count", run.StartingHead+"..HEAD"); got != "1" {
+					t.Fatalf("reconciliation recommitted: %s", got)
+				}
+			}
+		})
+	}
+}
+
+func TestSchedulerRejectsReplacementDuringCommitChild(t *testing.T) {
+	s, request, q := schedulerFixture(t, installSupervisorPeer(t), "schedule_success")
+	root := s.options.Database.Root
+	hook := "#!/bin/sh\n: > .git/commit-entered\nwhile test ! -f .git/commit-continue; do sleep 0.01; done\n"
+	if err := os.WriteFile(filepath.Join(root, ".git", "hooks", "pre-commit"), []byte(hook), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	handle := startSchedule(t, s, request)
+	// Unblock the owned child even if the test fails before the release below.
+	defer os.WriteFile(filepath.Join(root, ".git", "commit-continue"), []byte("go"), 0600)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(root, ".git", "commit-entered")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("commit child did not reach its hook")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	ref := domain.PelletReference{ProjectCode: request.Selected.Project.Code, Number: 1}
+	for _, operation := range []storage.PelletLifecycleOperation{storage.PelletRelease, storage.PelletStart} {
+		if _, err := q.TransitionPellet(ctx, request.Selected, ref, storage.PelletLifecycleRequest{Operation: operation}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	replacement, err := q.ReadPellet(ctx, request.Selected, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "commit-continue"), []byte("go"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	status := awaitSchedule(t, handle)
+	if status.State != "needs_attention" || status.Reason != "execution_run_conflict" || status.Completed != 0 {
+		t.Fatalf("replacement accepted after commit child: %+v", status)
+	}
+	run, err := s.options.Supervisor.options.Recorder.Read(ctx, s.options.Database, status.RunID)
+	if err != nil || run.ResultCommit != "" || run.Finalization == nil || run.ImplementationRevision+1 != replacement.ImplementationRevision {
+		t.Fatalf("commit adopted into replacement: %+v %v", run, err)
+	}
+	after, err := q.ReadPellet(ctx, request.Selected, ref)
+	if err != nil || storage.PelletVersion(after) != storage.PelletVersion(replacement) {
+		t.Fatalf("replacement changed: %+v %v", after, err)
+	}
+	if count := gitForExecutionTest(t, root, "rev-list", "--count", run.StartingHead+"..HEAD"); count != "1" {
+		t.Fatalf("unconfirmed child commit was lost or repeated: %s", count)
+	}
+	request.ResumePellet, request.ResumeFrom = &run.PelletNumber, &run.ID
+	resumed := awaitSchedule(t, startSchedule(t, s, request))
+	if resumed.State != "needs_attention" || resumed.Completed != 0 {
+		t.Fatalf("stale child commit reconciled: %+v", resumed)
+	}
 }
 
 func (db finalizationFailureDatabase) UpdateExecutionRun(ctx context.Context, update storage.UpdateExecutionRun) (storage.ExecutionRun, error) {
@@ -176,14 +332,24 @@ func TestFinalizationLiteralPathsAndMetadataBoundary(t *testing.T) {
 
 func TestSchedulerDetectsOwnershipAndHeadInterference(t *testing.T) {
 	executable := installSupervisorPeer(t)
-	for _, action := range []string{"release", "commit"} {
+	for _, action := range []string{"release", "release_start", "commit"} {
 		t.Run(action, func(t *testing.T) {
 			s, request, q := schedulerFixture(t, executable, "schedule_gate")
 			h := startSchedule(t, s, request)
 			awaitScheduledTurn(t, s)
-			if action == "release" {
+			before, err := q.ReadPellet(context.Background(), request.Selected, domain.PelletReference{ProjectCode: request.Selected.Project.Code, Number: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			head := gitForExecutionTest(t, s.options.Database.Root, "rev-parse", "HEAD")
+			if action == "release" || action == "release_start" {
 				if _, err := q.TransitionPellet(context.Background(), request.Selected, domain.PelletReference{ProjectCode: request.Selected.Project.Code, Number: 1}, storage.PelletLifecycleRequest{Operation: storage.PelletRelease}); err != nil {
 					t.Fatal(err)
+				}
+				if action == "release_start" {
+					if _, err := q.TransitionPellet(context.Background(), request.Selected, before.Reference, storage.PelletLifecycleRequest{Operation: storage.PelletStart}); err != nil {
+						t.Fatal(err)
+					}
 				}
 			} else {
 				gitForExecutionTest(t, s.options.Database.Root, "commit", "--allow-empty", "-m", "external change")
@@ -201,6 +367,18 @@ func TestSchedulerDetectsOwnershipAndHeadInterference(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(s.options.Database.Root, "demo-1.txt")); err != nil {
 				t.Fatal("implementation change was discarded", err)
+			}
+			if action == "release_start" {
+				after, err := q.ReadPellet(context.Background(), request.Selected, before.Reference)
+				if err != nil || after.ImplementationRevision != before.ImplementationRevision+1 || after.Status != before.Status || after.Workspace == nil || after.Workspace.ID != before.Workspace.ID || after.Title != before.Title || after.Description != before.Description {
+					t.Fatalf("replacement implementation changed: %+v %v", after, err)
+				}
+				if got := gitForExecutionTest(t, s.options.Database.Root, "rev-parse", "HEAD"); got != head {
+					t.Fatalf("stale turn committed: %s", got)
+				}
+				if got := gitForExecutionTest(t, s.options.Database.Root, "diff", "--cached", "--name-only"); got != "" {
+					t.Fatalf("stale turn staged: %s", got)
+				}
 			}
 		})
 	}

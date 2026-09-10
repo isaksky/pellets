@@ -540,14 +540,6 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 	run, readErr := execution.Read(finalCtx)
 	if readErr == nil && run.State != "completed" {
 		if interrupted && closeErr == nil && !errors.Is(err, codex.ErrCleanup) {
-			if diagnostic := executionFailureDiagnostic(err); diagnostic != "" && storage.RunActive(run.State) {
-				progress := run.RunProgress
-				progress.Summary = diagnostic
-				run, readErr = execution.recorder.Save(finalCtx, request.Database, storage.UpdateExecutionRun{ID: run.ID, ExpectedRevision: run.Revision, Progress: progress})
-				if readErr != nil {
-					return run, errors.Join(err, closeErr, readErr, driverStopErr)
-				}
-			}
 			outcome := "unknown"
 			switch completedTurnStatus(execution.LatestCompletion(), run.ThreadID, run.TurnID) {
 			case "interrupted":
@@ -555,7 +547,17 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 			case "failed":
 				outcome = "failed"
 			}
-			run, readErr = execution.recorder.markInterrupted(finalCtx, request.Database, run.ID, run.Revision, outcome)
+			if diagnostic := executionFailureDiagnostic(err); diagnostic != "" && storage.RunActive(run.State) {
+				// Save the diagnostic with the terminal state atomically. An
+				// intermediate active-finalization update must remain forbidden
+				// when lifecycle changes have replaced this implementation.
+				progress := run.RunProgress
+				progress.State, progress.Outcome, progress.ErrorCode = "interrupted", outcome, "supervisor_stopped"
+				progress.Summary, progress.Interaction = diagnostic, nil
+				run, readErr = execution.recorder.Save(finalCtx, request.Database, storage.UpdateExecutionRun{ID: run.ID, ExpectedRevision: run.Revision, Progress: progress})
+			} else {
+				run, readErr = execution.recorder.markInterrupted(finalCtx, request.Database, run.ID, run.Revision, outcome)
+			}
 		} else if storage.RunActive(run.State) {
 			progress := run.RunProgress
 			progress.State, progress.Outcome, progress.ErrorCode, progress.Summary = "needs_attention", "unknown", failureCode, ""

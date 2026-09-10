@@ -555,6 +555,9 @@ func (s *Scheduler) validateResult(ctx context.Context, run storage.ExecutionRun
 	if pellet.Status != domain.PelletClosed {
 		return scheduleError("schedule_pellet_not_closed", "the exact pellet has not been closed")
 	}
+	if pellet.ImplementationRevision != run.ImplementationRevision {
+		return scheduleError("implementation_ownership_changed", "the exact pellet's implementation revision changed")
+	}
 	root, err := executionRoot(ctx, s.options.Database, run)
 	if err != nil {
 		return err

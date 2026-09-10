@@ -297,6 +297,14 @@ func (db *ProjectDatabase) UpdateExecutionRun(ctx context.Context, request stora
 			return storage.ExecutionRunConflict(current.ID)
 		}
 		p := request.Progress
+		// Terminal failure/cancellation recording must remain possible after a
+		// lifecycle change. Success and durable finalization evidence, however,
+		// belong only to the implementation generation captured by this run.
+		if request.VerifiedCommit != "" || p.State == "completed" || storage.RunActive(p.State) && p.Finalization != nil {
+			if err := requireRunImplementationRevision(ctx, conn, current); err != nil {
+				return err
+			}
+		}
 		if p.State == "completed" && current.CheckpointScope != nil {
 			pellet, err := loadPellet(ctx, conn, current.ProjectID, current.PelletNumber)
 			if err != nil {
@@ -457,15 +465,10 @@ func (db *ProjectDatabase) BeginExecutionOperation(ctx context.Context, id, revi
 		default:
 			return storage.InvalidExecutionRun("unsupported pending execution operation")
 		}
-		if current.ResumeFrom != nil && operation != "turn/interrupt" {
+		if operation != "turn/interrupt" {
 			// Recheck at dispatch too, since a lifecycle change can happen after
 			// capture. Cancellation must remain available for an existing turn.
-			var implementationRevision int64
-			err := conn.QueryRowContext(ctx, `SELECT implementation_revision FROM pellets WHERE project_id=? AND number=?`, current.ProjectID, current.PelletNumber).Scan(&implementationRevision)
-			if errors.Is(err, sql.ErrNoRows) || err == nil && implementationRevision != current.ImplementationRevision {
-				return storage.ExecutionRunConflict(id)
-			}
-			if err != nil {
+			if err := requireRunImplementationRevision(ctx, conn, current); err != nil {
 				return err
 			}
 		}
@@ -481,6 +484,15 @@ func (db *ProjectDatabase) BeginExecutionOperation(ctx context.Context, id, revi
 		return err
 	})
 	return run, err
+}
+
+func requireRunImplementationRevision(ctx context.Context, q runQuery, run storage.ExecutionRun) error {
+	var revision int64
+	err := q.QueryRowContext(ctx, `SELECT implementation_revision FROM pellets WHERE project_id=? AND number=?`, run.ProjectID, run.PelletNumber).Scan(&revision)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && revision != run.ImplementationRevision {
+		return storage.ExecutionRunConflict(run.ID)
+	}
+	return err
 }
 
 // FinishExecutionOperation reconciles only the response's identities against

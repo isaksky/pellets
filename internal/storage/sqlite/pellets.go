@@ -892,6 +892,9 @@ func (repository *PelletRepository) transitionPellet(ctx context.Context, projec
 	if expectedVersion != "" && expectedVersion != storage.PelletVersion(before) {
 		return storage.PelletLifecycleResult{}, &storage.OptimisticConflict{Pellet: &before}
 	}
+	if request.ExpectedImplementationRevision != nil && (before.ImplementationRevision != *request.ExpectedImplementationRevision || before.Status != domain.PelletInProgress || before.Workspace == nil || before.Workspace.ID != project.Workspace.ID) {
+		return storage.PelletLifecycleResult{}, domain.NewError(domain.Conflict, "implementation_ownership_changed", "the exact pellet's ownership or implementation revision changed", nil)
+	}
 
 	after, recovered, changed, err := applyPelletLifecycleTransition(ctx, connection, project, before, request)
 	if err != nil {
@@ -1137,6 +1140,9 @@ func ensureStoredProjectWorkspace(ctx context.Context, query projectQuery, proje
 }
 
 func validatePelletLifecycleRequest(request storage.PelletLifecycleRequest) error {
+	if request.ExpectedImplementationRevision != nil && (*request.ExpectedImplementationRevision < 1 || request.Operation != storage.PelletClose || request.RecoveryWorkspaceID != nil) {
+		return domain.NewError(domain.Usage, "invalid_implementation_revision", "a positive implementation revision is only supported for an owned close", nil)
+	}
 	switch request.Operation {
 	case storage.PelletStart, storage.PelletRelease, storage.PelletClose, storage.PelletReopen, storage.PelletDefer:
 	default:

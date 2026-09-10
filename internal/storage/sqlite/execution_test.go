@@ -146,6 +146,77 @@ func TestImplementationResumeRejectsChangedGenerationAtCaptureAndDispatch(t *tes
 	}
 }
 
+func TestOrdinaryRunRejectsReplacementGenerationAtDurableBoundaries(t *testing.T) {
+	for _, boundary := range []string{"thread/start", "thread/resume", "turn/start", "verification", "commit", "verified_commit", "close", "completed", "atomic_close"} {
+		t.Run(boundary, func(t *testing.T) {
+			ctx := context.Background()
+			db, run, fixture := createTestRun(t)
+			if boundary != "thread/start" {
+				run = updateRun(t, db, run, storage.RunProgress{Phase: "implementation", State: "running", ThreadID: "thread", TurnID: "turn"}, "")
+			}
+			q := fixture.open(t)
+			defer q.Close()
+			ref := domain.PelletReference{ProjectCode: run.ProjectCode, Number: run.PelletNumber}
+			for _, operation := range []storage.PelletLifecycleOperation{storage.PelletRelease, storage.PelletStart} {
+				if _, err := q.TransitionPellet(ctx, fixture.main, ref, storage.PelletLifecycleRequest{Operation: operation}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			replacement, err := q.ReadPellet(ctx, fixture.main, ref)
+			if err != nil || replacement.ImplementationRevision != run.ImplementationRevision+1 {
+				t.Fatalf("replacement generation: %+v %v", replacement, err)
+			}
+			var rejected error
+			if strings.Contains(boundary, "/") {
+				_, rejected = db.BeginExecutionOperation(ctx, run.ID, run.Revision, boundary)
+			} else if boundary == "atomic_close" {
+				_, rejected = q.TransitionPellet(ctx, fixture.main, ref, storage.PelletLifecycleRequest{Operation: storage.PelletClose, ExpectedImplementationRevision: &run.ImplementationRevision})
+			} else {
+				progress := run.RunProgress
+				progress.Phase = boundary
+				progress.Finalization = &storage.FinalizationEvidence{Files: []string{"source.go"}, Tree: strings.Repeat("c", 40), Subject: "demo-1: implement"}
+				commit := ""
+				if boundary == "verified_commit" || boundary == "completed" {
+					progress.Phase = "finalization"
+					commit = strings.Repeat("b", 40)
+				}
+				if boundary == "completed" {
+					progress.State, progress.Outcome = "completed", "succeeded"
+				}
+				_, rejected = db.UpdateExecutionRun(ctx, storage.UpdateExecutionRun{ID: run.ID, ExpectedRevision: run.Revision, Progress: progress, VerifiedCommit: commit})
+			}
+			code := "execution_run_conflict"
+			if boundary == "atomic_close" {
+				code = "implementation_ownership_changed"
+			}
+			if domain.PublicError(rejected).Code != code {
+				t.Fatalf("stale %s accepted: %v", boundary, rejected)
+			}
+			after, err := q.ReadPellet(ctx, fixture.main, ref)
+			if err != nil || !reflect.DeepEqual(after, replacement) {
+				t.Fatalf("replacement changed: %+v %v", after, err)
+			}
+			unchanged, err := db.ReadExecutionRun(ctx, run.ID)
+			if err != nil || unchanged.Revision != run.Revision || unchanged.PendingOperation != "" || unchanged.ResultCommit != "" {
+				t.Fatalf("rejected boundary persisted evidence: %+v %v", unchanged, err)
+			}
+			if run.TurnID != "" {
+				pending, err := db.BeginExecutionOperation(ctx, run.ID, run.Revision, "turn/interrupt")
+				if err != nil {
+					t.Fatalf("replacement prevented cancellation: %v", err)
+				}
+				run, err = db.FinishExecutionOperation(ctx, storage.ExecutionOperationResult{ID: run.ID, PendingRevision: pending.PendingRevision})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			progress := run.RunProgress
+			progress.State, progress.Outcome, progress.ErrorCode = "needs_attention", "unknown", "execution_run_conflict"
+			updateRun(t, db, run, progress, "")
+		})
+	}
+}
+
 func TestFinalizationEvidenceIsImmutableAndInheritedExactly(t *testing.T) {
 	db, run, _ := createTestRun(t)
 	progress := storage.RunProgress{Phase: "close", State: "running", ThreadID: "thread", TurnID: "turn", Finalization: &storage.FinalizationEvidence{Files: []string{"source.go"}, Tree: strings.Repeat("c", 40), Subject: "demo-1: implement"}}

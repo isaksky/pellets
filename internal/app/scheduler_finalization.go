@@ -29,7 +29,7 @@ func (s *Scheduler) requireOwnership(ctx context.Context, run storage.ExecutionR
 	if err != nil {
 		return err
 	}
-	if p.Status != domain.PelletInProgress || p.Workspace == nil || p.Workspace.ID != run.WorkspaceID || p.Title != run.PelletTitle || p.Description != run.PelletDescription || !storage.MatchesSchedule(p, run.ExternalID, run.Group) {
+	if p.ImplementationRevision != run.ImplementationRevision || p.Status != domain.PelletInProgress || p.Workspace == nil || p.Workspace.ID != run.WorkspaceID || p.Title != run.PelletTitle || p.Description != run.PelletDescription || !storage.MatchesSchedule(p, run.ExternalID, run.Group) {
 		return scheduleError("implementation_ownership_changed", "the exact pellet's ownership or scope changed")
 	}
 	return nil
@@ -285,7 +285,7 @@ func (s *Scheduler) finalize(ctx context.Context, execution *WorkspaceExecution,
 		if err != nil {
 			return err
 		}
-		closed = p.Status == domain.PelletClosed && p.Title == run.PelletTitle && p.Description == run.PelletDescription
+		closed = p.ImplementationRevision == run.ImplementationRevision && p.Status == domain.PelletClosed && p.Title == run.PelletTitle && p.Description == run.PelletDescription
 	}
 	if !closed {
 		if err := s.requireOwnership(ctx, run); err != nil {
@@ -298,7 +298,7 @@ func (s *Scheduler) finalize(ctx context.Context, execution *WorkspaceExecution,
 		if err != nil {
 			return err
 		}
-		_, err = queue.TransitionPellet(ctx, executionSelection(run), domain.PelletReference{ProjectCode: run.ProjectCode, Number: run.PelletNumber}, storage.PelletLifecycleRequest{Operation: storage.PelletClose})
+		_, err = queue.TransitionPellet(ctx, executionSelection(run), domain.PelletReference{ProjectCode: run.ProjectCode, Number: run.PelletNumber}, storage.PelletLifecycleRequest{Operation: storage.PelletClose, ExpectedImplementationRevision: &run.ImplementationRevision})
 		err = errors.Join(err, queue.Close())
 		if err != nil {
 			return err

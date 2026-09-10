@@ -146,6 +146,67 @@ func TestFinalizationStopNowContainsDetachedHookAndPreservesUnrelatedProcess(t *
 	lock.Close()
 }
 
+func TestFinalizationStopNowAfterReplacementRetainsDiagnosticAndCleansReceipt(t *testing.T) {
+	ctx := context.Background()
+	s, request, q := schedulerFixture(t, installSupervisorPeer(t), "schedule_success")
+	root := s.options.Database.Root
+	startingHead := gitForExecutionTest(t, root, "rev-parse", "HEAD")
+	installDelayedFinalizationHook(t, root)
+	handle := startSchedule(t, s, request)
+	pids := awaitFinalizationHook(t, root)
+	ref := domain.PelletReference{ProjectCode: request.Selected.Project.Code, Number: 1}
+	for _, operation := range []storage.PelletLifecycleOperation{storage.PelletRelease, storage.PelletStart} {
+		if _, err := q.TransitionPellet(ctx, request.Selected, ref, storage.PelletLifecycleRequest{Operation: operation}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	replacement, err := q.ReadPellet(ctx, request.Selected, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := s.options.Supervisor.options.Recorder
+	runs, err := recorder.ListWorkspaceRuns(ctx, s.options.Database, request.Selected.Workspace.ID, 1)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("running commit evidence: %+v %v", runs, err)
+	}
+	handle.StopNow()
+	status := awaitSchedule(t, handle)
+	if status.State != "stopped" || status.Completed != 0 {
+		t.Fatalf("replacement stop = %+v", status)
+	}
+	run, err := recorder.Read(ctx, s.options.Database, runs[0].ID)
+	if err != nil || run.State != "interrupted" || run.ErrorCode != "supervisor_stopped" || run.FinishedAt == nil || run.Phase != "commit" || run.Finalization == nil || run.PendingOperation != "" || run.ResultCommit != "" || !strings.Contains(run.Summary, "DELAYED-HOOK cancellation diagnostic") {
+		t.Fatalf("shutdown did not persist terminal diagnostic: %+v %v", run, err)
+	}
+	assertFinalizationHookStopped(t, root, pids)
+	if head := gitForExecutionTest(t, root, "rev-parse", "HEAD"); head != startingHead {
+		t.Fatalf("stopped hook committed replacement: %s", head)
+	}
+	if staged := gitForExecutionTest(t, root, "diff", "--cached", "--name-only"); staged != "demo-1.txt" {
+		t.Fatalf("shutdown discarded staged implementation: %q", staged)
+	}
+	lock, err := executionlock.Acquire(filepath.Join(root, ".git"))
+	if err != nil {
+		t.Fatalf("confirmed shutdown left a recovery receipt: %v", err)
+	}
+	defer lock.Close()
+	// Confirm the old active row no longer fences a fresh capture. This only
+	// records an attempt; staged work still requires explicit reconciliation.
+	capture := run.RunCapture
+	capture.ResumeFrom = nil
+	fresh, err := recorder.Begin(ctx, s.options.Database, request.Selected, capture)
+	if err != nil || fresh.ImplementationRevision != replacement.ImplementationRevision || fresh.ThreadID != "" || fresh.ResumeFrom != nil {
+		t.Fatalf("replacement remains fenced by stopped run: %+v %v", fresh, err)
+	}
+	if _, err := recorder.MarkInterrupted(ctx, s.options.Database, fresh.ID, fresh.Revision); err != nil {
+		t.Fatal(err)
+	}
+	after, err := q.ReadPellet(ctx, request.Selected, ref)
+	if err != nil || storage.PelletVersion(after) != storage.PelletVersion(replacement) {
+		t.Fatalf("shutdown changed replacement: %+v %v", after, err)
+	}
+}
+
 func TestFinalizationServerCrashHelper(t *testing.T) {
 	encoded := os.Getenv("PELLETS_FINALIZATION_CRASH_REQUEST")
 	if encoded == "" {

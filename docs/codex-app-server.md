@@ -314,6 +314,17 @@ the commit is HEAD with exactly the captured starting parent, expected tree,
 and expected subject, and requires a clean worktree. `.pellets` and Git metadata
 paths cannot be finalized. No pathspec globs, reset, amend, push, or PR is used.
 
+Ordinary dispatch, finalization evidence, commit verification, and completion
+are bound to the run's captured implementation revision. Closing checks that
+revision and workspace ownership in the lifecycle transaction. Releasing and
+starting the same pellet invalidates the old attempt even when all visible
+fields match. If replacement occurs while a Git commit is already running,
+its possible commit is preserved for inspection; the old attempt cannot adopt
+that commit or close the replacement and stops for attention. Exact Resume
+also rejects that stale revision. Confirmed Stop now persists interruption and
+any Git diagnostic together, then clears the execution receipt even when the
+implementation revision changed during the stopped child.
+
 Finalization Git commands, including private-index filters, commit hooks, and
 signing helpers, use the same process-tree containment and execution-lock
 custody as Codex. Stop now waits for owned descendants to settle; foreground
@@ -729,6 +740,7 @@ traceable checks:
 | Owned pellet without a run: authentication/config repair, restart, CLI start, reconstructed modes/filters, duplicate exclusion | `TestHTTPResumeWithoutRunRepairsPreflightAndReconstructsExactIntent` plus `node scripts/test-web-recovery-browser.cjs` |
 | Reopened generation starts fresh; current generation retains exact-attempt recovery | `TestHTTPReopenedGenerationResumesWithFreshConversationAfterPreflightRepair`, `TestHTTPCurrentGenerationRunRequiresExactAttemptAndPreventsOverlap`, and the recovery browser suite |
 | Lifecycle generation changes during preflight or before continuation dispatch | `TestSchedulerResumeRevalidatesGenerationAfterPreflight` and `TestImplementationResumeRejectsChangedGenerationAtCaptureAndDispatch` |
+| Ordinary generation changes during implementation, commit, verification, or atomic closure | `TestSchedulerDetectsOwnershipAndHeadInterference`, `TestSchedulerRejectsReplacementDuringCommitChild`, `TestSchedulerFinalizationRejectsReplacementAtMutationBoundaries`, and `TestOrdinaryRunRejectsReplacementGenerationAtDurableBoundaries` |
 
 `go test ./...` runs the Go rows with fake app-server children and temporary
 repositories/databases. On macOS it also runs the Darwin/Unix process-custody
