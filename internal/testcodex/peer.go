@@ -118,7 +118,10 @@ func Run() bool {
 			if mode == "schedule_gate" {
 				waitFile("fake-complete")
 			}
-			completeScheduled(mode, message.Params)
+			report := completeScheduled(mode, message.Params)
+			if mode != "schedule_turn_only" {
+				write(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread", "turnId": "turn", "item": map[string]any{"type": "agentMessage", "phase": "final_answer", "text": report}}})
+			}
 			write(map[string]any{"method": "thread/tokenUsage/updated", "params": map[string]any{"threadId": "thread", "turnId": "turn", "tokenUsage": map[string]any{"last": map[string]any{"cachedInputTokens": int64(7)}, "total": map[string]any{"cachedInputTokens": int64(70)}}}})
 			if mode == "schedule_input" {
 				write(map[string]any{"id": 1, "method": "item/tool/requestUserInput", "params": map[string]any{}})

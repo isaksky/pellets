@@ -54,6 +54,15 @@ type SchedulerOptions struct {
 	// Ready is a narrow, read-only checkpoint policy extension; see storage's
 	// transaction contract. Nil means ordinary queue semantics.
 	Ready func(context.Context, storage.ResolvedProject, storage.Pellet) (bool, error)
+	// Checkpoints have their own driver and completion evidence. Ordinary
+	// clean-worktree and single implementation commit rules do not apply.
+	Checkpoints *CheckpointExecutionPolicy
+}
+
+type CheckpointExecutionPolicy struct {
+	Matches            func(storage.Pellet) bool
+	Drive              ExecutionDriver
+	ValidateCompletion func(context.Context, storage.ExecutionRun, storage.ResolvedProject) error
 }
 
 // Scheduler has foreground lifetime only. Restart never recreates schedules;
@@ -257,11 +266,48 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 			if err != nil {
 				return nil, err
 			}
+			// Explicit reconciliation may observe that close committed before
+			// the terminal run save. It does not reopen or select another pellet.
+			if request.ResumeFrom != nil {
+				previous, err := s.options.Supervisor.options.Recorder.Read(ctx, s.options.Database, *request.ResumeFrom)
+				if err != nil {
+					queue.Close()
+					return nil, err
+				}
+				if previous.ProjectID != request.Selected.Project.ID || previous.WorkspaceID != request.Selected.Workspace.ID || previous.PelletNumber != *request.ResumePellet {
+					queue.Close()
+					return nil, storage.ExecutionRunConflict(previous.ID)
+				}
+				if previous.Finalization != nil && previous.ResultCommit != "" && previous.Phase == "close" {
+					p, err := queue.ReadPellet(ctx, request.Selected, domain.PelletReference{ProjectCode: request.Selected.Project.Code, Number: previous.PelletNumber})
+					if err != nil {
+						queue.Close()
+						return nil, err
+					}
+					if p.Status == domain.PelletClosed && storage.MatchesSchedule(p, request.ExternalID, request.Group) {
+						if err := queue.Close(); err != nil {
+							return nil, err
+						}
+						h.status.PelletNumber = previous.PelletNumber
+						return &storage.RunCapture{ProjectID: previous.ProjectID, WorkspaceID: previous.WorkspaceID, PelletNumber: previous.PelletNumber, Mode: request.Mode, ExternalID: request.ExternalID, Group: request.Group, ResumeFrom: request.ResumeFrom}, nil
+					}
+				}
+			}
 			selection := storage.ScheduleSelection{ExternalID: request.ExternalID, Group: request.Group, ResumePellet: request.ResumePellet}
-			if s.options.Ready != nil {
-				selection.Ready = func(ctx context.Context, p storage.Pellet) (bool, error) {
+			selection.Ready = func(ctx context.Context, p storage.Pellet) (bool, error) {
+				if request.ResumePellet == nil && !s.isCheckpoint(p) {
+					root, err := executionRoot(ctx, s.options.Database, storage.ExecutionRun{WorkspaceRoot: request.Selected.Workspace.RootPath, WorkspaceGitDir: request.Selected.Workspace.GitDir, GitCommonDir: request.Selected.Project.GitCommonDir})
+					if err != nil {
+						return false, err
+					}
+					if err := requireCleanWorktree(ctx, root); err != nil {
+						return false, err
+					}
+				}
+				if s.options.Ready != nil {
 					return s.options.Ready(ctx, request.Selected, p)
 				}
+				return true, nil
 			}
 			selected, err := queue.SelectScheduledPellet(ctx, request.Selected, selection)
 			err = errors.Join(err, queue.Close())
@@ -273,7 +319,11 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 				return nil, nil
 			}
 			h.status.PelletNumber = selected.Pellet.Reference.Number
-			return &storage.RunCapture{ProjectID: request.Selected.Project.ID, WorkspaceID: request.Selected.Workspace.ID, PelletNumber: selected.Pellet.Reference.Number, Mode: request.Mode, ExternalID: request.ExternalID, Group: request.Group, ResumeFrom: request.ResumeFrom}, nil
+			mode := request.Mode
+			if s.isCheckpoint(*selected.Pellet) {
+				mode = "review_checkpoint"
+			}
+			return &storage.RunCapture{ProjectID: request.Selected.Project.ID, WorkspaceID: request.Selected.Workspace.ID, PelletNumber: selected.Pellet.Reference.Number, Mode: mode, ExternalID: request.ExternalID, Group: request.Group, ResumeFrom: request.ResumeFrom}, nil
 		})
 		h.execution = execution
 		if execution != nil {
@@ -361,7 +411,13 @@ func scheduleError(code, message string) error {
 }
 
 func (s *Scheduler) validateCompletion(ctx context.Context, run storage.ExecutionRun, selected storage.ResolvedProject) error {
-	if run.State != "completed" || run.Outcome != "succeeded" || run.PendingOperation != "" || run.ProjectID != selected.Project.ID || run.WorkspaceID != selected.Workspace.ID || run.ThreadID == "" || run.TurnID == "" || run.CommitVerifiedAt == nil || run.ResultCommit == "" || run.ResultCommit == run.StartingHead {
+	if run.Mode == "review_checkpoint" {
+		if s.options.Checkpoints == nil || s.options.Checkpoints.ValidateCompletion == nil {
+			return scheduleError("checkpoint_policy_required", "checkpoint completion policy is required")
+		}
+		return s.options.Checkpoints.ValidateCompletion(ctx, run, selected)
+	}
+	if run.State != "completed" || run.Outcome != "succeeded" || run.PendingOperation != "" || run.ProjectID != selected.Project.ID || run.WorkspaceID != selected.Workspace.ID || run.ThreadID == "" || run.TurnID == "" || run.CommitVerifiedAt == nil || run.ResultCommit == "" || run.ResultCommit == run.StartingHead || run.Finalization == nil {
 		return scheduleError("schedule_completion_unverified", "the exact attempt lacks validated completion evidence")
 	}
 	return s.validateResult(ctx, run, selected)
@@ -386,11 +442,23 @@ func (s *Scheduler) validateResult(ctx context.Context, run storage.ExecutionRun
 	}
 	head, err := executionGit(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil || head != run.ResultCommit || head == run.StartingHead {
-		return missingRunEvidence("result_commit_not_head")
+		return errors.Join(missingRunEvidence("result_commit_not_head"), err)
 	}
 	if err := verifyRunCommit(ctx, root, head); err != nil {
 		return err
 	}
+	if run.Finalization != nil {
+		if err := validateFinalizationCommit(ctx, root, run, head); err != nil {
+			return err
+		}
+		if err := requireCleanWorktree(ctx, root); err != nil {
+			return err
+		}
+	}
 	_, err = executionGit(ctx, root, "merge-base", "--is-ancestor", run.StartingHead, head)
 	return err
+}
+
+func (s *Scheduler) isCheckpoint(p storage.Pellet) bool {
+	return s.options.Checkpoints != nil && s.options.Checkpoints.Matches != nil && s.options.Checkpoints.Matches(p)
 }

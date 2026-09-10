@@ -69,6 +69,12 @@ func installSupervisorPeer(t *testing.T) string {
 func supervisorFixture(t *testing.T, executable string) (*ExecutionSupervisor, ExecutionRequest) {
 	t.Helper()
 	recorder, database, selected, capture := executionFixture(t)
+	if err := os.WriteFile(filepath.Join(database.Root, ".git", "info", "exclude"), []byte("/pellets.db*\n/fake-*\n/.agents/\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitForExecutionTest(t, database.Root, "config", "user.name", "Test")
+	gitForExecutionTest(t, database.Root, "config", "user.email", "test@example.invalid")
+	gitForExecutionTest(t, database.Root, "config", "commit.gpgSign", "false")
 	if err := os.MkdirAll(filepath.Join(database.Root, ".agents", "skills", "pellets"), 0700); err != nil {
 		t.Fatal(err)
 	}

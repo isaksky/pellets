@@ -20,7 +20,7 @@ import (
 // stable schema (without --experimental) also verifies these are available
 // without opting into experimental API behavior.
 var requiredOperations = map[Operation][]string{
-	ThreadStart: {"cwd", "approvalPolicy", "approvalsReviewer", "config", "model", "sandbox"}, ThreadRead: {"threadId", "includeTurns"},
+	ThreadStart: {"cwd", "approvalPolicy", "approvalsReviewer", "config", "model", "sandbox", "ephemeral"}, ThreadRead: {"threadId", "includeTurns"},
 	ThreadResume: {"threadId"}, TurnStart: {"threadId", "input"},
 	TurnSteer:     {"threadId", "input", "expectedTurnId"},
 	TurnInterrupt: {"threadId", "turnId"}, AccountRead: {"refreshToken"},
@@ -29,7 +29,7 @@ var requiredOperations = map[Operation][]string{
 }
 
 var requiredOperationFields = map[Operation][]string{
-	TurnStart: {"approvalPolicy", "approvalsReviewer", "cwd", "effort", "model", "sandboxPolicy"},
+	TurnStart: {"approvalPolicy", "approvalsReviewer", "cwd", "effort", "model", "sandboxPolicy", "outputSchema"},
 }
 
 var requiredSchemaValues = map[string][]string{
@@ -138,7 +138,7 @@ func inspect(ctx context.Context, cfg Config) (Runtime, error) {
 	checks := map[string]map[string][]string{
 		"ClientRequest.json":      {"initialize": {"clientInfo"}},
 		"ClientNotification.json": {"initialized": nil},
-		"ServerNotification.json": {"turn/completed": {"threadId", "turn"}, "serverRequest/resolved": {"requestId"}},
+		"ServerNotification.json": {"turn/completed": {"threadId", "turn"}, "item/completed": {"threadId", "turnId", "item"}, "serverRequest/resolved": {"requestId"}},
 		"ServerRequest.json":      {},
 	}
 	for op, fields := range requiredOperations {

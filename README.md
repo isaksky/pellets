@@ -470,6 +470,14 @@ finish; Stop now interrupts it. Only an exact successful turn, verified new
 commit, and closed target pellet permit advancement. Failures stop for attention
 without hidden retries. See [scheduler interfaces](docs/codex-app-server.md#foreground-scheduler).
 
+Ordinary runs require a clean worktree. Codex implements and verifies the exact
+pellet, then returns a structured result. The server checks the reported files,
+stages only those paths, creates one pellet-ID commit, verifies it, and closes
+the pellet. Codex's implementation phase cannot commit, close, release, defer,
+select more work, or create follow-ups. Explicit finalization recovery reuses
+the persisted tree and existing commit without repeating implementation or
+tests. Interference and no-op results require attention; changes are preserved.
+
 Press Ctrl+C to stop (SIGTERM also requests orderly shutdown). Pellets immediately acknowledges the interrupt on stderr,
 closes live-update streams, and allows ordinary requests up to five seconds to
 finish. A second Ctrl+C forces exit if shutdown stalls. Stdout remains reserved

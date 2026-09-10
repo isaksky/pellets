@@ -284,8 +284,17 @@ func (execution *WorkspaceExecution) Save(ctx context.Context, progress storage.
 		return storage.ExecutionRun{}, err
 	}
 	defer cancel()
-	if progress.State == "completed" && completedTurnStatus(execution.LatestCompletion(), progress.ThreadID, progress.TurnID) != "completed" {
-		return storage.ExecutionRun{}, storage.InvalidExecutionRun("completion requires the exact turn's successful terminal notification")
+	if (progress.State == "completed" || progress.Finalization != nil) && completedTurnStatus(execution.LatestCompletion(), progress.ThreadID, progress.TurnID) != "completed" {
+		current, err := execution.Read(ctx)
+		if err != nil {
+			return storage.ExecutionRun{}, err
+		}
+		// The immutable finalization record is written only after the exact
+		// successful implementation terminal event. Explicit recovery can use
+		// that durable proof without repeating a model turn or its tests.
+		if current.ResumeFrom == nil || current.Finalization == nil || progress.ThreadID != current.ThreadID || progress.TurnID != current.TurnID {
+			return storage.ExecutionRun{}, storage.InvalidExecutionRun("completion requires the exact turn's successful terminal notification or durable finalization proof")
+		}
 	}
 	return execution.recorder.Save(ctx, execution.database, storage.UpdateExecutionRun{ID: execution.id, ExpectedRevision: revision, Progress: progress})
 }
@@ -378,7 +387,7 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 	if err := lock.Record(executionlock.Owner{Database: request.Database.Path, RunID: run.ID}); err != nil {
 		return run, err
 	}
-	workCtx, cancelWork := handle.ctx, handle.cancel
+	workCtx, cancelWork := codex.WithExecutionLock(handle.ctx, lock.File()), handle.cancel
 	execution := &WorkspaceExecution{recorder: supervisor.options.Recorder, database: request.Database, id: run.ID, prepared: prepared, ctx: workCtx,
 		operations: make(chan struct{}, 1), events: make(chan codex.Event, prepared.Settings.Limits.EventBuffer), completion: make(chan struct{}, 1), eventDone: make(chan struct{}), eventFailure: make(chan error, 1)}
 	go execution.relayEvents()
@@ -402,6 +411,9 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 		interrupted = true
 	case err = <-driverDone:
 		driverReturned = true
+		if err != nil {
+			failureCode = domain.PublicError(err).Code
+		}
 	case err = <-processDone:
 		failureCode = "codex_session_stopped"
 	case err = <-execution.eventFailure:
@@ -426,7 +438,7 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 	if !driverReturned {
 		select {
 		case driverErr := <-driverDone:
-			if !errors.Is(driverErr, context.Canceled) {
+			if !errors.Is(driverErr, context.Canceled) || executionFailureDiagnostic(driverErr) != "" || errors.Is(driverErr, codex.ErrCleanup) {
 				err = errors.Join(err, driverErr)
 			}
 		case <-time.After(5 * time.Second):
@@ -437,7 +449,15 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 	defer cancelFinal()
 	run, readErr := execution.Read(finalCtx)
 	if readErr == nil && run.State != "completed" {
-		if interrupted && closeErr == nil {
+		if interrupted && closeErr == nil && !errors.Is(err, codex.ErrCleanup) {
+			if diagnostic := executionFailureDiagnostic(err); diagnostic != "" && storage.RunActive(run.State) {
+				progress := run.RunProgress
+				progress.Summary = diagnostic
+				run, readErr = execution.recorder.Save(finalCtx, request.Database, storage.UpdateExecutionRun{ID: run.ID, ExpectedRevision: run.Revision, Progress: progress})
+				if readErr != nil {
+					return run, errors.Join(err, closeErr, readErr, driverStopErr)
+				}
+			}
 			outcome := "unknown"
 			switch completedTurnStatus(execution.LatestCompletion(), run.ThreadID, run.TurnID) {
 			case "interrupted":
@@ -449,7 +469,8 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 		} else if storage.RunActive(run.State) {
 			progress := run.RunProgress
 			progress.State, progress.Outcome, progress.ErrorCode, progress.Summary = "needs_attention", "unknown", failureCode, ""
-			if closeErr != nil {
+			progress.Summary = executionFailureDiagnostic(err)
+			if closeErr != nil || errors.Is(err, codex.ErrCleanup) {
 				progress.ErrorCode = "process_cleanup_unconfirmed"
 			}
 			run, readErr = execution.recorder.Save(finalCtx, request.Database, storage.UpdateExecutionRun{ID: run.ID, ExpectedRevision: run.Revision, Progress: progress})
@@ -460,7 +481,7 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 	if interruptErr != nil && !errors.Is(interruptErr, context.DeadlineExceeded) && !errors.Is(interruptErr, context.Canceled) {
 		err = errors.Join(err, interruptErr)
 	}
-	if closeErr == nil && readErr == nil && driverStopErr == nil && run.PendingOperation == "" {
+	if closeErr == nil && readErr == nil && driverStopErr == nil && run.PendingOperation == "" && !errors.Is(err, codex.ErrCleanup) {
 		readErr = lock.Clean()
 	}
 	return run, errors.Join(err, closeErr, readErr, driverStopErr)
@@ -478,6 +499,11 @@ func (execution *WorkspaceExecution) interrupt(ctx context.Context) error {
 		return err
 	}
 	if run.TurnID == "" || run.ThreadID == "" || run.State == "completed" {
+		return nil
+	}
+	if run.ResumeFrom != nil && run.Finalization != nil {
+		// Finalization recovery starts no model turn in this session. The
+		// recorded ID belongs to an already completed implementation turn.
 		return nil
 	}
 	if completedTurn(execution.LatestCompletion(), run.ThreadID, run.TurnID) {

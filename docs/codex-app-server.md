@@ -217,13 +217,69 @@ exact pellet's reference/title/description to Codex and forbids further selectio
 Capture creation revalidates ownership and filters after preflight.
 
 The driver starts/resumes the recorded thread, starts one implementation turn,
-and asks Codex to implement, verify, commit, then close the exact pellet through
+and asks Codex to implement and verify the exact pellet. The implementation
+turn cannot stage, commit, close, release, defer, select work, create follow-ups,
+amend, push, or open a PR; implementation subagents are opt-in through explicit
+user or repository instructions. The deterministic server finalizer commits
+and closes through the same lifecycle repository used by
 `pl`. It never substitutes another model/tool loop. Advancement requires the
 exact successful terminal turn notification, a new full Git commit verified as
 HEAD and descended from starting HEAD, the exact closed pellet, durable
 completed/succeeded evidence, and confirmed supervisor cleanup. Turn-end,
 closed status alone, missing/purged evidence, interrupted/failed turns, input
 requests, or preflight errors stop for attention; none triggers a hidden retry.
+
+New ordinary work is checked for a clean index/worktree, including untracked
+files, inside the selection readiness boundary and again before thread start.
+The new thread is persisted (`ephemeral: false`) and receives the complete
+captured description plus the starting HEAD. `turn/start.outputSchema` requires
+an exact reference and starting HEAD, `ready` or `needs_attention`, exact file
+identities, and a verification account. The driver accepts only the bound
+`item/completed` final `agentMessage` and the exact successful terminal turn.
+Missing, malformed, wrong-target, failed, or no-op reports stop for attention.
+Verification details remain in Codex's transcript; Pellets stores its bounded
+orchestration evidence, not arbitrary model output.
+
+Finalization rechecks live scope/ownership, unchanged HEAD, an untouched index,
+and agreement between the reported files and actual changes. A private Git
+index computes the complete expected tree without staging the workspace.
+Migration 9 records that immutable tree, literal file identities, and concise
+pellet-ID subject before staging. The server stages only those paths, rechecks
+the index tree and ownership, and makes one normal Git commit. Existing Git
+hooks and signing configuration remain effective. Before close it verifies
+the commit is HEAD with exactly the captured starting parent, expected tree,
+and expected subject, and requires a clean worktree. `.pellets` and Git metadata
+paths cannot be finalized. No pathspec globs, reset, amend, push, or PR is used.
+
+Finalization Git commands, including private-index filters, commit hooks, and
+signing helpers, use the same process-tree containment and execution-lock
+custody as Codex. Stop now waits for owned descendants to settle; foreground
+death triggers the independent Unix custodian or Windows kill-on-close Job.
+Unconfirmed Git cleanup retains the execution fence. No process is selected
+for termination by name, and unrelated processes remain outside this custody.
+Git failures retain a bounded diagnostic in the failure receipt and attempt
+summary: terminal escapes/control characters are removed, common credential
+forms are redacted, and text is limited to the run-summary bound. The failed
+attempt retains this diagnostic when a later explicit Resume succeeds.
+If raw stderr exceeds its capture bound, its leading partial line is discarded
+before sanitization; an overlong line without a newline is omitted entirely.
+This prevents truncation from dropping a credential label while retaining its
+secret suffix, including malformed bytes and credentials split across writes.
+
+Explicit Resume preserves the original starting HEAD and immutable finalization
+record. If HEAD still matches the starting commit, the unchanged expected work
+can be finalized. If the exact expected commit already exists, the server
+records/reuses it and proceeds to close without another model turn, test run,
+or commit. This also covers a commit that succeeded before its evidence save.
+A recorded close intent whose pellet is already closed can be reconciled after
+a failed terminal save without reopening it. Changed scope, ownership, files,
+index, or Git evidence stops for attention while preserving all changes and
+diagnostics. Process-death fences still require the supervisor's explicit
+reconciliation; no restart auto-replays an uncertain operation.
+
+`CheckpointExecutionPolicy` supplies a separate driver and completion validator
+for review checkpoints. It bypasses ordinary clean-start and implementation
+commit requirements; absent checkpoint policy cannot silently complete a review.
 
 Run one finishes after one validated pellet. Drain selects afresh after each
 completion, respecting intervening adds, edits, moves, closes, and deferrals.

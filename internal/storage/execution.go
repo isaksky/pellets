@@ -78,6 +78,15 @@ type RunProgress struct {
 	// CachedInputTokens is present only when the installed runtime reports it.
 	// Pellets records telemetry; it never promises a provider cache hit.
 	CachedInputTokens *int64 `json:"cached_input_tokens,omitempty"`
+	// Finalization is immutable evidence captured after the implementation
+	// turn succeeds and before staging/commit. It survives explicit resumes.
+	Finalization *FinalizationEvidence `json:"finalization,omitempty"`
+}
+
+type FinalizationEvidence struct {
+	Files   []string `json:"files"`
+	Tree    string   `json:"tree"`
+	Subject string   `json:"subject"`
 }
 
 type RunActivity struct {
@@ -220,6 +229,21 @@ func ValidatePromptPrefix(prefix PromptPrefix) error {
 }
 
 func ValidateRunProgress(p RunProgress) error {
+	if p.Finalization != nil {
+		f := p.Finalization
+		if !IsFullCommitID(f.Tree) || len(f.Files) == 0 || len(f.Files) > 10000 || len(f.Subject) == 0 || len(f.Subject) > 240 || strings.ContainsAny(f.Subject, "\x00\r\n") {
+			return InvalidExecutionRun("invalid finalization evidence")
+		}
+		for _, file := range f.Files {
+			if file == "" || len(file) > 4096 || strings.ContainsRune(file, 0) || !utf8.ValidString(file) {
+				return InvalidExecutionRun("invalid finalization file")
+			}
+		}
+		encoded, _ := json.Marshal(f)
+		if len(encoded) > MaxRunSnapshotBytes {
+			return InvalidExecutionRun("finalization evidence exceeds storage bound")
+		}
+	}
 	// Phases describe durable intent immediately before the corresponding
 	// external operation. New phases require an explicit schema migration.
 	switch p.Phase {

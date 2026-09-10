@@ -41,7 +41,7 @@ func (recorder ExecutionRecorder) Begin(ctx context.Context, database Database, 
 	}
 	head, err := executionGit(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil || !storage.IsFullCommitID(head) {
-		return storage.ExecutionRun{}, missingRunEvidence("starting_head_unavailable")
+		return storage.ExecutionRun{}, errors.Join(missingRunEvidence("starting_head_unavailable"), err)
 	}
 	capture.StartingHead = head
 	repo, err := recorder.repository(ctx, database)
@@ -219,13 +219,15 @@ func (recorder ExecutionRecorder) VerifyCommit(ctx context.Context, database Dat
 	}
 	head, err := executionGit(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil || head != commit {
-		return run, missingRunEvidence("result_commit_not_head")
+		return run, errors.Join(missingRunEvidence("result_commit_not_head"), err)
 	}
 	if _, err := executionGit(ctx, root, "merge-base", "--is-ancestor", run.StartingHead, commit); err != nil {
-		return run, missingRunEvidence("starting_head_not_ancestor")
+		return run, errors.Join(missingRunEvidence("starting_head_not_ancestor"), err)
 	}
 	progress := run.RunProgress
-	progress.Phase = "finalization"
+	if progress.Phase != "close" {
+		progress.Phase = "finalization"
+	}
 	return recorder.save(ctx, database, storage.UpdateExecutionRun{ID: id, ExpectedRevision: revision, Progress: progress, VerifiedCommit: commit})
 }
 
@@ -300,16 +302,23 @@ func verifyRunCommit(ctx context.Context, root, commit string) error {
 	}
 	objectType, err := executionGit(ctx, root, "cat-file", "-t", commit)
 	if err != nil || objectType != "commit" {
-		return missingRunEvidence("commit_unavailable")
+		return errors.Join(missingRunEvidence("commit_unavailable"), err)
 	}
 	return nil
 }
 
 func executionGit(ctx context.Context, root string, args ...string) (string, error) {
-	command := exec.CommandContext(ctx, "git", append([]string{"--no-replace-objects", "-C", root}, args...)...)
-	command.WaitDelay = time.Second
-	output, err := command.Output()
-	return strings.TrimSpace(string(output)), err
+	output, err := executionGitRaw(ctx, root, args...)
+	return strings.TrimSpace(output), err
+}
+
+func executionGitRaw(ctx context.Context, root string, args ...string) (string, error) {
+	command := exec.Command("git", append([]string{"--no-replace-objects", "-C", root}, args...)...)
+	output, diagnostic, err := codex.RunOwnedCommand(ctx, command)
+	if err != nil {
+		return output, newExecutionGitFailure(err, diagnostic)
+	}
+	return output, nil
 }
 
 func missingRunEvidence(code string) error {

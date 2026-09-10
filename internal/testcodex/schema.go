@@ -12,9 +12,9 @@ import (
 func WriteSchema(dir, mode string) {
 	files := map[string]map[string][]string{
 		"ClientRequest.json": {
-			"initialize": {"clientInfo", "capabilities"}, "thread/start": {"cwd", "approvalPolicy", "approvalsReviewer", "config", "model", "sandbox"},
+			"initialize": {"clientInfo", "capabilities"}, "thread/start": {"cwd", "approvalPolicy", "approvalsReviewer", "config", "model", "sandbox", "ephemeral"},
 			"thread/read": {"threadId", "includeTurns"}, "thread/resume": {"threadId"},
-			"turn/start": {"threadId", "input", "approvalPolicy", "approvalsReviewer", "cwd", "effort", "model", "sandboxPolicy"}, "turn/steer": {"threadId", "input", "expectedTurnId"},
+			"turn/start": {"threadId", "input", "approvalPolicy", "approvalsReviewer", "cwd", "effort", "model", "sandboxPolicy", "outputSchema"}, "turn/steer": {"threadId", "input", "expectedTurnId"},
 			"turn/interrupt": {"threadId", "turnId"}, "account/read": {"refreshToken"},
 			"account/rateLimits/read": {}, "model/list": {"cursor"}, "config/read": {"includeLayers"},
 			"configRequirements/read": {}, "review/start": {"threadId", "target", "delivery"},
@@ -24,7 +24,7 @@ func WriteSchema(dir, mode string) {
 			"item/commandExecution/requestApproval": {}, "item/fileChange/requestApproval": {},
 			"item/permissions/requestApproval": {}, "item/tool/requestUserInput": {}, "mcpServer/elicitation/request": {},
 		},
-		"ServerNotification.json": {"turn/completed": {"threadId", "turn"}, "serverRequest/resolved": {"requestId", "threadId"}},
+		"ServerNotification.json": {"turn/completed": {"threadId", "turn"}, "item/completed": {"threadId", "turnId", "item"}, "serverRequest/resolved": {"requestId", "threadId"}},
 	}
 	if mode == "missing-method" {
 		delete(files["ClientRequest.json"], "turn/steer")

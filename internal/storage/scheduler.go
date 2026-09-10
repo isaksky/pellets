@@ -23,6 +23,7 @@ const NextNotReady NextSelectionReason = "not_ready"
 type SchedulerQueue interface {
 	SelectScheduledPellet(context.Context, ResolvedProject, ScheduleSelection) (NextSelection, error)
 	ReadPellet(context.Context, ResolvedProject, domain.PelletReference) (Pellet, error)
+	TransitionPellet(context.Context, ResolvedProject, domain.PelletReference, PelletLifecycleRequest) (PelletLifecycleResult, error)
 	Close() error
 }
 

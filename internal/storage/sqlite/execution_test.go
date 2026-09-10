@@ -48,6 +48,29 @@ func TestPreThreadRetryKeepsFreshPromptPrefix(t *testing.T) {
 	}
 }
 
+func TestFinalizationEvidenceIsImmutableAndInheritedExactly(t *testing.T) {
+	db, run, _ := createTestRun(t)
+	progress := storage.RunProgress{Phase: "close", State: "running", ThreadID: "thread", TurnID: "turn", Finalization: &storage.FinalizationEvidence{Files: []string{"source.go"}, Tree: strings.Repeat("c", 40), Subject: "demo-1: implement"}}
+	run = updateRun(t, db, run, progress, strings.Repeat("b", 40))
+	changed := progress
+	changed.Finalization = &storage.FinalizationEvidence{Files: []string{"unrelated.go"}, Tree: progress.Finalization.Tree, Subject: progress.Finalization.Subject}
+	if _, err := db.UpdateExecutionRun(context.Background(), storage.UpdateExecutionRun{ID: run.ID, ExpectedRevision: run.Revision, Progress: changed}); domain.PublicError(err).Code != "execution_run_conflict" {
+		t.Fatalf("changed finalization accepted: %v", err)
+	}
+	progress.State, progress.Outcome = "interrupted", "unknown"
+	stopped := updateRun(t, db, run, progress, "")
+	capture := stopped.RunCapture
+	capture.ResumeFrom = &stopped.ID
+	capture.StartingHead = strings.Repeat("d", 40)
+	resumed, err := db.CreateExecutionRun(context.Background(), capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.StartingHead != stopped.StartingHead || resumed.ResultCommit != stopped.ResultCommit || resumed.TurnID != stopped.TurnID || resumed.Phase != "close" || !reflect.DeepEqual(resumed.Finalization, stopped.Finalization) || !reflect.DeepEqual(resumed.CommitVerifiedAt, stopped.CommitVerifiedAt) {
+		t.Fatalf("resume replaced finalization evidence: %+v", resumed)
+	}
+}
+
 func createTestRun(t *testing.T) (*ProjectDatabase, storage.ExecutionRun, pelletRepositoryFixture) {
 	t.Helper()
 	fixture := newPelletRepositoryFixture(t)
@@ -97,7 +120,7 @@ func TestExecutionMigrationFromReleasedFixtureAndRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertPragmaInt(t, db.db, "user_version", 8)
+	assertPragmaInt(t, db.db, "user_version", LatestSchemaVersion)
 	assertQueryInt(t, db.db, `SELECT COUNT(*) FROM application_metadata WHERE key='fixture' AND value='released-v1'`, 1)
 	assertQueryInt(t, db.db, `SELECT COUNT(*) FROM execution_runs`, 0)
 	var project, workspace, number int64
