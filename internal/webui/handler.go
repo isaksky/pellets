@@ -311,6 +311,7 @@ type filterView struct {
 	Direction      string
 	GroupText      string
 	GroupUngrouped bool
+	GroupExact     bool
 }
 
 type sortHeaderView struct {
@@ -757,6 +758,7 @@ func parseFilters(values url.Values) (storage.WebPelletFilters, filterView, erro
 			return filters, view, domain.NewError(domain.Usage, "invalid_group_filter", "the group filter is invalid", nil)
 		}
 		filters.Group = storage.WebExactFilter{Set: true, Value: group}
+		view.GroupExact = true
 		if group != nil {
 			view.GroupText = *group
 		} else {

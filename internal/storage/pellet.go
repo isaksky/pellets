@@ -30,15 +30,25 @@ type Pellet struct {
 // NewPellet contains the fields accepted when allocating a new pellet. Status
 // may be open or maybe_later; an empty status means open.
 type NewPellet struct {
-	Kind          domain.PelletKind        `json:",omitempty"`
-	ReviewTargets []domain.PelletReference `json:",omitempty"`
-	RequestID     *string
-	Title         string
-	Description   string
-	ExternalID    *string
-	Group         *string
-	Status        domain.PelletStatus
-	Placement     *PelletPlacement
+	Kind                 domain.PelletKind        `json:",omitempty"`
+	ReviewTargets        []domain.PelletReference `json:",omitempty"`
+	ReviewTargetVersions []ReviewTargetVersion    `json:",omitempty"`
+	RequestID            *string
+	Title                string
+	Description          string
+	ExternalID           *string
+	Group                *string
+	Status               domain.PelletStatus
+	Placement            *PelletPlacement
+}
+
+// ReviewTargetVersion binds one browser-selected target identity to the exact
+// authoritative row version seen before checkpoint creation. CLI callers do
+// not populate it; the web writer checks supplied versions inside its creation
+// transaction before it snapshots target scope and allocates placement.
+type ReviewTargetVersion struct {
+	Reference domain.PelletReference `json:"reference"`
+	Version   string                 `json:"version"`
 }
 
 // ReviewCheckpoint is the versioned, materialized read contract. Targets are

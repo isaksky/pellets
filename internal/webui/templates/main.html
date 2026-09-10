@@ -119,9 +119,8 @@
     <details class="create-popover"><summary class="primary-button">New task</summary>
       <form action="/projects/{{.Project.Code}}/pellets" method="post" data-on:submit="@submit()" class="stack-form">
         <input type="hidden" name="_csrf" value="{{.CSRF}}">
+		<input type="hidden" name="request_id" value="">
         <label>Title <input name="title" required autofocus></label>
-        <label>Review targets (optional) <input name="review_targets" placeholder="project-12,project-15" aria-describedby="review-targets-help"></label>
-        <small id="review-targets-help">Select exact Pellet references to create a review checkpoint after their last active queue position. Leave blank for ordinary work.</small>
         <label>Description <textarea name="description" rows="4"></textarea></label>
         <div class="form-grid"><label>External ID <input name="external_id"></label><label>Group <input name="group"></label></div>
         <label>Status <select name="status"><option value="open">Open</option><option value="maybe_later">Maybe later</option></select></label>
@@ -141,9 +140,20 @@
 </section>{{end}}
 
 {{define "task-list"}}<div id="task-list" class="table-frame live-fragment" data-live-fragment data-fragment-kind="tasks" data-refresh-url="{{.CurrentURL}}">
-  {{if .Pellets}}<div id="task-table-scroll" class="table-scroll"><table><thead><tr>{{range .SortHeaders}}<th scope="col"{{if .TitleColumn}} class="task-title-column"{{end}}{{if .Active}} aria-sort="{{.AriaSort}}"{{end}}><a id="task-sort-{{.Key}}" class="task-sort {{if .Active}}active{{end}}" href="{{.URL}}" data-on:click="@navigate('tasks-area')" aria-label="{{.ActionLabel}}"><span>{{.Label}}</span>{{if .Indicator}}<span class="sort-indicator" aria-hidden="true">{{.Indicator}}</span>{{end}}</a></th>{{end}}</tr></thead><tbody>
-  {{range .Pellets}}<tr id="task-{{.Pellet.Reference}}" class="task-row status-{{.Pellet.Status}} {{if .Selected}}selected{{end}}" data-row-id="{{.Pellet.Reference}}" data-row-version="{{.Version}}">
-    <td><a class="row-link" href="{{.URL}}" data-on:click="@navigate('inspector-host')"><code>{{.Pellet.Reference}}</code></a></td>
+  <section class="checkpoint-composer" data-checkpoint-composer data-filter-external-set="{{if .Filters.ExternalID}}true{{else}}false{{end}}" data-filter-external="{{.Filters.ExternalID}}" data-filter-group-set="{{if .Filters.GroupExact}}true{{else}}false{{end}}" data-filter-group="{{.Filters.GroupText}}" data-filter-group-ungrouped="{{if .Filters.GroupUngrouped}}true{{else}}false{{end}}" hidden aria-labelledby="checkpoint-composer-title">
+    <div><span class="eyebrow">Selected scope</span><h3 id="checkpoint-composer-title">Create review checkpoint</h3></div>
+    <p data-checkpoint-summary aria-live="polite"></p><p class="checkpoint-warning" data-checkpoint-warning role="alert" hidden></p>
+    <form action="/projects/{{.Project.Code}}/pellets" method="post" data-on:submit="@submit()" data-checkpoint-form class="stack-form">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="request_id" value=""><input type="hidden" name="review_targets" value=""><input type="hidden" name="review_target_versions" value=""><input type="hidden" name="status" value="open">
+      <label>Checkpoint title <input name="title" value="Review selected changes" required maxlength="4096"></label>
+      <label>Description <textarea name="description" rows="2" maxlength="65536"></textarea></label>
+      <div class="form-grid"><label>External ID <input name="external_id" data-checkpoint-metadata="external" maxlength="4096"></label><label>Group <input name="group" data-checkpoint-metadata="group" maxlength="4096"></label></div>
+      <div class="checkpoint-actions"><button class="primary-button" type="submit" disabled>Insert review checkpoint</button><button type="button" data-checkpoint-clear>Clear selection</button></div>
+    </form>
+  </section>
+  {{if .Pellets}}<div id="task-table-scroll" class="table-scroll"><table><thead><tr>{{range .SortHeaders}}<th scope="col"{{if .TitleColumn}} class="task-title-column"{{end}}{{if .Active}} aria-sort="{{.AriaSort}}"{{end}}>{{if eq .Key "reference"}}<label class="selection-all"><input type="checkbox" data-checkpoint-select-all aria-label="Select all visible ordinary tasks"><span>Select</span></label>{{end}}<a id="task-sort-{{.Key}}" class="task-sort {{if .Active}}active{{end}}" href="{{.URL}}" data-on:click="@navigate('tasks-area')" aria-label="{{.ActionLabel}}"><span>{{.Label}}</span>{{if .Indicator}}<span class="sort-indicator" aria-hidden="true">{{.Indicator}}</span>{{end}}</a></th>{{end}}</tr></thead><tbody>
+  {{range .Pellets}}<tr id="task-{{.Pellet.Reference}}" class="task-row status-{{.Pellet.Status}} {{if .Selected}}selected{{end}}" data-row-id="{{.Pellet.Reference}}" data-row-version="{{.Version}}" data-checkpoint-kind="{{.Pellet.Kind}}" data-checkpoint-priority="{{if .Pellet.Priority}}{{.Pellet.Priority}}{{end}}" data-checkpoint-external-set="{{if .Pellet.ExternalID}}true{{else}}false{{end}}" data-checkpoint-external="{{if .Pellet.ExternalID}}{{.Pellet.ExternalID}}{{end}}" data-checkpoint-group-set="{{if .Pellet.Group}}true{{else}}false{{end}}" data-checkpoint-group="{{if .Pellet.Group}}{{.Pellet.Group}}{{end}}">
+    <td><span class="selection-control"><input type="checkbox" data-checkpoint-select aria-label="Select {{.Pellet.Reference}} for review"{{if ne .Pellet.Kind "ordinary"}} disabled title="Review checkpoints cannot be selected as review targets"{{end}}><a class="row-link" href="{{.URL}}" data-on:click="@navigate('inspector-host')"><code>{{.Pellet.Reference}}</code></a></span></td>
     <td class="task-title-column"><span class="task-title">{{.Pellet.Title}}</span>{{if .Pellet.Checkpoint}}<small>Review checkpoint · {{if .Pellet.Checkpoint.Ready}}ready{{else}}waiting{{end}}</small>{{end}}{{if .Owner}}<small>{{.Owner}}</small>{{end}}</td>
     <td>{{.Group}}</td><td><span class="badge status-badge {{.Pellet.Status}}">{{statusLabel .Pellet.Status}}</span></td><td><code>{{.Priority}}</code></td><td><code>{{.ExternalID}}</code></td><td><time datetime="{{.Pellet.UpdatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{formatTime .Pellet.UpdatedAt}}</time></td>
   </tr>{{end}}</tbody></table></div>
@@ -177,7 +187,7 @@
   <header><div><span class="eyebrow">Task inspector</span><h2 id="inspector-title">{{.SelectedPellet.Pellet.Reference}}</h2></div>{{if .CloseURL}}<a class="icon-button" href="{{.CloseURL}}" data-on:click="@navigate('inspector-host')" aria-label="Close inspector">×</a>{{end}}</header>
   <div class="inspector-scroll">
     <div class="inspector-title-row"><span class="badge status-badge {{.SelectedPellet.Pellet.Status}}">{{statusLabel .SelectedPellet.Pellet.Status}}</span>{{if .SelectedPellet.Owner}}<span class="owner-badge">{{.SelectedPellet.Owner}}</span>{{end}}</div>
-    {{with .SelectedPellet.Pellet.Checkpoint}}<section><h3>Review checkpoint</h3><p>{{if .Ready}}Ready: all selected targets have implementation evidence.{{else}}Waiting for the selected targets and implementation evidence.{{end}}</p><ul>{{range .Targets}}<li><code>{{.Reference}}</code> · {{.Title}} · {{.Reason}}{{if .Evidence}}<br>Commit <code>{{.Evidence.ResultCommit}}</code> (run {{.Evidence.RunID}}, workspace {{.Evidence.WorkspaceID}}){{end}}</li>{{end}}</ul></section>{{end}}
+    {{with .SelectedPellet.Pellet.Checkpoint}}<section><h3>Review checkpoint</h3><p>{{if .Ready}}Ready: all selected targets have implementation evidence.{{else}}Waiting for the selected targets and implementation evidence.{{end}}</p><p class="form-help"><strong>Kind:</strong> Review checkpoint · <strong>Review outcome:</strong> pending separate review · <strong>Created follow-ups:</strong> none recorded yet.</p><ul>{{range .Targets}}<li><code>{{.Reference}}</code> · {{.Title}} · {{.Reason}}{{if .Evidence}}<br>Commit <code>{{.Evidence.ResultCommit}}</code> (run {{.Evidence.RunID}}, workspace {{.Evidence.WorkspaceID}}){{end}}</li>{{end}}</ul></section>{{end}}
     <form id="edit-task-{{.SelectedPellet.Pellet.Reference}}" action="/projects/{{.SelectedPellet.Pellet.Reference.ProjectCode}}/pellets/{{.SelectedPellet.Pellet.Reference}}/edit" method="post" data-on:submit="@submit()" class="stack-form dirty-track">
       <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}">
       <label>Title <input name="title" value="{{.SelectedPellet.Pellet.Title}}" required></label>

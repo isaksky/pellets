@@ -71,6 +71,19 @@ func prepareCheckpoint(ctx context.Context, q projectQuery, project storage.Reso
 	}
 	targets := make([]storage.Pellet, 0, len(input.ReviewTargets))
 	var last *storage.Pellet
+	expectedVersions := make(map[int64]string, len(input.ReviewTargetVersions))
+	for _, expected := range input.ReviewTargetVersions {
+		if err := ensureReferenceProject(ctx, q, project.Project, expected.Reference); err != nil {
+			return nil, err
+		}
+		if expected.Version == "" || expectedVersions[expected.Reference.Number] != "" {
+			return nil, invalidCheckpoint("review target versions must be distinct, exact row versions")
+		}
+		expectedVersions[expected.Reference.Number] = expected.Version
+	}
+	if len(expectedVersions) > 0 && len(expectedVersions) != len(input.ReviewTargets) {
+		return nil, invalidCheckpoint("every selected review target requires an exact row version")
+	}
 	for _, ref := range input.ReviewTargets {
 		if err := ensureReferenceProject(ctx, q, project.Project, ref); err != nil {
 			return nil, err
@@ -84,6 +97,10 @@ func prepareCheckpoint(ctx context.Context, q projectQuery, project storage.Reso
 		}
 		if target.Kind != domain.PelletOrdinary {
 			return nil, invalidCheckpoint("review checkpoints may select only ordinary pellets")
+		}
+		if expected, ok := expectedVersions[ref.Number]; ok && expected != storage.PelletVersion(target) {
+			current := target
+			return nil, &storage.OptimisticConflict{Pellet: &current}
 		}
 		targets = append(targets, target)
 		if target.Priority != nil && (last == nil || *target.Priority > *last.Priority || (*target.Priority == *last.Priority && target.Reference.Number > last.Reference.Number)) {
@@ -117,6 +134,7 @@ func validateCheckpointInput(input *storage.NewPellet) error {
 		return invalidCheckpoint("review checkpoints are created open with automatic placement")
 	}
 	input.ReviewTargets = append([]domain.PelletReference(nil), input.ReviewTargets...)
+	input.ReviewTargetVersions = append([]storage.ReviewTargetVersion(nil), input.ReviewTargetVersions...)
 	sort.Slice(input.ReviewTargets, func(i, j int) bool { return input.ReviewTargets[i].Number < input.ReviewTargets[j].Number })
 	for i, ref := range input.ReviewTargets {
 		if _, err := domain.ParsePelletReference(ref.String()); err != nil {
@@ -125,6 +143,25 @@ func validateCheckpointInput(input *storage.NewPellet) error {
 		if i > 0 && input.ReviewTargets[i-1].Number == ref.Number && input.ReviewTargets[i-1].ProjectCode == ref.ProjectCode {
 			return invalidCheckpoint("review targets must be distinct")
 		}
+	}
+	if len(input.ReviewTargetVersions) > 0 {
+		if len(input.ReviewTargetVersions) != len(input.ReviewTargets) {
+			return invalidCheckpoint("every selected review target requires an exact row version")
+		}
+		selected := make(map[domain.PelletReference]bool, len(input.ReviewTargets))
+		for _, reference := range input.ReviewTargets {
+			selected[reference] = true
+		}
+		seen := make(map[domain.PelletReference]bool, len(input.ReviewTargetVersions))
+		for _, version := range input.ReviewTargetVersions {
+			if version.Version == "" || seen[version.Reference] || !selected[version.Reference] {
+				return invalidCheckpoint("review target versions must be distinct, exact row versions")
+			}
+			seen[version.Reference] = true
+		}
+		sort.Slice(input.ReviewTargetVersions, func(i, j int) bool {
+			return input.ReviewTargetVersions[i].Reference.Number < input.ReviewTargetVersions[j].Reference.Number
+		})
 	}
 	return nil
 }

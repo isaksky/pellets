@@ -152,7 +152,16 @@ func (h *handler) createPellet(response http.ResponseWriter, request *http.Reque
 	if _, present := request.PostForm["review_targets"]; !present {
 		request.PostForm.Set("review_targets", "")
 	}
-	if err := requireFields(request.PostForm, []string{"_csrf", "title", "description", "external_id", "group", "status", "review_targets"}); err != nil {
+	if _, present := request.PostForm["review_target_versions"]; !present {
+		request.PostForm.Set("review_target_versions", "")
+	}
+	// request_id is optional for the ordinary task form, but the checkpoint
+	// composer always supplies one. Keeping it in the shared add receipt makes
+	// a double-click or a lost browser response safe to retry.
+	if _, present := request.PostForm["request_id"]; !present {
+		request.PostForm.Set("request_id", "")
+	}
+	if err := requireFields(request.PostForm, []string{"_csrf", "request_id", "title", "description", "external_id", "group", "status", "review_targets", "review_target_versions"}); err != nil {
 		h.renderError(response, http.StatusUnprocessableEntity, err, submittedDraft(request.PostForm))
 		return
 	}
@@ -164,9 +173,13 @@ func (h *handler) createPellet(response http.ResponseWriter, request *http.Reque
 	input := storage.NewPellet{
 		Title: request.PostForm.Get("title"), Description: request.PostForm.Get("description"),
 		ExternalID: nullableInput(request.PostForm.Get("external_id")), Group: nullableInput(request.PostForm.Get("group")),
-		Status: status,
+		Status: status, RequestID: nullableInput(request.PostForm.Get("request_id")),
 	}
 	if selected := strings.TrimSpace(request.PostForm.Get("review_targets")); selected != "" {
+		if input.RequestID == nil {
+			h.renderMutationError(response, requestError("review checkpoint creation requires a stable request ID"), submittedDraft(request.PostForm))
+			return
+		}
 		input.Kind = domain.PelletReviewCheckpoint
 		for _, value := range strings.Split(selected, ",") {
 			ref, err := domain.ParsePelletReference(strings.TrimSpace(value))
@@ -174,7 +187,27 @@ func (h *handler) createPellet(response http.ResponseWriter, request *http.Reque
 				h.renderMutationError(response, err, submittedDraft(request.PostForm))
 				return
 			}
+			if !projectAcceptsCode(project, ref.ProjectCode) {
+				h.renderMutationError(response, requestError("the selected review targets belong to another project"), submittedDraft(request.PostForm))
+				return
+			}
+			ref.ProjectCode = project.Code
 			input.ReviewTargets = append(input.ReviewTargets, ref)
+		}
+		versions := strings.Split(strings.TrimSpace(request.PostForm.Get("review_target_versions")), ",")
+		if len(versions) != len(input.ReviewTargets) {
+			h.renderMutationError(response, requestError("every selected review target requires its exact row version"), submittedDraft(request.PostForm))
+			return
+		}
+		for _, value := range versions {
+			referenceText, version, found := strings.Cut(strings.TrimSpace(value), ":")
+			reference, err := domain.ParsePelletReference(referenceText)
+			if !found || err != nil || !projectAcceptsCode(project, reference.ProjectCode) || !validVersion(version) {
+				h.renderMutationError(response, requestError("the selected review target versions are invalid"), submittedDraft(request.PostForm))
+				return
+			}
+			reference.ProjectCode = project.Code
+			input.ReviewTargetVersions = append(input.ReviewTargetVersions, storage.ReviewTargetVersion{Reference: reference, Version: version})
 		}
 	}
 	pellet, err := h.application.CreatePellet(request.Context(), project, input)

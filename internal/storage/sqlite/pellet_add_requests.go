@@ -37,6 +37,15 @@ func pelletAddFingerprint(ctx context.Context, query projectQuery, project stora
 			input.ReviewTargets[i].ProjectCode = ""
 		}
 	}
+	if input.ReviewTargetVersions != nil {
+		input.ReviewTargetVersions = append([]storage.ReviewTargetVersion{}, input.ReviewTargetVersions...)
+		for i, target := range input.ReviewTargetVersions {
+			if err := ensureReferenceProject(ctx, query, project.Project, target.Reference); err != nil {
+				return "", err
+			}
+			input.ReviewTargetVersions[i].Reference.ProjectCode = ""
+		}
+	}
 	if input.Placement != nil {
 		if err := ensureReferenceProject(ctx, query, project.Project, input.Placement.Target); err != nil {
 			return "", err

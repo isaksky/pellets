@@ -177,6 +177,19 @@ input:hover, textarea:hover, select:hover { border-color: color-mix(in srgb, var
 .quiet-button { height: 37px; font-size: .76rem; }
 
 .table-frame { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.checkpoint-composer { display: grid; grid-template-columns: minmax(12rem, .75fr) minmax(18rem, 1.25fr); gap: .45rem 1rem; padding: .85rem; border-bottom: 1px solid var(--border); background: var(--accent-soft); }
+.checkpoint-composer[hidden] { display: none; }
+.checkpoint-composer h3 { margin: 0; }
+.checkpoint-composer p { margin: 0; color: var(--text-muted); font-size: .76rem; overflow-wrap: anywhere; }
+.checkpoint-composer form { grid-column: 1 / -1; grid-template-columns: minmax(12rem, 1fr) minmax(15rem, 1.6fr) minmax(13rem, 1.1fr) auto; align-items: end; gap: .55rem; }
+.checkpoint-composer form > .form-grid { grid-template-columns: 1fr 1fr; gap: .45rem; }
+.checkpoint-composer form button { white-space: nowrap; }
+.checkpoint-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.checkpoint-warning { grid-column: 1 / -1; color: var(--warning) !important; }
+.selection-all, .selection-control { display: inline-flex; align-items: center; gap: .42rem; color: inherit; font: inherit; font-size: inherit; font-weight: inherit; }
+.selection-all { margin-right: .5rem; font-size: .63rem; text-transform: none; letter-spacing: normal; }
+.selection-control input, .selection-all input { width: 1rem; height: 1rem; padding: 0; accent-color: var(--accent); }
+.selection-control .row-link { display: inline-block; }
 .table-scroll { width: 100%; overflow: auto; }
 table { width: 100%; border-collapse: collapse; font-size: .79rem; }
 th { position: sticky; top: 0; z-index: 1; padding: .58rem .7rem; background: var(--surface-muted); border-bottom: 1px solid var(--border); color: var(--text-muted); text-align: left; font-size: .67rem; text-transform: uppercase; letter-spacing: .055em; white-space: nowrap; }
@@ -278,6 +291,8 @@ dd { margin: 0; overflow-wrap: anywhere; font-size: .76rem; }
   .inspector > header { min-height: 68px; }
   .conflict-state, .error-state { max-height: 94vh; overflow: auto; border-radius: 16px 16px 0 0; }
   .form-grid, .inline-form { grid-template-columns: 1fr; }
+  .checkpoint-composer, .checkpoint-composer form { grid-template-columns: 1fr; }
+  .checkpoint-composer form > .form-grid { grid-template-columns: 1fr; }
   .memory-grid { grid-template-columns: 1fr; }
 }
 

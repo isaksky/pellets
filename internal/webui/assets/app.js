@@ -303,6 +303,14 @@ import { action, actions } from "./datastar-1.0.3.js";
       state.completed = true;
       var result = JSON.parse(detail.argsRaw.signals)._webResult;
       if (!result) return;
+      if (state.el.matches && state.el.matches("form[data-checkpoint-form]") && result.status < 400) {
+        // The add receipt intentionally retains this value after uncertain
+        // failures, but a confirmed creation must not make the next distinct
+        // selection replay this completed request.
+        var requestID = state.el.querySelector("input[name=request_id]");
+        if (requestID) requestID.value = "";
+        clearCheckpointSelection();
+      }
       // Related regions can refresh even when newer edits reject the inspector.
       // Advance history only if the requested destination was actually accepted.
       if (!state.automatic && state.primaryApplied && result.status < 400 && result.url) {
@@ -322,6 +330,165 @@ import { action, actions } from "./datastar-1.0.3.js";
   });
 
   var previousRows = new Map();
+  // Selection is deliberately keyed by immutable Pellet references rather than
+  // a row position. The table may be sorted by any display column and live
+  // invalidations may replace its DOM while a human is composing a checkpoint.
+  var checkpointSelection = new Map();
+  // Composer inputs are replaced by live HTML patches. Keep an explicit user
+  // override outside that DOM so a poll cannot silently restore an inferred
+  // filter/common value over the value they chose.
+  var checkpointMetadataOverrides = {};
+
+  function checkpointRowSnapshot(row) {
+    return {
+      reference: row.dataset.rowId,
+      version: row.dataset.rowVersion,
+      kind: row.dataset.checkpointKind,
+      priority: row.dataset.checkpointPriority,
+      external: row.dataset.checkpointExternal || "",
+      externalSet: row.dataset.checkpointExternalSet === "true",
+      group: row.dataset.checkpointGroup || "",
+      groupSet: row.dataset.checkpointGroupSet === "true",
+      problem: ""
+    };
+  }
+
+  function newCheckpointRequestID() {
+    if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+    if (window.crypto && window.crypto.getRandomValues) {
+      var bytes = new Uint8Array(16);
+      window.crypto.getRandomValues(bytes);
+      return Array.prototype.map.call(bytes, function (byte) { return byte.toString(16).padStart(2, "0"); }).join("");
+    }
+    return "checkpoint-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+  }
+
+  function clearCheckpointSelection() {
+    checkpointSelection.clear();
+    checkpointMetadataOverrides = {};
+    synchronizeCheckpointSelection();
+  }
+
+  function updateCheckpointComposer() {
+    var composer = document.querySelector("[data-checkpoint-composer]");
+    if (!composer) return;
+    var selected = Array.from(checkpointSelection.values()).sort(function (a, b) { return a.reference.localeCompare(b.reference, undefined, {numeric: true}); });
+    var form = composer.querySelector("form[data-checkpoint-form]");
+    var targets = form.querySelector("input[name=review_targets]");
+    var versions = form.querySelector("input[name=review_target_versions]");
+    var button = form.querySelector("button[type=submit]");
+    var summary = composer.querySelector("[data-checkpoint-summary]");
+    var warning = composer.querySelector("[data-checkpoint-warning]");
+    var invalid = selected.filter(function (item) { return item.problem || item.kind !== "ordinary"; });
+    var tooMany = selected.length > 1000;
+    composer.hidden = selected.length === 0;
+    targets.value = selected.map(function (item) { return item.reference; }).join(",");
+    versions.value = selected.map(function (item) { return item.reference + ":" + item.version; }).join(",");
+    if (!selected.length) return;
+
+    var active = selected.filter(function (item) { return /^\d+$/.test(item.priority); });
+    active.sort(function (a, b) { return Number(a.priority) - Number(b.priority) || a.reference.localeCompare(b.reference); });
+    var placement = active.length ? "after " + active[active.length - 1].reference + " in authoritative priority order" : "at the active queue tail (the selection has no active queue position)";
+    summary.textContent = selected.length + " selected: " + selected.map(function (item) { return item.reference; }).join(", ") + ". Insert " + placement + "; the displayed table sort does not affect placement.";
+
+    function metadata(name, filterSet, filterValue) {
+      if (filterSet) return {value: filterValue, source: "the exact displayed " + name + " filter", mixed: false};
+      var values = new Set(selected.map(function (item) { return item[name] + "\u0000" + (item[name + "Set"] ? "set" : "unset"); }));
+      if (values.size === 1) {
+        var first = selected[0];
+        return {value: first[name], source: "common selected metadata", mixed: false};
+      }
+      return {value: "", source: "mixed selected metadata", mixed: true};
+    }
+    var external = metadata("external", composer.dataset.filterExternalSet === "true", composer.dataset.filterExternal || "");
+    var group = metadata("group", composer.dataset.filterGroupSet === "true", composer.dataset.filterGroup || "");
+    [ ["external", external], ["group", group] ].forEach(function (entry) {
+      var input = form.querySelector("[data-checkpoint-metadata='" + entry[0] + "']");
+      input.value = Object.prototype.hasOwnProperty.call(checkpointMetadataOverrides, entry[0]) ? checkpointMetadataOverrides[entry[0]] : entry[1].value;
+    });
+    var metadataNotice = "External ID: " + external.source + "; Group: " + group.source + ".";
+    if (composer.dataset.filterGroupUngrouped === "true") metadataNotice += " The exact Ungrouped filter remains ungrouped and cannot be scheduled until it is removed.";
+    if (external.mixed || group.mixed) metadataNotice += " Mixed values default to no exact filter, so this checkpoint will not disappear from a guessed runner filter.";
+
+    if (invalid.length || tooMany) {
+      warning.hidden = false;
+      warning.textContent = tooMany ? "Select at most 1000 ordinary Pellets for one checkpoint." : "Selection changed and was not submitted: " + invalid.map(function (item) { return item.reference + " (" + (item.problem || "not an ordinary Pellet") + ")"; }).join(", ") + ". Reselect each affected target after refreshing it.";
+      button.disabled = true;
+    } else {
+      warning.hidden = false;
+      warning.textContent = metadataNotice;
+      button.disabled = false;
+    }
+    var requestID = form.querySelector("input[name=request_id]");
+    if (!requestID.value) requestID.value = newCheckpointRequestID();
+  }
+
+  function synchronizeCheckpointSelection() {
+    var rows = new Map();
+    document.querySelectorAll("#task-list .task-row[data-checkpoint-kind]").forEach(function (row) { rows.set(row.dataset.rowId, row); });
+    checkpointSelection.forEach(function (selected, reference) {
+      var row = rows.get(reference);
+      if (!row) {
+        selected.problem = "no longer appears in this filtered queue";
+        return;
+      }
+      var current = checkpointRowSnapshot(row);
+      if (current.version !== selected.version) selected.problem = "changed since selection";
+    });
+    document.querySelectorAll("#task-list [data-checkpoint-select]").forEach(function (checkbox) {
+      var row = checkbox.closest(".task-row");
+      checkbox.checked = checkpointSelection.has(row.dataset.rowId);
+    });
+    document.querySelectorAll("[data-checkpoint-select-all]").forEach(function (control) {
+      var selectable = Array.prototype.filter.call(document.querySelectorAll("[data-checkpoint-select]:not([disabled])"), function (checkbox) { return checkbox.closest(".task-row"); });
+      control.checked = selectable.length > 0 && selectable.every(function (checkbox) { return checkbox.checked; });
+      control.indeterminate = selectable.some(function (checkbox) { return checkbox.checked; }) && !control.checked;
+    });
+    updateCheckpointComposer();
+  }
+
+  document.addEventListener("change", function (event) {
+    var checkbox = event.target && event.target.closest("[data-checkpoint-select]");
+    if (checkbox) {
+      var row = checkbox.closest(".task-row");
+      if (checkbox.checked) checkpointSelection.set(row.dataset.rowId, checkpointRowSnapshot(row));
+      else checkpointSelection.delete(row.dataset.rowId);
+      synchronizeCheckpointSelection();
+      return;
+    }
+    var all = event.target && event.target.closest("[data-checkpoint-select-all]");
+    if (all) {
+      document.querySelectorAll("[data-checkpoint-select]:not([disabled])").forEach(function (candidate) {
+        var row = candidate.closest(".task-row");
+        candidate.checked = all.checked;
+        if (all.checked) checkpointSelection.set(row.dataset.rowId, checkpointRowSnapshot(row));
+        else checkpointSelection.delete(row.dataset.rowId);
+      });
+      synchronizeCheckpointSelection();
+      return;
+    }
+    var metadataInput = event.target && event.target.closest("[data-checkpoint-metadata]");
+    if (metadataInput) checkpointMetadataOverrides[metadataInput.dataset.checkpointMetadata] = metadataInput.value;
+  });
+
+  document.addEventListener("input", function (event) {
+    var metadataInput = event.target && event.target.closest("[data-checkpoint-metadata]");
+    if (metadataInput) checkpointMetadataOverrides[metadataInput.dataset.checkpointMetadata] = metadataInput.value;
+  });
+
+  document.addEventListener("click", function (event) {
+	var clear = event.target && event.target.closest("[data-checkpoint-clear]");
+	if (!clear) return;
+	event.preventDefault();
+	clearCheckpointSelection();
+  });
+
+  document.addEventListener("submit", function (event) {
+    var form = event.target && event.target.closest("form[data-checkpoint-form]");
+    if (!form) return;
+    var requestID = form.querySelector("input[name=request_id]");
+    if (!requestID.value) requestID.value = newCheckpointRequestID();
+  }, true);
   function rememberAndMarkRows(scope) {
     var current = new Map();
     scope.querySelectorAll("[data-row-id][data-row-version]").forEach(function (row) {
@@ -361,6 +528,7 @@ import { action, actions } from "./datastar-1.0.3.js";
   function initialize(scope) {
     applyTheme(root.dataset.themeChoice || "system");
     rememberAndMarkRows(scope);
+    synchronizeCheckpointSelection();
     configureInspector(scope);
   }
   initialize(document);
