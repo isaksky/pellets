@@ -229,9 +229,10 @@ func Run() bool {
 				if strings.HasPrefix(mode, "review_findings") {
 					cwd, err := os.Getwd()
 					must(err)
-					review = "The exact changes have one correctness issue.\n\nReview comment:\n\n- [P1] Handle edge case — " + filepath.Join(cwd, "demo-1.txt") + ":1-1\n  The selected change misses the empty input case."
+					file := reviewedFixtureFile(scheduledTurn)
+					review = "The exact changes have one correctness issue.\n\nReview comment:\n\n- [P1] Handle edge case — " + filepath.Join(cwd, file) + ":1-1\n  The selected change misses the empty input case."
 					if mode == "review_findings_partial" {
-						review += "\n\n- [P2] Handle another edge — " + filepath.Join(cwd, "demo-1.txt") + ":1-1\n  The selected change also mishandles the second input case."
+						review += "\n\n- [P2] Handle another edge — " + filepath.Join(cwd, file) + ":1-1\n  The selected change also mishandles the second input case."
 					}
 				}
 				if mode == "review_malformed_result" {
@@ -319,6 +320,25 @@ func cleanReviewMarker(params json.RawMessage) string {
 		panic("review request lacks its scope-bound clean marker")
 	}
 	return request.Target.Instructions[start : start+len(prefix)+64]
+}
+
+// Browser/HTTP fixtures use different project codes. Emit a native finding
+// against the actual selected file instead of assuming the app tests' demo.
+func reviewedFixtureFile(params json.RawMessage) string {
+	var request struct {
+		Target struct {
+			Instructions string `json:"instructions"`
+		} `json:"target"`
+	}
+	must(json.Unmarshal(params, &request))
+	var snapshot struct {
+		Commits []struct {
+			Files []string `json:"files"`
+		} `json:"commits"`
+	}
+	start := strings.Index(request.Target.Instructions, "\n")
+	must(json.Unmarshal([]byte(request.Target.Instructions[start+1:]), &snapshot))
+	return snapshot.Commits[0].Files[0]
 }
 
 func writeScheduledCompletion(write func(any), mode string, params json.RawMessage) {

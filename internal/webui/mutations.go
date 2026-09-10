@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"pellets/internal/app"
 	"pellets/internal/domain"
@@ -392,6 +394,16 @@ func (h *handler) renderMutationError(response http.ResponseWriter, err error, d
 		if conflict.Pellet != nil {
 			views := makePelletViews([]storage.Pellet{*conflict.Pellet}, conflict.Pellet.Reference.ProjectCode, nil, conflict.Pellet.Reference.String(), storage.WebPelletSort{}, nil, false)
 			data.SelectedPellet = &views[0]
+			if conflict.Pellet.Checkpoint != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				outcome, readErr := h.application.CheckpointOutcome(ctx, *conflict.Pellet)
+				cancel()
+				if readErr != nil {
+					h.renderError(response, statusForError(readErr), readErr, draft)
+					return
+				}
+				data.SelectedPellet.CheckpointOutcome = makeCheckpointOutcomeView(outcome, conflict.Pellet.Reference.ProjectCode, nil, storage.WebPelletSort{})
+			}
 			data.Conflict.Kind = "pellet"
 			data.Conflict.Current = fmt.Sprintf("%s · %s · updated %s", conflict.Pellet.Reference, conflict.Pellet.Title, formatTime(conflict.Pellet.UpdatedAt))
 		} else if conflict.Memory != nil {

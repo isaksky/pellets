@@ -92,6 +92,7 @@ type WebReader interface {
 	ListWebProjects(ctx context.Context) ([]WebProjectSummary, error)
 	ListWebPellets(ctx context.Context, project Project, filters WebPelletFilters) ([]Pellet, error)
 	ReadWebPellet(ctx context.Context, project Project, reference domain.PelletReference) (Pellet, error)
+	ReadCheckpointOutcome(ctx context.Context, projectID, checkpointNumber, implementationRevision int64) (CheckpointOutcome, error)
 	ListWebGroups(ctx context.Context, project Project) ([]*string, error)
 	ListWebMemories(ctx context.Context, project Project) ([]Memory, error)
 	ReadWebMemory(ctx context.Context, project Project, memoryID int64) (Memory, error)

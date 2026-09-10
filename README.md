@@ -336,6 +336,14 @@ task form accepts optional Review targets and its inspector shows this scope.
 Execution requires the separate checkpoint review policy; an absent policy is
 reported before dispatch. See [the CLI contract](docs/cli-spec.md#pl-add).
 
+The inspector reads durable review outcomes for that checkpoint's exact
+implementation generation. It shows clean/findings/needs-attention status,
+partial or complete triage counts, created follow-up links, and non-creation
+dispositions. Reconnecting or running another Pellet in the same workspace
+preserves these results. Purged follow-ups retain their reference with a
+“no longer present” label; reopening the checkpoint starts a new generation.
+Reviewer transcripts, commands, full diffs, and assessment prose are not shown.
+
 Checkpoint execution reviews the exact commits, then independently triages
 findings against current code, repository instructions, and existing active
 Pellets. Each valid distinct issue becomes an ordinary follow-up with context
@@ -587,6 +595,9 @@ forms, live refresh, conflict handling, and keyboard flows. Also run
 failure before run capture, repaired explicit Resume, server restart, and
 CLI-started ownership. This uses the compiled server and a deterministic Codex
 protocol peer in disposable repositories, without a model service or account.
+`node scripts/test-web-checkpoint-browser.cjs` covers durable clean/findings
+outcomes, partial triage and recovery, follow-up navigation, server restart,
+later workspace runs, narrow inspectors, and generation isolation.
 Node and Playwright are development tools only; `pl server` serves embedded
 assets and works offline.
 

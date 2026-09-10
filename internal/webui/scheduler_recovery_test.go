@@ -86,7 +86,9 @@ func recoveryHandlerFixture(t *testing.T) (handlerFixture, string) {
 	t.Cleanup(func() { f.application.Executions.Close() })
 	f.application.Scheduler = app.NewScheduler(context.Background(), app.SchedulerOptions{Database: f.application.Database, Supervisor: f.application.Executions, OpenQueue: func(ctx context.Context, path string) (storage.SchedulerQueue, error) {
 		return sqlite.OpenPelletRepository(ctx, path)
-	}})
+	}, Checkpoints: app.NewCheckpointReviewPolicy(f.application.Database, func(ctx context.Context, path string) (storage.SchedulerQueue, error) {
+		return sqlite.OpenPelletRepository(ctx, path)
+	})})
 	t.Cleanup(func() { f.application.Scheduler.Close() })
 	return f, root
 }

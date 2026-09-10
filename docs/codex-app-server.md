@@ -504,6 +504,21 @@ no code fixes, and never schedules another review checkpoint automatically.
 Drain and Watch may consume its ordinary follow-ups within their saved filters
 and remaining limits.
 
+The checkpoint inspector uses a query-only outcome read keyed by stable
+project ID, checkpoint number, and implementation revision. One read
+transaction combines the permanent review/triage receipt with that exact
+generation's latest review attempt and assessment dispositions. It does not
+depend on a live supervisor or the workspace dashboard's limited run history.
+Successful review completions saved before triage receipts were introduced
+remain visible; any findings without assessments are marked partial and need
+attention.
+Closed results and partial triage therefore survive reconnects and later
+ordinary runs. Created references remain visible after purge, with links only
+while the Pellet exists. Non-creation dispositions use fixed labels; no
+reviewer summary, assessment prose, transcript, commands, or full diff is
+rendered. The selected-target section explicitly labels its current evidence,
+and a reopened checkpoint cannot inherit the prior generation's outcome.
+
 `review/start` is never replayed during recovery. If a final structured result
 was already persisted, explicit Resume rechecks the exact conversation history,
 scope, commit objects, and repository state before resuming only unfinished
@@ -709,6 +724,7 @@ traceable checks:
 | Linked-worktree concurrency and checkpoint evidence from multiple worktrees | `TestSupervisorLinkedWorktreesExecuteConcurrently` and `TestCheckpointReviewerUsesExactCommitsFromDifferentWorktrees` |
 | Checkpoint readiness, selected work in another workspace, noncontiguous commits, and completion without a commit | checkpoint SQLite tests, `TestCheckpointReviewerUsesFreshDetachedContextAndExactCommitSet`, and `TestCheckpointPolicyBypassesOrdinaryFinalizer` |
 | Lost-response/expired-receipt recovery and duplicate-free partial triage | checkpoint triage SQLite/application tests |
+| Durable checkpoint inspector: clean/findings, partial recovery, purged refs, reconnect, later run and exact generation | `TestCheckpointOutcomeDurablePartialResumeAndExactGeneration`, `TestCheckpointOutcomePreservesPurgedFollowupReference`, `TestHTTPCheckpointDurableOutcomes`, and `node scripts/test-web-checkpoint-browser.cjs` |
 | Server forms, checkpoint composer, live refresh, conflict recovery, keyboard navigation | Go web-handler/asset tests plus `node scripts/test-web-browser.cjs` |
 | Owned pellet without a run: authentication/config repair, restart, CLI start, reconstructed modes/filters, duplicate exclusion | `TestHTTPResumeWithoutRunRepairsPreflightAndReconstructsExactIntent` plus `node scripts/test-web-recovery-browser.cjs` |
 | Reopened generation starts fresh; current generation retains exact-attempt recovery | `TestHTTPReopenedGenerationResumesWithFreshConversationAfterPreflightRepair`, `TestHTTPCurrentGenerationRunRequiresExactAttemptAndPreventsOverlap`, and the recovery browser suite |

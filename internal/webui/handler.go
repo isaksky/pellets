@@ -288,16 +288,17 @@ type scheduleView struct {
 }
 
 type pelletView struct {
-	Pellet       storage.Pellet
-	Version      string
-	URL          string
-	Selected     bool
-	OwnerCurrent bool
-	CanLifecycle bool
-	Group        string
-	ExternalID   string
-	Priority     string
-	Owner        string
+	CheckpointOutcome *checkpointOutcomeView
+	Pellet            storage.Pellet
+	Version           string
+	URL               string
+	Selected          bool
+	OwnerCurrent      bool
+	CanLifecycle      bool
+	Group             string
+	ExternalID        string
+	Priority          string
+	Owner             string
 }
 
 type memoryView struct {
@@ -518,6 +519,13 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 			}
 			views := makePelletViews([]storage.Pellet{pellet}, code, request.URL.Query(), selectedReferenceText, filters.Sort, data.CurrentWorkspace, data.CurrentProject)
 			data.SelectedPellet = &views[0]
+			if pellet.Checkpoint != nil {
+				outcome, err := h.application.CheckpointOutcome(request.Context(), pellet)
+				if err != nil {
+					return pageData{}, err
+				}
+				data.SelectedPellet.CheckpointOutcome = makeCheckpointOutcomeView(outcome, code, request.URL.Query(), filters.Sort)
+			}
 			data.CloseURL = taskURL(code, request.URL.Query(), "", filters.Sort)
 			active, err := h.application.Pellets(request.Context(), selected.Project, storage.WebPelletFilters{})
 			if err != nil {

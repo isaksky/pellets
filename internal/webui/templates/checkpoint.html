@@ -1,0 +1,12 @@
+{{define "checkpoint-outcome"}}{{with .}}<div data-checkpoint-outcome data-checkpoint-generation="{{.ImplementationRevision}}" aria-live="polite">
+  <p><strong>Review outcome:</strong> {{.Label}}{{if and .NeedsAttention .ReviewCompleted}} · Needs attention{{end}}</p>
+  <p class="form-help">Checkpoint generation {{.ImplementationRevision}}{{if .RunID}} · Review attempt {{.RunID}}{{end}}</p>
+  {{if .ReviewCompleted}}<p><strong>Triage:</strong> {{if eq .Triage "partial"}}Partial{{else}}Complete{{end}} · {{.Assessed}} of {{.Findings}} distinct findings assessed.</p>{{end}}
+  <h4>Created follow-ups</h4>
+  {{if .Followups}}<ul>{{range .Followups}}<li>Finding {{.FindingNumber}} · {{template "checkpoint-reference" .}}</li>{{end}}</ul>
+  {{else if .ReviewCompleted}}{{if eq .Triage "complete"}}<p>0 created.{{if eq .Status "clean"}} No findings.{{end}}</p>{{else}}<p>0 created so far; triage is unfinished.</p>{{end}}
+  {{else}}<p>Follow-ups will be recorded after a successful review and triage.</p>{{end}}
+  {{if .Dispositions}}<h4>Other dispositions</h4><ul>{{range .Dispositions}}<li>Finding {{.FindingNumber}} · {{.Label}}{{if .Reference}} · {{template "checkpoint-reference" .}}{{end}}</li>{{end}}</ul>{{end}}
+</div>{{end}}{{end}}
+
+{{define "checkpoint-reference"}}{{if .URL}}<a href="{{.URL}}" data-on:click="@navigate('inspector-host')"><code>{{.Reference}}</code></a>{{else}}<code>{{.Reference}}</code> (no longer present){{end}}{{end}}
