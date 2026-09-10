@@ -17,7 +17,35 @@ import (
 
 func runCapture(project, workspace, pellet int64) storage.RunCapture {
 	return storage.RunCapture{ProjectID: project, WorkspaceID: workspace, PelletNumber: pellet, Mode: "run_one", StartingHead: strings.Repeat("a", 40),
-		Settings: storage.EffectiveRunSettings{Codex: storage.CodexRunSettings{Executable: "codex", Model: "future-model", ReasoningEffort: "high", Limits: storage.CodexRunLimits{MaxMessageBytes: 4096, EventBuffer: 8, MaxPending: 8, StderrBytes: 1024}}, ApprovalPolicy: "on-request", ApprovalsReviewer: "auto_review", SandboxMode: "workspace-write"}}
+		Settings:     storage.EffectiveRunSettings{Codex: storage.CodexRunSettings{Executable: "codex", Model: "future-model", ReasoningEffort: "high", Limits: storage.CodexRunLimits{MaxMessageBytes: 4096, EventBuffer: 8, MaxPending: 8, StderrBytes: 1024}}, ApprovalPolicy: "on-request", ApprovalsReviewer: "auto_review", SandboxMode: "workspace-write"},
+		PromptPrefix: storage.PromptPrefix{TemplateVersion: "test-prefix", SkillSHA256: strings.Repeat("a", 64), HelpSHA256: strings.Repeat("b", 64), ToolExecutable: "pl", ToolVersion: "test", Text: "stable\n"}}
+}
+
+func TestPromptPrefixEncodedStorageBoundAccountsForJSONEscapes(t *testing.T) {
+	prefix := storage.PromptPrefix{TemplateVersion: "test-prefix", SkillSHA256: strings.Repeat("a", 64), HelpSHA256: strings.Repeat("b", 64), ToolExecutable: strings.Repeat("\x01", 4096), ToolVersion: strings.Repeat("\x01", 512), Text: strings.Repeat("\x01", 200000)}
+	if err := storage.ValidatePromptPrefix(prefix); err != nil {
+		t.Fatalf("escaped prefix unexpectedly rejected: %v", err)
+	}
+	prefix.Text = strings.Repeat("\x01", 400000)
+	if err := storage.ValidatePromptPrefix(prefix); domain.PublicError(err).Code != "invalid_execution_run" {
+		t.Fatalf("oversized encoded prefix error = %v", err)
+	}
+}
+
+func TestPreThreadRetryKeepsFreshPromptPrefix(t *testing.T) {
+	db, run, _ := createTestRun(t)
+	stopped := updateRun(t, db, run, storage.RunProgress{Phase: "preflight", State: "interrupted", Outcome: "unknown"}, "")
+	fresh := stopped.RunCapture
+	previous := stopped.ID
+	fresh.ResumeFrom = &previous
+	fresh.PromptPrefix = storage.PromptPrefix{TemplateVersion: "test-prefix", SkillSHA256: strings.Repeat("c", 64), HelpSHA256: strings.Repeat("d", 64), ToolExecutable: "changed-pl", ToolVersion: "changed", Text: "fresh prefix\n"}
+	retried, err := db.CreateExecutionRun(context.Background(), fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried.ThreadID != "" || retried.PromptPrefix != fresh.PromptPrefix {
+		t.Fatalf("pre-thread retry inherited stale conversation: %#v", retried)
+	}
 }
 
 func createTestRun(t *testing.T) (*ProjectDatabase, storage.ExecutionRun, pelletRepositoryFixture) {
@@ -69,7 +97,7 @@ func TestExecutionMigrationFromReleasedFixtureAndRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertPragmaInt(t, db.db, "user_version", 7)
+	assertPragmaInt(t, db.db, "user_version", 8)
 	assertQueryInt(t, db.db, `SELECT COUNT(*) FROM application_metadata WHERE key='fixture' AND value='released-v1'`, 1)
 	assertQueryInt(t, db.db, `SELECT COUNT(*) FROM execution_runs`, 0)
 	var project, workspace, number int64

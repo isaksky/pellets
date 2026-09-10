@@ -69,6 +69,12 @@ func installSupervisorPeer(t *testing.T) string {
 func supervisorFixture(t *testing.T, executable string) (*ExecutionSupervisor, ExecutionRequest) {
 	t.Helper()
 	recorder, database, selected, capture := executionFixture(t)
+	if err := os.MkdirAll(filepath.Join(database.Root, ".agents", "skills", "pellets"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(database.Root, ".agents", "skills", "pellets", "SKILL.md"), []byte("---\nname: pellets\n---\nSupervisor test skill.\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	settings := WorkspaceRunSettingsManager{Open: func(ctx context.Context, path string) (storage.WorkspaceRunSettingsDatabase, error) {
 		return sqlite.OpenWorkspaceRunSettingsDatabase(ctx, path)
 	}}

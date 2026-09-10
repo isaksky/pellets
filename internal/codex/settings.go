@@ -187,6 +187,7 @@ type PreparedRun struct {
 	Account          AccountStatus
 	Models           []ModelInfo
 	EvidenceSettings storage.EffectiveRunSettings
+	PromptPrefix     storage.PromptPrefix
 	thread           map[string]any
 	turn             map[string]any
 }
@@ -223,7 +224,8 @@ func PrepareRun(ctx context.Context, options PrepareOptions) (_ *PreparedRun, er
 	if err != nil {
 		return nil, err
 	}
-	if err := requirePelletsTool(ctx, workspace); err != nil {
+	promptPrefix, err := preparePelletsPromptPrefix(ctx, workspace)
+	if err != nil {
 		return nil, err
 	}
 	client, err := Start(ctx, Config{
@@ -314,7 +316,7 @@ func PrepareRun(ctx context.Context, options PrepareOptions) (_ *PreparedRun, er
 	if evidenceSettings.Codex.ReasoningEffort == "" {
 		evidenceSettings.Codex.ReasoningEffort = effective.ReasoningEffort
 	}
-	return &PreparedRun{Client: client, Settings: settings, Account: account, Models: models, EvidenceSettings: evidenceSettings, thread: thread, turn: turn}, nil
+	return &PreparedRun{Client: client, Settings: settings, Account: account, Models: models, EvidenceSettings: evidenceSettings, PromptPrefix: promptPrefix, thread: thread, turn: turn}, nil
 }
 
 // requirePelletsTool checks the same cwd and inherited environment supplied to

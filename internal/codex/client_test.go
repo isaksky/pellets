@@ -927,3 +927,33 @@ func TestUnexpectedCleanExitIsNotTurnSuccess(t *testing.T) {
 		t.Fatal("invented terminal turn")
 	}
 }
+
+func TestCachedInputTokensAcceptsOnlyReportedNonnegativeIntegers(t *testing.T) {
+	for _, test := range []struct {
+		params string
+		want   int64
+		ok     bool
+	}{
+		{`{"turn":{"usage":{"cachedInputTokens":42}}}`, 42, true},
+		{`{"usage":{"cached_input_tokens":0}}`, 0, true},
+		{`{"usage":{"cachedInputTokens":1.5}}`, 0, false},
+		{`{"usage":{"cachedInputTokens":-1}}`, 0, false},
+		{`{"usage":{}}`, 0, false},
+	} {
+		event := &Event{Method: "turn/completed", Params: json.RawMessage(test.params)}
+		if got, ok := CachedInputTokens(event); got != test.want || ok != test.ok {
+			t.Fatalf("CachedInputTokens(%s) = (%d, %t), want (%d, %t)", test.params, got, ok, test.want, test.ok)
+		}
+	}
+	usage := &Event{Method: "thread/tokenUsage/updated", Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","tokenUsage":{"total":{"cachedInputTokens":9}}}`)}
+	if got, ok := CachedInputTokensForTurn(usage, "thread", "turn"); !ok || got != 9 {
+		t.Fatalf("bound usage = (%d, %t)", got, ok)
+	}
+	if _, ok := CachedInputTokensForTurn(usage, "thread", "other"); ok {
+		t.Fatal("accepted another turn's usage")
+	}
+	total := &Event{Method: "thread/tokenUsage/updated", Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","tokenUsage":{"last":{"cachedInputTokens":1},"total":{"cachedInputTokens":9}}}`)}
+	if got, ok := CachedInputTokensForTurn(total, "thread", "turn"); !ok || got != 1 {
+		t.Fatalf("per-turn telemetry = (%d, %t)", got, ok)
+	}
+}

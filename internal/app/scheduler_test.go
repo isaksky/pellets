@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,6 +125,111 @@ func TestSchedulerRealDriverModesLimitAndExactBinding(t *testing.T) {
 				t.Fatalf("turn calls %d", turns)
 			}
 		})
+	}
+}
+
+func TestSchedulerPrefixIsStableForNewConversationAndAbsentOnResume(t *testing.T) {
+	executable := installSupervisorPeer(t)
+	s, request, _ := schedulerFixture(t, executable, "schedule_failed")
+	first := awaitSchedule(t, startSchedule(t, s, request))
+	if first.State != "needs_attention" || first.RunID == 0 {
+		t.Fatalf("first attempt = %+v", first)
+	}
+	run, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, first.RunID)
+	if err != nil || run.PromptPrefix.TemplateVersion == "" || !strings.HasPrefix(run.PromptPrefix.Text, "PELLETS CODEX TASK PRELOAD v1\n") || run.CachedInputTokens == nil || *run.CachedInputTokens != 7 {
+		t.Fatalf("durable prefix = %#v, %v", run.PromptPrefix, err)
+	}
+	if err := os.WriteFile(filepath.Join(s.options.Database.Root, ".agents", "skills", "pellets", "SKILL.md"), []byte("---\nname: pellets\n---\nChanged before resume.\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Prepare the resumed attempt against changed skill and tool-version
+	// sources. Its durable conversation provenance must nevertheless remain A.
+	t.Setenv("PELLETS_SUPERVISOR_PEER_VERSION", "changed-before-resume")
+	if err := os.WriteFile(filepath.Join(s.options.Database.Root, "fake-mode"), []byte("schedule_success"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	pellet, previous := run.PelletNumber, run.ID
+	request.ResumePellet, request.ResumeFrom = &pellet, &previous
+	second := awaitSchedule(t, startSchedule(t, s, request))
+	if second.State != "completed" {
+		t.Fatalf("resume = %+v", second)
+	}
+	resumed, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, second.RunID)
+	if err != nil || resumed.CachedInputTokens == nil || *resumed.CachedInputTokens != 7 || resumed.PromptPrefix != run.PromptPrefix {
+		t.Fatalf("resume provenance/telemetry = %#v, %#v, %v", resumed.PromptPrefix, resumed.CachedInputTokens, err)
+	}
+	var prompts []string
+	for _, event := range readPeerEvents(t, s.options.Database.Root) {
+		if event.Method != "turn/start" {
+			continue
+		}
+		var params struct{ Input []struct{ Text string } }
+		if err := json.Unmarshal(event.Params, &params); err != nil {
+			t.Fatal(err)
+		}
+		prompts = append(prompts, params.Input[0].Text)
+	}
+	if len(prompts) != 2 || !strings.HasPrefix(prompts[0], run.PromptPrefix.Text) || strings.Contains(prompts[1], "PELLETS CODEX TASK PRELOAD v1") {
+		t.Fatalf("new/resume prompt bytes = %#v", prompts)
+	}
+	if dynamic := strings.Index(prompts[0], "The foreground Pellets server"); dynamic <= strings.Index(prompts[0], "STABLE PELLETS WORKFLOW") || !strings.Contains(prompts[0], "\n{\"Reference\":\""+run.ProjectCode+"-"+fmt.Sprint(run.PelletNumber)+"\"") {
+		t.Fatalf("dynamic task did not follow stable prefix: %q", prompts[0])
+	}
+}
+
+func TestSchedulerPersistsCachedTokensBeforeInputAttention(t *testing.T) {
+	executable := installSupervisorPeer(t)
+	s, request, _ := schedulerFixture(t, executable, "schedule_input")
+	status := awaitSchedule(t, startSchedule(t, s, request))
+	if status.State != "needs_attention" || status.Reason != "codex_input_required" {
+		t.Fatalf("input attention = %+v", status)
+	}
+	run, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, status.RunID)
+	if err != nil || run.CachedInputTokens == nil || *run.CachedInputTokens != 7 {
+		t.Fatalf("input telemetry = %#v, %v", run.CachedInputTokens, err)
+	}
+}
+
+func TestSchedulerPreThreadRetryUsesFreshChangedPrefix(t *testing.T) {
+	executable := installSupervisorPeer(t)
+	s, request, _ := schedulerFixture(t, executable, "schedule_prethread_failure")
+	first := awaitSchedule(t, startSchedule(t, s, request))
+	if first.State != "needs_attention" {
+		t.Fatalf("pre-thread failure = %+v", first)
+	}
+	previous, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, first.RunID)
+	if err != nil || previous.ThreadID != "" {
+		t.Fatalf("pre-thread evidence = %#v, %v", previous, err)
+	}
+	if err := os.WriteFile(filepath.Join(s.options.Database.Root, ".agents", "skills", "pellets", "SKILL.md"), []byte("---\nname: pellets\n---\nFresh retry skill.\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PELLETS_SUPERVISOR_PEER_VERSION", "fresh-prethread-retry")
+	if err := os.WriteFile(filepath.Join(s.options.Database.Root, "fake-mode"), []byte("schedule_success"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	pellet, resumeFrom := previous.PelletNumber, previous.ID
+	request.ResumePellet, request.ResumeFrom = &pellet, &resumeFrom
+	second := awaitSchedule(t, startSchedule(t, s, request))
+	if second.State != "completed" {
+		t.Fatalf("pre-thread retry = %+v", second)
+	}
+	retried, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, second.RunID)
+	if err != nil || retried.PromptPrefix == previous.PromptPrefix || !strings.Contains(retried.PromptPrefix.Text, "Fresh retry skill.\n") {
+		t.Fatalf("fresh retry provenance = %#v, %v", retried.PromptPrefix, err)
+	}
+	var prompt string
+	for _, event := range readPeerEvents(t, s.options.Database.Root) {
+		if event.Method == "turn/start" {
+			var params struct{ Input []struct{ Text string } }
+			if err := json.Unmarshal(event.Params, &params); err != nil {
+				t.Fatal(err)
+			}
+			prompt = params.Input[0].Text
+		}
+	}
+	if !strings.HasPrefix(prompt, retried.PromptPrefix.Text) {
+		t.Fatalf("fresh prefix absent from new conversation: %q", prompt)
 	}
 }
 

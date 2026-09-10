@@ -87,3 +87,72 @@ type Runtime struct {
 	Version    string
 	UserAgent  string
 }
+
+// CachedInputTokens extracts optional token-cache telemetry from a terminal or
+// token-usage app-server notification. Both documented camelCase and
+// snake_case response forms are accepted because this adapter otherwise
+// preserves runtime JSON.
+func CachedInputTokens(event *Event) (int64, bool) {
+	if event == nil || (event.Method != "turn/completed" && event.Method != "thread/tokenUsage/updated") {
+		return 0, false
+	}
+	var payload any
+	if json.Unmarshal(event.Params, &payload) != nil {
+		return 0, false
+	}
+	return cachedInputTokens(payload)
+}
+
+// CachedInputTokensForTurn additionally binds telemetry to the exact recorded
+// conversation identity. The runtime emits token usage independently from a
+// terminal turn notification, so callers retain it until completion.
+func CachedInputTokensForTurn(event *Event, threadID, turnID string) (int64, bool) {
+	if event == nil || threadID == "" || turnID == "" {
+		return 0, false
+	}
+	var identity struct {
+		ThreadID string `json:"threadId"`
+		TurnID   string `json:"turnId"`
+		Turn     struct {
+			ID string `json:"id"`
+		} `json:"turn"`
+	}
+	if json.Unmarshal(event.Params, &identity) != nil || identity.ThreadID != threadID {
+		return 0, false
+	}
+	if identity.TurnID == "" {
+		identity.TurnID = identity.Turn.ID
+	}
+	if identity.TurnID != turnID {
+		return 0, false
+	}
+	return CachedInputTokens(event)
+}
+
+func cachedInputTokens(value any) (int64, bool) {
+	switch value := value.(type) {
+	case map[string]any:
+		for _, name := range []string{"cachedInputTokens", "cached_input_tokens"} {
+			if number, ok := value[name].(float64); ok && number >= 0 && number == float64(int64(number)) {
+				return int64(number), true
+			}
+		}
+		// ThreadTokenUsage contains both last and total summaries. The scheduler
+		// needs this turn's usage, so prefer last explicitly rather than a
+		// cumulative thread total or Go map iteration order.
+		for _, name := range []string{"tokenUsage", "last", "total", "usage", "turn"} {
+			if child, exists := value[name]; exists {
+				if number, ok := cachedInputTokens(child); ok {
+					return number, true
+				}
+			}
+		}
+	case []any:
+		for _, child := range value {
+			if number, ok := cachedInputTokens(child); ok {
+				return number, true
+			}
+		}
+	}
+	return 0, false
+}

@@ -20,6 +20,21 @@ func Run() bool {
 		return false
 	}
 	args := os.Args[1:]
+	if strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe") == "pl" {
+		if len(args) > 0 && (args[0] == "--version" || args[len(args)-1] == "--help") {
+			if args[0] == "--version" {
+				version := os.Getenv("PELLETS_SUPERVISOR_PEER_VERSION")
+				if version == "" {
+					version = "supervisor-test"
+				}
+				fmt.Println("pl " + version)
+			} else {
+				fmt.Printf("Usage: pl %s\n", strings.Join(args[:len(args)-1], " "))
+			}
+			return true
+		}
+		return false
+	}
 	if args[0] == "--version" {
 		fmt.Println("codex-cli 0.151.0")
 		return true
@@ -73,7 +88,11 @@ func Run() bool {
 		case "model/list":
 			result = map[string]any{"data": []any{map[string]any{"id": "test-model", "model": "test-model", "displayName": "Test", "isDefault": true, "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "high"}}}}, "nextCursor": nil}
 		case "thread/start", "thread/resume":
-			result = map[string]any{"thread": map[string]any{"id": "thread"}}
+			if mode == "schedule_prethread_failure" && message.Method == "thread/start" {
+				result = map[string]any{}
+			} else {
+				result = map[string]any{"thread": map[string]any{"id": "thread"}}
+			}
 		case "turn/start":
 			if !strings.HasPrefix(mode, "schedule_") {
 				spawn("child")
@@ -100,6 +119,11 @@ func Run() bool {
 				waitFile("fake-complete")
 			}
 			completeScheduled(mode, message.Params)
+			write(map[string]any{"method": "thread/tokenUsage/updated", "params": map[string]any{"threadId": "thread", "turnId": "turn", "tokenUsage": map[string]any{"last": map[string]any{"cachedInputTokens": int64(7)}, "total": map[string]any{"cachedInputTokens": int64(70)}}}})
+			if mode == "schedule_input" {
+				write(map[string]any{"id": 1, "method": "item/tool/requestUserInput", "params": map[string]any{}})
+				continue
+			}
 			status := "completed"
 			if mode == "schedule_failed" {
 				status = "failed"

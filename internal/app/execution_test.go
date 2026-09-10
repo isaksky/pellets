@@ -65,7 +65,7 @@ func executionFixture(t *testing.T) (ExecutionRecorder, Database, storage.Resolv
 	recorder := ExecutionRecorder{Open: func(ctx context.Context, path string) (storage.ExecutionRunDatabase, error) {
 		return sqlite.OpenExecutionRunDatabase(ctx, path)
 	}}
-	capture := storage.RunCapture{ProjectID: project.ID, WorkspaceID: selected.Workspace.ID, PelletNumber: pellet.Reference.Number, Mode: "run_one", Settings: storage.EffectiveRunSettings{Codex: storage.CodexRunSettings{Executable: "codex", Model: "test-model", Limits: storage.CodexRunLimits{MaxMessageBytes: 4096, EventBuffer: 8, MaxPending: 8, StderrBytes: 1024}}, ApprovalPolicy: "on-request", ApprovalsReviewer: "auto_review", SandboxMode: "workspace-write"}}
+	capture := storage.RunCapture{ProjectID: project.ID, WorkspaceID: selected.Workspace.ID, PelletNumber: pellet.Reference.Number, Mode: "run_one", Settings: storage.EffectiveRunSettings{Codex: storage.CodexRunSettings{Executable: "codex", Model: "test-model", Limits: storage.CodexRunLimits{MaxMessageBytes: 4096, EventBuffer: 8, MaxPending: 8, StderrBytes: 1024}}, ApprovalPolicy: "on-request", ApprovalsReviewer: "auto_review", SandboxMode: "workspace-write"}, PromptPrefix: storage.PromptPrefix{TemplateVersion: "test-prefix", SkillSHA256: strings.Repeat("a", 64), HelpSHA256: strings.Repeat("b", 64), ToolExecutable: "pl", ToolVersion: "test", Text: "stable\n"}}
 	return recorder, database, selected, capture
 }
 

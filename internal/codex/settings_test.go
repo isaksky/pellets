@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -50,11 +51,45 @@ func installFakePelletsTool(t *testing.T) string {
 	t.Setenv("PELLETS_CODEX_TEST_ORIGINAL_EXE", executable)
 	t.Setenv("GORACE", "atexit_sleep_ms=0")
 	t.Setenv("PATH", directory)
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".agents", "skills", "pellets"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".agents", "skills", "pellets", "SKILL.md"), []byte("---\nname: pellets\n---\nTest skill.\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
 	return path
 }
 
 func pelletsToolPeer(mode string) {
-	if !reflect.DeepEqual(os.Args[1:], []string{"--version"}) {
+	arguments := os.Args[1:]
+	if log := os.Getenv("PELLETS_CODEX_TEST_TOOL_LOG"); log != "" {
+		file, err := os.OpenFile(log, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			panic(err)
+		}
+		_, err = fmt.Fprintln(file, strings.Join(arguments, " "))
+		if closeErr := file.Close(); err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			panic(err)
+		}
+	}
+	if reflect.DeepEqual(arguments, []string{"--version"}) {
+		if mode == "huge-version" {
+			fmt.Fprint(os.Stdout, strings.Repeat("v", maxPelletsVersionBytes+1))
+			return
+		}
+		fmt.Fprint(os.Stdout, "pl test 1\n")
+	} else if len(arguments) > 0 && arguments[len(arguments)-1] == "--help" {
+		if mode == "huge-help" {
+			fmt.Fprint(os.Stdout, strings.Repeat("h", maxPelletsHelpCommandBytes+1))
+			return
+		}
+		fmt.Fprintf(os.Stdout, "Usage: pl %s\n", strings.Join(arguments[:len(arguments)-1], " "))
+	} else {
 		panic("wrong Pellets tool probe arguments")
 	}
 	workspace, err := os.Getwd()
@@ -78,6 +113,90 @@ func pelletsToolPeer(mode string) {
 	if mode == "descendant-hang" {
 		spawnPelletsToolDescendant()
 		time.Sleep(30 * time.Second)
+	}
+}
+
+func TestPelletsPromptPrefixSnapshotsStableBytesAndRefreshes(t *testing.T) {
+	installFakePelletsTool(t)
+	workspace := t.TempDir()
+	skillPath := filepath.Join(workspace, ".agents", "skills", "pellets", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skillPath, []byte("---\r\nname: pellets\r\n---\r\nStable skill.\r\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(t.TempDir(), "tool.log")
+	t.Setenv("PELLETS_CODEX_TEST_TOOL_LOG", log)
+	first, err := preparePelletsPromptPrefix(context.Background(), workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(first.Text, "\r") || !strings.HasPrefix(first.Text, "PELLETS CODEX TASK PRELOAD v1\n") {
+		t.Fatalf("prefix line endings/header = %q", first.Text)
+	}
+	stable, help, workflow := strings.Index(first.Text, "INSTALLED PELLETS SKILL\n"), strings.Index(first.Text, "REQUIRED INSTALLED PELLETS CLI HELP\n"), strings.Index(first.Text, "STABLE PELLETS WORKFLOW\n")
+	if stable < 0 || help <= stable || workflow <= help || !strings.Contains(first.Text, "Stable skill.\n") || !strings.Contains(first.Text, "$ pl start-next --help\n") {
+		t.Fatalf("unstable prefix ordering: %q", first.Text)
+	}
+	second, err := preparePelletsPromptPrefix(context.Background(), workspace)
+	if err != nil || second != first {
+		t.Fatalf("cached prefix = %#v, %v; want %#v", second, err, first)
+	}
+	lines, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(strings.TrimSpace(string(lines)), "\n") + 1; got != 10 { // first snapshot's 9 calls plus the cache key's version probe
+		t.Fatalf("tool calls after cache = %d, want 10: %q", got, lines)
+	}
+	if err := os.WriteFile(skillPath, []byte("---\nname: pellets\n---\nRefreshed skill.\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	third, err := preparePelletsPromptPrefix(context.Background(), workspace)
+	if err != nil || third.SkillSHA256 == first.SkillSHA256 || !strings.Contains(third.Text, "Refreshed skill.\n") {
+		t.Fatalf("refreshed prefix = %#v, %v", third, err)
+	}
+	lines, err = os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(strings.TrimSpace(string(lines)), "\n") + 1; got != 19 { // a source change reruns the complete help snapshot
+		t.Fatalf("tool calls after refresh = %d, want 19: %q", got, lines)
+	}
+}
+
+func TestPelletsPromptPrefixBoundsSkillVersionAndHelpBeforeAllocation(t *testing.T) {
+	for _, test := range []struct {
+		name, mode string
+		largeSkill string
+	}{
+		{name: "skill", largeSkill: strings.Repeat("s", maxPelletsSkillBytes+1)},
+		{name: "version", mode: "huge-version"},
+		{name: "help", mode: "huge-help"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			installFakePelletsTool(t)
+			workspace := t.TempDir()
+			skillPath := filepath.Join(workspace, ".agents", "skills", "pellets", "SKILL.md")
+			if err := os.MkdirAll(filepath.Dir(skillPath), 0700); err != nil {
+				t.Fatal(err)
+			}
+			content := "---\nname: pellets\n---\nBounded.\n"
+			if test.largeSkill != "" {
+				content = test.largeSkill
+			}
+			if err := os.WriteFile(skillPath, []byte(content), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if test.mode != "" {
+				t.Setenv("PELLETS_CODEX_TEST_TOOL_MODE", test.mode)
+			}
+			_, err := preparePelletsPromptPrefix(context.Background(), workspace)
+			if !errors.Is(err, ErrToolUnavailable) || !strings.Contains(err.Error(), "bounded Pellets prompt preflight snapshot") {
+				t.Fatalf("bounded preflight error = %v", err)
+			}
+		})
 	}
 }
 

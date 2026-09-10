@@ -215,6 +215,9 @@ type WorkspaceExecution struct {
 func (execution *WorkspaceExecution) ThreadStartParams() map[string]any {
 	return execution.prepared.ThreadStartParams()
 }
+func (execution *WorkspaceExecution) PromptPrefix() storage.PromptPrefix {
+	return execution.prepared.PromptPrefix
+}
 func (execution *WorkspaceExecution) TurnStartParams(thread string, input []any) (map[string]any, error) {
 	return execution.prepared.TurnStartParams(thread, input)
 }
@@ -367,6 +370,7 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 		return run, lock.Clean()
 	}
 	request.Capture.Settings = prepared.EvidenceSettings
+	request.Capture.PromptPrefix = prepared.PromptPrefix
 	run, err = supervisor.options.Recorder.Begin(processCtx, request.Database, request.Selected, request.Capture)
 	if err != nil {
 		return run, err

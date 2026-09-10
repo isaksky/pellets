@@ -13,10 +13,28 @@ import (
 )
 
 const (
-	MaxRunActivity      = 64
-	MaxRunSummaryBytes  = 1024
-	MaxRunSnapshotBytes = 1 << 20
+	MaxRunActivity       = 64
+	MaxRunSummaryBytes   = 1024
+	MaxRunSnapshotBytes  = 1 << 20
+	MaxPromptPrefixBytes = 2 << 20
+	// This matches the SQLite prompt_prefix_json CHECK. Text can require JSON
+	// escaping, so validation below measures the encoded record rather than
+	// assuming its raw byte length is sufficient.
+	MaxPromptPrefixJSONBytes = 2 << 20
 )
+
+// PromptPrefix is the immutable, normalized Pellets layer supplied to a new
+// Codex conversation. It deliberately records the exact snapshot used for an
+// attempt without copying Codex configuration, AGENTS.md, or a transcript.
+// Those remain owned by the installed runtime.
+type PromptPrefix struct {
+	TemplateVersion string `json:"template_version"`
+	SkillSHA256     string `json:"skill_sha256"`
+	HelpSHA256      string `json:"help_sha256"`
+	ToolExecutable  string `json:"tool_executable"`
+	ToolVersion     string `json:"tool_version"`
+	Text            string `json:"text"`
+}
 
 // EffectiveRunSettings is an allowlist, never a copy of app-server config,
 // request payloads, environment, account data, or transcript content.
@@ -43,6 +61,7 @@ type RunCapture struct {
 	Group        *string              `json:"group"`
 	Settings     EffectiveRunSettings `json:"settings"`
 	StartingHead string               `json:"starting_head"`
+	PromptPrefix PromptPrefix         `json:"prompt_prefix"`
 }
 
 // RunProgress contains only orchestration evidence. Summary is application-
@@ -56,6 +75,9 @@ type RunProgress struct {
 	Outcome   string `json:"outcome,omitempty"`
 	ErrorCode string `json:"error_code,omitempty"`
 	Summary   string `json:"summary,omitempty"`
+	// CachedInputTokens is present only when the installed runtime reports it.
+	// Pellets records telemetry; it never promises a provider cache hit.
+	CachedInputTokens *int64 `json:"cached_input_tokens,omitempty"`
 }
 
 type RunActivity struct {
@@ -142,6 +164,9 @@ func ValidateRunCapture(c RunCapture) error {
 			return InvalidExecutionRun("invalid exact run filter")
 		}
 	}
+	if err := ValidatePromptPrefix(c.PromptPrefix); err != nil {
+		return err
+	}
 	s := c.Settings
 	if s.ApprovalPolicy != "on-request" || s.ApprovalsReviewer != "auto_review" || s.SandboxMode != "workspace-write" {
 		return InvalidExecutionRun("run settings must preserve automatic approval review and workspace-write")
@@ -169,6 +194,27 @@ func ValidateRunCapture(c RunCapture) error {
 	encoded, err := json.Marshal(s)
 	if err != nil || len(encoded) > 32768 {
 		return InvalidExecutionRun("effective settings exceed the storage limit")
+	}
+	return nil
+}
+
+func ValidatePromptPrefix(prefix PromptPrefix) error {
+	// Databases created before the prompt-prefix migration use this immutable
+	// compatibility marker. New attempts never produce it.
+	if prefix.TemplateVersion == "legacy" && prefix.SkillSHA256 == "" && prefix.HelpSHA256 == "" && prefix.ToolExecutable == "" && prefix.ToolVersion == "" && prefix.Text == "" {
+		return nil
+	}
+	if prefix.TemplateVersion == "" || prefix.SkillSHA256 == "" || prefix.HelpSHA256 == "" || prefix.ToolExecutable == "" || prefix.ToolVersion == "" || prefix.Text == "" ||
+		len(prefix.TemplateVersion) > 128 || len(prefix.SkillSHA256) != 64 || len(prefix.HelpSHA256) != 64 || len(prefix.ToolExecutable) > 4096 || len(prefix.ToolVersion) > 512 || len(prefix.Text) > MaxPromptPrefixBytes ||
+		!utf8.ValidString(prefix.TemplateVersion) || !utf8.ValidString(prefix.ToolExecutable) || !utf8.ValidString(prefix.ToolVersion) || !utf8.ValidString(prefix.Text) || strings.ContainsRune(prefix.Text, 0) {
+		return InvalidExecutionRun("invalid immutable Pellets prompt prefix")
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(prefix.SkillSHA256) || !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(prefix.HelpSHA256) {
+		return InvalidExecutionRun("invalid immutable Pellets prompt prefix hash")
+	}
+	encoded, err := json.Marshal(prefix)
+	if err != nil || len(encoded) > MaxPromptPrefixJSONBytes {
+		return InvalidExecutionRun("immutable Pellets prompt prefix exceeds its encoded storage bound")
 	}
 	return nil
 }
@@ -210,6 +256,9 @@ func ValidateRunProgress(p RunProgress) error {
 	}
 	if len(p.Summary) > MaxRunSummaryBytes || !utf8.ValidString(p.Summary) || strings.ContainsRune(p.Summary, 0) {
 		return InvalidExecutionRun("activity summary exceeds its UTF-8 storage bound")
+	}
+	if p.CachedInputTokens != nil && *p.CachedInputTokens < 0 {
+		return InvalidExecutionRun("cached input tokens must be nonnegative")
 	}
 	return nil
 }

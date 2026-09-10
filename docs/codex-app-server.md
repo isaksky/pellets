@@ -177,6 +177,28 @@ kills processes by executable name.
 
 ## Foreground scheduler
 
+### Stable Pellets prompt preflight
+
+Before the foreground supervisor creates an execution attempt, it resolves the
+installed Codex-targeted Pellets skill (repository scope first, then personal
+scope) and captures the required `pl` help surface plus the installed `pl`
+executable version. This is read-only: Pellets never installs, replaces, or
+rewrites a user skill, `AGENTS.md`, or Codex configuration. Snapshots are
+normalized to LF and cached only while the skill content and executable bytes /
+version remain unchanged; a changed source or failed help syntax check produces
+a fresh preflight result rather than silently reusing an old snapshot.
+
+For a new Codex thread, the scheduler prepends one deterministic
+`pellets-codex-prefix-v1` layer: snapshot identity, skill, CLI help, then the
+small stable workflow. Only after that layer does it append the selected
+pellet's variable reference/title/description. The exact prefix and template
+version are retained with the durable execution attempt. A resumed thread uses
+its existing conversation context and does not append the full prefix again.
+This deliberately complements—rather than replaces—the installed runtime's
+system prompt, user instructions, `AGENTS.md` discovery, tools, and settings.
+If a terminal runtime event reports cached input tokens, the attempt exposes
+that observed telemetry; Pellets does not promise provider cache hits.
+
 `app.Scheduler` owns Run one (`run_one`), Drain (`drain`), and Watch (`watch`)
 for an explicitly chosen existing registered workspace. Requests copy their
 mode, exact nonempty group/external-ID filters, optional exact Resume pellet
