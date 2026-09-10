@@ -97,6 +97,7 @@ func buildProductionSchemaContracts() {
 		{version: 8, name: "execution-prompt-prefix", sql: migration8SQL},
 		{version: 9, name: "execution-finalization", sql: migration9SQL},
 		{version: 10, name: "execution-interactions", sql: migration10SQL},
+		{version: 11, name: "execution-recovery", sql: migration11SQL},
 	}
 	productionSchemaContracts.byVersion = make(map[int][]schemaObjectDefinition, len(endpoints))
 	for _, endpoint := range endpoints {

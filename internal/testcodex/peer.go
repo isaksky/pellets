@@ -115,6 +115,18 @@ func Run() bool {
 			if mode == "crash" {
 				os.Exit(9)
 			}
+			cwd, err := os.Getwd()
+			must(err)
+			result = map[string]any{"thread": map[string]any{"id": "thread", "cwd": cwd, "status": map[string]any{"type": "notLoaded"}, "turns": []any{map[string]any{"id": "turn", "status": "interrupted"}}}}
+			if mode == "schedule_missing_history" {
+				result = map[string]any{}
+			}
+			if mode == "schedule_active_history" {
+				result = map[string]any{"thread": map[string]any{"id": "thread", "cwd": cwd, "status": map[string]any{"type": "active"}, "turns": []any{}}}
+			}
+			if mode == "schedule_advanced_history" {
+				result = map[string]any{"thread": map[string]any{"id": "thread", "cwd": cwd, "status": map[string]any{"type": "notLoaded"}, "turns": []any{map[string]any{"id": "turn", "status": "completed"}, map[string]any{"id": "external-turn", "status": "completed"}}}}
+			}
 		case "turn/interrupt":
 			if mode == "hang-interrupt" {
 				continue
@@ -131,6 +143,9 @@ func Run() bool {
 			continue
 		}
 		if message.Method == "turn/start" && strings.HasPrefix(mode, "schedule_") {
+			if mode == "schedule_exit" {
+				os.Exit(9)
+			}
 			if mode == "schedule_input_live" {
 				write(map[string]any{"id": 41, "method": "item/tool/requestUserInput", "params": map[string]any{"threadId": "thread", "turnId": "turn", "itemId": "question-item", "isBlocking": true, "questions": []any{map[string]any{"id": "choice", "header": "Scope", "question": "Which scope should be used?", "options": []any{map[string]any{"label": "Focused", "description": "Change only the target."}, map[string]any{"label": "Broad", "description": "Change related code."}}, "isOther": true, "isSecret": false}, map[string]any{"id": "note", "header": "Note", "question": "Any concise constraint?", "options": nil, "isOther": false, "isSecret": false}}}})
 				continue

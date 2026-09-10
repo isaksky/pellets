@@ -472,6 +472,15 @@ finish; Stop now interrupts it. Only an exact successful turn, verified new
 commit, and closed target pellet permit advancement. Failures stop for attention
 without hidden retries. See [scheduler interfaces](docs/codex-app-server.md#foreground-scheduler).
 
+Startup marks abandoned active attempts interrupted or needing attention and
+waits for explicit Resume. Resume shows the saved pellet, phase, mode, remaining
+limit, and exact filters. It checks the original worktree/branch, ownership,
+commit evidence, and saved Codex history before continuing. Missing or ambiguous
+evidence stays visible and preserved. Checkpoint recovery requires its own
+idempotent policy. An uncertain Windows crash receipt remains fenced because
+the current unnamed Job Object cannot be inspected after server death; see
+[recovery limits](docs/codex-app-server.md#startup-and-explicit-recovery).
+
 Ordinary runs require a clean worktree. Codex implements and verifies the exact
 pellet, then returns a structured result. The server checks the reported files,
 stages only those paths, creates one pellet-ID commit, verifies it, and closes

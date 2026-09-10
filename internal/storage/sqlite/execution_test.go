@@ -225,7 +225,7 @@ func TestExecutionInterruptedPhasesExplicitResumeAndRename(t *testing.T) {
 			capture := run.RunCapture
 			capture.ResumeFrom = &run.ID
 			resumed, err := db.CreateExecutionRun(context.Background(), capture)
-			if err != nil || resumed.Attempt != 2 || resumed.ThreadID != run.ThreadID || resumed.TurnID != "" || resumed.ID == run.ID {
+			if err != nil || resumed.Attempt != 2 || resumed.ThreadID != run.ThreadID || resumed.TurnID != run.TurnID || resumed.Phase != phase || resumed.ID == run.ID {
 				t.Fatalf("resume: %#v %v", resumed, err)
 			}
 			original, err := db.ReadExecutionRun(context.Background(), run.ID)
@@ -364,6 +364,11 @@ func TestExecutionExactCaptureAndCommitEvidenceCannotChange(t *testing.T) {
 	capture.Group, capture.ExternalID, capture.ResumeFrom = &group, &external, &run.ID
 	capture.Mode = "watch"
 	capture.Settings.Codex.Model = "new-effective-model"
+	if _, err := db.CreateExecutionRun(context.Background(), capture); domain.PublicError(err).Code != "execution_run_conflict" {
+		t.Fatalf("Resume accepted replacement filters: %v", err)
+	}
+	capture.Group, capture.ExternalID = run.Group, run.ExternalID
+	capture.Mode = run.Mode
 	resumed, err := db.CreateExecutionRun(context.Background(), capture)
 	if err != nil {
 		t.Fatal(err)

@@ -39,6 +39,12 @@ func (s *Scheduler) drive(ctx context.Context, execution *WorkspaceExecution) er
 		return err
 	}
 	if run.Mode == "review_checkpoint" {
+		if run.ResumeFrom != nil {
+			if s.options.Checkpoints != nil && s.options.Checkpoints.Resume != nil {
+				return s.options.Checkpoints.Resume(ctx, execution)
+			}
+			return scheduleError("checkpoint_resume_policy_required", "checkpoint recovery requires an idempotent phase reconciliation policy")
+		}
 		if s.options.Checkpoints != nil && s.options.Checkpoints.Drive != nil {
 			return s.options.Checkpoints.Drive(ctx, execution)
 		}
@@ -205,6 +211,12 @@ func (s *Scheduler) drive(ctx context.Context, execution *WorkspaceExecution) er
 				return scheduleError("implementation_report_invalid", "the exact turn lacks a bound structured implementation result")
 			}
 			if result.Outcome != "ready" {
+				progress := run.RunProgress
+				progress.State, progress.Outcome, progress.ErrorCode, progress.Summary = "needs_attention", "unknown", "implementation_needs_attention", "The turn finished with unfinished work. Review the saved conversation and use Resume to continue this pellet and its saved mode."
+				_, err := execution.Save(ctx, progress, run.Revision)
+				if err != nil {
+					return err
+				}
 				return scheduleError("implementation_needs_attention", "implementation did not report ready")
 			}
 			return s.prepareFinalization(ctx, execution, run, result.Files)

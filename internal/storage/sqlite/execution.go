@@ -71,13 +71,24 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 			if err != nil {
 				return err
 			}
-			if previous.ProjectID != c.ProjectID || previous.WorkspaceID != c.WorkspaceID || previous.PelletNumber != c.PelletNumber || storage.RunActive(previous.State) || previous.State == "completed" {
+			completedReceipt := previous.State == "completed" && resumingClosed && previous.Finalization != nil && previous.ResultCommit != "" && previous.Phase == "finalization"
+			if previous.ProjectID != c.ProjectID || previous.WorkspaceID != c.WorkspaceID || previous.PelletNumber != c.PelletNumber || storage.RunActive(previous.State) || previous.State == "completed" && !completedReceipt {
 				return storage.ExecutionRunConflict(previous.ID)
 			}
-			if resumingClosed && (previous.Finalization == nil || previous.ResultCommit == "" || previous.Phase != "close") {
+			if !reflect.DeepEqual(previous.ExternalID, c.ExternalID) || !reflect.DeepEqual(previous.Group, c.Group) {
+				return storage.ExecutionRunConflict(previous.ID)
+			}
+			if resumingClosed && (previous.Finalization == nil || previous.ResultCommit == "" || previous.Phase != "close" && !completedReceipt) {
 				return storage.ExecutionRunConflict(previous.ID)
 			}
 			c.StartingHead = previous.StartingHead
+			c.StartingRef = previous.StartingRef
+			c.Mode = previous.Mode
+			c.ScheduleMode, c.ScheduleRemaining = previous.ScheduleMode, previous.ScheduleRemaining
+			c.ExternalID, c.Group = previous.ExternalID, previous.Group
+			if previous.PelletTitle != title || previous.PelletDescription != description {
+				return storage.ExecutionRunConflict(previous.ID)
+			}
 			var alreadyResumed bool
 			if err := conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM execution_runs WHERE resume_from = ?)`, previous.ID).Scan(&alreadyResumed); err != nil {
 				return err
@@ -86,12 +97,11 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 				return storage.ExecutionRunConflict(previous.ID)
 			}
 			threadID = previous.ThreadID
+			phase, turnID = previous.Phase, previous.TurnID
+			if completedReceipt {
+				phase = "close"
+			}
 			if previous.Finalization != nil {
-				if previous.PelletTitle != title || previous.PelletDescription != description {
-					return storage.ExecutionRunConflict(previous.ID)
-				}
-				phase = previous.Phase
-				turnID = previous.TurnID
 				resultCommit = previous.ResultCommit
 				if previous.CommitVerifiedAt != nil {
 					stamp := previous.CommitVerifiedAt.Format(runTimeFormat)
@@ -110,6 +120,15 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 				// append them to this existing thread.
 				c.PromptPrefix = previous.PromptPrefix
 			}
+		}
+		if c.ScheduleMode == "" {
+			c.ScheduleMode = c.Mode
+			if c.Mode == "review_checkpoint" {
+				c.ScheduleMode = "run_one"
+			}
+		}
+		if c.ScheduleRemaining == 0 {
+			c.ScheduleRemaining = 1
 		}
 		encoded, err := json.Marshal(c.Settings)
 		if err != nil {
@@ -135,6 +154,9 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 			return err
 		}
 		if err := appendRunActivity(ctx, conn, id, 1, now, storage.RunProgress{Phase: phase, State: "running"}); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE execution_runs SET starting_ref=?, schedule_mode=?, schedule_remaining=? WHERE run_id=?`, c.StartingRef, c.ScheduleMode, c.ScheduleRemaining, id); err != nil {
 			return err
 		}
 		run, err = readExecutionRun(ctx, conn, id)
@@ -487,14 +509,14 @@ func readExecutionRun(ctx context.Context, q runQuery, id int64) (run storage.Ex
 		r.phase, r.state, r.thread_id, r.turn_id, r.outcome, r.error_code, r.summary, r.cached_input_tokens, r.finalization_json, r.result_commit,
 		r.interaction_json, r.commit_verified_at, r.created_at, r.updated_at, r.finished_at, r.activity_pruned, p.code, r.pending_operation, r.pending_revision, r.pending_turn_id,
 		EXISTS(SELECT 1 FROM pellets WHERE project_id=r.project_id AND number=r.pellet_number),
-		w.root_path, w.root_path_relative, w.git_dir, w.git_dir_relative, p.git_common_dir, p.git_common_dir_relative
+		w.root_path, w.root_path_relative, w.git_dir, w.git_dir_relative, p.git_common_dir, p.git_common_dir_relative, r.starting_ref, r.schedule_mode, r.schedule_remaining
 		FROM execution_runs r JOIN projects p ON p.project_id=r.project_id
 		JOIN project_workspaces w ON w.workspace_id=r.workspace_id WHERE r.run_id=?`, id).Scan(
 		&run.ID, &run.Attempt, &run.Revision, &run.ProjectID, &run.WorkspaceID, &run.PelletNumber,
 		&run.ResumeFrom, &run.Mode, &run.ExternalID, &run.Group, &settings, &promptPrefix, &run.StartingHead, &run.PelletTitle, &run.PelletDescription,
 		&run.Phase, &run.State, &run.ThreadID, &run.TurnID, &run.Outcome, &run.ErrorCode, &run.Summary, &run.CachedInputTokens, &finalization, &run.ResultCommit,
 		&interaction, &verified, &created, &updated, &finished, &run.ActivityPruned, &run.ProjectCode, &run.PendingOperation, &run.PendingRevision, &run.PendingTurnID, &run.PelletPresent,
-		&run.WorkspaceRoot.Value, &run.WorkspaceRoot.Relative, &run.WorkspaceGitDir.Value, &run.WorkspaceGitDir.Relative, &run.GitCommonDir.Value, &run.GitCommonDir.Relative)
+		&run.WorkspaceRoot.Value, &run.WorkspaceRoot.Relative, &run.WorkspaceGitDir.Value, &run.WorkspaceGitDir.Relative, &run.GitCommonDir.Value, &run.GitCommonDir.Relative, &run.StartingRef, &run.ScheduleMode, &run.ScheduleRemaining)
 	if errors.Is(err, sql.ErrNoRows) {
 		return run, storage.ExecutionRunNotFound(id)
 	}

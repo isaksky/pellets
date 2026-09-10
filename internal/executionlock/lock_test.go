@@ -78,3 +78,41 @@ func TestLockRejectsSymlinkWithoutChangingTarget(t *testing.T) {
 		t.Fatalf("changed unrelated file: %q %v", data, err)
 	}
 }
+
+func TestRecoveryAcquisitionRetainsExactReceiptAndExclusion(t *testing.T) {
+	dir := t.TempDir()
+	lock, err := Acquire(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := Owner{Database: "test.db", RunID: 42}
+	if err := lock.Record(owner); err != nil {
+		t.Fatal(err)
+	}
+	lock.Close()
+	before, err := os.ReadFile(filepath.Join(dir, "pellets-execution.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery, err := AcquireRecovery(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recovery.Close()
+	if got := recovery.Owner(); got == nil || *got != owner {
+		t.Fatalf("receipt changed: %+v", got)
+	}
+	if recovery.RecoveryStopped() != (runtime.GOOS != "windows") {
+		t.Fatal("recovery manufactured process cleanup proof")
+	}
+	if other, err := AcquireRecovery(dir); domain.PublicError(err).Code != "workspace_execution_busy" {
+		if other != nil {
+			other.Close()
+		}
+		t.Fatalf("parallel recovery admitted: %v", err)
+	}
+	after, err := os.ReadFile(filepath.Join(dir, "pellets-execution.lock"))
+	if err != nil || string(before) != string(after) {
+		t.Fatalf("recovery erased receipt: %q %v", after, err)
+	}
+}

@@ -78,6 +78,13 @@ func (runner Runner) Run(ctx context.Context, options Options) (runErr error) {
 			return errors.New("server supervisor is not configured")
 		}
 		defer func() { runErr = errors.Join(runErr, application.Executions.Close()) }()
+		projects, err := application.Projects(ctx)
+		if err != nil {
+			return err
+		}
+		if err := application.Executions.ReconcileStartup(ctx, application.Database, projects); err != nil {
+			return err
+		}
 	}
 	monitor, err := runner.OpenMonitor(ctx, options.DatabasePath)
 	if err != nil {

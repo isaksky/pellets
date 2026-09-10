@@ -164,10 +164,67 @@ that receipt as a conservative recovery fence even after the OS lock becomes
 available. `workspace_execution_recovery_required` reports the exact receipt
 and lock path; existing run/operation evidence remains inspectable. There is no
 automatic recovery, PID stealing, deletion of a stale lock file, or public
-recovery command at this boundary. Explicit reconciliation must establish the
-owned work stopped and resolve the exact saved attempt before reuse. This also
+CLI recovery command at this boundary. The foreground server's explicit Resume
+validates that receipt under the same OS lock and resolves the exact saved
+attempt before reuse. This also
 prevents the Windows asynchronous job-termination window from allowing a
 duplicate run after server death.
+
+### Startup and explicit recovery
+
+Before serving execution controls, startup inspects the latest durable attempt
+for each registered workspace. A free execution lock permits marking an active
+attempt interrupted, preserving its phase, conversation, pending call, and
+commit evidence. A busy lock is left with its live server/custodian. Missing
+worktrees and unverifiable cleanup become needs-attention evidence. This step
+never prepares Codex, clears a recovery receipt, or recreates Watch/Drain.
+Opening or reading a database alone still performs no execution reconciliation.
+
+Resume addresses the latest exact attempt. It restores the captured schedule
+mode, remaining pellet limit (including the interrupted pellet), and exact
+filters; the UI describes the pellet, phase, mode, and remaining limit before
+the user submits it. Recovery checks the registered Git root, Git directory,
+common directory, starting branch or detached-HEAD state, HEAD/commit evidence,
+ownership, and unchanged task scope. Changed branches require restoring the
+original branch after reviewing local work; changed ownership or scope requires
+reconciling that external edit. Older attempts without captured branch evidence
+remain preserved but cannot pass automatic recovery. No Git reset, branch
+switch, lifecycle reversal, or replacement worktree is performed.
+
+For recorded conversations, stable `thread/read` with `includeTurns: true`
+checks the exact ID, working directory, runtime status, and terminal turn
+identities before `thread/resume` or a new generation. The response is bounded
+by the installed transport limit and is never copied into SQLite. Missing,
+oversized, active, incomplete, or unexpectedly advanced history stops with an
+explanation; restore the saved history or reconcile the external session before
+trying again. A pending turn start is settled only when exactly one new terminal
+turn follows its captured predecessor. An unknown thread-start identity cannot
+be replayed as a fresh conversation. Finalization reuses its saved proof and
+never starts another implementation turn or duplicates the verified commit.
+If completion itself was saved before a crash left the receipt uncleared,
+Resume may reconcile that exact completed unit through the same close checks.
+It retains the original successful attempt and verifies a new reconciliation
+attempt without another commit; a completed unit without a leftover receipt
+cannot be resumed.
+
+On Unix, the inherited custodian lock proves that participating owned processes
+have settled before a recovery lock can be acquired. On Windows, a leftover
+receipt from the existing unnamed Job Object implementation cannot provide
+that post-crash proof. Resume reports `process_cleanup_unconfirmed` and preserves
+the receipt, work, and conversation; this version has no supported automatic
+way to clear that uncertain Windows receipt. Do not delete the lock file or
+infer that asynchronous Job Object termination completed. Cleanly interrupted
+runs whose receipt was cleared after confirmed cleanup remain resumable.
+
+An implementation turn that reports unfinished work stops visibly and preserves
+the pellet in progress; it does not close, release, defer, select another pellet,
+or retry the failure. Explicit Resume may continue the saved mode only after
+that unit passes its normal completion checks. Checkpoint attempts preserve
+their phase and previous run/turn IDs and require a registered
+`CheckpointExecutionPolicy.Resume` driver. That driver must reconcile its own
+durable review/triage receipts idempotently. The ordinary checkpoint `Drive`
+callback is never used as an interruption fallback; the production review and
+follow-up policies are a separate integration.
 
 These locks coordinate participating Pellets servers only. An independently
 started Codex session, editor agent, or direct CLI worker can still change the

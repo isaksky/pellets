@@ -40,6 +40,7 @@ type ScheduleStatus struct {
 	RunID           int64   `json:"run_id,omitempty"`
 	State           string  `json:"state"`
 	Reason          string  `json:"reason,omitempty"`
+	Detail          string  `json:"detail,omitempty"`
 	StopAfterPellet bool    `json:"stop_after_pellet"`
 }
 
@@ -63,6 +64,9 @@ type CheckpointExecutionPolicy struct {
 	Matches            func(storage.Pellet) bool
 	Drive              ExecutionDriver
 	ValidateCompletion func(context.Context, storage.ExecutionRun, storage.ResolvedProject) error
+	// Resume must reconcile the saved phase and any durable triage receipts
+	// idempotently. It is never substituted with Drive after an interruption.
+	Resume ExecutionDriver
 }
 
 // Scheduler has foreground lifetime only. Restart never recreates schedules;
@@ -125,6 +129,17 @@ func (s *Scheduler) Start(ctx context.Context, request ScheduleRequest) (*Schedu
 	}
 	if request.ResumePellet != nil && *request.ResumePellet < 1 || request.ResumeFrom != nil && (request.ResumePellet == nil || *request.ResumeFrom < 1) {
 		return nil, storage.InvalidExecutionRun("Resume requires the exact positive pellet and optional attempt ID")
+	}
+	if request.ResumeFrom != nil {
+		previous, err := s.options.Supervisor.options.Recorder.Read(ctx, s.options.Database, *request.ResumeFrom)
+		if err != nil {
+			return nil, err
+		}
+		if previous.ProjectID != request.Selected.Project.ID || previous.WorkspaceID != request.Selected.Workspace.ID || previous.PelletNumber != *request.ResumePellet {
+			return nil, storage.ExecutionRunConflict(previous.ID)
+		}
+		request.Mode, request.Limit = previous.ScheduleMode, previous.ScheduleRemaining
+		request.ExternalID, request.Group = copyScheduleFilter(previous.ExternalID), copyScheduleFilter(previous.Group)
 	}
 	for _, value := range []*string{request.ExternalID, request.Group} {
 		if value != nil && (*value == "" || len(*value) > 4096 || !utf8.ValidString(*value)) {
@@ -195,6 +210,28 @@ func (s *Scheduler) WorkspaceStatus(workspaceID int64) (ScheduleStatus, bool) {
 	return h.Status(), true
 }
 
+// WorkspaceAttention retains a failed admission/recovery explanation even
+// when no new durable attempt could safely be created.
+func (s *Scheduler) WorkspaceAttention(workspaceID int64) string {
+	s.mu.Lock()
+	var latest *ScheduleHandle
+	var id int64
+	for candidate, handle := range s.schedules {
+		if candidate > id && handle.status.WorkspaceID == workspaceID {
+			latest, id = handle, candidate
+		}
+	}
+	s.mu.Unlock()
+	if latest == nil {
+		return ""
+	}
+	status := latest.Status()
+	if status.State == "needs_attention" {
+		return status.Detail
+	}
+	return ""
+}
+
 func (h *ScheduleHandle) Status() ScheduleStatus {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -258,6 +295,14 @@ func (h *ScheduleHandle) finish(state, reason string) {
 	h.execution = nil
 }
 
+func (h *ScheduleHandle) attention(err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	public := domain.PublicError(err)
+	h.status.State, h.status.Reason, h.status.Detail = "needs_attention", public.Code, public.Message
+	h.execution = nil
+}
+
 func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 	var changes <-chan struct{}
 	if s.options.Subscribe != nil {
@@ -274,10 +319,21 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 		}
 		h.status.State, h.status.Reason = "selecting", ""
 		reason := storage.NextNone
-		execution, err := s.options.Supervisor.start(h.ctx, ExecutionRequest{Database: s.options.Database, Selected: request.Selected, Capture: storage.RunCapture{ProjectID: request.Selected.Project.ID, WorkspaceID: request.Selected.Workspace.ID}, Overrides: request.Overrides}, s.drive, func(ctx context.Context) (*storage.RunCapture, error) {
+		execution, err := s.options.Supervisor.start(h.ctx, ExecutionRequest{Database: s.options.Database, Selected: request.Selected, Capture: storage.RunCapture{ProjectID: request.Selected.Project.ID, WorkspaceID: request.Selected.Workspace.ID, ResumeFrom: request.ResumeFrom}, Overrides: request.Overrides}, s.drive, func(ctx context.Context) (*storage.RunCapture, error) {
 			queue, err := s.options.OpenQueue(ctx, s.options.Database.Path)
 			if err != nil {
 				return nil, err
+			}
+			if request.ResumePellet != nil && request.ResumeFrom == nil {
+				runs, err := s.options.Supervisor.options.Recorder.ListWorkspaceRuns(ctx, s.options.Database, request.Selected.Workspace.ID, 1)
+				if err != nil {
+					queue.Close()
+					return nil, err
+				}
+				if len(runs) != 0 && runs[0].PelletNumber == *request.ResumePellet {
+					queue.Close()
+					return nil, scheduleError("schedule_exact_resume_required", "Resume must reference the exact saved attempt and conversation")
+				}
 			}
 			// Explicit reconciliation may observe that close committed before
 			// the terminal run save. It does not reopen or select another pellet.
@@ -291,7 +347,16 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 					queue.Close()
 					return nil, storage.ExecutionRunConflict(previous.ID)
 				}
-				if previous.Finalization != nil && previous.ResultCommit != "" && previous.Phase == "close" {
+				if previous.Mode == "review_checkpoint" && (s.options.Checkpoints == nil || s.options.Checkpoints.Resume == nil) {
+					queue.Close()
+					return nil, scheduleError("checkpoint_resume_policy_required", "this checkpoint needs its idempotent recovery policy before Resume; its saved phase and follow-ups are preserved")
+				}
+				p, err := queue.ReadPellet(ctx, request.Selected, domain.PelletReference{ProjectCode: request.Selected.Project.Code, Number: previous.PelletNumber})
+				if err != nil || p.Title != previous.PelletTitle || p.Description != previous.PelletDescription || (previous.Mode == "review_checkpoint") != s.isCheckpoint(p) {
+					queue.Close()
+					return nil, errors.Join(scheduleError("resume_scope_changed", "the saved pellet scope, filters, or checkpoint policy changed; reconcile that edit before Resume"), err)
+				}
+				if previous.Finalization != nil && previous.ResultCommit != "" && (previous.Phase == "close" || previous.State == "completed") {
 					p, err := queue.ReadPellet(ctx, request.Selected, domain.PelletReference{ProjectCode: request.Selected.Project.Code, Number: previous.PelletNumber})
 					if err != nil {
 						queue.Close()
@@ -302,7 +367,7 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 							return nil, err
 						}
 						h.status.PelletNumber = previous.PelletNumber
-						return &storage.RunCapture{ProjectID: previous.ProjectID, WorkspaceID: previous.WorkspaceID, PelletNumber: previous.PelletNumber, Mode: request.Mode, ExternalID: request.ExternalID, Group: request.Group, ResumeFrom: request.ResumeFrom}, nil
+						return &storage.RunCapture{ProjectID: previous.ProjectID, WorkspaceID: previous.WorkspaceID, PelletNumber: previous.PelletNumber, Mode: previous.Mode, ScheduleMode: request.Mode, ScheduleRemaining: request.Limit - h.status.Completed, ExternalID: request.ExternalID, Group: request.Group, ResumeFrom: request.ResumeFrom}, nil
 					}
 				}
 			}
@@ -336,7 +401,7 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 			if s.isCheckpoint(*selected.Pellet) {
 				mode = "review_checkpoint"
 			}
-			return &storage.RunCapture{ProjectID: request.Selected.Project.ID, WorkspaceID: request.Selected.Workspace.ID, PelletNumber: selected.Pellet.Reference.Number, Mode: mode, ExternalID: request.ExternalID, Group: request.Group, ResumeFrom: request.ResumeFrom}, nil
+			return &storage.RunCapture{ProjectID: request.Selected.Project.ID, WorkspaceID: request.Selected.Workspace.ID, PelletNumber: selected.Pellet.Reference.Number, Mode: mode, ScheduleMode: request.Mode, ScheduleRemaining: request.Limit - h.status.Completed, ExternalID: request.ExternalID, Group: request.Group, ResumeFrom: request.ResumeFrom}, nil
 		})
 		h.execution = execution
 		if execution != nil {
@@ -348,7 +413,7 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 			if h.ctx.Err() != nil {
 				h.finish("stopped", "stop_requested")
 			} else {
-				h.finish("needs_attention", domain.PublicError(err).Code)
+				h.attention(err)
 			}
 			return
 		}
@@ -388,7 +453,7 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 			return
 		}
 		if err != nil {
-			h.finish("needs_attention", domain.PublicError(err).Code)
+			h.attention(err)
 			return
 		}
 		if run.PelletNumber != expectedPellet {
@@ -396,7 +461,7 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 			return
 		}
 		if err := s.validateCompletion(h.ctx, run, request.Selected); err != nil {
-			h.finish("needs_attention", domain.PublicError(err).Code)
+			h.attention(err)
 			return
 		}
 		h.mu.Lock()

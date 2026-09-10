@@ -44,6 +44,19 @@ func (recorder ExecutionRecorder) Begin(ctx context.Context, database Database, 
 		return storage.ExecutionRun{}, errors.Join(missingRunEvidence("starting_head_unavailable"), err)
 	}
 	capture.StartingHead = head
+	capture.StartingRef, err = executionGit(ctx, root, "rev-parse", "--symbolic-full-name", "HEAD")
+	if err != nil || capture.StartingRef == "" {
+		return storage.ExecutionRun{}, missingRunEvidence("starting_ref_unavailable")
+	}
+	if capture.ResumeFrom != nil {
+		previous, err := recorder.Read(ctx, database, *capture.ResumeFrom)
+		if err != nil {
+			return storage.ExecutionRun{}, err
+		}
+		if previous.StartingRef == "" || previous.StartingRef != capture.StartingRef {
+			return storage.ExecutionRun{}, scheduleError("resume_branch_changed", "the branch changed during Resume preparation; restore and reconcile the original branch before continuing")
+		}
+	}
 	repo, err := recorder.repository(ctx, database)
 	if err != nil {
 		return storage.ExecutionRun{}, err

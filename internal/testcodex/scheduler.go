@@ -53,7 +53,11 @@ func completeScheduled(mode string, params json.RawMessage) string {
 	if mode == "schedule_wrong_report" {
 		target.Reference = "wrong-999"
 	}
-	result, err := json.Marshal(map[string]any{"reference": target.Reference, "starting_head": target.StartingHead, "outcome": "ready", "files": files, "verification": "Disposable integration peer: verified exact file content."})
+	outcome := "ready"
+	if mode == "schedule_unfinished" {
+		outcome = "needs_attention"
+	}
+	result, err := json.Marshal(map[string]any{"reference": target.Reference, "starting_head": target.StartingHead, "outcome": outcome, "files": files, "verification": "Disposable integration peer: verified exact file content."})
 	must(err)
 	return string(result)
 }

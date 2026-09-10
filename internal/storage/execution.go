@@ -53,16 +53,19 @@ type EffectiveRunSettings struct {
 // RunCapture is immutable for an attempt. Nil filters mean unfiltered; supplied
 // values retain exact bytes. An explicit resume creates a new numbered attempt.
 type RunCapture struct {
-	ProjectID    int64                `json:"project_id"`
-	WorkspaceID  int64                `json:"workspace_id"`
-	PelletNumber int64                `json:"pellet_number"`
-	ResumeFrom   *int64               `json:"resume_from,omitempty"`
-	Mode         string               `json:"mode"`
-	ExternalID   *string              `json:"external_id"`
-	Group        *string              `json:"group"`
-	Settings     EffectiveRunSettings `json:"settings"`
-	StartingHead string               `json:"starting_head"`
-	PromptPrefix PromptPrefix         `json:"prompt_prefix"`
+	ProjectID         int64                `json:"project_id"`
+	WorkspaceID       int64                `json:"workspace_id"`
+	PelletNumber      int64                `json:"pellet_number"`
+	ResumeFrom        *int64               `json:"resume_from,omitempty"`
+	Mode              string               `json:"mode"`
+	ExternalID        *string              `json:"external_id"`
+	Group             *string              `json:"group"`
+	Settings          EffectiveRunSettings `json:"settings"`
+	StartingHead      string               `json:"starting_head"`
+	StartingRef       string               `json:"starting_ref"`
+	ScheduleMode      string               `json:"schedule_mode"`
+	ScheduleRemaining int                  `json:"schedule_remaining"`
+	PromptPrefix      PromptPrefix         `json:"prompt_prefix"`
 }
 
 // RunProgress contains only orchestration evidence. Summary is application-
@@ -196,6 +199,12 @@ var safeRunID = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,256}$`)
 func IsFullCommitID(value string) bool { return fullCommitID.MatchString(value) }
 
 func ValidateRunCapture(c RunCapture) error {
+	if len(c.StartingRef) > 4096 || strings.ContainsAny(c.StartingRef, "\x00\r\n") || !utf8.ValidString(c.StartingRef) {
+		return InvalidExecutionRun("invalid starting Git reference")
+	}
+	if c.ScheduleMode != "" && c.ScheduleMode != "run_one" && c.ScheduleMode != "drain" && c.ScheduleMode != "watch" || c.ScheduleRemaining < 0 || c.ScheduleRemaining > 10000 {
+		return InvalidExecutionRun("invalid saved schedule intent")
+	}
 	if c.ProjectID < 1 || c.WorkspaceID < 1 || c.PelletNumber < 1 || (c.ResumeFrom != nil && *c.ResumeFrom < 1) || !IsFullCommitID(c.StartingHead) {
 		return InvalidExecutionRun("stable identities and a full starting commit ID are required")
 	}

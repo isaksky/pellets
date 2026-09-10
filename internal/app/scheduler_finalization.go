@@ -29,7 +29,7 @@ func (s *Scheduler) requireOwnership(ctx context.Context, run storage.ExecutionR
 	if err != nil {
 		return err
 	}
-	if p.Status != domain.PelletInProgress || p.Workspace == nil || p.Workspace.ID != run.WorkspaceID || p.Title != run.PelletTitle || p.Description != run.PelletDescription {
+	if p.Status != domain.PelletInProgress || p.Workspace == nil || p.Workspace.ID != run.WorkspaceID || p.Title != run.PelletTitle || p.Description != run.PelletDescription || !storage.MatchesSchedule(p, run.ExternalID, run.Group) {
 		return scheduleError("implementation_ownership_changed", "the exact pellet's ownership or scope changed")
 	}
 	return nil

@@ -214,7 +214,13 @@ HEAD, credential-free effective settings, mode (`run_one`, `drain`, `watch`, or
 reserved `review_checkpoint`), exact nullable external-ID/group filters, and an
 optional reference to the exact stopped attempt being explicitly resumed.
 Resume creates another attempt and retains the former thread identity; it does
-not erase the prior turn, outcome, or snapshot. The reserved review mode adds no
+not erase the prior turn, outcome, or snapshot. The new attempt inherits the
+saved phase and turn as well as its conversation. Migration 11 adds immutable
+`starting_ref` (full branch ref or `HEAD` when detached), `schedule_mode`, and
+`schedule_remaining` (including the current pellet). These fields describe what
+an explicit Resume will do, never a startup trigger. Older rows retain an empty
+reference and a conservative one-unit schedule default; no missing branch or
+remaining-limit evidence is invented. The reserved review mode adds no
 checkpoint scope, dependency, or scheduler behavior.
 
 Ordinary run creation revalidates both captured filters against the exact

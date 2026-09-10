@@ -119,6 +119,7 @@ func TestPendingInteractionRendersAfterBrowserReconnectAndDeadProcessRejectsAnsw
 	capture := storage.RunCapture{ProjectID: f.projects[0].ID, WorkspaceID: f.projects[0].Workspaces[0].ID, PelletNumber: pellet.Reference.Number, Mode: "run_one", StartingHead: strings.Repeat("a", 40),
 		Settings:     storage.EffectiveRunSettings{Codex: storage.CodexRunSettings{Executable: "codex", Limits: storage.CodexRunLimits{MaxMessageBytes: 4096, EventBuffer: 8, MaxPending: 8, StderrBytes: 1024}}, ApprovalPolicy: "on-request", ApprovalsReviewer: "auto_review", SandboxMode: "workspace-write"},
 		PromptPrefix: storage.PromptPrefix{TemplateVersion: "test", SkillSHA256: strings.Repeat("a", 64), HelpSHA256: strings.Repeat("b", 64), ToolExecutable: "pl", ToolVersion: "test", Text: "stable"}}
+	capture.ScheduleMode, capture.ScheduleRemaining = "watch", 7
 	db, err := sqlite.OpenExecutionRunDatabase(context.Background(), f.databasePath)
 	if err != nil {
 		t.Fatal(err)
@@ -148,5 +149,20 @@ func TestPendingInteractionRendersAfterBrowserReconnectAndDeadProcessRejectsAnsw
 	response = performMutation(f.handler, "/projects/project1/runs/"+strconv.FormatInt(run.ID, 10)+"/interaction", form, testOrigin, true, "application/x-www-form-urlencoded")
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "process is no longer available") {
 		t.Fatalf("dead process answer = %d %s", response.Code, response.Body.String())
+	}
+	db, err = sqlite.OpenExecutionRunDatabase(context.Background(), f.databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.InterruptExecutionRun(context.Background(), run.ID, run.Revision, "unknown")
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	response = performRequest(f.handler, http.MethodGet, "/projects/project1/tasks", "", nil)
+	for _, want := range []string{"Nothing restarts automatically", "at implementation, then continue watch (7 pellets remaining", `name="mode" value="watch"`, `name="resume_from" value="` + strconv.FormatInt(run.ID, 10) + `"`} {
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), want) {
+			t.Fatalf("saved recovery intent missing %q: %d %s", want, response.Code, response.Body.String())
+		}
 	}
 }

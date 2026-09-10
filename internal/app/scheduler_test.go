@@ -422,7 +422,7 @@ func TestWebResumeRestoresCapturedFiltersInsteadOfBrowserValues(t *testing.T) {
 	_ = awaitSchedule(t, handle)
 }
 
-func TestSchedulerPreThreadRetryUsesFreshChangedPrefix(t *testing.T) {
+func TestSchedulerUnidentifiedThreadCannotBeRetriedWithFreshPrefix(t *testing.T) {
 	executable := installSupervisorPeer(t)
 	s, request, _ := schedulerFixture(t, executable, "schedule_prethread_failure")
 	first := awaitSchedule(t, startSchedule(t, s, request))
@@ -443,25 +443,13 @@ func TestSchedulerPreThreadRetryUsesFreshChangedPrefix(t *testing.T) {
 	pellet, resumeFrom := previous.PelletNumber, previous.ID
 	request.ResumePellet, request.ResumeFrom = &pellet, &resumeFrom
 	second := awaitSchedule(t, startSchedule(t, s, request))
-	if second.State != "completed" {
-		t.Fatalf("pre-thread retry = %+v", second)
+	if second.State != "needs_attention" || second.Reason != "resume_conversation_unidentified" || second.Started != 0 {
+		t.Fatalf("uncertain thread creation was retried = %+v", second)
 	}
-	retried, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, second.RunID)
-	if err != nil || retried.PromptPrefix == previous.PromptPrefix || !strings.Contains(retried.PromptPrefix.Text, "Fresh retry skill.\n") {
-		t.Fatalf("fresh retry provenance = %#v, %v", retried.PromptPrefix, err)
-	}
-	var prompt string
 	for _, event := range readPeerEvents(t, s.options.Database.Root) {
 		if event.Method == "turn/start" {
-			var params struct{ Input []struct{ Text string } }
-			if err := json.Unmarshal(event.Params, &params); err != nil {
-				t.Fatal(err)
-			}
-			prompt = params.Input[0].Text
+			t.Fatal("unidentified thread generated work")
 		}
-	}
-	if !strings.HasPrefix(prompt, retried.PromptPrefix.Text) {
-		t.Fatalf("fresh prefix absent from new conversation: %q", prompt)
 	}
 }
 
@@ -701,7 +689,7 @@ func TestSchedulerResumeUsesExactRecordedThread(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	previous, err = supervisor.options.Recorder.Save(ctx, request.Database, storage.UpdateExecutionRun{ID: previous.ID, ExpectedRevision: previous.Revision, Progress: storage.RunProgress{Phase: "implementation", State: "interrupted", Outcome: "unknown", ThreadID: "thread"}})
+	previous, err = supervisor.options.Recorder.Save(ctx, request.Database, storage.UpdateExecutionRun{ID: previous.ID, ExpectedRevision: previous.Revision, Progress: storage.RunProgress{Phase: "implementation", State: "interrupted", Outcome: "unknown", ThreadID: "thread", TurnID: "turn"}})
 	if err != nil {
 		t.Fatal(err)
 	}

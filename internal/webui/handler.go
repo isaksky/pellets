@@ -227,40 +227,44 @@ type workspaceView struct {
 // durable attempt. The receipt is useful while this server is alive; the run
 // remains authoritative after a browser reconnect or server restart.
 type runWorkspaceView struct {
-	ID              int64
-	Root            string
-	ActivePellet    string
-	Run             *runView
-	Schedule        *scheduleView
-	ExternalID      string
-	Group           string
-	Busy            bool
-	UngroupedFilter bool
+	ID                int64
+	Root              string
+	ActivePellet      string
+	Run               *runView
+	Schedule          *scheduleView
+	ExternalID        string
+	Group             string
+	Busy              bool
+	UngroupedFilter   bool
+	RecoveryAttention string
 }
 
 type runView struct {
-	ID           int64
-	Revision     int64
-	Pellet       string
-	Mode         string
-	Model        string
-	Effort       string
-	Phase        string
-	State        string
-	Activity     string
-	Outcome      string
-	Commit       string
-	Error        string
-	ExternalID   string
-	Group        string
-	PelletNumber int64
-	CanResume    bool
-	Awaiting     bool
-	AutoReview   bool
-	Interrupted  bool
-	Attention    bool
-	Active       bool
-	Interaction  *storage.RunInteraction
+	ID            int64
+	Revision      int64
+	Pellet        string
+	Mode          string
+	Model         string
+	Effort        string
+	Phase         string
+	State         string
+	Activity      string
+	Outcome       string
+	Commit        string
+	Error         string
+	ExternalID    string
+	Group         string
+	PelletNumber  int64
+	CanResume     bool
+	UnownedActive bool
+	ResumeMode    string
+	ResumeLimit   int
+	Awaiting      bool
+	AutoReview    bool
+	Interrupted   bool
+	Attention     bool
+	Active        bool
+	Interaction   *storage.RunInteraction
 }
 
 type scheduleView struct {
@@ -560,10 +564,17 @@ func (h *handler) runWorkspaceViews(request *http.Request, project storage.Proje
 		}
 		if len(runs) > 0 {
 			run := makeRunView(runs[0])
+			if storage.RunActive(runs[0].State) && h.application.Executions != nil && !h.application.Executions.OwnsRun(h.application.Database, runs[0].ID) {
+				run.UnownedActive, run.CanResume = true, runs[0].PelletPresent
+			}
+			if runs[0].State == "completed" && h.application.Executions != nil && h.application.Executions.RecoveryPending(h.application.Database, runs[0]) {
+				run.CanResume = runs[0].PelletPresent
+			}
 			view.Run = &run
 			view.Busy = storage.RunActive(runs[0].State)
 		}
 		if h.application.Scheduler != nil {
+			view.RecoveryAttention = h.application.Scheduler.WorkspaceAttention(workspace.ID)
 			if schedule, ok := h.application.Scheduler.WorkspaceStatus(workspace.ID); ok {
 				view.Schedule = &scheduleView{ID: schedule.ID, Mode: schedule.Mode, State: schedule.State, StopAfter: schedule.StopAfterPellet, ExternalID: textOrDash(schedule.ExternalID), Group: textOrDash(schedule.Group)}
 				view.Busy = true
@@ -596,6 +607,7 @@ func makeRunView(run storage.ExecutionRun) runView {
 	view.Interrupted = run.State == "interrupted"
 	view.Attention = run.State == "needs_attention"
 	view.CanResume = !storage.RunActive(run.State) && run.State != "completed" && run.PelletPresent
+	view.ResumeMode, view.ResumeLimit = run.ScheduleMode, run.ScheduleRemaining
 	lowerActivity := strings.ToLower(activity)
 	view.AutoReview = strings.Contains(lowerActivity, "automatic approval review is in progress") || strings.Contains(lowerActivity, "automatic approval review requires attention") || strings.Contains(lowerActivity, "explicit human decision")
 	return view

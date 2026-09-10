@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 
 	"pellets/internal/domain"
@@ -21,15 +22,36 @@ type Owner struct {
 }
 
 type Lock struct {
-	file *os.File
-	path string
-	once sync.Once
-	err  error
+	file  *os.File
+	path  string
+	once  sync.Once
+	err   error
+	owner *Owner
 }
 
 // Acquire never waits or steals. The persistent inode must never be removed:
 // unlinking it would allow two independent locks for the same worktree.
 func Acquire(gitDir string) (*Lock, error) {
+	return acquire(gitDir, false)
+}
+
+// AcquireRecovery takes the same nonblocking OS lock but retains the recovery
+// receipt for inspection. It never clears it or starts work. On Unix the
+// custodian inherits this lock through process cleanup; obtaining it proves
+// that no participating owner or its custodian is still active.
+func AcquireRecovery(gitDir string) (*Lock, error) { return acquire(gitDir, true) }
+
+func (lock *Lock) Owner() *Owner {
+	if lock.owner == nil {
+		return nil
+	}
+	owner := *lock.owner
+	return &owner
+}
+
+func (lock *Lock) RecoveryStopped() bool { return lock.owner == nil || runtime.GOOS != "windows" }
+
+func acquire(gitDir string, recovery bool) (*Lock, error) {
 	canonical, err := filepath.EvalSymlinks(gitDir)
 	if err != nil {
 		return nil, err
@@ -65,7 +87,11 @@ func Acquire(gitDir string) (*Lock, error) {
 	}
 	if len(data) != 0 {
 		var owner Owner
-		_ = json.Unmarshal(data, &owner)
+		valid := len(data) <= 8192 && json.Unmarshal(data, &owner) == nil && owner.Database != "" && owner.RunID >= 0
+		if recovery && valid {
+			lock.owner = &owner
+			return lock, nil
+		}
 		lock.Close()
 		return nil, domain.NewError(domain.Conflict, "workspace_execution_recovery_required", "a previous server did not finish workspace cleanup; inspect its execution evidence before explicit recovery; do not delete the lock file", map[string]any{"lock_path": path, "database": owner.Database, "run_id": owner.RunID})
 	}

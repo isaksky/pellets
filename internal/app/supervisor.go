@@ -90,6 +90,15 @@ func (supervisor *ExecutionSupervisor) ReadRun(ctx context.Context, database Dat
 	return supervisor.options.Recorder.Read(ctx, database, id)
 }
 
+// OwnsRun distinguishes this foreground process from a persisted active row.
+// A previous server/custodian may still hold the OS lock; only explicit Resume
+// attempts that lock and may reconcile a subsequently settled owner.
+func (supervisor *ExecutionSupervisor) OwnsRun(database Database, id int64) bool {
+	supervisor.mu.Lock()
+	defer supervisor.mu.Unlock()
+	return supervisor.active[activeExecutionKey{databasePath: database.Path, runID: id}] != nil
+}
+
 func NewExecutionSupervisor(ctx context.Context, options SupervisorOptions) *ExecutionSupervisor {
 	if options.Prepare == nil {
 		options.Prepare = codex.PrepareRun
@@ -136,13 +145,23 @@ func (supervisor *ExecutionSupervisor) start(ctx context.Context, request Execut
 	if err != nil {
 		return nil, err
 	}
-	lock, err := executionlock.Acquire(identity.GitDir)
+	var lock *executionlock.Lock
+	if request.Capture.ResumeFrom != nil {
+		lock, err = executionlock.AcquireRecovery(identity.GitDir)
+	} else {
+		lock, err = executionlock.Acquire(identity.GitDir)
+	}
 	if err != nil {
 		return nil, err
 	}
 	if _, err = executionRoot(ctx, request.Database, identityRun); err != nil {
 		lock.Close()
 		return nil, err
+	}
+	if request.Capture.ResumeFrom != nil {
+		if _, err := supervisor.validateResume(ctx, request, root, lock); err != nil {
+			return nil, errors.Join(err, lock.Close())
+		}
 	}
 	// Copy pointer-bearing request values before asynchronous use.
 	encoded, err := json.Marshal(request)
@@ -224,6 +243,7 @@ type WorkspaceExecution struct {
 	prepared     *codex.PreparedRun
 	ctx          context.Context
 	closing      atomic.Bool
+	turnStarted  atomic.Bool
 	operations   chan struct{}
 	events       chan codex.Event
 	completion   chan struct{}
@@ -283,6 +303,9 @@ func (execution *WorkspaceExecution) Call(ctx context.Context, operation codex.O
 			return nil, err
 		}
 		_, response, err := execution.recorder.CallCodex(ctx, execution.database, run.ID, run.Revision, execution.prepared.Client, operation, params)
+		if operation == codex.TurnStart && err == nil {
+			execution.turnStarted.Store(true)
+		}
 		return response, err
 	default:
 		return execution.prepared.Client.Call(ctx, operation, params)
@@ -380,7 +403,7 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 	if err != nil {
 		// Ordinary preflight failures (login, settings, capability) are safe to
 		// retry after PrepareRun's cleanup. Ambiguous cleanup retains the fence.
-		if !errors.Is(err, codex.ErrCleanup) {
+		if !errors.Is(err, codex.ErrCleanup) && lock.Owner() == nil {
 			if errors.Is(err, context.Canceled) && processCtx.Err() != nil {
 				err = nil
 			}
@@ -396,7 +419,22 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 		if err := prepared.Client.Close(); err != nil {
 			return run, err
 		}
+		if request.Capture.ResumeFrom != nil && lock.Owner() != nil {
+			return run, handle.ctx.Err()
+		}
 		return run, lock.Clean()
+	}
+	if request.Capture.ResumeFrom != nil {
+		if err := supervisor.reconcileConversation(processCtx, request, root, prepared.Client); err != nil {
+			// Keep the original attempt and receipt when history is missing or
+			// ambiguous. A read-only recovery probe with confirmed cleanup must
+			// not manufacture a crash receipt when no old receipt existed.
+			closeErr := prepared.Client.Close()
+			if closeErr == nil && lock.Owner() == nil {
+				closeErr = lock.Clean()
+			}
+			return run, errors.Join(err, closeErr)
+		}
 	}
 	request.Capture.Settings = prepared.EvidenceSettings
 	request.Capture.PromptPrefix = prepared.PromptPrefix
@@ -538,9 +576,10 @@ func (execution *WorkspaceExecution) interrupt(ctx context.Context) error {
 	if run.TurnID == "" || run.ThreadID == "" || run.State == "completed" {
 		return nil
 	}
-	if run.ResumeFrom != nil && run.Finalization != nil {
-		// Finalization recovery starts no model turn in this session. The
-		// recorded ID belongs to an already completed implementation turn.
+	if run.ResumeFrom != nil && !execution.turnStarted.Load() {
+		// Recovery carries a historical turn ID. Until this session starts a
+		// new turn, neither finalization nor checkpoint reconciliation owns
+		// an active generation that it may interrupt.
 		return nil
 	}
 	if completedTurn(execution.LatestCompletion(), run.ThreadID, run.TurnID) {
