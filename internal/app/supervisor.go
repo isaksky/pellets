@@ -36,10 +36,18 @@ type ExecutionSupervisor struct {
 	mu       sync.Mutex
 	stopping bool
 	runs     map[*ExecutionHandle]struct{}
+	active   map[activeExecutionKey]*WorkspaceExecution
 	wait     sync.WaitGroup
 	closed   chan struct{}
 	once     sync.Once
 	err      error
+}
+
+// Execution run IDs are local to a project database. Keep the database path
+// in the live-process key so two foreground projects may both have run #1.
+type activeExecutionKey struct {
+	databasePath string
+	runID        int64
 }
 
 type ExecutionRequest struct {
@@ -89,7 +97,7 @@ func NewExecutionSupervisor(ctx context.Context, options SupervisorOptions) *Exe
 	if options.InterruptTimeout <= 0 {
 		options.InterruptTimeout = 3 * time.Second
 	}
-	supervisor := &ExecutionSupervisor{options: options, runs: make(map[*ExecutionHandle]struct{}), closed: make(chan struct{})}
+	supervisor := &ExecutionSupervisor{options: options, runs: make(map[*ExecutionHandle]struct{}), active: make(map[activeExecutionKey]*WorkspaceExecution), closed: make(chan struct{})}
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -221,6 +229,7 @@ type WorkspaceExecution struct {
 	completion   chan struct{}
 	eventDone    chan struct{}
 	eventFailure chan error
+	actions      chan interactionAction
 }
 
 func (execution *WorkspaceExecution) ThreadStartParams() map[string]any {
@@ -400,7 +409,16 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 	}
 	workCtx, cancelWork := codex.WithExecutionLock(handle.ctx, lock.File()), handle.cancel
 	execution := &WorkspaceExecution{recorder: supervisor.options.Recorder, database: request.Database, id: run.ID, prepared: prepared, ctx: workCtx,
-		operations: make(chan struct{}, 1), events: make(chan codex.Event, prepared.Settings.Limits.EventBuffer), completion: make(chan struct{}, 1), eventDone: make(chan struct{}), eventFailure: make(chan error, 1)}
+		operations: make(chan struct{}, 1), events: make(chan codex.Event, prepared.Settings.Limits.EventBuffer), completion: make(chan struct{}, 1), eventDone: make(chan struct{}), eventFailure: make(chan error, 1), actions: make(chan interactionAction)}
+	supervisor.mu.Lock()
+	key := activeExecutionKey{databasePath: request.Database.Path, runID: run.ID}
+	supervisor.active[key] = execution
+	supervisor.mu.Unlock()
+	defer func() {
+		supervisor.mu.Lock()
+		delete(supervisor.active, key)
+		supervisor.mu.Unlock()
+	}()
 	go execution.relayEvents()
 	driverDone := make(chan error, 1)
 	go func() {
@@ -480,6 +498,7 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 		} else if storage.RunActive(run.State) {
 			progress := run.RunProgress
 			progress.State, progress.Outcome, progress.ErrorCode, progress.Summary = "needs_attention", "unknown", failureCode, ""
+			progress.Interaction = nil
 			switch failureCode {
 			case "codex_input_required":
 				progress.Summary = "Codex is awaiting explicit input."

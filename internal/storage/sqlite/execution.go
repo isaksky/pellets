@@ -223,6 +223,10 @@ func (db *ProjectDatabase) UpdateExecutionRun(ctx context.Context, request stora
 		if err != nil {
 			return err
 		}
+		interaction, err := json.Marshal(p.Interaction)
+		if err != nil {
+			return err
+		}
 		// Conversation identity cannot silently change. A new thread requires a
 		// separate explicit attempt; a new turn is legal only at turn_start.
 		if (current.ThreadID != "" && p.ThreadID != current.ThreadID) || (current.TurnID != "" && p.TurnID != current.TurnID && (p.Phase != "turn_start" || p.TurnID == "")) {
@@ -251,8 +255,8 @@ func (db *ProjectDatabase) UpdateExecutionRun(ctx context.Context, request stora
 			s := verified.Format(runTimeFormat)
 			verifiedStamp = &s
 		}
-		_, err = conn.ExecContext(ctx, `UPDATE execution_runs SET phase=?, state=?, thread_id=?, turn_id=?, outcome=?, error_code=?, summary=?, cached_input_tokens=?, finalization_json=?, result_commit=?, commit_verified_at=?, revision=revision+1, updated_at=?, finished_at=? WHERE run_id=?`,
-			p.Phase, p.State, p.ThreadID, p.TurnID, p.Outcome, p.ErrorCode, p.Summary, p.CachedInputTokens, string(finalization), resultCommit, verifiedStamp, stamp, finished, current.ID)
+		_, err = conn.ExecContext(ctx, `UPDATE execution_runs SET phase=?, state=?, thread_id=?, turn_id=?, outcome=?, error_code=?, summary=?, cached_input_tokens=?, finalization_json=?, interaction_json=?, result_commit=?, commit_verified_at=?, revision=revision+1, updated_at=?, finished_at=? WHERE run_id=?`,
+			p.Phase, p.State, p.ThreadID, p.TurnID, p.Outcome, p.ErrorCode, p.Summary, p.CachedInputTokens, string(finalization), string(interaction), resultCommit, verifiedStamp, stamp, finished, current.ID)
 		if err != nil {
 			return err
 		}
@@ -291,7 +295,8 @@ func (db *ProjectDatabase) InterruptExecutionRun(ctx context.Context, id, revisi
 		progress := current.RunProgress
 		progress.State, progress.Outcome, progress.ErrorCode = "interrupted", outcome, "supervisor_stopped"
 		stamp := runUpdateTime(current).Format(runTimeFormat)
-		_, err = conn.ExecContext(ctx, `UPDATE execution_runs SET state='interrupted', outcome=?, error_code='supervisor_stopped', revision=revision+1, updated_at=?, finished_at=? WHERE run_id=?`, outcome, stamp, stamp, id)
+		progress.Interaction = nil
+		_, err = conn.ExecContext(ctx, `UPDATE execution_runs SET state='interrupted', outcome=?, error_code='supervisor_stopped', interaction_json='null', revision=revision+1, updated_at=?, finished_at=? WHERE run_id=?`, outcome, stamp, stamp, id)
 		if err != nil {
 			return err
 		}
@@ -394,9 +399,14 @@ func (db *ProjectDatabase) FinishExecutionOperation(ctx context.Context, result 
 			}
 		} else if storage.RunActive(current.State) {
 			progress.State, progress.Outcome, progress.ErrorCode = "needs_attention", "unknown", result.ErrorCode
+			progress.Interaction = nil
 			finished = &now
 		}
 		if err := storage.ValidateRunProgress(progress); err != nil {
+			return err
+		}
+		interaction, err := json.Marshal(progress.Interaction)
+		if err != nil {
 			return err
 		}
 		var finishedStamp *string
@@ -405,8 +415,8 @@ func (db *ProjectDatabase) FinishExecutionOperation(ctx context.Context, result 
 			finishedStamp = &s
 		}
 		stamp := now.Format(runTimeFormat)
-		_, err = conn.ExecContext(ctx, `UPDATE execution_runs SET thread_id=?, turn_id=?, state=?, outcome=?, error_code=?, finished_at=?, pending_operation='', pending_revision=0, pending_turn_id='', revision=revision+1, updated_at=? WHERE run_id=?`,
-			progress.ThreadID, progress.TurnID, progress.State, progress.Outcome, progress.ErrorCode, finishedStamp, stamp, result.ID)
+		_, err = conn.ExecContext(ctx, `UPDATE execution_runs SET thread_id=?, turn_id=?, state=?, outcome=?, error_code=?, interaction_json=?, finished_at=?, pending_operation='', pending_revision=0, pending_turn_id='', revision=revision+1, updated_at=? WHERE run_id=?`,
+			progress.ThreadID, progress.TurnID, progress.State, progress.Outcome, progress.ErrorCode, string(interaction), finishedStamp, stamp, result.ID)
 		if err != nil {
 			return err
 		}
@@ -470,12 +480,12 @@ type runQuery interface {
 }
 
 func readExecutionRun(ctx context.Context, q runQuery, id int64) (run storage.ExecutionRun, err error) {
-	var settings, promptPrefix, finalization, created, updated string
+	var settings, promptPrefix, finalization, interaction, created, updated string
 	var finished, verified sql.NullString
 	err = q.QueryRowContext(ctx, `SELECT r.run_id, r.attempt, r.revision, r.project_id, r.workspace_id, r.pellet_number,
 		r.resume_from, r.mode, r.external_id, r.group_id, r.settings_json, r.prompt_prefix_json, r.starting_head, r.pellet_title, r.pellet_description,
 		r.phase, r.state, r.thread_id, r.turn_id, r.outcome, r.error_code, r.summary, r.cached_input_tokens, r.finalization_json, r.result_commit,
-		r.commit_verified_at, r.created_at, r.updated_at, r.finished_at, r.activity_pruned, p.code, r.pending_operation, r.pending_revision, r.pending_turn_id,
+		r.interaction_json, r.commit_verified_at, r.created_at, r.updated_at, r.finished_at, r.activity_pruned, p.code, r.pending_operation, r.pending_revision, r.pending_turn_id,
 		EXISTS(SELECT 1 FROM pellets WHERE project_id=r.project_id AND number=r.pellet_number),
 		w.root_path, w.root_path_relative, w.git_dir, w.git_dir_relative, p.git_common_dir, p.git_common_dir_relative
 		FROM execution_runs r JOIN projects p ON p.project_id=r.project_id
@@ -483,7 +493,7 @@ func readExecutionRun(ctx context.Context, q runQuery, id int64) (run storage.Ex
 		&run.ID, &run.Attempt, &run.Revision, &run.ProjectID, &run.WorkspaceID, &run.PelletNumber,
 		&run.ResumeFrom, &run.Mode, &run.ExternalID, &run.Group, &settings, &promptPrefix, &run.StartingHead, &run.PelletTitle, &run.PelletDescription,
 		&run.Phase, &run.State, &run.ThreadID, &run.TurnID, &run.Outcome, &run.ErrorCode, &run.Summary, &run.CachedInputTokens, &finalization, &run.ResultCommit,
-		&verified, &created, &updated, &finished, &run.ActivityPruned, &run.ProjectCode, &run.PendingOperation, &run.PendingRevision, &run.PendingTurnID, &run.PelletPresent,
+		&interaction, &verified, &created, &updated, &finished, &run.ActivityPruned, &run.ProjectCode, &run.PendingOperation, &run.PendingRevision, &run.PendingTurnID, &run.PelletPresent,
 		&run.WorkspaceRoot.Value, &run.WorkspaceRoot.Relative, &run.WorkspaceGitDir.Value, &run.WorkspaceGitDir.Relative, &run.GitCommonDir.Value, &run.GitCommonDir.Relative)
 	if errors.Is(err, sql.ErrNoRows) {
 		return run, storage.ExecutionRunNotFound(id)
@@ -498,6 +508,9 @@ func readExecutionRun(ctx context.Context, q runQuery, id int64) (run storage.Ex
 		return run, err
 	}
 	if err := json.Unmarshal([]byte(finalization), &run.Finalization); err != nil {
+		return run, err
+	}
+	if err := json.Unmarshal([]byte(interaction), &run.Interaction); err != nil {
 		return run, err
 	}
 	if err := storage.ValidateRunCapture(run.RunCapture); err != nil {

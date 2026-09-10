@@ -32,6 +32,48 @@ func TestPromptPrefixEncodedStorageBoundAccountsForJSONEscapes(t *testing.T) {
 	}
 }
 
+func TestPendingInteractionRoundTripsAndClearsWithoutAnswers(t *testing.T) {
+	db, run, _ := createTestRun(t)
+	interaction := &storage.RunInteraction{RequestID: `"request-1"`, Method: "item/tool/requestUserInput", ThreadID: "thread", TurnID: "turn", ItemID: "item", Title: "Codex needs your input", Questions: []storage.InteractionQuestion{{ID: "scope", Header: "Scope", Question: "Which scope?", Options: []storage.InteractionOption{{Label: "Focused", Description: "Only the target."}}, Other: true, Secret: true}}}
+	progress := storage.RunProgress{Phase: "implementation", State: "awaiting_input", ThreadID: "thread", TurnID: "turn", Summary: "Codex is awaiting explicit input.", Interaction: interaction}
+	run = updateRun(t, db, run, progress, "")
+	read, err := db.ReadExecutionRun(context.Background(), run.ID)
+	if err != nil || !reflect.DeepEqual(read.Interaction, interaction) {
+		t.Fatalf("pending interaction round trip = %#v, %v", read.Interaction, err)
+	}
+	progress = read.RunProgress
+	progress.State, progress.Interaction = "running", nil
+	read = updateRun(t, db, read, progress, "")
+	if read.Interaction != nil {
+		t.Fatalf("cleared interaction retained: %#v", read.Interaction)
+	}
+	var stored string
+	if err := db.db.QueryRowContext(context.Background(), `SELECT interaction_json FROM execution_runs WHERE run_id=?`, run.ID).Scan(&stored); err != nil || strings.Contains(stored, "answer") {
+		t.Fatalf("unexpected answer storage: %q, %v", stored, err)
+	}
+}
+
+func TestFailedPendingOperationClearsPendingInteractionAtomically(t *testing.T) {
+	db, run, _ := createTestRun(t)
+	interaction := &storage.RunInteraction{RequestID: `"request-1"`, Method: "item/tool/requestUserInput", ThreadID: "thread", TurnID: "turn", ItemID: "item", Title: "Codex needs your input", Questions: []storage.InteractionQuestion{{ID: "scope", Header: "Scope", Question: "Which scope?"}}}
+	run = updateRun(t, db, run, storage.RunProgress{Phase: "implementation", State: "awaiting_input", ThreadID: "thread", TurnID: "turn", Interaction: interaction}, "")
+	pending, err := db.BeginExecutionOperation(context.Background(), run.ID, run.Revision, "turn/interrupt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := db.FinishExecutionOperation(context.Background(), storage.ExecutionOperationResult{ID: run.ID, PendingRevision: pending.PendingRevision, ErrorCode: "codex_call_failed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.State != "needs_attention" || failed.Interaction != nil || failed.PendingOperation != "" {
+		t.Fatalf("failed operation retained interaction or fence: %#v", failed)
+	}
+	reloaded, err := db.ReadExecutionRun(context.Background(), run.ID)
+	if err != nil || reloaded.Interaction != nil || reloaded.PendingOperation != "" {
+		t.Fatalf("durable failed operation state = %#v, %v", reloaded, err)
+	}
+}
+
 func TestPreThreadRetryKeepsFreshPromptPrefix(t *testing.T) {
 	db, run, _ := createTestRun(t)
 	stopped := updateRun(t, db, run, storage.RunProgress{Phase: "preflight", State: "interrupted", Outcome: "unknown"}, "")

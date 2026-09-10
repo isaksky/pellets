@@ -2,6 +2,7 @@ package webui
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"mime"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"pellets/internal/app"
 	"pellets/internal/domain"
 	"pellets/internal/storage"
 )
@@ -46,6 +48,8 @@ func (h *handler) serveMutation(response http.ResponseWriter, request *http.Requ
 	project := projectSummary.Project
 
 	switch {
+	case len(segments) == 5 && segments[2] == "runs" && (segments[4] == "interaction" || segments[4] == "follow-up"):
+		h.submitRunAction(response, request, project, segments[3], segments[4])
 	case len(segments) == 3 && segments[2] == "schedules":
 		h.startSchedule(response, request, project)
 	case len(segments) == 5 && segments[2] == "schedules":
@@ -88,6 +92,60 @@ func (h *handler) serveMutation(response http.ResponseWriter, request *http.Requ
 	default:
 		http.NotFound(response, request)
 	}
+}
+
+func (h *handler) submitRunAction(response http.ResponseWriter, request *http.Request, project storage.Project, rawID, kind string) {
+	runID, err := parsePositiveID(rawID)
+	if err != nil {
+		h.renderError(response, http.StatusNotFound, requestError("run not found"), nil)
+		return
+	}
+	revision, err := parsePositiveID(request.PostForm.Get("revision"))
+	if err != nil {
+		h.renderError(response, http.StatusUnprocessableEntity, requestError("an exact run revision is required"), nil)
+		return
+	}
+	submission := app.InteractionSubmission{RunID: runID, Revision: revision}
+	allowed := map[string]bool{"_csrf": true, "revision": true}
+	if kind == "follow-up" {
+		allowed["text"] = true
+		submission.FollowUp = request.PostForm.Get("text")
+	} else {
+		allowed["request_id"], allowed["action"] = true, true
+		submission.RequestID, submission.Action = request.PostForm.Get("request_id"), request.PostForm.Get("action")
+		submission.Answers = map[string][]string{}
+		for name, values := range request.PostForm {
+			if strings.HasPrefix(name, "answer.") && len(name) > len("answer.") {
+				if len(values) != 1 {
+					h.renderError(response, http.StatusUnprocessableEntity, requestError("each answer must occur exactly once"), nil)
+					return
+				}
+				submission.Answers[strings.TrimPrefix(name, "answer.")] = values
+				allowed[name] = true
+			}
+		}
+	}
+	for name, values := range request.PostForm {
+		if !allowed[name] || len(values) != 1 {
+			h.renderError(response, http.StatusUnprocessableEntity, requestError("the run action contains unexpected fields"), nil)
+			return
+		}
+	}
+	for name := range allowed {
+		if _, ok := request.PostForm[name]; !ok && !strings.HasPrefix(name, "answer.") {
+			h.renderError(response, http.StatusUnprocessableEntity, requestError("the run action is incomplete"), nil)
+			return
+		}
+	}
+	run, err := h.application.SubmitRunInteraction(request.Context(), project, submission)
+	if err != nil {
+		h.renderError(response, statusForError(err), err, nil)
+		return
+	}
+	response.Header().Set("Content-Type", "application/json; charset=utf-8")
+	response.Header().Set("Cache-Control", "no-store")
+	response.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(response).Encode(map[string]any{"run_id": run.ID, "revision": run.Revision, "state": run.State})
 }
 
 func (h *handler) createPellet(response http.ResponseWriter, request *http.Request, project storage.Project) {

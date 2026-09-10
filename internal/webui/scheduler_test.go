@@ -100,3 +100,53 @@ func TestScheduleHTTPExplicitWorkspaceExactFieldsAndSecurity(t *testing.T) {
 		}
 	}
 }
+
+func TestPendingInteractionRendersAfterBrowserReconnectAndDeadProcessRejectsAnswer(t *testing.T) {
+	f := newHandlerFixture(t, 1)
+	pellet, err := f.application.CreatePellet(context.Background(), f.projects[0], storage.NewPellet{Title: "interactive"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.application.TransitionPellet(context.Background(), f.projects[0], pellet.Reference, storage.PelletVersion(pellet), storage.PelletLifecycleRequest{Operation: storage.PelletStart}); err != nil {
+		t.Fatal(err)
+	}
+	recorder := app.ExecutionRecorder{Open: func(ctx context.Context, path string) (storage.ExecutionRunDatabase, error) {
+		return sqlite.OpenExecutionRunDatabase(ctx, path)
+	}}
+	f.application.Executions = app.NewExecutionSupervisor(context.Background(), app.SupervisorOptions{Recorder: recorder})
+	defer f.application.Executions.Close()
+	f.application.Database = app.Database{Root: filepath.Dir(f.databasePath), Path: f.databasePath}
+	capture := storage.RunCapture{ProjectID: f.projects[0].ID, WorkspaceID: f.projects[0].Workspaces[0].ID, PelletNumber: pellet.Reference.Number, Mode: "run_one", StartingHead: strings.Repeat("a", 40),
+		Settings:     storage.EffectiveRunSettings{Codex: storage.CodexRunSettings{Executable: "codex", Limits: storage.CodexRunLimits{MaxMessageBytes: 4096, EventBuffer: 8, MaxPending: 8, StderrBytes: 1024}}, ApprovalPolicy: "on-request", ApprovalsReviewer: "auto_review", SandboxMode: "workspace-write"},
+		PromptPrefix: storage.PromptPrefix{TemplateVersion: "test", SkillSHA256: strings.Repeat("a", 64), HelpSHA256: strings.Repeat("b", 64), ToolExecutable: "pl", ToolVersion: "test", Text: "stable"}}
+	db, err := sqlite.OpenExecutionRunDatabase(context.Background(), f.databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := db.CreateExecutionRun(context.Background(), capture)
+	if err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	interaction := &storage.RunInteraction{RequestID: `"reconnect"`, Method: "item/tool/requestUserInput", ThreadID: "thread", TurnID: "turn", ItemID: "item", Title: "Codex needs your input", Questions: []storage.InteractionQuestion{{ID: "choice", Header: "Scope", Question: "Which complete choice?", Options: []storage.InteractionOption{{Label: "Focused", Description: "Only the exact target."}}, Other: true}, {ID: "secret", Header: "Secret", Question: "Enter a transient value", Secret: true}}}
+	progress := storage.RunProgress{Phase: "implementation", State: "awaiting_input", ThreadID: "thread", TurnID: "turn", Summary: "Codex is awaiting explicit input.", Interaction: interaction}
+	run, err = db.UpdateExecutionRun(context.Background(), storage.UpdateExecutionRun{ID: run.ID, ExpectedRevision: run.Revision, Progress: progress})
+	if closeErr := db.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := performRequest(f.handler, http.MethodGet, "/projects/project1/tasks", "", nil)
+	body := response.Body.String()
+	for _, want := range []string{"Which complete choice?", "Focused", "Only the exact target.", `type="password"`, `name="request_id" value="&#34;reconnect&#34;"`} {
+		if response.Code != http.StatusOK || !strings.Contains(body, want) {
+			t.Fatalf("reconnected UI missing %q: %d %s", want, response.Code, body)
+		}
+	}
+	form := url.Values{"_csrf": {testCSRF}, "revision": {strconv.FormatInt(run.Revision, 10)}, "request_id": {`"reconnect"`}, "action": {"answer"}, "answer.choice": {"Focused"}, "answer.secret": {"transient"}}
+	response = performMutation(f.handler, "/projects/project1/runs/"+strconv.FormatInt(run.ID, 10)+"/interaction", form, testOrigin, true, "application/x-www-form-urlencoded")
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "process is no longer available") {
+		t.Fatalf("dead process answer = %d %s", response.Code, response.Body.String())
+	}
+}

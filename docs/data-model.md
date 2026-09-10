@@ -202,6 +202,9 @@ Migration 7 adds `execution_runs` and `execution_run_activity`; its
 [SQL](../internal/storage/sqlite/migrations/0007_execution_runs.sql) is the
 normative table and constraint contract. These records do not participate in
 queue selection, priorities, pellet lifecycle, or assignment history.
+Migrations 8 and 9 add immutable prompt provenance and finalization evidence;
+migration 10 adds the bounded `interaction_json` snapshot used to reconnect a
+browser to one pending app-server request.
 
 Each run is one numbered attempt against stable `project_id`, `workspace_id`,
 and monotonic `pellet_number`. The public project code is joined on read, so
@@ -235,6 +238,14 @@ requires a forward migration and matching application validation; it does not
 create a generic event type. Timestamps use fixed-width UTC RFC3339 with nine
 fractional digits. A stopped attempt has an explicit finish time and outcome;
 uncertainty is `unknown`, never success inferred from process exit.
+
+At most one pending interaction is stored on a run in `awaiting_input` state.
+It retains the canonical JSON-RPC request ID, exact thread/turn/item identity,
+complete bounded question text and options, or the minimal fields required for
+a one-time approval response. Secret values, answers, commands, credentials,
+and transcripts are not stored. Clearing or answering the request advances the
+same optimistic revision, so duplicate and stale browser responses conflict;
+the live supervisor separately rejects responses after process loss.
 
 Before a consequential Codex call, `BeginExecutionOperation` writes one
 allowlisted `pending_operation` (`thread/start`, `thread/resume`, `turn/start`,

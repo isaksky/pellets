@@ -229,6 +229,12 @@ completed/succeeded evidence, and confirmed supervisor cleanup. Turn-end,
 closed status alone, missing/purged evidence, interrupted/failed turns, input
 requests, or preflight errors stop for attention; none triggers a hidden retry.
 
+While the owned process remains live, app-server questions and remaining
+human approval decisions instead pause the exact run at `awaiting_input` with
+one bounded durable interaction. The stored record contains the complete
+question/options or the minimum approval display and routing fields, never an
+answer, secret, command text, credential, or transcript.
+
 New ordinary work is checked for a clean index/worktree, including untracked
 files, inside the selection readiness boundary and again before thread start.
 The new thread is persisted (`ephemeral: false`) and receives the complete
@@ -307,7 +313,24 @@ in-memory receipt with the latest durable run so reconnects remain authoritative
 Its Run one, Drain, Watch, Stop after, Stop now, and eligible Resume controls use
 these form endpoints and refresh from the server; cards contain only bounded
 application-authored activity, never Codex transcripts, command text, or output.
-Interactive question answering remains an explicit attention path.
+Pending questions render all supplied question text, choices, Other/free-text
+support, and secret inputs (whose values are never persisted). POST
+`/projects/CODE/runs/RUN/interaction` binds the rendered run revision and exact
+JSON-RPC request ID; POST `/projects/CODE/runs/RUN/follow-up` binds the run
+revision and concise text. Both reuse the same Host, Origin, content-type, and
+double-submit CSRF checks. Duplicate, withdrawn, wrong-run, wrong-turn, and
+dead-process submissions are rejected. A browser disconnect changes none of
+this durable state.
+
+Follow-ups use `turn/steer` with the exact `expectedTurnId` while the turn is
+active. If that turn becomes idle first, the driver starts one new turn; it
+does not overlap turns or silently broaden a failed steer. One-time command and
+file decisions use only `accept` or `decline`; permission grants echo only the
+requested subset, remain turn-scoped, and retain strict automatic review.
+Automatic-review lifecycle notifications show bounded progress and denial,
+timeout, or abort rationale. Explicit Resume starts a new attempt and lets the
+resumed Codex conversation reissue any still-needed interaction; an old request
+ID is never replayed into the new process.
 
 Resume never accepts browser-provided filters: the server reads the exact prior
 attempt and restores its captured filters before scheduling. An exact Ungrouped
@@ -377,7 +400,7 @@ The runtime still applies protected paths and managed requirements.
 ## Runner interface
 
 The foreground supervisor's persistence boundary is
-`app.ExecutionRecorder`, backed by schema-7 execution records. Begin an attempt
+`app.ExecutionRecorder`, backed by versioned execution records. Begin an attempt
 with the resolved workspace and `PreparedRun.EvidenceSettings` before a thread
 or turn starts. The allowlisted evidence settings capture the resolved
 executable/transport limits, known effective model/effort, sandbox roots and

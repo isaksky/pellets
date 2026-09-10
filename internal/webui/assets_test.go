@@ -6,6 +6,13 @@ import (
 	"testing"
 )
 
+func TestMCPDeclineBypassesRequiredAnswerValidation(t *testing.T) {
+	templates := embeddedText(t, "templates/main.html")
+	if !strings.Contains(templates, `<button type="submit" name="action" value="decline" formnovalidate>Decline</button>`) {
+		t.Fatal("MCP decline remains blocked by required answer controls")
+	}
+}
+
 func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing.T) {
 	t.Parallel()
 	css := embeddedText(t, "assets/app.css")

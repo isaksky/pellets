@@ -61,6 +61,7 @@ func Run() bool {
 	record("process", nil)
 	scanner := bufio.NewScanner(os.Stdin)
 	write := func(value any) { must(json.NewEncoder(os.Stdout).Encode(value)) }
+	var scheduledTurn json.RawMessage
 	for scanner.Scan() {
 		var message struct {
 			ID     json.RawMessage `json:"id"`
@@ -68,6 +69,14 @@ func Run() bool {
 			Params json.RawMessage `json:"params"`
 		}
 		must(json.Unmarshal(scanner.Bytes(), &message))
+		if message.Method == "" && len(message.ID) != 0 {
+			record("response", scanner.Bytes())
+			if mode == "schedule_input_live" || mode == "schedule_approval_live" {
+				write(map[string]any{"method": "serverRequest/resolved", "params": map[string]any{"threadId": "thread", "requestId": json.RawMessage(message.ID)}})
+				writeScheduledCompletion(write, mode, scheduledTurn)
+			}
+			continue
+		}
 		record(message.Method, message.Params)
 		var result any = map[string]any{}
 		switch message.Method {
@@ -99,6 +108,9 @@ func Run() bool {
 				waitFile("fake-child-ready")
 			}
 			result = map[string]any{"turn": map[string]any{"id": "turn"}}
+			scheduledTurn = append(scheduledTurn[:0], message.Params...)
+		case "turn/steer":
+			result = map[string]any{"turnId": "turn"}
 		case "thread/read":
 			if mode == "crash" {
 				os.Exit(9)
@@ -114,7 +126,22 @@ func Run() bool {
 			continue
 		}
 		write(map[string]any{"id": message.ID, "result": result})
+		if message.Method == "turn/steer" && mode == "schedule_followup_live" {
+			writeScheduledCompletion(write, mode, scheduledTurn)
+			continue
+		}
 		if message.Method == "turn/start" && strings.HasPrefix(mode, "schedule_") {
+			if mode == "schedule_input_live" {
+				write(map[string]any{"id": 41, "method": "item/tool/requestUserInput", "params": map[string]any{"threadId": "thread", "turnId": "turn", "itemId": "question-item", "isBlocking": true, "questions": []any{map[string]any{"id": "choice", "header": "Scope", "question": "Which scope should be used?", "options": []any{map[string]any{"label": "Focused", "description": "Change only the target."}, map[string]any{"label": "Broad", "description": "Change related code."}}, "isOther": true, "isSecret": false}, map[string]any{"id": "note", "header": "Note", "question": "Any concise constraint?", "options": nil, "isOther": false, "isSecret": false}}}})
+				continue
+			}
+			if mode == "schedule_approval_live" {
+				write(map[string]any{"id": "approval-7", "method": "item/commandExecution/requestApproval", "params": map[string]any{"threadId": "thread", "turnId": "turn", "itemId": "command-item", "startedAtMs": 1, "kind": "command", "reason": "The sandbox requires a one-time decision."}})
+				continue
+			}
+			if mode == "schedule_followup_live" {
+				continue
+			}
 			if mode == "schedule_gate" {
 				waitFile("fake-complete")
 			}
@@ -139,6 +166,12 @@ func Run() bool {
 		}
 	}
 	return true
+}
+
+func writeScheduledCompletion(write func(any), mode string, params json.RawMessage) {
+	report := completeScheduled(mode, params)
+	write(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread", "turnId": "turn", "item": map[string]any{"type": "agentMessage", "phase": "final_answer", "text": report}}})
+	write(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread", "turn": map[string]any{"id": "turn", "status": "completed"}}})
 }
 
 func record(method string, params json.RawMessage) {

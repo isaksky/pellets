@@ -28,7 +28,7 @@ import { action, actions } from "./datastar-1.0.3.js";
   // state never guesses a run state or retains a stale receipt after reconnect.
   document.addEventListener("submit", async function (event) {
     var form = event.target;
-    if (!form || !form.matches("form[data-schedule]")) return;
+    if (!form || !form.matches("form[data-schedule], form[data-run-action]")) return;
     event.preventDefault();
     if (form.dataset.schedulePending === "true") return;
     var submitter = event.submitter;
@@ -58,7 +58,7 @@ import { action, actions } from "./datastar-1.0.3.js";
     feedback.textContent = "Updating run controls…";
     try {
       var response = await fetch(form.action, {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: body.toString()});
-      if (!response.ok) throw new Error("schedule receipt rejected");
+      if (!response.ok) throw new Error("run action rejected");
       confirmed = true;
       feedback.hidden = true;
       refreshRegions();

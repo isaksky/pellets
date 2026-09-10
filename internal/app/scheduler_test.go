@@ -86,17 +86,64 @@ func awaitScheduledTurn(t *testing.T, s *Scheduler) {
 	}
 }
 
+func awaitActiveRun(t *testing.T, s *Scheduler, interaction bool) storage.ExecutionRun {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		runs, err := s.options.Supervisor.ListWorkspaceRuns(context.Background(), s.options.Database, 1, 8)
+		if err == nil && len(runs) > 0 && storage.RunActive(runs[0].State) && (runs[0].Interaction != nil) == interaction && (interaction || runs[0].Phase == "implementation") {
+			return runs[0]
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("active run timeout: %#v %v", runs, err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func TestConciseCodexActivityDoesNotExposeProtocolContent(t *testing.T) {
 	for method, want := range map[string]string{
 		"item/started":                          "Codex started the next workspace activity.",
 		"item/completed":                        "Codex completed an activity; validating the bound result.",
-		"item/commandExecution/requestApproval": "Automatic approval review is in progress.",
+		"item/commandExecution/requestApproval": "Automatic review routed this approval for an explicit human decision.",
 		"item/tool/requestUserInput":            "Codex is awaiting explicit input.",
 		"unknown/event":                         "",
 	} {
 		if got := conciseCodexActivity(method); got != want {
 			t.Fatalf("summary for %q = %q, want %q", method, got, want)
 		}
+	}
+}
+
+func TestMCPFormInteractionUsesTypedBoundedControls(t *testing.T) {
+	run := storage.ExecutionRun{RunProgress: storage.RunProgress{ThreadID: "thread", TurnID: "turn"}}
+	params := json.RawMessage(`{"threadId":"thread","turnId":"turn","serverName":"example","mode":"form","message":"Choose deployment details","requestedSchema":{"type":"object","required":["count","safe"],"properties":{"safe":{"type":"boolean","title":"Safety","description":"Is this safe?"},"count":{"type":"integer","title":"Count","description":"How many?"},"label":{"type":"string","enum":["small","large"],"description":"Which size?"}}}}`)
+	interaction, err := parseServerInteraction(codex.Event{ID: json.RawMessage(`"mcp-1"`), Method: "mcpServer/elicitation/request", Params: params}, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if interaction.RequestID != `"mcp-1"` || interaction.Mode != "form" || len(interaction.Questions) != 3 || interaction.Questions[0].ID != "count" || interaction.Questions[0].Type != "integer" || !interaction.Questions[0].Required || interaction.Questions[2].Options[0].Label != "true" {
+		t.Fatalf("MCP form interaction: %#v", interaction)
+	}
+}
+
+func TestAutomaticReviewProgressAndDenialReasonAreExactlyCorrelatedAndBounded(t *testing.T) {
+	event := codex.Event{Method: "item/autoApprovalReview/completed", Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","review":{"status":"denied","rationale":"Credential probing is not authorized."}}`)}
+	if got := conciseCodexEvent(event, "thread", "turn"); got != "Automatic approval review denied. Credential probing is not authorized." {
+		t.Fatalf("review summary = %q", got)
+	}
+	if got := conciseCodexEvent(event, "other", "turn"); got != "" {
+		t.Fatalf("cross-thread review surfaced: %q", got)
+	}
+}
+
+func TestStrictAutomaticReviewProgressIsExactlyCorrelated(t *testing.T) {
+	event := codex.Event{Method: "autoApprovalReview/strictReviewRequired", Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","startedAtMs":1}`)}
+	if got := conciseCodexEvent(event, "thread", "turn"); got != "Automatic approval review is in progress for each remaining command in this turn." {
+		t.Fatalf("strict review progress = %q", got)
+	}
+	if got := conciseCodexEvent(event, "other-thread", "turn"); got != "" {
+		t.Fatalf("cross-thread strict review progress = %q", got)
 	}
 }
 
@@ -193,28 +240,140 @@ func TestSchedulerPrefixIsStableForNewConversationAndAbsentOnResume(t *testing.T
 
 func TestSchedulerPersistsCachedTokensBeforeInputAttention(t *testing.T) {
 	executable := installSupervisorPeer(t)
-	s, request, _ := schedulerFixture(t, executable, "schedule_input")
-	status := awaitSchedule(t, startSchedule(t, s, request))
-	if status.State != "needs_attention" || status.Reason != "codex_input_required" {
-		t.Fatalf("input attention = %+v", status)
+	s, request, _ := schedulerFixture(t, executable, "schedule_input_live")
+	h := startSchedule(t, s, request)
+	run := awaitActiveRun(t, s, true)
+	if run.CachedInputTokens != nil {
+		// The live peer requests input before emitting terminal token telemetry.
+		t.Fatalf("unexpected pre-completion token telemetry: %#v", run.CachedInputTokens)
 	}
-	run, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, status.RunID)
-	if err != nil || run.CachedInputTokens == nil || *run.CachedInputTokens != 7 || run.Summary != "Codex is awaiting explicit input." {
-		t.Fatalf("input telemetry/activity = %#v %q %v", run.CachedInputTokens, run.Summary, err)
+	if run.Summary != "Codex is awaiting explicit input." || run.Interaction == nil {
+		t.Fatalf("input telemetry/activity = %#v %q", run.CachedInputTokens, run.Summary)
+	}
+	h.StopNow()
+	_ = awaitSchedule(t, h)
+}
+
+func TestSchedulerCorrelatesDurableUserInputAndRejectsStaleRevision(t *testing.T) {
+	executable := installSupervisorPeer(t)
+	s, request, _ := schedulerFixture(t, executable, "schedule_input_live")
+	h := startSchedule(t, s, request)
+	run := awaitActiveRun(t, s, true)
+	if run.State != "awaiting_input" || run.Interaction.Method != "item/tool/requestUserInput" || len(run.Interaction.Questions) != 2 || run.Interaction.RequestID != "41" {
+		t.Fatalf("pending interaction: %#v", run)
+	}
+	_, err := s.options.Supervisor.SubmitInteraction(context.Background(), s.options.Database, InteractionSubmission{RunID: run.ID, Revision: run.Revision - 1, RequestID: run.Interaction.RequestID, Action: "answer", Answers: map[string][]string{"choice": {"Focused"}, "note": {"Keep it small"}}})
+	if err == nil || domain.PublicError(err).Code != "execution_run_conflict" {
+		t.Fatalf("stale revision accepted: %v", err)
+	}
+	if _, err := s.options.Supervisor.SubmitInteraction(context.Background(), s.options.Database, InteractionSubmission{RunID: run.ID, Revision: run.Revision, RequestID: run.Interaction.RequestID, Action: "answer", Answers: map[string][]string{"choice": {"Focused"}, "note": {"Keep it small"}}}); err != nil {
+		t.Fatal(err)
+	}
+	status := awaitSchedule(t, h)
+	if status.State != "completed" {
+		t.Fatalf("interaction completion: %+v", status)
+	}
+	var response string
+	for _, event := range readPeerEvents(t, s.options.Database.Root) {
+		if event.Method == "response" {
+			response = string(event.Params)
+		}
+	}
+	if !strings.Contains(response, `"id":41`) || !strings.Contains(response, `"Focused"`) || !strings.Contains(response, `"Keep it small"`) {
+		t.Fatalf("exact response not delivered: %s", response)
+	}
+	if _, err := s.options.Supervisor.SubmitInteraction(context.Background(), s.options.Database, InteractionSubmission{RunID: run.ID, Revision: run.Revision, RequestID: "41", Action: "answer"}); err == nil {
+		t.Fatal("duplicate response was accepted")
+	}
+}
+
+func TestExplicitResumeReissuesInteractionOnNewRunAndRejectsDeadRequest(t *testing.T) {
+	executable := installSupervisorPeer(t)
+	s, request, _ := schedulerFixture(t, executable, "schedule_input_live")
+	firstHandle := startSchedule(t, s, request)
+	first := awaitActiveRun(t, s, true)
+	firstHandle.StopNow()
+	_ = awaitSchedule(t, firstHandle)
+	stopped, err := s.options.Supervisor.ReadRun(context.Background(), s.options.Database, first.ID)
+	if err != nil || stopped.State != "interrupted" || stopped.Interaction != nil {
+		t.Fatalf("stopped interaction: %#v %v", stopped, err)
+	}
+	if _, err := s.options.Supervisor.SubmitInteraction(context.Background(), s.options.Database, InteractionSubmission{RunID: first.ID, Revision: first.Revision, RequestID: first.Interaction.RequestID, Action: "answer"}); err == nil || domain.PublicError(err).Code != "run_process_unavailable" {
+		t.Fatalf("dead request accepted: %v", err)
+	}
+	pellet, previous := first.PelletNumber, first.ID
+	request.ResumePellet, request.ResumeFrom = &pellet, &previous
+	secondHandle := startSchedule(t, s, request)
+	second := awaitActiveRun(t, s, true)
+	if second.ID == first.ID || second.ResumeFrom == nil || *second.ResumeFrom != first.ID || second.Interaction == nil {
+		t.Fatalf("reissued interaction: %#v", second)
+	}
+	if _, err := s.options.Supervisor.SubmitInteraction(context.Background(), s.options.Database, InteractionSubmission{RunID: second.ID, Revision: second.Revision, RequestID: second.Interaction.RequestID, Action: "answer", Answers: map[string][]string{"choice": {"Focused"}, "note": {"Resume safely"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if status := awaitSchedule(t, secondHandle); status.State != "completed" {
+		t.Fatalf("resumed interaction completion: %+v", status)
+	}
+}
+
+func TestSchedulerRoutesOneTimeApprovalDenialWithoutBroaderPermission(t *testing.T) {
+	executable := installSupervisorPeer(t)
+	s, request, _ := schedulerFixture(t, executable, "schedule_approval_live")
+	h := startSchedule(t, s, request)
+	run := awaitActiveRun(t, s, true)
+	if run.Interaction.RequestID != `"approval-7"` || !strings.Contains(run.Interaction.Title, "one command") {
+		t.Fatalf("approval interaction: %#v", run.Interaction)
+	}
+	if _, err := s.options.Supervisor.SubmitInteraction(context.Background(), s.options.Database, InteractionSubmission{RunID: run.ID, Revision: run.Revision, RequestID: run.Interaction.RequestID, Action: "decline"}); err != nil {
+		t.Fatal(err)
+	}
+	if status := awaitSchedule(t, h); status.State != "completed" {
+		t.Fatalf("denial continuation: %+v", status)
+	}
+	for _, event := range readPeerEvents(t, s.options.Database.Root) {
+		if event.Method == "response" {
+			payload := string(event.Params)
+			if !strings.Contains(payload, `"decision":"decline"`) || strings.Contains(payload, "acceptForSession") || strings.Contains(payload, "Amendment") {
+				t.Fatalf("unsafe approval response: %s", payload)
+			}
+		}
+	}
+}
+
+func TestSchedulerSteersFollowUpIntoExactActiveTurn(t *testing.T) {
+	executable := installSupervisorPeer(t)
+	s, request, _ := schedulerFixture(t, executable, "schedule_followup_live")
+	h := startSchedule(t, s, request)
+	run := awaitActiveRun(t, s, false)
+	if _, err := s.options.Supervisor.SubmitInteraction(context.Background(), s.options.Database, InteractionSubmission{RunID: run.ID, Revision: run.Revision, FollowUp: "Focus on the failing test first."}); err != nil {
+		t.Fatal(err)
+	}
+	if status := awaitSchedule(t, h); status.State != "completed" {
+		t.Fatalf("follow-up completion: %+v", status)
+	}
+	var steer map[string]any
+	for _, event := range readPeerEvents(t, s.options.Database.Root) {
+		if event.Method == "turn/steer" {
+			if err := json.Unmarshal(event.Params, &steer); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if steer["threadId"] != "thread" || steer["expectedTurnId"] != "turn" || !strings.Contains(fmt.Sprint(steer["input"]), "failing test") {
+		t.Fatalf("steer params: %#v", steer)
 	}
 }
 
 func TestSchedulerPreservesApprovalReviewAttention(t *testing.T) {
 	executable := installSupervisorPeer(t)
-	s, request, _ := schedulerFixture(t, executable, "schedule_approval")
-	status := awaitSchedule(t, startSchedule(t, s, request))
-	if status.State != "needs_attention" || status.Reason != "codex_approval_review_required" {
-		t.Fatalf("approval attention = %+v", status)
+	s, request, _ := schedulerFixture(t, executable, "schedule_approval_live")
+	h := startSchedule(t, s, request)
+	run := awaitActiveRun(t, s, true)
+	if run.State != "awaiting_input" || run.Interaction == nil || run.Interaction.Method != "item/commandExecution/requestApproval" || run.Summary != "Automatic review routed this approval for an explicit human decision." {
+		t.Fatalf("approval activity = %#v", run)
 	}
-	run, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, status.RunID)
-	if err != nil || run.State != "needs_attention" || run.ErrorCode != "codex_approval_review_required" || run.Summary != "Automatic approval review requires attention." {
-		t.Fatalf("approval activity = %#v %v", run, err)
-	}
+	h.StopNow()
+	_ = awaitSchedule(t, h)
 }
 
 func TestWebResumeRestoresCapturedFiltersInsteadOfBrowserValues(t *testing.T) {

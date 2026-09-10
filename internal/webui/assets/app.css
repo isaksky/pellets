@@ -144,6 +144,9 @@ h3 { font-size: .86rem; letter-spacing: .01em; }
 .run-notice.warning { color: var(--warning); background: var(--warning-soft); border-color: color-mix(in srgb, var(--warning) 30%, var(--border)); }
 .run-state.running { color: var(--accent-strong); background: var(--accent-soft); }
 .run-state.awaiting_input, .run-state.needs_attention, .run-state.interrupted { color: var(--warning); background: var(--warning-soft); }
+.run-interaction, .run-follow-up { margin-top: .8rem; padding: .8rem; border: 1px solid var(--border); border-radius: .5rem; }
+.run-interaction fieldset { margin: .7rem 0; }
+.run-interaction input, .run-interaction select, .run-interaction textarea, .run-follow-up textarea { width: 100%; }
 .run-state.completed { color: var(--success); background: var(--success-soft); }
 .run-controls { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .75rem; }
 .run-controls form { display: flex; gap: .35rem; }

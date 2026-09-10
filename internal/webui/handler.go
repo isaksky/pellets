@@ -240,6 +240,7 @@ type runWorkspaceView struct {
 
 type runView struct {
 	ID           int64
+	Revision     int64
 	Pellet       string
 	Mode         string
 	Model        string
@@ -258,6 +259,8 @@ type runView struct {
 	AutoReview   bool
 	Interrupted  bool
 	Attention    bool
+	Active       bool
+	Interaction  *storage.RunInteraction
 }
 
 type scheduleView struct {
@@ -587,13 +590,14 @@ func makeRunView(run storage.ExecutionRun) runView {
 		activity = "No activity reported yet."
 	}
 	activity = publicRunActivity(activity)
-	view := runView{ID: run.ID, Pellet: run.ProjectCode + "-" + strconv.FormatInt(run.PelletNumber, 10), PelletNumber: run.PelletNumber, Mode: run.Mode, Model: model, Effort: effort, Phase: run.Phase, State: run.State, Activity: activity, Commit: run.ResultCommit, Error: run.ErrorCode, ExternalID: textOrDash(run.ExternalID), Group: textOrDash(run.Group)}
+	view := runView{ID: run.ID, Revision: run.Revision, Pellet: run.ProjectCode + "-" + strconv.FormatInt(run.PelletNumber, 10), PelletNumber: run.PelletNumber, Mode: run.Mode, Model: model, Effort: effort, Phase: run.Phase, State: run.State, Activity: activity, Commit: run.ResultCommit, Error: run.ErrorCode, ExternalID: textOrDash(run.ExternalID), Group: textOrDash(run.Group), Active: storage.RunActive(run.State), Interaction: run.Interaction}
 	view.Outcome = run.Outcome
 	view.Awaiting = run.State == "awaiting_input" || run.ErrorCode == "codex_input_required"
 	view.Interrupted = run.State == "interrupted"
 	view.Attention = run.State == "needs_attention"
 	view.CanResume = !storage.RunActive(run.State) && run.State != "completed" && run.PelletPresent
-	view.AutoReview = strings.Contains(strings.ToLower(activity), "automatic approval review")
+	lowerActivity := strings.ToLower(activity)
+	view.AutoReview = strings.Contains(lowerActivity, "automatic approval review is in progress") || strings.Contains(lowerActivity, "automatic approval review requires attention") || strings.Contains(lowerActivity, "explicit human decision")
 	return view
 }
 

@@ -282,6 +282,13 @@ is outside the selected worktree, only its immediate directory is added to the
 effective workspace-write roots; Pellets never substitutes a broader grant or
 a replacement database.
 
+One bounded pending interaction is durable per run so browser reconnects can
+render complete questions and explicit remaining decisions. Answers and
+credentials are never stored. Actions are checked against the run revision and
+exact app-server request/thread/turn, and require the live owned process;
+stale or post-restart responses fail closed. Follow-ups use expected-turn
+steering and start a new turn only after the prior turn is known idle.
+
 Ordinary server-supervised work follows test → commit → close. A review
 checkpoint has explicit scope and a separate Codex review context; it can
 produce deduplicated focused follow-up pellets, but it does not create a

@@ -66,6 +66,23 @@ func (application *WebApplication) StartSchedule(ctx context.Context, project st
 	return nil, scheduleError("schedule_workspace_unavailable", "choose an existing workspace in this project")
 }
 
+// SubmitRunInteraction routes only to the exact live process after checking
+// project ownership against durable evidence. A browser cannot substitute a
+// different run, thread, turn, or server request.
+func (application *WebApplication) SubmitRunInteraction(ctx context.Context, project storage.Project, submission InteractionSubmission) (storage.ExecutionRun, error) {
+	if application.Executions == nil || application.Database.Path == "" {
+		return storage.ExecutionRun{}, scheduleError("run_process_unavailable", "foreground execution is unavailable")
+	}
+	run, err := application.Executions.ReadRun(ctx, application.Database, submission.RunID)
+	if err != nil {
+		return run, err
+	}
+	if run.ProjectID != project.ID {
+		return run, storage.ExecutionRunConflict(run.ID)
+	}
+	return application.Executions.SubmitInteraction(ctx, application.Database, submission)
+}
+
 func copyScheduleFilter(value *string) *string {
 	if value == nil {
 		return nil

@@ -23,7 +23,7 @@ func completeScheduled(mode string, params json.RawMessage) string {
 	ref, err := domain.ParsePelletReference(target.Reference)
 	must(err)
 	files := []string{}
-	if mode == "schedule_success" || mode == "schedule_gate" || mode == "schedule_wrong_report" || mode == "schedule_unreported_file" || mode == "schedule_staged" {
+	if mode == "schedule_success" || mode == "schedule_gate" || mode == "schedule_wrong_report" || mode == "schedule_unreported_file" || mode == "schedule_staged" || mode == "schedule_input_live" || mode == "schedule_approval_live" || mode == "schedule_followup_live" {
 		file := target.Reference + ".txt"
 		must(os.WriteFile(file, []byte("Implemented "+target.Reference+"\n"), 0600))
 		files = append(files, file)

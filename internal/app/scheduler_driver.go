@@ -109,26 +109,47 @@ func (s *Scheduler) drive(ctx context.Context, execution *WorkspaceExecution) er
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case action := <-execution.actions:
+			updated, resetResult, actionErr := execution.applyInteraction(ctx, action)
+			if actionErr == nil {
+				run = updated
+				if resetResult {
+					result = nil
+				}
+			}
+			action.result <- interactionResult{run: updated, err: actionErr}
 		case event, ok := <-execution.Events():
 			if !ok {
 				return codex.ErrClosed
 			}
 			if len(event.ID) != 0 {
-				summary := conciseCodexActivity(event.Method)
-				if summary != "" && summary != run.Summary {
-					progress := run.RunProgress
-					progress.Summary = summary
-					run, err = execution.Save(ctx, progress, run.Revision)
-					if err != nil {
-						return err
-					}
+				if run.Interaction != nil {
+					_ = execution.Respond(ctx, event.ID, nil, &codex.RPCError{Code: -32600, Message: "Pellets already has a pending interaction for this run"})
+					return scheduleError("codex_interaction_overlap", "Codex emitted overlapping interaction requests")
 				}
-				switch event.Method {
-				case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval":
-					return scheduleError("codex_approval_review_required", "automatic approval review requires attention")
-				default:
-					return scheduleError("codex_input_required", "Codex requested input; explicit attention is required")
+				interaction, parseErr := parseServerInteraction(event, run)
+				if parseErr != nil {
+					_ = execution.Respond(ctx, event.ID, nil, &codex.RPCError{Code: -32602, Message: "Unsupported or invalid interaction request"})
+					return parseErr
 				}
+				progress := run.RunProgress
+				progress.State, progress.Interaction = "awaiting_input", interaction
+				progress.Summary = conciseCodexActivity(event.Method)
+				run, err = execution.Save(ctx, progress, run.Revision)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+			if resolved := resolvedRequestID(event); run.Interaction != nil && resolved == run.ThreadID+"\x00"+run.Interaction.RequestID {
+				progress := run.RunProgress
+				progress.State, progress.Interaction = "running", nil
+				progress.Summary = "The pending Codex request was resolved or withdrawn."
+				run, err = execution.Save(ctx, progress, run.Revision)
+				if err != nil {
+					return err
+				}
+				continue
 			}
 			if cached, reported := codex.CachedInputTokensForTurn(&event, run.ThreadID, run.TurnID); reported {
 				progress := run.RunProgress
@@ -157,7 +178,7 @@ func (s *Scheduler) drive(ctx context.Context, execution *WorkspaceExecution) er
 					result = &report
 				}
 			}
-			if summary := conciseCodexActivity(event.Method); summary != "" && summary != run.Summary {
+			if summary := conciseCodexEvent(event, run.ThreadID, run.TurnID); summary != "" && summary != run.Summary {
 				progress := run.RunProgress
 				progress.Summary = summary
 				run, err = execution.Save(ctx, progress, run.Revision)
@@ -168,6 +189,14 @@ func (s *Scheduler) drive(ctx context.Context, execution *WorkspaceExecution) er
 			status := completedTurnStatus(&event, run.ThreadID, run.TurnID)
 			if status == "" {
 				continue
+			}
+			if run.Interaction != nil {
+				progress := run.RunProgress
+				progress.State, progress.Interaction = "running", nil
+				run, err = execution.Save(ctx, progress, run.Revision)
+				if err != nil {
+					return err
+				}
 			}
 			if status != "completed" {
 				return scheduleError("codex_turn_unsuccessful", "the exact Codex turn did not complete successfully")
@@ -183,6 +212,44 @@ func (s *Scheduler) drive(ctx context.Context, execution *WorkspaceExecution) er
 	}
 }
 
+func conciseCodexEvent(event codex.Event, threadID, turnID string) string {
+	if event.Method != "item/autoApprovalReview/started" && event.Method != "item/autoApprovalReview/completed" && event.Method != "autoApprovalReview/strictReviewRequired" {
+		return conciseCodexActivity(event.Method)
+	}
+	var params struct {
+		ThreadID string `json:"threadId"`
+		TurnID   string `json:"turnId"`
+		Review   struct {
+			Status    string  `json:"status"`
+			Rationale *string `json:"rationale"`
+		} `json:"review"`
+	}
+	if json.Unmarshal(event.Params, &params) != nil {
+		return "Automatic approval review status changed."
+	}
+	if params.ThreadID != threadID || params.TurnID != turnID {
+		return ""
+	}
+	if event.Method == "autoApprovalReview/strictReviewRequired" {
+		return "Automatic approval review is in progress for each remaining command in this turn."
+	}
+	if event.Method == "item/autoApprovalReview/started" {
+		return "Automatic approval review is in progress."
+	}
+	status := strings.TrimSpace(params.Review.Status)
+	if status == "" {
+		status = "finished"
+	}
+	summary := "Automatic approval review " + status + "."
+	if params.Review.Rationale != nil && (status == "denied" || status == "aborted" || status == "timedOut" || status == "error") {
+		reason := strings.TrimSpace(boundedDisplay(*params.Review.Rationale, 700))
+		if reason != "" {
+			summary += " " + reason
+		}
+	}
+	return summary
+}
+
 // conciseCodexActivity maps protocol categories to fixed, bounded UI text.
 // It intentionally never reads item text, command arguments, command output,
 // or any transcript field, and it never invokes another model.
@@ -195,7 +262,7 @@ func conciseCodexActivity(method string) string {
 	case "turn/completed":
 		return "Codex turn completed; validating the bound result."
 	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval":
-		return "Automatic approval review is in progress."
+		return "Automatic review routed this approval for an explicit human decision."
 	case "item/tool/requestUserInput", "mcpServer/elicitation/request":
 		return "Codex is awaiting explicit input."
 	default:

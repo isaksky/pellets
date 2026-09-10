@@ -16,6 +16,7 @@ const (
 	MaxRunActivity       = 64
 	MaxRunSummaryBytes   = 1024
 	MaxRunSnapshotBytes  = 1 << 20
+	MaxInteractionBytes  = 256 << 10
 	MaxPromptPrefixBytes = 2 << 20
 	// This matches the SQLite prompt_prefix_json CHECK. Text can require JSON
 	// escaping, so validation below measures the encoded record rather than
@@ -81,6 +82,41 @@ type RunProgress struct {
 	// Finalization is immutable evidence captured after the implementation
 	// turn succeeds and before staging/commit. It survives explicit resumes.
 	Finalization *FinalizationEvidence `json:"finalization,omitempty"`
+	// Interaction is the one outstanding app-server request, if any. It keeps
+	// only the bounded fields needed to render and correlate a response; answers,
+	// credentials, command text, and transcript content are never retained.
+	Interaction *RunInteraction `json:"interaction,omitempty"`
+}
+
+type RunInteraction struct {
+	RequestID string                `json:"request_id"`
+	Method    string                `json:"method"`
+	ThreadID  string                `json:"thread_id"`
+	TurnID    string                `json:"turn_id,omitempty"`
+	ItemID    string                `json:"item_id,omitempty"`
+	Title     string                `json:"title"`
+	Detail    string                `json:"detail,omitempty"`
+	Mode      string                `json:"mode,omitempty"`
+	Questions []InteractionQuestion `json:"questions,omitempty"`
+	// RequestedPermissions is retained only for the exact turn-scoped grant
+	// response. It is not rendered and must contain no credentials.
+	RequestedPermissions json.RawMessage `json:"requested_permissions,omitempty"`
+}
+
+type InteractionQuestion struct {
+	ID       string              `json:"id"`
+	Header   string              `json:"header"`
+	Question string              `json:"question"`
+	Options  []InteractionOption `json:"options,omitempty"`
+	Other    bool                `json:"other,omitempty"`
+	Secret   bool                `json:"secret,omitempty"`
+	Type     string              `json:"type,omitempty"`
+	Required bool                `json:"required,omitempty"`
+}
+
+type InteractionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
 }
 
 type FinalizationEvidence struct {
@@ -229,6 +265,12 @@ func ValidatePromptPrefix(prefix PromptPrefix) error {
 }
 
 func ValidateRunProgress(p RunProgress) error {
+	if err := ValidateRunInteraction(p.Interaction); err != nil {
+		return err
+	}
+	if p.Interaction != nil && p.State != "awaiting_input" {
+		return InvalidExecutionRun("a pending interaction requires awaiting-input state")
+	}
 	if p.Finalization != nil {
 		f := p.Finalization
 		if !IsFullCommitID(f.Tree) || len(f.Files) == 0 || len(f.Files) > 10000 || len(f.Subject) == 0 || len(f.Subject) > 240 || strings.ContainsAny(f.Subject, "\x00\r\n") {
@@ -283,6 +325,59 @@ func ValidateRunProgress(p RunProgress) error {
 	}
 	if p.CachedInputTokens != nil && *p.CachedInputTokens < 0 {
 		return InvalidExecutionRun("cached input tokens must be nonnegative")
+	}
+	return nil
+}
+
+func ValidateRunInteraction(interaction *RunInteraction) error {
+	if interaction == nil {
+		return nil
+	}
+	if interaction.RequestID == "" || len(interaction.RequestID) > 512 || interaction.ThreadID == "" || !safeRunID.MatchString(interaction.ThreadID) ||
+		(interaction.TurnID != "" && !safeRunID.MatchString(interaction.TurnID)) || len(interaction.ItemID) > 256 || !utf8.ValidString(interaction.RequestID) || !utf8.ValidString(interaction.ItemID) ||
+		len(interaction.Title) == 0 || len(interaction.Title) > 1024 || len(interaction.Detail) > 4096 || !utf8.ValidString(interaction.Title) || !utf8.ValidString(interaction.Detail) ||
+		strings.ContainsRune(interaction.Title, 0) || strings.ContainsRune(interaction.Detail, 0) {
+		return InvalidExecutionRun("invalid pending interaction identity or display content")
+	}
+	switch interaction.Method {
+	case "item/tool/requestUserInput":
+		if interaction.TurnID == "" || len(interaction.Questions) == 0 || len(interaction.Questions) > 3 || len(interaction.RequestedPermissions) != 0 {
+			return InvalidExecutionRun("invalid user-input interaction")
+		}
+	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
+		if interaction.TurnID == "" || len(interaction.Questions) != 0 || len(interaction.RequestedPermissions) != 0 {
+			return InvalidExecutionRun("invalid approval interaction")
+		}
+	case "item/permissions/requestApproval":
+		if interaction.TurnID == "" || len(interaction.Questions) != 0 || len(interaction.RequestedPermissions) == 0 || !json.Valid(interaction.RequestedPermissions) {
+			return InvalidExecutionRun("invalid permissions interaction")
+		}
+	case "mcpServer/elicitation/request":
+		if interaction.ItemID != "" || (interaction.Mode != "form" && interaction.Mode != "url") || len(interaction.RequestedPermissions) != 0 || (interaction.Mode == "form" && len(interaction.Questions) == 0) || len(interaction.Questions) > 64 {
+			return InvalidExecutionRun("invalid MCP elicitation interaction")
+		}
+	default:
+		return InvalidExecutionRun("unsupported pending interaction method")
+	}
+	seen := map[string]bool{}
+	for _, question := range interaction.Questions {
+		if question.ID == "" || seen[question.ID] || len(question.ID) > 256 || len(question.Header) > 256 || question.Question == "" || len(question.Question) > 8192 ||
+			!utf8.ValidString(question.ID+question.Header+question.Question) || strings.ContainsRune(question.ID+question.Header+question.Question, 0) || len(question.Options) > 32 {
+			return InvalidExecutionRun("invalid pending interaction question")
+		}
+		seen[question.ID] = true
+		if question.Type != "" && question.Type != "string" && question.Type != "number" && question.Type != "integer" && question.Type != "boolean" {
+			return InvalidExecutionRun("unsupported pending interaction question type")
+		}
+		for _, option := range question.Options {
+			if option.Label == "" || len(option.Label) > 1024 || len(option.Description) > 4096 || !utf8.ValidString(option.Label+option.Description) || strings.ContainsRune(option.Label+option.Description, 0) {
+				return InvalidExecutionRun("invalid pending interaction option")
+			}
+		}
+	}
+	encoded, err := json.Marshal(interaction)
+	if err != nil || len(encoded) > MaxInteractionBytes {
+		return InvalidExecutionRun("pending interaction exceeds its storage bound")
 	}
 	return nil
 }
