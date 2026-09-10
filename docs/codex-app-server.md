@@ -250,10 +250,17 @@ a fresh preflight result rather than silently reusing an old snapshot.
 
 For a new Codex thread, the scheduler prepends one deterministic
 `pellets-codex-prefix-v1` layer: snapshot identity, skill, CLI help, then the
-small stable workflow. Only after that layer does it append the selected
-pellet's variable reference/title/description. The exact prefix and template
-version are retained with the durable execution attempt. A resumed thread uses
+small stable workflow. Only after that layer does it append phase-specific
+instructions and variable task context. Fresh detached checkpoint reviews and
+each fresh finding-assessment thread receive that same captured prefix once,
+followed by their read-only role restrictions and exact snapshot/finding/queue
+context. The prefix stays outside the review snapshot and its clean-marker
+digest. The exact prefix and template version are retained with the durable
+execution attempt. A resumed thread uses
 its existing conversation context and does not append the full prefix again.
+Resuming checkpoint triage reuses the original captured prefix for fresh
+assessments of unfinished findings, even if skill or executable sources changed;
+it does not repeat the review or completed assessments.
 This deliberately complements—rather than replaces—the installed runtime's
 system prompt, user instructions, `AGENTS.md` discovery, tools, and settings.
 If a terminal runtime event reports cached input tokens, the attempt exposes

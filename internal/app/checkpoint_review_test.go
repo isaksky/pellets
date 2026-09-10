@@ -114,6 +114,7 @@ func TestCheckpointReviewerUsesFreshDetachedContextAndExactCommitSet(t *testing.
 							t.Fatalf("triage turn not read-only/structured: %+v", params)
 						}
 						input := params["input"].([]any)[0].(map[string]any)["text"].(string)
+						assertCapturedCheckpointPrefix(t, input, run.PromptPrefix.Text, "Independently triage exactly")
 						for _, required := range []string{"applicable AGENTS.md", "active_queue", "prior_assessments", "verifiable acceptance criteria"} {
 							if !strings.Contains(input, required) {
 								t.Fatalf("triage prompt omits %q", required)
@@ -130,11 +131,26 @@ func TestCheckpointReviewerUsesFreshDetachedContextAndExactCommitSet(t *testing.
 			}
 			target := review["target"].(map[string]any)
 			instructions := target["instructions"].(string)
+			assertCapturedCheckpointPrefix(t, instructions, run.PromptPrefix.Text, "Review exactly the immutable checkpoint")
+			encoded, err := json.Marshal(run.ReviewSnapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasSuffix(instructions, "Checkpoint "+checkpoint.Reference.String()+":\n"+string(encoded)) || !strings.Contains(instructions, "`"+reviewCleanMarker(encoded)+"`") || strings.Contains(string(encoded), "PELLETS CODEX TASK PRELOAD") {
+				t.Fatal("prefix changed the immutable snapshot or its scope-bound clean marker")
+			}
 			first, third := implementations[0].ResultCommit, implementations[2].ResultCommit
 			if target["type"] != "custom" || !strings.Contains(instructions, first) || !strings.Contains(instructions, third) || strings.Contains(instructions, first+".."+third) {
 				t.Fatalf("inexact custom scope: %s", instructions)
 			}
 		})
+	}
+}
+
+func assertCapturedCheckpointPrefix(t *testing.T, prompt, prefix, role string) {
+	t.Helper()
+	if prefix == "" || !strings.HasPrefix(prompt, prefix+role) || strings.Count(prompt, prefix) != 1 {
+		t.Fatal("fresh checkpoint conversation must start with exactly one captured prefix followed by its role restrictions")
 	}
 }
 
@@ -471,6 +487,12 @@ func TestCheckpointReviewerCancellationResumesDurableResultWithoutRepeatingRevie
 	if first.State != "interrupted" || first.ReviewResult == nil {
 		t.Fatalf("cancelled evidence: %#v", first)
 	}
+	initialTurns := 0
+	for _, event := range readPeerEvents(t, s.options.Database.Root) {
+		if event.Method == string(codex.TurnStart) {
+			initialTurns++
+		}
+	}
 	if err := os.WriteFile(filepath.Join(s.options.Database.Root, "fake-mode"), []byte("review_clean"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -479,14 +501,22 @@ func TestCheckpointReviewerCancellationResumesDurableResultWithoutRepeatingRevie
 	if status.State != "completed" {
 		t.Fatalf("resume status: %+v", status)
 	}
-	count := 0
+	count, turns := 0, 0
 	for _, event := range readPeerEvents(t, s.options.Database.Root) {
 		if event.Method == string(codex.ReviewStart) {
 			count++
+			var params struct{ Target struct{ Instructions string } }
+			if err := json.Unmarshal(event.Params, &params); err != nil {
+				t.Fatal(err)
+			}
+			assertCapturedCheckpointPrefix(t, params.Target.Instructions, first.PromptPrefix.Text, "Review exactly the immutable checkpoint")
+		}
+		if event.Method == string(codex.TurnStart) {
+			turns++
 		}
 	}
-	if count != 1 {
-		t.Fatalf("review/start repeated %d times", count)
+	if count != 1 || turns != initialTurns {
+		t.Fatalf("review resume repeated work: review starts=%d turns=%d want=%d", count, turns, initialTurns)
 	}
 }
 

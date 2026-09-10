@@ -342,7 +342,9 @@ func reviewedFixtureFile(params json.RawMessage) string {
 			Files []string `json:"files"`
 		} `json:"commits"`
 	}
-	start := strings.Index(request.Target.Instructions, "\n")
+	// The snapshot is the final JSON line after the captured multiline preload
+	// and the checkpoint review role instructions.
+	start := strings.LastIndex(request.Target.Instructions, "\n")
 	must(json.Unmarshal([]byte(request.Target.Instructions[start+1:]), &snapshot))
 	return snapshot.Commits[0].Files[0]
 }
