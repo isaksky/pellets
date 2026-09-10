@@ -11,7 +11,7 @@ import (
 
 func (h *handler) startSchedule(w http.ResponseWriter, r *http.Request, project storage.Project) {
 	fields := []string{"_csrf", "workspace_id", "mode"}
-	for _, optional := range []string{"external_id", "group", "group_scope", "resume_pellet", "resume_from", "limit"} {
+	for _, optional := range []string{"external_id", "group", "group_scope", "resume_pellet", "resume_from", "limit", "preflight_receipt"} {
 		if _, exists := r.PostForm[optional]; exists {
 			fields = append(fields, optional)
 		}
@@ -26,6 +26,19 @@ func (h *handler) startSchedule(w http.ResponseWriter, r *http.Request, project 
 		return
 	}
 	request := app.ScheduleRequest{Mode: r.PostForm.Get("mode")}
+	if token, present := r.PostForm["preflight_receipt"]; present {
+		if len(token[0]) != 64 {
+			h.renderError(w, http.StatusUnprocessableEntity, requestError("invalid preflight receipt identity"), nil)
+			return
+		}
+		for _, key := range []string{"external_id", "group", "group_scope"} {
+			if _, present := r.PostForm[key]; present {
+				h.renderError(w, http.StatusUnprocessableEntity, requestError("saved preflight filters must come from the exact receipt"), nil)
+				return
+			}
+		}
+		request.PreflightReceipt = token[0]
+	}
 	groupScope := r.PostForm.Get("group_scope")
 	if groupScope == "ungrouped" {
 		h.renderError(w, http.StatusUnprocessableEntity, requestError("scheduling an exact ungrouped filter is not supported; remove the group filter before running"), nil)

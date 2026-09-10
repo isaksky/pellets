@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 
 	"pellets/internal/codex"
 	"pellets/internal/discovery"
@@ -13,6 +15,97 @@ import (
 	"pellets/internal/executionlock"
 	"pellets/internal/storage"
 )
+
+func preflightRecoveryRequired() error {
+	return scheduleError("workspace_execution_recovery_required", "the preflight recovery receipt is legacy, ambiguous, or belongs to different work; preserve it and reconcile the exact workspace before continuing")
+}
+
+func capturePreflight(ctx context.Context, request ExecutionRequest, root string) (*executionlock.Preflight, error) {
+	identity, err := discovery.FindGitIdentity(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	head, err := executionGit(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil || !storage.IsFullCommitID(head) {
+		return nil, errors.Join(missingRunEvidence("starting_head_unavailable"), err)
+	}
+	ref, err := executionGit(ctx, root, "rev-parse", "--symbolic-full-name", "HEAD")
+	if err != nil || ref == "" {
+		return nil, missingRunEvidence("starting_ref_unavailable")
+	}
+	databaseIdentity, err := executionlock.FileIdentity(request.Database.Path)
+	if err != nil {
+		return nil, err
+	}
+	gitIdentity, err := executionlock.FileIdentity(identity.GitDir)
+	if err != nil {
+		return nil, err
+	}
+	c := request.Capture
+	return &executionlock.Preflight{Version: 1, Platform: runtime.GOOS, DatabaseIdentity: databaseIdentity, GitIdentity: gitIdentity,
+		ProjectID: c.ProjectID, WorkspaceID: c.WorkspaceID, PelletNumber: c.PelletNumber, ImplementationRevision: c.ExpectedImplementationRevision,
+		Root: root, GitDir: identity.GitDir, GitCommonDir: identity.GitCommonDir, StartingHead: head, StartingRef: ref,
+		Mode: c.Mode, ScheduleMode: c.ScheduleMode, ScheduleRemaining: c.ScheduleRemaining, ExternalID: c.ExternalID, Group: c.Group}, nil
+}
+
+func matchPreflight(previous, current *executionlock.Preflight) error {
+	if previous == nil || previous.Version != 1 || previous.Platform != runtime.GOOS || previous.DatabaseIdentity == "" || previous.GitIdentity == "" || previous.ImplementationRevision < 1 {
+		return preflightRecoveryRequired()
+	}
+	return samePreflight(previous, current)
+}
+
+func samePreflight(previous, current *executionlock.Preflight) error {
+	if !reflect.DeepEqual(previous, current) {
+		return preflightRecoveryRequired()
+	}
+	return nil
+}
+
+// PreflightRecovery is display-only. A valid snapshot does not prove cleanup;
+// explicit admission must acquire the OS lock and revalidate it again.
+func (supervisor *ExecutionSupervisor) PreflightRecovery(ctx context.Context, database Database, selected storage.ResolvedProject, pellet storage.Pellet) (*executionlock.Preflight, error) {
+	gitDir, err := discovery.ResolveLocalPath(database.Root, selected.Workspace.GitDir)
+	if err != nil {
+		return nil, err
+	}
+	owner, err := executionlock.ReadOwner(gitDir)
+	if err != nil {
+		return nil, preflightRecoveryRequired()
+	}
+	if owner == nil {
+		return nil, nil
+	}
+	if runtime.GOOS == "windows" {
+		return nil, scheduleError("process_cleanup_unconfirmed", "previous process cleanup cannot be verified on this platform; preserve the recovery receipt")
+	}
+	if owner.Database != database.Path || owner.RunID != 0 || owner.Preflight == nil {
+		return nil, preflightRecoveryRequired()
+	}
+	p := owner.Preflight
+	root, err := executionRoot(ctx, database, storage.ExecutionRun{WorkspaceRoot: selected.Workspace.RootPath, WorkspaceGitDir: selected.Workspace.GitDir, GitCommonDir: selected.Project.GitCommonDir})
+	if err != nil {
+		return nil, err
+	}
+	if pellet.Status != domain.PelletInProgress || pellet.Workspace == nil || pellet.Workspace.ID != selected.Workspace.ID || !storage.MatchesSchedule(pellet, p.ExternalID, p.Group) {
+		return nil, preflightRecoveryRequired()
+	}
+	if p.ScheduleMode != "run_one" && p.ScheduleMode != "drain" && p.ScheduleMode != "watch" || p.ScheduleRemaining < 1 || p.ScheduleRemaining > 10000 {
+		return nil, preflightRecoveryRequired()
+	}
+	mode := p.ScheduleMode
+	if pellet.Kind == domain.PelletReviewCheckpoint {
+		mode = "review_checkpoint"
+	}
+	current, err := capturePreflight(ctx, ExecutionRequest{Database: database, Selected: selected, Capture: storage.RunCapture{ProjectID: selected.Project.ID, WorkspaceID: selected.Workspace.ID, PelletNumber: pellet.Reference.Number, ExpectedImplementationRevision: pellet.ImplementationRevision, Mode: mode, ScheduleMode: p.ScheduleMode, ScheduleRemaining: p.ScheduleRemaining, ExternalID: p.ExternalID, Group: p.Group}}, root)
+	if err != nil {
+		return nil, err
+	}
+	if err := matchPreflight(p, current); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
 
 // RecoveryPending is display-only. Admission still obtains the OS lock and
 // validates the exact receipt; seeing bytes never proves process cleanup.
@@ -92,7 +185,7 @@ func (supervisor *ExecutionSupervisor) validateResume(ctx context.Context, reque
 		return previous, storage.ExecutionRunConflict(previous.ID)
 	}
 	if owner := lock.Owner(); owner != nil {
-		if owner.Database != request.Database.Path || owner.RunID != 0 && owner.RunID != previous.ID {
+		if owner.Database != request.Database.Path || owner.RunID != previous.ID {
 			return previous, scheduleError("workspace_execution_recovery_required", "the recovery receipt belongs to another database or attempt; inspect that exact receipt")
 		}
 		if !lock.RecoveryStopped() {

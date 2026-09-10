@@ -240,14 +240,16 @@ type runWorkspaceView struct {
 	NoRunResume       *noRunResumeView
 }
 
-// No conversation or schedule intent has been captured for this owned pellet.
-// These are suggestions from its current metadata, never claimed as saved
-// schedule filters. The browser explicitly chooses the new schedule mode.
+// Without a crash receipt, filters are suggestions from current metadata.
+// A validated preflight receipt instead requires its exact saved intent.
 type noRunResumeView struct {
 	PelletNumber           int64
 	ImplementationRevision int64
 	ExternalID             string
 	Group                  string
+	SavedMode              string
+	SavedLimit             int
+	ReceiptToken           string
 }
 
 type runView struct {
@@ -618,6 +620,23 @@ func (h *handler) runWorkspaceViews(request *http.Request, project storage.Proje
 				}
 				if owned.Group != nil {
 					view.NoRunResume.Group = *owned.Group
+				}
+				if h.application.Executions != nil {
+					receipt, err := h.application.Executions.PreflightRecovery(request.Context(), h.application.Database, storage.ResolvedProject{Project: project, Workspace: workspace}, owned)
+					if err != nil {
+						view.NoRunResume = nil
+						view.RecoveryAttention = domain.PublicError(err).Message
+					} else if receipt != nil {
+						view.NoRunResume.SavedMode, view.NoRunResume.SavedLimit = receipt.ScheduleMode, receipt.ScheduleRemaining
+						view.NoRunResume.ReceiptToken = receipt.Token()
+						view.NoRunResume.ExternalID, view.NoRunResume.Group = "", ""
+						if receipt.ExternalID != nil {
+							view.NoRunResume.ExternalID = *receipt.ExternalID
+						}
+						if receipt.Group != nil {
+							view.NoRunResume.Group = *receipt.Group
+						}
+					}
 				}
 			}
 			// Ordinary queue controls cannot resume an owned pellet.

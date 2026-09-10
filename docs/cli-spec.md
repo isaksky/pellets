@@ -474,6 +474,12 @@ match both saved filters. Resume restores the exact prior attempt, worktree,
 branch, phase, Codex thread/turn, schedule mode, and remaining limit after
 validating current ownership and Git/queue evidence. Server startup only marks
 abandoned attempts interrupted or needing attention; it never resumes them.
+When a Unix preflight crash leaves a validated zero-run receipt, Resume instead
+requires confirmation of its saved mode, remaining limit, and exact filters for
+the same owned pellet generation. After custodian cleanup and repaired preflight,
+it creates one fresh run and conversation. Legacy or mismatched receipts and
+Windows cleanup without post-crash proof remain fenced. With no receipt and no
+current-generation run, the form asks for a new mode and filters explicitly.
 A missing conversation, ambiguous pending call, changed scope, missing commit,
 or unconfirmed process cleanup remains visible for recovery rather than being
 silently retried. Stop after Pellet permits the active unit to finish; Stop now

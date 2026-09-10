@@ -24,7 +24,7 @@ const until = async (predicate, message) => {
   throw new Error(message);
 };
 async function stopServer() {
-  if (server && server.exitCode === null) {
+  if (server && server.exitCode === null && server.signalCode === null) {
     const exited = new Promise(resolve => server.once('exit', resolve));
     server.kill('SIGINT');
     await exited;
@@ -53,7 +53,11 @@ async function startServer(root) {
   for (const scenario of [
     {name: 'auth', failure: 'unauthenticated', mode: 'run_one'},
     {name: 'config', failure: 'config_disallows_review', mode: 'drain', restart: true},
-    {name: 'cli', mode: 'watch'}
+    {name: 'cli', mode: 'watch'},
+    ...(process.platform === 'win32' ? [] : [
+      {name: 'crash', failure: 'preflight_gate', mode: 'watch', crash: true},
+      {name: 'crash-multiline', failure: 'preflight_gate', mode: 'watch', crash: true, multiline: true}
+    ])
   ]) {
     const root = path.join(temporary, scenario.name);
     fs.mkdirSync(root);
@@ -65,7 +69,8 @@ async function startServer(root) {
     git('config', 'commit.gpgSign', 'false');
     git('commit', '--allow-empty', '-m', 'initial');
     fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '\n/fake-*\n/.agents/\n');
-    const group = ' Exact Group ', external = 'Exact:ID';
+    const group = scenario.multiline ? ' Exact\r\nGroup\n<saved>\rend ' : ' Exact Group ';
+    const external = scenario.multiline ? 'Exact:\rID\n<saved>\r\nend' : 'Exact:ID';
     const target = cli('add', 'recover this exact target', '--group', group, '--external-id', external);
     const queued = cli('add', 'leave matching target queued', '--group', group, '--external-id', external);
     const unrelated = cli('add', 'leave unrelated target queued');
@@ -73,7 +78,7 @@ async function startServer(root) {
     const initialHead = git('rev-parse', 'HEAD').trim();
     const modeFile = path.join(root, 'fake-mode');
     fs.writeFileSync(modeFile, scenario.failure || 'schedule_success');
-    if (!scenario.failure) cli('start-next', '--group', group, '--external-id', external);
+    if (!scenario.failure || scenario.crash) cli('start-next', '--group', group, '--external-id', external);
     let origin = await startServer(root);
     const page = await browser.newPage();
     page.setDefaultTimeout(15000);
@@ -87,17 +92,61 @@ async function startServer(root) {
       return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
     };
     if (scenario.failure) {
-      const start = page.locator('form[data-schedule]').filter({has: page.locator('button[name=mode]')});
-      await start.locator('input[name=group]').fill(group);
-      await start.locator('input[name=external_id]').fill(external);
-      await start.locator(`button[value=${scenario.mode}]`).click();
+      const start = scenario.crash ? resume : page.locator('form[data-schedule]').filter({has: page.locator('button[name=mode]')});
+      if (scenario.multiline) {
+        // The HTTP API accepts opaque multiline filters. Their browser Resume
+        // must restore the saved bytes without relying on HTML text inputs.
+        const initial = await start.evaluate(form => Object.fromEntries(new FormData(form)));
+        const response = await page.request.post(origin + `/projects/${target.project}/schedules`, {
+          headers: {Origin: origin}, form: {...initial, mode: scenario.mode, limit: '1', group, external_id: external, group_scope: 'value'}
+        });
+        assert.equal(response.status(), 202);
+      } else if (scenario.crash) {
+        await start.locator('input[name=group]').fill(group);
+        await start.locator('input[name=external_id]').fill(external);
+        await start.locator('input[name=limit]').fill('1');
+        await start.locator('select[name=mode]').selectOption(scenario.mode);
+        await start.getByRole('button', {name: 'Resume', exact: true}).click();
+      } else {
+        await start.locator('input[name=group]').fill(group);
+        await start.locator('input[name=external_id]').fill(external);
+        await start.locator(`button[value=${scenario.mode}]`).click();
+      }
       // This disposable server's first schedule is #1. Preflight may finish
       // after the ownership invalidation; reconnect to its authoritative state
       // without depending on the dashboard's 35-second fallback refresh.
-      await until(async () => {
-        const response = await page.request.get(origin + `/projects/${target.project}/schedules/1`);
-        return response.status() === 200 && (await response.json()).state === 'needs_attention';
-      }, 'Initial preflight did not fail');
+      if (scenario.crash) {
+        await until(() => fs.existsSync(path.join(root, 'fake-preflight-ready')), 'Preflight did not reach the owned process gate');
+        const ownedPIDs = events().filter(event => event.method === 'process').map(event => event.pid);
+        assert.equal(ownedPIDs.length, 3, 'Preflight gate must own a real root, child and grandchild');
+        const lockPath = path.join(root, '.git', 'pellets-execution.lock');
+        const receiptBytes = fs.readFileSync(lockPath, 'utf8');
+        const preflight = JSON.parse(receiptBytes);
+        assert.equal(preflight.run_id || 0, 0);
+        assert.equal(preflight.preflight.version, 1);
+        assert.equal(preflight.preflight.schedule_mode, scenario.mode);
+        assert.equal(preflight.preflight.group, group);
+        assert.equal(preflight.preflight.external_id, external);
+        const guardian = Number(execFileSync('ps', ['-o', 'ppid=', '-p', String(ownedPIDs[0])], {encoding: 'utf8'}).trim());
+        assert.equal(Number(execFileSync('ps', ['-o', 'ppid=', '-p', String(guardian)], {encoding: 'utf8'}).trim()), server.pid);
+        const killed = new Promise(resolve => server.once('exit', resolve));
+        server.kill('SIGKILL');
+        await killed;
+        const alive = pid => {
+          try { return !execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], {encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore']}).trim().startsWith('Z'); }
+          catch { return false; }
+        };
+        await until(() => [...ownedPIDs, guardian].every(pid => !alive(pid)), 'Custodian did not settle its process family after SIGKILL');
+        origin = await startServer(root);
+        await page.goto(origin);
+        assert.equal(fs.readFileSync(lockPath, 'utf8'), receiptBytes, 'Restart changed the recovery receipt without Resume');
+        assert.equal(events().filter(event => event.method === 'thread/start' || event.method === 'turn/start').length, 0, 'Restart ran work automatically');
+      } else {
+        await until(async () => {
+          const response = await page.request.get(origin + `/projects/${target.project}/schedules/1`);
+          return response.status() === 200 && (await response.json()).state === 'needs_attention';
+        }, 'Initial preflight did not fail');
+      }
       await page.reload();
       await resume.waitFor();
       assert.equal(cli('show', target.id).status, 'in_progress');
@@ -113,17 +162,25 @@ async function startServer(root) {
       fs.writeFileSync(modeFile, 'schedule_gate');
     }
     await resume.waitFor();
-    assert.match(await resume.textContent(), /No run or saved schedule intent exists/);
+    assert.match(await resume.textContent(), scenario.crash ? /recovery receipt preserves the mode/ : /No run or saved schedule intent exists/);
     assert.match(await resume.textContent(), /new conversation/);
     assert.equal(await resume.locator('select[name=mode]').inputValue(), '', 'Recovery silently chose a mode');
-    assert.equal(await resume.locator('input[name=group]').inputValue(), group);
-    assert.equal(await resume.locator('input[name=external_id]').inputValue(), external);
+    if (scenario.crash) {
+      assert.equal(await resume.locator('[name=group], [name=external_id], [name=group_scope]').count(), 0);
+      assert.match(await resume.locator('input[name=preflight_receipt]').inputValue(), /^[0-9a-f]{64}$/);
+      const displayed = text => text.replace(/\r\n|\r/g, '\n');
+      assert.equal(await resume.locator('[data-saved-filter=group]').inputValue(), displayed(group));
+      assert.equal(await resume.locator('[data-saved-filter=external_id]').inputValue(), displayed(external));
+    } else {
+      assert.equal(await resume.locator('input[name=group]').inputValue(), group);
+      assert.equal(await resume.locator('input[name=external_id]').inputValue(), external);
+    }
     assert.equal(await resume.locator('input[name=resume_from]').count(), 0);
     assert.equal(await resume.locator('input[name=resume_pellet]').inputValue(), String(target.number));
     await page.setViewportSize({width: 390, height: 844});
     assert.equal(await resume.evaluate(form => {
       const workspace = form.closest('.run-workspace').getBoundingClientRect();
-      return Array.from(form.querySelectorAll('select, input:not([type=hidden]), button')).every(control => {
+      return Array.from(form.querySelectorAll('select, textarea, input:not([type=hidden]), button')).every(control => {
         const box = control.getBoundingClientRect();
         return box.left >= workspace.left && box.right <= workspace.right;
       });
@@ -132,7 +189,12 @@ async function startServer(root) {
     await resume.getByRole('button', {name: 'Resume', exact: true}).click();
     assert.equal(await resume.locator('select[name=mode]').evaluate(el => el.validity.valueMissing), true);
     await resume.locator('select[name=mode]').selectOption(scenario.mode);
-    await resume.locator('input[name=limit]').fill('1');
+    if (scenario.crash) {
+      assert.equal(await resume.locator('input[name=limit]').inputValue(), '1');
+      assert.equal(await resume.locator('input[name=limit]').getAttribute('readonly'), '');
+      assert.equal(await resume.locator('[data-saved-filter=group]').getAttribute('readonly'), '');
+      assert.equal(await resume.locator('select[name=mode] option').count(), 2);
+    } else await resume.locator('input[name=limit]').fill('1');
     // A live invalidation must not reset the user's reconstructed intent.
     await page.evaluate(() => document.dispatchEvent(new CustomEvent('pellets-refresh')));
     await page.waitForTimeout(400);
@@ -144,6 +206,27 @@ async function startServer(root) {
     assert.equal(forbidden.status(), 403);
     const noCSRF = await page.request.post(endpoint, {headers: {Origin: origin}, form: {...fields, _csrf: 'invalid'}});
     assert.equal(noCSRF.status(), 403);
+    if (scenario.crash) {
+      for (const changed of [{mode: 'drain'}, {limit: '2'}]) {
+        const changedFields = {...fields, ...changed};
+        for (const key of Object.keys(changedFields)) if (changedFields[key] === undefined) delete changedFields[key];
+        const rejected = await page.request.post(endpoint, {headers: {Origin: origin}, form: changedFields});
+        assert.equal(rejected.status(), 202);
+        const rejectedID = (await rejected.json()).id;
+        await until(async () => {
+          const state = await (await page.request.get(endpoint + '/' + rejectedID)).json();
+          assert.equal(state.run_id || 0, 0);
+          return state.state === 'needs_attention' && state.reason === 'workspace_execution_recovery_required';
+        }, 'Changed preflight intent was not rejected');
+      }
+      for (const changed of [{group: 'changed'}, {external_id: 'changed'}, {group_scope: 'any'}]) {
+        const rejected = await page.request.post(endpoint, {headers: {Origin: origin}, form: {...fields, ...changed}});
+        assert.equal(rejected.status(), 422, 'Receipt confirmation accepted injected filter fields');
+      }
+      const tampered = await page.request.post(endpoint, {headers: {Origin: origin}, form: {...fields, preflight_receipt: '0'.repeat(64)}});
+      assert.equal(tampered.status(), 409, 'Changed receipt token was accepted');
+      assert.equal(events().filter(event => event.method === 'thread/start' || event.method === 'turn/start').length, 0);
+    }
     const accepted = page.waitForResponse(response => response.url() === endpoint && response.request().method() === 'POST' && response.status() === 202);
     await resume.getByRole('button', {name: 'Resume', exact: true}).click();
     await accepted;

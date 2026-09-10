@@ -55,6 +55,10 @@ type ExecutionRequest struct {
 	Selected  storage.ResolvedProject
 	Capture   storage.RunCapture
 	Overrides codex.RunOverrides
+	// Only the scheduler sets this after an explicit exact-pellet Resume.
+	ResumePellet     *int64
+	PreflightReceipt string
+	preflight        *executionlock.Preflight
 }
 
 // ExecutionHandle is a receipt, not ownership transferred to a browser.
@@ -146,7 +150,7 @@ func (supervisor *ExecutionSupervisor) start(ctx context.Context, request Execut
 		return nil, err
 	}
 	var lock *executionlock.Lock
-	if request.Capture.ResumeFrom != nil {
+	if request.Capture.ResumeFrom != nil || request.ResumePellet != nil {
 		lock, err = executionlock.AcquireRecovery(identity.GitDir)
 	} else {
 		lock, err = executionlock.Acquire(identity.GitDir)
@@ -158,9 +162,23 @@ func (supervisor *ExecutionSupervisor) start(ctx context.Context, request Execut
 		lock.Close()
 		return nil, err
 	}
+	if request.PreflightReceipt != "" {
+		owner := lock.Owner()
+		if request.ResumePellet == nil || request.Capture.ResumeFrom != nil || owner == nil || owner.Preflight == nil || owner.Preflight.Token() != request.PreflightReceipt {
+			return nil, errors.Join(preflightRecoveryRequired(), lock.Close())
+		}
+	}
 	if request.Capture.ResumeFrom != nil {
 		if _, err := supervisor.validateResume(ctx, request, root, lock); err != nil {
 			return nil, errors.Join(err, lock.Close())
+		}
+	}
+	if request.Capture.ResumeFrom == nil && lock.Owner() != nil {
+		if request.ResumePellet == nil || lock.Owner().RunID != 0 || lock.Owner().Preflight == nil || lock.Owner().Database != request.Database.Path {
+			return nil, errors.Join(preflightRecoveryRequired(), lock.Close())
+		}
+		if !lock.RecoveryStopped() {
+			return nil, errors.Join(scheduleError("process_cleanup_unconfirmed", "previous process cleanup cannot be verified on this platform; preserve the recovery receipt"), lock.Close())
 		}
 	}
 	// Copy pointer-bearing request values before asynchronous use.
@@ -190,7 +208,25 @@ func (supervisor *ExecutionSupervisor) start(ctx context.Context, request Execut
 		}
 		request.Capture = *capture
 	}
-	if err := lock.Record(executionlock.Owner{Database: request.Database.Path}); err != nil {
+	owner := executionlock.Owner{Database: request.Database.Path}
+	if request.Capture.ResumeFrom != nil {
+		owner.RunID = *request.Capture.ResumeFrom
+	} else if request.Capture.ExpectedImplementationRevision > 0 {
+		owner.Preflight, err = capturePreflight(ctx, request, root)
+		if err != nil {
+			return nil, errors.Join(err, lock.Close())
+		}
+		if previous := lock.Owner(); previous != nil {
+			if err := matchPreflight(previous.Preflight, owner.Preflight); err != nil {
+				return nil, errors.Join(err, lock.Close())
+			}
+		}
+		request.Capture.StartingHead, request.Capture.StartingRef = owner.Preflight.StartingHead, owner.Preflight.StartingRef
+		request.preflight = owner.Preflight
+	} else if lock.Owner() != nil {
+		return nil, errors.Join(preflightRecoveryRequired(), lock.Close())
+	}
+	if err := lock.Record(owner); err != nil {
 		lock.Close()
 		return nil, err
 	}
@@ -435,7 +471,7 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 		if err := prepared.Client.Close(); err != nil {
 			return run, err
 		}
-		if request.Capture.ResumeFrom != nil && lock.Owner() != nil {
+		if lock.Owner() != nil {
 			return run, handle.ctx.Err()
 		}
 		return run, lock.Clean()
@@ -454,6 +490,19 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 	}
 	request.Capture.Settings = prepared.EvidenceSettings
 	request.Capture.PromptPrefix = prepared.PromptPrefix
+	if request.preflight != nil {
+		current, captureErr := capturePreflight(processCtx, request, root)
+		if captureErr == nil {
+			captureErr = samePreflight(request.preflight, current)
+		}
+		if captureErr != nil {
+			closeErr := prepared.Client.Close()
+			if closeErr == nil && lock.Owner() == nil {
+				closeErr = lock.Clean()
+			}
+			return run, errors.Join(captureErr, closeErr)
+		}
+	}
 	run, err = supervisor.options.Recorder.Begin(processCtx, request.Database, request.Selected, request.Capture)
 	if err != nil {
 		// Atomic capture may reject a lifecycle/filter change during preflight.

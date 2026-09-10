@@ -43,6 +43,26 @@ func (application *WebApplication) StartSchedule(ctx context.Context, project st
 	for _, workspace := range summary.Project.Workspaces {
 		if workspace.ID == workspaceID {
 			request.Selected = storage.ResolvedProject{Project: summary.Project, Workspace: workspace}
+			if request.PreflightReceipt != "" {
+				if application.Executions == nil || request.ResumePellet == nil || request.ResumeFrom != nil || request.Group != nil || request.ExternalID != nil {
+					return nil, preflightRecoveryRequired()
+				}
+				pellet, err := application.Pellet(ctx, summary.Project, domain.PelletReference{ProjectCode: summary.Project.Code, Number: *request.ResumePellet})
+				if err != nil {
+					return nil, err
+				}
+				receipt, err := application.Executions.PreflightRecovery(ctx, application.Database, request.Selected, pellet)
+				if err != nil {
+					return nil, err
+				}
+				if receipt == nil || receipt.Token() != request.PreflightReceipt {
+					return nil, preflightRecoveryRequired()
+				}
+				// Restore exact bytes from the server-side receipt. HTML inputs
+				// cannot round-trip CR/LF in otherwise valid opaque filters.
+				// Admission checks the token again under the execution lock.
+				request.Group, request.ExternalID = copyScheduleFilter(receipt.Group), copyScheduleFilter(receipt.ExternalID)
+			}
 			if request.ResumeFrom != nil {
 				if application.Executions == nil || application.Database.Path == "" || request.ResumePellet == nil {
 					return nil, scheduleError("resume_unavailable", "the exact durable attempt is unavailable for Resume")

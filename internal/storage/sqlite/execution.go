@@ -26,6 +26,28 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 		return run, err
 	}
 	err = db.writeRun(ctx, func(conn *sql.Conn) error {
+		if expected := c.ExpectedWorkspace; expected != nil {
+			project, err := loadProject(ctx, conn, c.ProjectID)
+			if err != nil {
+				return err
+			}
+			if expected.Project.ID != c.ProjectID || expected.Workspace.ProjectID != c.ProjectID || expected.Workspace.ID != c.WorkspaceID || project.GitCommonDir != expected.Project.GitCommonDir {
+				return storage.InvalidExecutionRun("the selected project identity changed during preflight")
+			}
+			workspaces, err := loadWorkspaces(ctx, conn, c.ProjectID)
+			if err != nil {
+				return err
+			}
+			matched := false
+			for _, workspace := range workspaces {
+				if workspace.ID == c.WorkspaceID && workspace.RootPath == expected.Workspace.RootPath && workspace.GitDir == expected.Workspace.GitDir {
+					matched = true
+				}
+			}
+			if !matched {
+				return storage.InvalidExecutionRun("the selected workspace identity changed during preflight")
+			}
+		}
 		var title, description, status string
 		var workspace sql.NullInt64
 		var externalID, group sql.NullString
@@ -38,6 +60,9 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 			return err
 		}
 		implementationRevision := pellet.ImplementationRevision
+		if c.ResumeFrom == nil && c.ExpectedImplementationRevision != 0 && c.ExpectedImplementationRevision != implementationRevision {
+			return storage.InvalidExecutionRun("the selected pellet implementation revision changed during preflight")
+		}
 		if pellet.Kind == domain.PelletReviewCheckpoint {
 			pellet, err = loadPellet(ctx, conn, c.ProjectID, c.PelletNumber)
 			if err != nil {

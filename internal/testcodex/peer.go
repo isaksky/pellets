@@ -87,6 +87,12 @@ func Run() bool {
 		case "initialized":
 			continue
 		case "account/read":
+			if mode == "preflight_gate" {
+				spawn("child")
+				waitFile("fake-child-ready")
+				must(os.WriteFile("fake-preflight-ready", []byte("ready"), 0600))
+				waitFile("fake-preflight-release")
+			}
 			if mode == "unauthenticated" {
 				result = map[string]any{"account": nil, "requiresOpenaiAuth": true}
 			} else {

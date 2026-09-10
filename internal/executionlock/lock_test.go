@@ -1,9 +1,11 @@
 package executionlock
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"pellets/internal/domain"
@@ -54,6 +56,23 @@ func TestLockFenceAndPersistentInode(t *testing.T) {
 			other.Close()
 		}
 		t.Fatalf("lost crash fence: %v", err)
+	}
+}
+
+func TestRecoveryRejectsUnicodeFieldAliases(t *testing.T) {
+	owner := Owner{Database: "test.db", Preflight: &Preflight{Version: 1, ScheduleRemaining: 1}}
+	encoded, err := json.Marshal(owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, alias := range []string{"ſchedule_remaining", `\u017fchedule_remaining`, "SCHEDULE_REMAINING"} {
+		data := strings.Replace(string(encoded), `"schedule_remaining":1`, `"schedule_remaining":1,"`+alias+`":99`, 1)
+		if _, err := decodeOwner([]byte(data)); err == nil {
+			t.Fatalf("accepted noncanonical alias %q", alias)
+		}
+	}
+	if _, err := decodeOwner(encoded); err != nil {
+		t.Fatalf("rejected canonical ASCII receipt: %v", err)
 	}
 }
 
@@ -114,5 +133,38 @@ func TestRecoveryAcquisitionRetainsExactReceiptAndExclusion(t *testing.T) {
 	after, err := os.ReadFile(filepath.Join(dir, "pellets-execution.lock"))
 	if err != nil || string(before) != string(after) {
 		t.Fatalf("recovery erased receipt: %q %v", after, err)
+	}
+}
+
+func TestRecoveryRejectsAmbiguousAndUnknownReceiptFields(t *testing.T) {
+	for _, data := range []string{
+		`{"database":"a","database":"b"}`,
+		`{"database":"a","Database":"b"}`,
+		`{"database":"a","run_id":0,"run_id":1}`,
+		`{"database":"a","unknown":1}`,
+		`{"database":"a","preflight":{"version":1,"version":2}}`,
+		`{"database":"a","preflight":{"unexpected":1}}`,
+		`{"database":"a","preflight":{"version":1}}`,
+		`{"database":"a"} {"database":"b"}`,
+		`{"database":"a","run_id":2,"preflight":{"version":1}}`,
+		"{\"database\":\"\xff\"}",
+	} {
+		t.Run(data, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "pellets-execution.lock")
+			if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if lock, err := AcquireRecovery(dir); domain.PublicError(err).Code != "workspace_execution_recovery_required" {
+				if lock != nil {
+					lock.Close()
+				}
+				t.Fatalf("ambiguous receipt accepted: %v", err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || string(after) != data {
+				t.Fatalf("receipt changed: %q %v", after, err)
+			}
+		})
 	}
 }

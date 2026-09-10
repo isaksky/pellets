@@ -43,11 +43,14 @@ func (recorder ExecutionRecorder) Begin(ctx context.Context, database Database, 
 	if err != nil || !storage.IsFullCommitID(head) {
 		return storage.ExecutionRun{}, errors.Join(missingRunEvidence("starting_head_unavailable"), err)
 	}
-	capture.StartingHead = head
-	capture.StartingRef, err = executionGit(ctx, root, "rev-parse", "--symbolic-full-name", "HEAD")
-	if err != nil || capture.StartingRef == "" {
+	ref, err := executionGit(ctx, root, "rev-parse", "--symbolic-full-name", "HEAD")
+	if err != nil || ref == "" {
 		return storage.ExecutionRun{}, missingRunEvidence("starting_ref_unavailable")
 	}
+	if capture.ExpectedImplementationRevision > 0 && capture.ResumeFrom == nil && (capture.StartingHead != "" && capture.StartingHead != head || capture.StartingRef != "" && capture.StartingRef != ref) {
+		return storage.ExecutionRun{}, scheduleError("preflight_repository_changed", "the repository HEAD or branch changed during preflight; preserve the work and inspect the recovery receipt")
+	}
+	capture.StartingHead, capture.StartingRef = head, ref
 	if capture.ResumeFrom != nil {
 		previous, err := recorder.Read(ctx, database, *capture.ResumeFrom)
 		if err != nil {
@@ -61,6 +64,7 @@ func (recorder ExecutionRecorder) Begin(ctx context.Context, database Database, 
 	if err != nil {
 		return storage.ExecutionRun{}, err
 	}
+	capture.ExpectedWorkspace = &selected
 	created, operationErr := repo.CreateExecutionRun(ctx, capture)
 	return created, errors.Join(operationErr, repo.Close())
 }

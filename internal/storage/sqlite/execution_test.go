@@ -32,6 +32,50 @@ func TestPromptPrefixEncodedStorageBoundAccountsForJSONEscapes(t *testing.T) {
 	}
 }
 
+func TestPreflightCaptureRevalidatesRegisteredIdentityAndGeneration(t *testing.T) {
+	for _, change := range []string{"workspace root", "workspace git", "project git", "generation"} {
+		t.Run(change, func(t *testing.T) {
+			ctx := context.Background()
+			db, old, fixture := createTestRun(t)
+			old = updateRun(t, db, old, storage.RunProgress{Phase: "preflight", State: "interrupted", Outcome: "unknown"}, "")
+			q := fixture.open(t)
+			defer q.Close()
+			ref := domain.PelletReference{ProjectCode: old.ProjectCode, Number: old.PelletNumber}
+			for _, operation := range []storage.PelletLifecycleOperation{storage.PelletRelease, storage.PelletStart} {
+				if _, err := q.TransitionPellet(ctx, fixture.main, ref, storage.PelletLifecycleRequest{Operation: operation}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			pellet, err := q.ReadPellet(ctx, fixture.main, ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			capture := old.RunCapture
+			expected := fixture.main
+			capture.ExpectedWorkspace, capture.ExpectedImplementationRevision = &expected, pellet.ImplementationRevision
+			switch change {
+			case "workspace root":
+				expected.Workspace.RootPath.Value += "/changed"
+			case "workspace git":
+				expected.Workspace.GitDir.Value += "/changed"
+			case "project git":
+				expected.Project.GitCommonDir.Value += "/changed"
+			case "generation":
+				capture.ExpectedImplementationRevision--
+			}
+			if _, err := db.CreateExecutionRun(ctx, capture); domain.PublicError(err).Code != "invalid_execution_run" {
+				t.Fatalf("changed %s admitted: %v", change, err)
+			}
+			assertQueryInt(t, db.db, `SELECT COUNT(*) FROM execution_runs`, 1)
+			capture.ExpectedWorkspace, capture.ExpectedImplementationRevision = &fixture.main, pellet.ImplementationRevision
+			fresh, err := db.CreateExecutionRun(ctx, capture)
+			if err != nil || fresh.ImplementationRevision != pellet.ImplementationRevision || fresh.ThreadID != "" || fresh.ResumeFrom != nil {
+				t.Fatalf("valid capture failed: %+v %v", fresh, err)
+			}
+		})
+	}
+}
+
 func TestPendingInteractionRoundTripsAndClearsWithoutAnswers(t *testing.T) {
 	db, run, _ := createTestRun(t)
 	interaction := &storage.RunInteraction{RequestID: `"request-1"`, Method: "item/tool/requestUserInput", ThreadID: "thread", TurnID: "turn", ItemID: "item", Title: "Codex needs your input", Questions: []storage.InteractionQuestion{{ID: "scope", Header: "Scope", Question: "Which scope?", Options: []storage.InteractionOption{{Label: "Focused", Description: "Only the target."}}, Other: true, Secret: true}}}

@@ -158,8 +158,11 @@ owned identities are confirmed stopped, including descendants of a still-live
 root. Delayed settlement never clears the durable recovery receipt or turns an
 uncertain outcome into success. No replacement run is admitted during this wait.
 
-While a run is owned, the lock file stores only its database path and available
-run ID. A crash, unknown cleanup, unsettled driver, or failed final save leaves
+While a run is owned, the lock file stores its database path and available
+run ID. Before the first run exists, scheduled work records a versioned
+preflight receipt with the selected pellet generation, workspace/repository
+identity, HEAD and branch, and exact schedule mode, remaining limit, and filters.
+A crash, unknown cleanup, unsettled driver, or failed final save leaves
 that receipt as a conservative recovery fence even after the OS lock becomes
 available. `workspace_execution_recovery_required` reports the exact receipt
 and lock path; existing run/operation evidence remains inspectable. There is no
@@ -371,7 +374,10 @@ foreground-memory state; restart never reconstructs or restarts schedules.
 The minimal server interface is form-encoded and uses the existing exact
 Host/Origin and double-submit CSRF checks. POST `/projects/CODE/schedules`
 requires `_csrf`, `workspace_id`, and `mode`, with optional `external_id`,
-`group`, `resume_pellet`, `resume_from`, and `limit`. It returns a 202 JSON
+`group`, `resume_pellet`, `resume_from`, `preflight_receipt`, and `limit`.
+`preflight_receipt` confirms the exact rendered no-run receipt and is mutually
+exclusive with `external_id`, `group`, and `group_scope`; its saved filters are
+restored on the server. It returns a 202 JSON
 schedule receipt. GET `/projects/CODE/schedules/ID` returns its current captured
 filters, counters, state, and reason. POST that path plus `/stop-after` or
 `/stop-now`, with `_csrf`, requests the corresponding stop. IDs are scoped to
@@ -391,6 +397,29 @@ filters. It sends `resume_pellet` without `resume_from`; the supervisor's
 worktree lock, identity checks, atomic ownership/filter validation, and fresh
 preflight still apply. Existing latest-attempt recovery requires its exact
 `resume_from`; ordinary queue actions cannot bypass explicit Resume.
+
+A Unix crash during preflight can leave a validated version-1 receipt with
+`run_id` zero and no durable run. After its prior custodian has settled, explicit
+Resume of the exact current-workspace pellet may start one fresh run and
+conversation. The form shows the saved mode, remaining limit, and exact filters
+and requires explicit confirmation of that mode; it cannot widen the scope.
+The form submits an opaque content identity for the exact receipt. Its filter
+text is display-only: the server restores the original bytes from the validated
+receipt, including CR/LF, and checks the identity again under the execution lock.
+Injected filter fields or a changed receipt identity are rejected.
+Admission reacquires the inherited OS lock and checks the receipt against the
+current database file identity, registered project/workspace, Git directory
+identity, HEAD/branch, ownership, implementation revision, mode, limit, and
+filters. Preflight must succeed again, repository identity is checked again,
+and capture atomically revalidates workspace registration, ownership, filters,
+and generation. A failed repair preserves the receipt. Startup never clears it
+or starts work. Legacy database-only zero-run receipts, changed or ambiguous
+receipts, receipts for other work, and platform-unverifiable cleanup remain
+fenced; no lock deletion or PID-based cleanup is supported. Windows retains its
+conservative post-crash behavior. A receipt left in the narrow interval after
+run creation but before recording its run ID is ambiguous and cannot authorize
+another fresh conversation.
+
 The current implementation revision distinguishes a reopened pellet from its
 older completed attempt even when its number is unchanged. Fresh recovery must
 not reuse that older conversation; a run for the current revision still
@@ -738,6 +767,7 @@ traceable checks:
 | Durable checkpoint inspector: clean/findings, partial recovery, purged refs, reconnect, later run and exact generation | `TestCheckpointOutcomeDurablePartialResumeAndExactGeneration`, `TestCheckpointOutcomePreservesPurgedFollowupReference`, `TestHTTPCheckpointDurableOutcomes`, and `node scripts/test-web-checkpoint-browser.cjs` |
 | Server forms, checkpoint composer, live refresh, conflict recovery, keyboard navigation | Go web-handler/asset tests plus `node scripts/test-web-browser.cjs` |
 | Owned pellet without a run: authentication/config repair, restart, CLI start, reconstructed modes/filters, duplicate exclusion | `TestHTTPResumeWithoutRunRepairsPreflightAndReconstructsExactIntent` plus `node scripts/test-web-recovery-browser.cjs` |
+| Unix preflight SIGKILL before run capture: real custodian settlement, exact receipt validation, repaired explicit Resume, no duplicate conversation | `TestPreflightCrashExplicitRecoveryRejectsMismatchesAndStartsOnce`, `TestPreflightCrashRecoveryRevalidatesGenerationAfterRepair`, and the recovery browser suite's SIGKILL scenario |
 | Reopened generation starts fresh; current generation retains exact-attempt recovery | `TestHTTPReopenedGenerationResumesWithFreshConversationAfterPreflightRepair`, `TestHTTPCurrentGenerationRunRequiresExactAttemptAndPreventsOverlap`, and the recovery browser suite |
 | Lifecycle generation changes during preflight or before continuation dispatch | `TestSchedulerResumeRevalidatesGenerationAfterPreflight` and `TestImplementationResumeRejectsChangedGenerationAtCaptureAndDispatch` |
 | Ordinary generation changes during implementation, commit, verification, or atomic closure | `TestSchedulerDetectsOwnershipAndHeadInterference`, `TestSchedulerRejectsReplacementDuringCommitChild`, `TestSchedulerFinalizationRejectsReplacementAtMutationBoundaries`, and `TestOrdinaryRunRejectsReplacementGenerationAtDurableBoundaries` |

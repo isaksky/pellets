@@ -16,14 +16,15 @@ import (
 const DefaultScheduleLimit = 100
 
 type ScheduleRequest struct {
-	Selected     storage.ResolvedProject `json:"-"`
-	Mode         string                  `json:"mode"`
-	ExternalID   *string                 `json:"external_id"`
-	Group        *string                 `json:"group"`
-	ResumePellet *int64                  `json:"resume_pellet,omitempty"`
-	ResumeFrom   *int64                  `json:"resume_from,omitempty"`
-	Limit        int                     `json:"limit"`
-	Overrides    codex.RunOverrides      `json:"overrides"`
+	Selected         storage.ResolvedProject `json:"-"`
+	Mode             string                  `json:"mode"`
+	ExternalID       *string                 `json:"external_id"`
+	Group            *string                 `json:"group"`
+	ResumePellet     *int64                  `json:"resume_pellet,omitempty"`
+	ResumeFrom       *int64                  `json:"resume_from,omitempty"`
+	PreflightReceipt string                  `json:"preflight_receipt,omitempty"`
+	Limit            int                     `json:"limit"`
+	Overrides        codex.RunOverrides      `json:"overrides"`
 }
 
 type ScheduleStatus struct {
@@ -319,7 +320,7 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 		}
 		h.status.State, h.status.Reason = "selecting", ""
 		reason := storage.NextNone
-		execution, err := s.options.Supervisor.start(h.ctx, ExecutionRequest{Database: s.options.Database, Selected: request.Selected, Capture: storage.RunCapture{ProjectID: request.Selected.Project.ID, WorkspaceID: request.Selected.Workspace.ID, ResumeFrom: request.ResumeFrom}, Overrides: request.Overrides}, s.drive, func(ctx context.Context) (*storage.RunCapture, error) {
+		execution, err := s.options.Supervisor.start(h.ctx, ExecutionRequest{Database: s.options.Database, Selected: request.Selected, Capture: storage.RunCapture{ProjectID: request.Selected.Project.ID, WorkspaceID: request.Selected.Workspace.ID, ResumeFrom: request.ResumeFrom}, Overrides: request.Overrides, ResumePellet: request.ResumePellet, PreflightReceipt: request.PreflightReceipt}, s.drive, func(ctx context.Context) (*storage.RunCapture, error) {
 			queue, err := s.options.OpenQueue(ctx, s.options.Database.Path)
 			if err != nil {
 				return nil, err
@@ -417,7 +418,7 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 			if s.isCheckpoint(*selected.Pellet) {
 				mode = "review_checkpoint"
 			}
-			return &storage.RunCapture{ProjectID: request.Selected.Project.ID, WorkspaceID: request.Selected.Workspace.ID, PelletNumber: selected.Pellet.Reference.Number, Mode: mode, ScheduleMode: request.Mode, ScheduleRemaining: request.Limit - h.status.Completed, ExternalID: request.ExternalID, Group: request.Group, ResumeFrom: request.ResumeFrom}, nil
+			return &storage.RunCapture{ProjectID: request.Selected.Project.ID, WorkspaceID: request.Selected.Workspace.ID, PelletNumber: selected.Pellet.Reference.Number, ExpectedImplementationRevision: selected.Pellet.ImplementationRevision, Mode: mode, ScheduleMode: request.Mode, ScheduleRemaining: request.Limit - h.status.Completed, ExternalID: request.ExternalID, Group: request.Group, ResumeFrom: request.ResumeFrom}, nil
 		})
 		h.execution = execution
 		if execution != nil {
@@ -497,6 +498,7 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 			return
 		}
 		request.ResumePellet, request.ResumeFrom = nil, nil
+		request.PreflightReceipt = ""
 	}
 }
 

@@ -55,19 +55,23 @@ type EffectiveRunSettings struct {
 // RunCapture is immutable for an attempt. Nil filters mean unfiltered; supplied
 // values retain exact bytes. An explicit resume creates a new numbered attempt.
 type RunCapture struct {
-	ProjectID         int64                `json:"project_id"`
-	WorkspaceID       int64                `json:"workspace_id"`
-	PelletNumber      int64                `json:"pellet_number"`
-	ResumeFrom        *int64               `json:"resume_from,omitempty"`
-	Mode              string               `json:"mode"`
-	ExternalID        *string              `json:"external_id"`
-	Group             *string              `json:"group"`
-	Settings          EffectiveRunSettings `json:"settings"`
-	StartingHead      string               `json:"starting_head"`
-	StartingRef       string               `json:"starting_ref"`
-	ScheduleMode      string               `json:"schedule_mode"`
-	ScheduleRemaining int                  `json:"schedule_remaining"`
-	PromptPrefix      PromptPrefix         `json:"prompt_prefix"`
+	// Admission-only guards, checked in the creation transaction. Zero/nil
+	// preserve callers without a preflight snapshot. Neither is persisted.
+	ExpectedImplementationRevision int64                `json:"expected_implementation_revision,omitempty"`
+	ExpectedWorkspace              *ResolvedProject     `json:"-"`
+	ProjectID                      int64                `json:"project_id"`
+	WorkspaceID                    int64                `json:"workspace_id"`
+	PelletNumber                   int64                `json:"pellet_number"`
+	ResumeFrom                     *int64               `json:"resume_from,omitempty"`
+	Mode                           string               `json:"mode"`
+	ExternalID                     *string              `json:"external_id"`
+	Group                          *string              `json:"group"`
+	Settings                       EffectiveRunSettings `json:"settings"`
+	StartingHead                   string               `json:"starting_head"`
+	StartingRef                    string               `json:"starting_ref"`
+	ScheduleMode                   string               `json:"schedule_mode"`
+	ScheduleRemaining              int                  `json:"schedule_remaining"`
+	PromptPrefix                   PromptPrefix         `json:"prompt_prefix"`
 }
 
 // RunMatchesPelletGeneration conservatively treats unknown legacy generations
