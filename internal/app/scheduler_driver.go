@@ -114,7 +114,21 @@ func (s *Scheduler) drive(ctx context.Context, execution *WorkspaceExecution) er
 				return codex.ErrClosed
 			}
 			if len(event.ID) != 0 {
-				return scheduleError("codex_input_required", "Codex requested input; explicit attention is required")
+				summary := conciseCodexActivity(event.Method)
+				if summary != "" && summary != run.Summary {
+					progress := run.RunProgress
+					progress.Summary = summary
+					run, err = execution.Save(ctx, progress, run.Revision)
+					if err != nil {
+						return err
+					}
+				}
+				switch event.Method {
+				case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval":
+					return scheduleError("codex_approval_review_required", "automatic approval review requires attention")
+				default:
+					return scheduleError("codex_input_required", "Codex requested input; explicit attention is required")
+				}
 			}
 			if cached, reported := codex.CachedInputTokensForTurn(&event, run.ThreadID, run.TurnID); reported {
 				progress := run.RunProgress
@@ -143,6 +157,14 @@ func (s *Scheduler) drive(ctx context.Context, execution *WorkspaceExecution) er
 					result = &report
 				}
 			}
+			if summary := conciseCodexActivity(event.Method); summary != "" && summary != run.Summary {
+				progress := run.RunProgress
+				progress.Summary = summary
+				run, err = execution.Save(ctx, progress, run.Revision)
+				if err != nil {
+					return err
+				}
+			}
 			status := completedTurnStatus(&event, run.ThreadID, run.TurnID)
 			if status == "" {
 				continue
@@ -158,6 +180,26 @@ func (s *Scheduler) drive(ctx context.Context, execution *WorkspaceExecution) er
 			}
 			return s.prepareFinalization(ctx, execution, run, result.Files)
 		}
+	}
+}
+
+// conciseCodexActivity maps protocol categories to fixed, bounded UI text.
+// It intentionally never reads item text, command arguments, command output,
+// or any transcript field, and it never invokes another model.
+func conciseCodexActivity(method string) string {
+	switch method {
+	case "item/started":
+		return "Codex started the next workspace activity."
+	case "item/completed":
+		return "Codex completed an activity; validating the bound result."
+	case "turn/completed":
+		return "Codex turn completed; validating the bound result."
+	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval":
+		return "Automatic approval review is in progress."
+	case "item/tool/requestUserInput", "mcpServer/elicitation/request":
+		return "Codex is awaiting explicit input."
+	default:
+		return ""
 	}
 }
 

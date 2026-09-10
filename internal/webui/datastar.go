@@ -36,7 +36,7 @@ func (response *datastarResponse) render(status int, name, path, elements string
 		// that may contain unsaved edits.
 		target := response.request.Header.Get("Pellets-Target")
 		switch target {
-		case "tasks-area", "task-list", "memory-list", "project-drawer", "workspace-strip", "project-record", "inspector-host":
+		case "tasks-area", "task-list", "memory-list", "project-drawer", "workspace-strip", "project-record", "run-dashboard", "inspector-host":
 			selector, mode = "#"+target, "inner"
 		default:
 			http.Error(response.ResponseWriter, "invalid fragment target", http.StatusBadRequest)

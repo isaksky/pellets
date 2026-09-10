@@ -44,12 +44,13 @@ type handler struct {
 
 func newHandler(application *app.WebApplication, hub *eventHub, config handlerConfig) (http.Handler, error) {
 	functions := template.FuncMap{
-		"statusLabel": statusLabel,
-		"formatTime":  formatTime,
-		"text":        nullableText,
-		"path":        localPath,
-		"eqStatus":    func(left domain.PelletStatus, right string) bool { return string(left) == right },
-		"sameID":      func(left, right int64) bool { return left == right },
+		"statusLabel":   statusLabel,
+		"runStateLabel": runStateLabel,
+		"formatTime":    formatTime,
+		"text":          nullableText,
+		"path":          localPath,
+		"eqStatus":      func(left domain.PelletStatus, right string) bool { return string(left) == right },
+		"sameID":        func(left, right int64) bool { return left == right },
 		"lifecycle": func(page pageData, operation string) lifecycleFormView {
 			return lifecycleFormView{Page: page, Operation: operation, Label: statusLabel(operation)}
 		},
@@ -182,6 +183,7 @@ type pageData struct {
 	MultiProject     bool
 	CurrentProject   bool
 	CurrentWorkspace *storage.Workspace
+	RunWorkspaces    []runWorkspaceView
 	Area             string
 	TasksURL         string
 	MemoriesURL      string
@@ -221,6 +223,52 @@ type workspaceView struct {
 	Pellet  string
 }
 
+// runWorkspaceView combines a process-local schedule receipt with the latest
+// durable attempt. The receipt is useful while this server is alive; the run
+// remains authoritative after a browser reconnect or server restart.
+type runWorkspaceView struct {
+	ID              int64
+	Root            string
+	ActivePellet    string
+	Run             *runView
+	Schedule        *scheduleView
+	ExternalID      string
+	Group           string
+	Busy            bool
+	UngroupedFilter bool
+}
+
+type runView struct {
+	ID           int64
+	Pellet       string
+	Mode         string
+	Model        string
+	Effort       string
+	Phase        string
+	State        string
+	Activity     string
+	Outcome      string
+	Commit       string
+	Error        string
+	ExternalID   string
+	Group        string
+	PelletNumber int64
+	CanResume    bool
+	Awaiting     bool
+	AutoReview   bool
+	Interrupted  bool
+	Attention    bool
+}
+
+type scheduleView struct {
+	ID         int64
+	Mode       string
+	State      string
+	StopAfter  bool
+	ExternalID string
+	Group      string
+}
+
 type pelletView struct {
 	Pellet       storage.Pellet
 	Version      string
@@ -248,12 +296,14 @@ type groupView struct {
 }
 
 type filterView struct {
-	Status     string
-	Group      string
-	ExternalID string
-	Query      string
-	Sort       string
-	Direction  string
+	Status         string
+	Group          string
+	ExternalID     string
+	Query          string
+	Sort           string
+	Direction      string
+	GroupText      string
+	GroupUngrouped bool
 }
 
 type sortHeaderView struct {
@@ -327,6 +377,8 @@ func (h *handler) servePage(response http.ResponseWriter, request *http.Request)
 			templateName = "project-rail"
 		case "workspace-strip":
 			templateName = "workspace-strip"
+		case "run-dashboard":
+			templateName = "run-dashboard"
 		case "project-record":
 			templateName = "project-record"
 		case "inspector-host":
@@ -402,6 +454,10 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 	if err != nil {
 		return pageData{}, err
 	}
+	data.RunWorkspaces, err = h.runWorkspaceViews(request, selected.Project)
+	if err != nil {
+		return pageData{}, err
+	}
 	if area == "tasks" {
 		var selectedReference domain.PelletReference
 		selectedReferenceText := ""
@@ -418,6 +474,11 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 			return pageData{}, err
 		}
 		data.Filters = view
+		for index := range data.RunWorkspaces {
+			data.RunWorkspaces[index].ExternalID = view.ExternalID
+			data.RunWorkspaces[index].Group = view.GroupText
+			data.RunWorkspaces[index].UngroupedFilter = view.GroupUngrouped
+		}
 		data.TasksURL = taskURL(code, nil, "", filters.Sort)
 		data.CurrentURL = taskURL(code, request.URL.Query(), selectedReferenceText, filters.Sort)
 		data.SortHeaders = makeSortHeaderViews(code, request.URL.Query(), selectedReferenceText, filters.Sort)
@@ -473,6 +534,78 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 		}
 	}
 	return data, nil
+}
+
+func (h *handler) runWorkspaceViews(request *http.Request, project storage.Project) ([]runWorkspaceView, error) {
+	views := make([]runWorkspaceView, 0, len(project.Workspaces))
+	status := domain.PelletInProgress
+	inProgress, err := h.application.Pellets(request.Context(), project, storage.WebPelletFilters{Status: &status})
+	if err != nil {
+		return nil, err
+	}
+	owners := make(map[int64]string, len(inProgress))
+	for _, pellet := range inProgress {
+		if pellet.Workspace != nil {
+			owners[pellet.Workspace.ID] = pellet.Reference.String()
+		}
+	}
+	for _, workspace := range project.Workspaces {
+		view := runWorkspaceView{ID: workspace.ID, Root: localPath(workspace.RootPath), ActivePellet: owners[workspace.ID]}
+		runs, err := h.application.WorkspaceRuns(request.Context(), workspace.ID)
+		if err != nil {
+			return nil, err
+		}
+		if len(runs) > 0 {
+			run := makeRunView(runs[0])
+			view.Run = &run
+			view.Busy = storage.RunActive(runs[0].State)
+		}
+		if h.application.Scheduler != nil {
+			if schedule, ok := h.application.Scheduler.WorkspaceStatus(workspace.ID); ok {
+				view.Schedule = &scheduleView{ID: schedule.ID, Mode: schedule.Mode, State: schedule.State, StopAfter: schedule.StopAfterPellet, ExternalID: textOrDash(schedule.ExternalID), Group: textOrDash(schedule.Group)}
+				view.Busy = true
+			}
+		}
+		views = append(views, view)
+	}
+	return views, nil
+}
+
+func makeRunView(run storage.ExecutionRun) runView {
+	model, effort := run.Settings.Codex.Model, run.Settings.Codex.ReasoningEffort
+	if model == "" {
+		model = "runtime default"
+	}
+	if effort == "" {
+		effort = "default"
+	}
+	activity := run.Summary
+	if activity == "" && len(run.Activity) > 0 {
+		activity = run.Activity[0].Summary
+	}
+	if activity == "" {
+		activity = "No activity reported yet."
+	}
+	activity = publicRunActivity(activity)
+	view := runView{ID: run.ID, Pellet: run.ProjectCode + "-" + strconv.FormatInt(run.PelletNumber, 10), PelletNumber: run.PelletNumber, Mode: run.Mode, Model: model, Effort: effort, Phase: run.Phase, State: run.State, Activity: activity, Commit: run.ResultCommit, Error: run.ErrorCode, ExternalID: textOrDash(run.ExternalID), Group: textOrDash(run.Group)}
+	view.Outcome = run.Outcome
+	view.Awaiting = run.State == "awaiting_input" || run.ErrorCode == "codex_input_required"
+	view.Interrupted = run.State == "interrupted"
+	view.Attention = run.State == "needs_attention"
+	view.CanResume = !storage.RunActive(run.State) && run.State != "completed" && run.PelletPresent
+	view.AutoReview = strings.Contains(strings.ToLower(activity), "automatic approval review")
+	return view
+}
+
+func publicRunActivity(activity string) string {
+	// Git diagnostics are durable evidence for the supervisor, but a browser
+	// activity card must never become a raw-command-output surface. Codex event
+	// summaries are already fixed strings; this protects the remaining local
+	// diagnostic path as well.
+	if strings.HasPrefix(activity, "Git:") {
+		return "Repository verification needs attention; inspect the local server diagnostics."
+	}
+	return activity
 }
 
 func projectAcceptsCode(project storage.Project, code string) bool {
@@ -608,6 +741,11 @@ func parseFilters(values url.Values) (storage.WebPelletFilters, filterView, erro
 			return filters, view, domain.NewError(domain.Usage, "invalid_group_filter", "the group filter is invalid", nil)
 		}
 		filters.Group = storage.WebExactFilter{Set: true, Value: group}
+		if group != nil {
+			view.GroupText = *group
+		} else {
+			view.GroupUngrouped = true
+		}
 	}
 	filters.Query = view.Query
 	filters.Sort = storage.NormalizeWebPelletSort(storage.WebPelletSort{
@@ -801,6 +939,23 @@ func statusLabel(value any) string {
 	return strings.ToUpper(words[:1]) + words[1:]
 }
 
+func runStateLabel(state string) string {
+	switch state {
+	case "awaiting_input":
+		return "Awaiting input"
+	case "needs_attention":
+		return "Needs attention"
+	case "interrupted":
+		return "Interrupted"
+	case "completed":
+		return "Completed"
+	case "running":
+		return "Running"
+	default:
+		return statusLabel(state)
+	}
+}
+
 func formatTime(value time.Time) string { return value.UTC().Format("2006-01-02 15:04:05Z") }
 func nullableText(value *string) string {
 	if value == nil {
@@ -831,7 +986,7 @@ func (h *handler) renderUpdates(response *datastarResponse, status int, primary 
 	if primary != "live" {
 		names = append(names, primary)
 	}
-	names = append(names, "project-counts", "area-tabs", "project-record")
+	names = append(names, "project-counts", "area-tabs", "project-record", "run-dashboard")
 	if data.MultiProject {
 		names = append(names, "project-rail")
 	} else {

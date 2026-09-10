@@ -61,6 +61,18 @@ func (recorder ExecutionRecorder) Read(ctx context.Context, database Database, i
 	return run, errors.Join(operationErr, repo.Close())
 }
 
+// ListWorkspaceRuns returns durable, bounded run evidence for one explicitly
+// identified workspace. It is read-only and deliberately does not reconcile,
+// resume, or otherwise alter an attempt.
+func (recorder ExecutionRecorder) ListWorkspaceRuns(ctx context.Context, database Database, workspaceID int64, limit int) ([]storage.ExecutionRun, error) {
+	repo, err := recorder.repository(ctx, database)
+	if err != nil {
+		return nil, err
+	}
+	runs, operationErr := repo.ListWorkspaceRuns(ctx, workspaceID, 0, limit)
+	return runs, errors.Join(operationErr, repo.Close())
+}
+
 func (recorder ExecutionRecorder) Save(ctx context.Context, database Database, request storage.UpdateExecutionRun) (storage.ExecutionRun, error) {
 	// Verified commit evidence is available only through VerifyCommit below.
 	if request.VerifiedCommit != "" {

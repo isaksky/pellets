@@ -22,6 +22,59 @@ import { action, actions } from "./datastar-1.0.3.js";
   document.addEventListener("change", function (event) {
     if (event.target && event.target.id === "theme-select") rememberTheme(event.target.value);
   });
+
+  // Schedule controls intentionally use the small JSON receipt endpoints.
+  // A successful receipt is followed by an authoritative page refresh; browser
+  // state never guesses a run state or retains a stale receipt after reconnect.
+  document.addEventListener("submit", async function (event) {
+    var form = event.target;
+    if (!form || !form.matches("form[data-schedule]")) return;
+    event.preventDefault();
+    if (form.dataset.schedulePending === "true") return;
+    var submitter = event.submitter;
+    if (submitter && submitter.disabled) return;
+    var fields = new FormData(form);
+    if (submitter && submitter.name) fields.set(submitter.name, submitter.value);
+    // Keep the explicit filter scope aligned with the current control value;
+    // an old rendered "value" marker must never turn a cleared group into an
+    // accidental wildcard. Ungrouped is intentionally server-rejected.
+    if (fields.has("group_scope") && fields.get("group_scope") !== "ungrouped") {
+      fields.set("group_scope", fields.get("group") ? "value" : "any");
+    }
+    var body = new URLSearchParams();
+    fields.forEach(function (value, key) {
+      // Empty filter controls mean "unfiltered". Omit them so the server can
+      // distinguish that from an invalid explicitly empty exact filter.
+      if ((key === "external_id" || key === "group") && value === "") return;
+      body.append(key, value);
+    });
+    var feedback = document.getElementById("request-feedback");
+    var buttons = Array.from(form.querySelectorAll("button"));
+    var confirmed = false;
+    form.dataset.schedulePending = "true";
+    buttons.forEach(function (button) { button.disabled = true; });
+    feedback.hidden = false;
+    feedback.classList.remove("request-failed");
+    feedback.textContent = "Updating run controls…";
+    try {
+      var response = await fetch(form.action, {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: body.toString()});
+      if (!response.ok) throw new Error("schedule receipt rejected");
+      confirmed = true;
+      feedback.hidden = true;
+      refreshRegions();
+    } catch (_) {
+      feedback.classList.add("request-failed");
+      feedback.textContent = "Run control could not be confirmed. Reload to view authoritative status.";
+    } finally {
+      // Success remains locked until the authoritative dashboard patch replaces
+      // this form. This closes the window where an old receipt could admit a
+      // duplicate click before the refreshed state arrives.
+      if (!confirmed) {
+        delete form.dataset.schedulePending;
+        buttons.forEach(function (button) { button.disabled = false; });
+      }
+    }
+  });
   if (media) media.addEventListener("change", function () {
     if (root.dataset.themeChoice === "system") applyTheme("system");
   });

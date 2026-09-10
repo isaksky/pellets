@@ -301,8 +301,20 @@ requires `_csrf`, `workspace_id`, and `mode`, with optional `external_id`,
 schedule receipt. GET `/projects/CODE/schedules/ID` returns its current captured
 filters, counters, state, and reason. POST that path plus `/stop-after` or
 `/stop-now`, with `_csrf`, requests the corresponding stop. IDs are scoped to
-the running server; project checks prevent retargeting a receipt. Polished
-browser controls and interactive question handling remain separate work.
+the running server; project checks prevent retargeting a receipt. The local
+browser renders one card per registered workspace, combining the current
+in-memory receipt with the latest durable run so reconnects remain authoritative.
+Its Run one, Drain, Watch, Stop after, Stop now, and eligible Resume controls use
+these form endpoints and refresh from the server; cards contain only bounded
+application-authored activity, never Codex transcripts, command text, or output.
+Interactive question answering remains an explicit attention path.
+
+Resume never accepts browser-provided filters: the server reads the exact prior
+attempt and restores its captured filters before scheduling. An exact Ungrouped
+(`group=n`) page filter cannot currently be represented by the scheduler's
+durable filter model, so its Run one/Drain/Watch controls are disabled and a
+crafted `group_scope=ungrouped` request is rejected rather than widened to an
+unfiltered run.
 
 `SchedulerOptions.Ready` is the narrow checkpoint integration hook. It receives
 the exact candidate under the queue writer transaction, must perform read-only

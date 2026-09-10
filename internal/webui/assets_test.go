@@ -41,6 +41,8 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 		`sortOpenerID`, `document.getElementById(sortOpenerID)`, `sorter.focus({preventScroll: true})`,
 		`beforeunload`, `Discard unsaved inspector changes?`, `event.key === "Escape"`,
 		`event.key !== "Tab"`, `drawerFocusable`, `closeDrawer(true)`, `aria-modal`, `prefers-color-scheme`, `window.location.reload()`,
+		`form.dataset.schedulePending === "true"`, `form.dataset.schedulePending = "true"`, `if (!confirmed)`, `group_scope`,
+		`fields.has("group_scope") && fields.get("group_scope") !== "ungrouped"`,
 	} {
 		if !strings.Contains(javascript+templates+preflight, required) {
 			t.Fatalf("UI assets missing %q", required)
@@ -109,6 +111,43 @@ func TestTaskRowPointerTargetKeepsOneKeyboardAccessibleNativeLink(t *testing.T) 
 			t.Fatalf("task row pointer/focus contract missing %q", required)
 		}
 	}
+}
+
+func TestScheduleStartScopeSerializationNeverLeaksIntoStopForms(t *testing.T) {
+	t.Parallel()
+	templates := embeddedText(t, "templates/main.html")
+	javascript := embeddedText(t, "assets/app.js")
+	start := scheduleFormMarkup(t, templates, `action="/projects/{{$.Project.Code}}/schedules" method="post" data-schedule`)
+	if !strings.Contains(start, `name="group_scope"`) || !strings.Contains(start, `name="group"`) {
+		t.Fatalf("start form must carry the explicit group scope and value: %s", start)
+	}
+	for _, action := range []string{"stop-after", "stop-now"} {
+		form := scheduleFormMarkup(t, templates, `/`+action+`" method="post" data-schedule`)
+		if strings.Contains(form, `name="group_scope"`) || strings.Contains(form, `name="group"`) {
+			t.Fatalf("%s form must serialize only its stop payload: %s", action, form)
+		}
+	}
+	for _, required := range []string{
+		`fields.has("group_scope") && fields.get("group_scope") !== "ungrouped"`,
+		`fields.set("group_scope", fields.get("group") ? "value" : "any");`,
+	} {
+		if !strings.Contains(javascript, required) {
+			t.Fatalf("client serialization contract missing %q", required)
+		}
+	}
+}
+
+func scheduleFormMarkup(t *testing.T, templates, marker string) string {
+	t.Helper()
+	start := strings.Index(templates, marker)
+	if start < 0 {
+		t.Fatalf("schedule form marker missing: %q", marker)
+	}
+	end := strings.Index(templates[start:], "</form>")
+	if end < 0 {
+		t.Fatalf("schedule form is incomplete: %q", marker)
+	}
+	return templates[start : start+end+len("</form>")]
 }
 
 func TestTaskTitleColumnUsesAvailableWidthBeforeTruncating(t *testing.T) {

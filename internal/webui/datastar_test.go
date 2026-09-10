@@ -32,7 +32,7 @@ func TestDatastarFragmentsAndFullPageNonce(t *testing.T) {
 		}
 		previousNonce = nonce
 	}
-	for _, target := range []string{"tasks-area", "task-list", "workspace-strip", "project-record", "inspector-host"} {
+	for _, target := range []string{"tasks-area", "task-list", "workspace-strip", "run-dashboard", "project-record", "inspector-host"} {
 		response := performRequest(fixture.handler, http.MethodGet, path+"?datastar=%7B%7D", "", http.Header{
 			"Datastar-Request": {"true"}, "Pellets-Target": {target},
 		})

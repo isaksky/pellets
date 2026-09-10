@@ -182,6 +182,19 @@ func (s *Scheduler) Get(id int64) (*ScheduleHandle, error) {
 	return h, nil
 }
 
+// WorkspaceStatus returns the current foreground receipt for the exact
+// workspace. Schedules are process-local; callers must combine this with the
+// durable run record for reconnect-safe rendering.
+func (s *Scheduler) WorkspaceStatus(workspaceID int64) (ScheduleStatus, bool) {
+	s.mu.Lock()
+	h := s.workspaces[workspaceID]
+	s.mu.Unlock()
+	if h == nil {
+		return ScheduleStatus{}, false
+	}
+	return h.Status(), true
+}
+
 func (h *ScheduleHandle) Status() ScheduleStatus {
 	h.mu.Lock()
 	defer h.mu.Unlock()

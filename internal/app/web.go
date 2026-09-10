@@ -17,6 +17,17 @@ type WebApplication struct {
 	Current    *storage.ResolvedProject
 	Executions *ExecutionSupervisor
 	Scheduler  *Scheduler
+	Database   Database
+}
+
+// WorkspaceRuns is a durable read used by the server-rendered activity view.
+// It never contacts Codex and is intentionally unavailable on lightweight
+// reader-only test/application instances.
+func (application *WebApplication) WorkspaceRuns(ctx context.Context, workspaceID int64) ([]storage.ExecutionRun, error) {
+	if application.Executions == nil || application.Database.Path == "" {
+		return nil, nil
+	}
+	return application.Executions.ListWorkspaceRuns(ctx, application.Database, workspaceID, 8)
 }
 
 // StartSchedule resolves only an explicitly chosen already registered workspace.
@@ -32,10 +43,35 @@ func (application *WebApplication) StartSchedule(ctx context.Context, project st
 	for _, workspace := range summary.Project.Workspaces {
 		if workspace.ID == workspaceID {
 			request.Selected = storage.ResolvedProject{Project: summary.Project, Workspace: workspace}
+			if request.ResumeFrom != nil {
+				if application.Executions == nil || application.Database.Path == "" || request.ResumePellet == nil {
+					return nil, scheduleError("resume_unavailable", "the exact durable attempt is unavailable for Resume")
+				}
+				previous, err := application.Executions.ReadRun(ctx, application.Database, *request.ResumeFrom)
+				if err != nil {
+					return nil, err
+				}
+				if previous.ProjectID != summary.Project.ID || previous.WorkspaceID != workspace.ID || previous.PelletNumber != *request.ResumePellet {
+					return nil, storage.ExecutionRunConflict(previous.ID)
+				}
+				// Resume is bound to the filters captured by the prior attempt, not
+				// mutable page controls or a browser-supplied payload. This prevents
+				// a metadata change from widening a resumed selection.
+				request.ExternalID = copyScheduleFilter(previous.ExternalID)
+				request.Group = copyScheduleFilter(previous.Group)
+			}
 			return application.Scheduler.Start(ctx, request)
 		}
 	}
 	return nil, scheduleError("schedule_workspace_unavailable", "choose an existing workspace in this project")
+}
+
+func copyScheduleFilter(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func (application *WebApplication) Close() error {

@@ -71,6 +71,17 @@ func (handle *ExecutionHandle) Result(ctx context.Context) (storage.ExecutionRun
 	}
 }
 
+// ListWorkspaceRuns exposes durable evidence to the local server UI without
+// exposing process ownership or allowing browser callers to affect a run.
+func (supervisor *ExecutionSupervisor) ListWorkspaceRuns(ctx context.Context, database Database, workspaceID int64, limit int) ([]storage.ExecutionRun, error) {
+	return supervisor.options.Recorder.ListWorkspaceRuns(ctx, database, workspaceID, limit)
+}
+
+// ReadRun is a read-only durable lookup for an explicitly referenced attempt.
+func (supervisor *ExecutionSupervisor) ReadRun(ctx context.Context, database Database, id int64) (storage.ExecutionRun, error) {
+	return supervisor.options.Recorder.Read(ctx, database, id)
+}
+
 func NewExecutionSupervisor(ctx context.Context, options SupervisorOptions) *ExecutionSupervisor {
 	if options.Prepare == nil {
 		options.Prepare = codex.PrepareRun
@@ -469,7 +480,14 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 		} else if storage.RunActive(run.State) {
 			progress := run.RunProgress
 			progress.State, progress.Outcome, progress.ErrorCode, progress.Summary = "needs_attention", "unknown", failureCode, ""
-			progress.Summary = executionFailureDiagnostic(err)
+			switch failureCode {
+			case "codex_input_required":
+				progress.Summary = "Codex is awaiting explicit input."
+			case "codex_approval_review_required":
+				progress.Summary = "Automatic approval review requires attention."
+			default:
+				progress.Summary = executionFailureDiagnostic(err)
+			}
 			if closeErr != nil || errors.Is(err, codex.ErrCleanup) {
 				progress.ErrorCode = "process_cleanup_unconfirmed"
 			}

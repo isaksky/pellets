@@ -70,6 +70,7 @@ func (runner Runner) Run(ctx context.Context, options Options) (runErr error) {
 	if err != nil {
 		return err
 	}
+	application.Database = app.Database{Root: options.DatabaseRoot, Path: options.DatabasePath}
 	defer application.Close()
 	if runner.OpenSupervisor != nil {
 		application.Executions = runner.OpenSupervisor(ctx)

@@ -86,6 +86,20 @@ func awaitScheduledTurn(t *testing.T, s *Scheduler) {
 	}
 }
 
+func TestConciseCodexActivityDoesNotExposeProtocolContent(t *testing.T) {
+	for method, want := range map[string]string{
+		"item/started":                          "Codex started the next workspace activity.",
+		"item/completed":                        "Codex completed an activity; validating the bound result.",
+		"item/commandExecution/requestApproval": "Automatic approval review is in progress.",
+		"item/tool/requestUserInput":            "Codex is awaiting explicit input.",
+		"unknown/event":                         "",
+	} {
+		if got := conciseCodexActivity(method); got != want {
+			t.Fatalf("summary for %q = %q, want %q", method, got, want)
+		}
+	}
+}
+
 func TestSchedulerRealDriverModesLimitAndExactBinding(t *testing.T) {
 	executable := installSupervisorPeer(t)
 	for _, test := range []struct {
@@ -185,9 +199,68 @@ func TestSchedulerPersistsCachedTokensBeforeInputAttention(t *testing.T) {
 		t.Fatalf("input attention = %+v", status)
 	}
 	run, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, status.RunID)
-	if err != nil || run.CachedInputTokens == nil || *run.CachedInputTokens != 7 {
-		t.Fatalf("input telemetry = %#v, %v", run.CachedInputTokens, err)
+	if err != nil || run.CachedInputTokens == nil || *run.CachedInputTokens != 7 || run.Summary != "Codex is awaiting explicit input." {
+		t.Fatalf("input telemetry/activity = %#v %q %v", run.CachedInputTokens, run.Summary, err)
 	}
+}
+
+func TestSchedulerPreservesApprovalReviewAttention(t *testing.T) {
+	executable := installSupervisorPeer(t)
+	s, request, _ := schedulerFixture(t, executable, "schedule_approval")
+	status := awaitSchedule(t, startSchedule(t, s, request))
+	if status.State != "needs_attention" || status.Reason != "codex_approval_review_required" {
+		t.Fatalf("approval attention = %+v", status)
+	}
+	run, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, status.RunID)
+	if err != nil || run.State != "needs_attention" || run.ErrorCode != "codex_approval_review_required" || run.Summary != "Automatic approval review requires attention." {
+		t.Fatalf("approval activity = %#v %v", run, err)
+	}
+}
+
+func TestWebResumeRestoresCapturedFiltersInsteadOfBrowserValues(t *testing.T) {
+	executable := installSupervisorPeer(t)
+	s, request, queue := schedulerFixture(t, executable, "schedule_failed")
+	originalGroup, originalExternal := "original group", "original external"
+	const pelletNumber int64 = 1
+	reference := domain.PelletReference{ProjectCode: request.Selected.Project.Code, Number: pelletNumber}
+	if _, err := queue.UpdatePellet(context.Background(), request.Selected, reference, storage.PelletChanges{
+		Group: storage.NullableTextChange{Set: true, Value: &originalGroup}, ExternalID: storage.NullableTextChange{Set: true, Value: &originalExternal},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	request.Group, request.ExternalID = &originalGroup, &originalExternal
+	first := awaitSchedule(t, startSchedule(t, s, request))
+	if first.RunID == 0 {
+		t.Fatalf("first run missing: %+v", first)
+	}
+	changedGroup, changedExternal := "changed group", "changed external"
+	if _, err := queue.UpdatePellet(context.Background(), request.Selected, reference, storage.PelletChanges{
+		Group: storage.NullableTextChange{Set: true, Value: &changedGroup}, ExternalID: storage.NullableTextChange{Set: true, Value: &changedExternal},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := sqlite.OpenWebReader(context.Background(), s.options.Database.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	writer, err := sqlite.OpenWebWriter(context.Background(), s.options.Database.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	application := &WebApplication{Reader: reader, Writer: writer, Executions: s.options.Supervisor, Scheduler: s, Database: s.options.Database}
+	maliciousGroup, maliciousExternal := "browser group", "browser external"
+	pellet, previous := pelletNumber, first.RunID
+	handle, err := application.StartSchedule(context.Background(), request.Selected.Project, request.Selected.Workspace.ID, ScheduleRequest{Mode: "run_one", ResumePellet: &pellet, ResumeFrom: &previous, Group: &maliciousGroup, ExternalID: &maliciousExternal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := handle.Status()
+	if status.Group == nil || status.ExternalID == nil || *status.Group != originalGroup || *status.ExternalID != originalExternal {
+		t.Fatalf("resume filters were not restored: %+v", status)
+	}
+	_ = awaitSchedule(t, handle)
 }
 
 func TestSchedulerPreThreadRetryUsesFreshChangedPrefix(t *testing.T) {

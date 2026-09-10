@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"pellets/internal/app"
@@ -82,6 +83,20 @@ func TestScheduleHTTPExplicitWorkspaceExactFieldsAndSecurity(t *testing.T) {
 		response = performMutation(f.handler, path, invalid, testOrigin, true, "application/x-www-form-urlencoded")
 		if response.Code == http.StatusAccepted {
 			t.Fatalf("accepted invalid %s=%v", test.key, test.values)
+		}
+	}
+	ungrouped := url.Values{"_csrf": {testCSRF}, "workspace_id": {strconv.FormatInt(f.projects[1].Workspaces[0].ID, 10)}, "mode": {"run_one"}, "group_scope": {"ungrouped"}}
+	response = performMutation(f.handler, path, ungrouped, testOrigin, true, "application/x-www-form-urlencoded")
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "exact ungrouped") {
+		t.Fatalf("ungrouped schedule = %d %s", response.Code, response.Body.String())
+	}
+	for _, mismatch := range []url.Values{
+		{"_csrf": {testCSRF}, "workspace_id": {strconv.FormatInt(f.projects[1].Workspaces[0].ID, 10)}, "mode": {"run_one"}, "group_scope": {"value"}},
+		{"_csrf": {testCSRF}, "workspace_id": {strconv.FormatInt(f.projects[1].Workspaces[0].ID, 10)}, "mode": {"run_one"}, "group_scope": {"any"}, "group": {"exact"}},
+	} {
+		response = performMutation(f.handler, path, mismatch, testOrigin, true, "application/x-www-form-urlencoded")
+		if response.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("accepted mismatched group scope: %d %s", response.Code, response.Body.String())
 		}
 	}
 }

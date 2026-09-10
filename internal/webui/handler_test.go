@@ -99,7 +99,7 @@ func TestHandlerRendersAuthoritativeResponsiveProjectViewsAndEscapesHTML(t *test
 		t.Fatalf("GET status = %d; body=%s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	for _, required := range []string{"project1", "workspace-strip", "New task", "All states", "System", "Dark", "Light", "app.js"} {
+	for _, required := range []string{"project1", "workspace-strip", "run-dashboard", "Workspace activity", "Run one", "Drain", "Watch", "New task", "All states", "System", "Dark", "Light", "app.js"} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("page missing %q", required)
 		}
@@ -137,6 +137,39 @@ func TestHandlerRendersAuthoritativeResponsiveProjectViewsAndEscapesHTML(t *test
 	response = performRequest(fixture.handler, http.MethodGet, "/projects/project1/memories/"+strconv.FormatInt(memory.ID, 10), "", nil)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Memory inspector") || !strings.Contains(response.Body.String(), `memory-card selected`) {
 		t.Fatalf("memory deep-link response = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestHandlerRefusesDisplayedUngroupedScheduleFilter(t *testing.T) {
+	fixture := newHandlerFixture(t, 1)
+	response := performRequest(fixture.handler, http.MethodGet, "/projects/project1/tasks?group=n", "", nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("page status = %d", response.Code)
+	}
+	body := response.Body.String()
+	for _, required := range []string{`name="group_scope" value="ungrouped"`, "displayed exact Ungrouped filter cannot be scheduled", `value="run_one" disabled`} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("ungrouped schedule guard missing %q: %s", required, body)
+		}
+	}
+}
+
+func TestRunViewPreservesFrozenFiltersAndInteractionCategories(t *testing.T) {
+	group, external := "frozen group", "frozen external"
+	for _, test := range []struct {
+		name, state, code, summary string
+		awaiting, review           bool
+	}{
+		{name: "input terminalization", state: "needs_attention", code: "codex_input_required", summary: "Codex is awaiting explicit input.", awaiting: true},
+		{name: "approval terminalization", state: "needs_attention", code: "codex_approval_review_required", summary: "Automatic approval review requires attention.", review: true},
+		{name: "active input", state: "awaiting_input", summary: "Codex is awaiting explicit input.", awaiting: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			view := makeRunView(storage.ExecutionRun{ID: 9, RunCapture: storage.RunCapture{ProjectID: 1, WorkspaceID: 2, PelletNumber: 3, Mode: "run_one", ExternalID: &external, Group: &group, Settings: storage.EffectiveRunSettings{Codex: storage.CodexRunSettings{Model: "model", ReasoningEffort: "high"}}}, ProjectCode: "project1", PelletPresent: true, RunProgress: storage.RunProgress{Phase: "implementation", State: test.state, Outcome: map[bool]string{true: "unknown", false: ""}[test.state != "awaiting_input"], ErrorCode: test.code, Summary: test.summary}})
+			if view.ExternalID != external || view.Group != group || view.Awaiting != test.awaiting || view.AutoReview != test.review {
+				t.Fatalf("run view = %#v", view)
+			}
+		})
 	}
 }
 

@@ -11,7 +11,7 @@ import (
 
 func (h *handler) startSchedule(w http.ResponseWriter, r *http.Request, project storage.Project) {
 	fields := []string{"_csrf", "workspace_id", "mode"}
-	for _, optional := range []string{"external_id", "group", "resume_pellet", "resume_from", "limit"} {
+	for _, optional := range []string{"external_id", "group", "group_scope", "resume_pellet", "resume_from", "limit"} {
 		if _, exists := r.PostForm[optional]; exists {
 			fields = append(fields, optional)
 		}
@@ -26,6 +26,20 @@ func (h *handler) startSchedule(w http.ResponseWriter, r *http.Request, project 
 		return
 	}
 	request := app.ScheduleRequest{Mode: r.PostForm.Get("mode")}
+	groupScope := r.PostForm.Get("group_scope")
+	if groupScope == "ungrouped" {
+		h.renderError(w, http.StatusUnprocessableEntity, requestError("scheduling an exact ungrouped filter is not supported; remove the group filter before running"), nil)
+		return
+	}
+	if scope, exists := r.PostForm["group_scope"]; exists && scope[0] != "any" && scope[0] != "value" && scope[0] != "ungrouped" {
+		h.renderError(w, http.StatusUnprocessableEntity, requestError("invalid group filter scope"), nil)
+		return
+	}
+	_, hasGroup := r.PostForm["group"]
+	if (groupScope == "value" && (!hasGroup || r.PostForm.Get("group") == "")) || (groupScope == "any" && hasGroup) {
+		h.renderError(w, http.StatusUnprocessableEntity, requestError("group filter scope does not match the exact group value"), nil)
+		return
+	}
 	for key, target := range map[string]**string{"external_id": &request.ExternalID, "group": &request.Group} {
 		if values, ok := r.PostForm[key]; ok {
 			value := values[0]

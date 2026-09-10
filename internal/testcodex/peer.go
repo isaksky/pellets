@@ -127,6 +127,10 @@ func Run() bool {
 				write(map[string]any{"id": 1, "method": "item/tool/requestUserInput", "params": map[string]any{}})
 				continue
 			}
+			if mode == "schedule_approval" {
+				write(map[string]any{"id": 1, "method": "item/commandExecution/requestApproval", "params": map[string]any{}})
+				continue
+			}
 			status := "completed"
 			if mode == "schedule_failed" {
 				status = "failed"

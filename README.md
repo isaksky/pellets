@@ -430,7 +430,9 @@ foreground behavior. New scripts and documentation must use `pl server`.
 The internal [Codex stdio adapter](docs/codex-app-server.md), run preflight,
 and workspace scheduler are wired to the foreground server lifetime. Internal
 HTTP interfaces expose Run one, Drain, Watch, explicit Resume, and both stop
-actions; browser execution controls are still separate work. Preflight verifies the
+actions. The browser shows each registered workspace's durable latest activity,
+phase, terminal result, and current foreground receipt; controls refresh from the
+server after every action and never expose a command log or transcript. Preflight verifies the
 installed runtime's protocol, local account, normal
 workspace configuration, managed requirements, and model capabilities without
 copying credentials or starting a model turn. Prepared runs use

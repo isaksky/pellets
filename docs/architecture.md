@@ -264,9 +264,11 @@ evidence. Read/list operations do not resume work or reconcile a live process.
 After the supervisor is known to have stopped, explicit interruption recording
 preserves its last phase for subsequent user-directed recovery. See
 [the data model](data-model.md#durable-execution-evidence) for state, bounds,
-purge, and retention contracts. The server-owned scheduler exposes internal
-Run one/Drain/Watch, status, Resume, and stop HTTP interfaces; polished browser
-controls remain separate work. It selects atomically under the execution lock,
+purge, and retention contracts. The server-owned scheduler exposes Run one/Drain/Watch,
+status, Resume, and stop HTTP interfaces alongside server-rendered browser controls.
+The browser combines foreground receipts with durable latest-run evidence per
+registered workspace, uses bounded category summaries rather than a transcript,
+and refreshes every control result authoritatively. It selects atomically under the execution lock,
 binds the exact pellet to Codex, and advances only after validated completion.
 Watch shares the database monitor and performs bounded idle recovery with no
 model calls. See [the scheduler contract](codex-app-server.md#foreground-scheduler)

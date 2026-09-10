@@ -42,6 +42,7 @@
         </label>
       </header>
       {{template "project-record" .}}
+      {{template "run-dashboard" .}}
       {{if not .MultiProject}}
       {{template "workspace-strip" .}}
       {{end}}
@@ -64,6 +65,27 @@
   {{range (index .Projects 0).Workspaces}}
   <div class="workspace-chip {{if .Current}}current{{end}}"><span>Workspace {{.ID}}</span><code title="{{.GitDir}}">{{.Root}}</code>{{if .Pellet}}<a href="/projects/{{$.Project.Code}}/tasks/{{.Pellet}}">{{.Pellet}}</a>{{else}}<span class="quiet">idle</span>{{end}}</div>
   {{end}}
+</section>{{end}}
+
+{{define "run-dashboard"}}<section id="run-dashboard" class="run-dashboard live-fragment" aria-labelledby="run-dashboard-title" data-refresh-url="{{.CurrentURL}}">
+  <div class="run-dashboard-heading"><div><span class="eyebrow">Foreground runs</span><h2 id="run-dashboard-title">Workspace activity</h2></div><p>Authoritative durable status; activity is concise and never includes commands or a transcript.</p></div>
+  <div class="run-workspaces">{{range .RunWorkspaces}}<article class="run-workspace" data-workspace-id="{{.ID}}">
+    <header><div><strong>Workspace {{.ID}}</strong><code title="{{.Root}}">{{.Root}}</code></div>{{if .ActivePellet}}<a href="/projects/{{$.Project.Code}}/tasks/{{.ActivePellet}}">{{.ActivePellet}}</a>{{else}}<span class="quiet">No active pellet</span>{{end}}</header>
+    {{if .Run}}<dl class="run-facts"><div><dt>Pellet</dt><dd><code>{{.Run.Pellet}}</code></dd></div><div><dt>Mode</dt><dd>{{runStateLabel .Run.Mode}}</dd></div><div><dt>Model / effort</dt><dd>{{.Run.Model}} · {{.Run.Effort}}</dd></div><div><dt>Phase</dt><dd>{{runStateLabel .Run.Phase}}</dd></div><div><dt>State</dt><dd><span class="badge run-state {{.Run.State}}">{{runStateLabel .Run.State}}</span></dd></div><div><dt>Frozen filters</dt><dd>External ID: {{.Run.ExternalID}} · Group: {{.Run.Group}}</dd></div></dl>
+      <p class="run-activity"><strong>Latest activity:</strong> {{.Run.Activity}}</p>
+      {{if .Run.AutoReview}}<p class="run-notice">Automatic approval review requires attention.</p>{{end}}
+      {{if .Run.Awaiting}}<p class="run-notice">Awaiting input for this exact run.</p>{{end}}
+      {{if .Run.Interrupted}}<p class="run-notice warning">Run was interrupted; use Resume only after reviewing the current workspace.</p>{{end}}
+      {{if .Run.Attention}}<p class="run-notice warning">Needs attention{{if .Run.Error}}: {{.Run.Error}}{{end}}.</p>{{end}}
+      {{if .Run.Commit}}<p class="run-outcome">Terminal commit: <code>{{.Run.Commit}}</code></p>{{else if .Run.Outcome}}<p class="run-outcome">Terminal outcome: {{.Run.Outcome}}</p>{{end}}
+    {{else}}<p class="run-activity">No recorded run for this workspace.</p>{{end}}
+    {{if .Schedule}}<p class="schedule-state">Schedule #{{.Schedule.ID}} · {{runStateLabel .Schedule.Mode}} · {{runStateLabel .Schedule.State}}{{if eq .Schedule.State "waiting"}} — waiting for a matching queue target{{end}}{{if .Schedule.StopAfter}} · stopping after current pellet{{end}} · frozen filters: External ID {{.Schedule.ExternalID}}, Group {{.Schedule.Group}}</p>{{end}}
+    <div class="run-controls" aria-label="Controls for workspace {{.ID}}">
+      <form action="/projects/{{$.Project.Code}}/schedules" method="post" data-schedule><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="workspace_id" value="{{.ID}}">{{if .UngroupedFilter}}<input type="hidden" name="group_scope" value="ungrouped"><p class="run-notice warning">The displayed exact Ungrouped filter cannot be scheduled. Remove it before running.</p>{{else}}<input type="hidden" name="group_scope" value="{{if .Group}}value{{else}}any{{end}}"><label class="run-filter">External ID <input name="external_id" value="{{.ExternalID}}" placeholder="Exact filter"{{if .Busy}} disabled{{end}}></label><label class="run-filter">Group <input name="group" value="{{.Group}}" placeholder="Exact filter"{{if .Busy}} disabled{{end}}></label>{{end}}<button type="submit" name="mode" value="run_one"{{if or .Busy .UngroupedFilter}} disabled{{end}}>Run one</button><button type="submit" name="mode" value="drain"{{if or .Busy .UngroupedFilter}} disabled{{end}}>Drain</button><button type="submit" name="mode" value="watch"{{if or .Busy .UngroupedFilter}} disabled{{end}}>Watch</button></form>
+      {{if .Schedule}}<form action="/projects/{{$.Project.Code}}/schedules/{{.Schedule.ID}}/stop-after" method="post" data-schedule><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit"{{if .Schedule.StopAfter}} disabled{{end}}>Stop after</button></form><form action="/projects/{{$.Project.Code}}/schedules/{{.Schedule.ID}}/stop-now" method="post" data-schedule><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit">Stop now</button></form>{{end}}
+      {{if .Run}}{{if .Run.CanResume}}<form action="/projects/{{$.Project.Code}}/schedules" method="post" data-schedule><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="workspace_id" value="{{.ID}}"><input type="hidden" name="mode" value="run_one"><input type="hidden" name="resume_pellet" value="{{.Run.PelletNumber}}"><input type="hidden" name="resume_from" value="{{.Run.ID}}"><button type="submit"{{if .Schedule}} disabled{{end}}>Resume</button></form>{{end}}{{end}}
+    </div>
+  </article>{{end}}</div>
 </section>{{end}}
 
 {{define "project-record"}}<details class="project-record live-fragment" id="project-record" data-refresh-url="{{.CurrentURL}}">
