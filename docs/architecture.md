@@ -233,6 +233,18 @@ steering, stopping, and resuming are explicit user actions. The automatic
 approval mode is `REVIEW`: it is neither blanket approval nor a disabled
 sandbox.
 
+`storage.ExecutionRunDatabase` and `app.ExecutionRecorder` implement that
+evidence boundary. Run creation captures stable identities and the pellet
+snapshot atomically. Codex conversation transitions persist intent before the
+external call and returned thread/turn IDs immediately afterward; uncertain
+calls retain `needs_attention` with an `unknown` outcome. Git commit evidence is
+verified before it is saved, and retention never deletes or retargets that
+evidence. Read/list operations do not resume work or reconcile a live process.
+After the supervisor is known to have stopped, explicit interruption recording
+preserves its last phase for subsequent user-directed recovery. See
+[the data model](data-model.md#durable-execution-evidence) for state, bounds,
+purge, and retention contracts. Public execution controls remain separate work.
+
 Concretely, prepared threads and turns use `workspace-write`, `on-request`, and
 `approvals_reviewer=auto_review`. Managed restrictions still apply, and
 questions, denials, timeouts, and errors remain visible. When the bound database

@@ -1,6 +1,6 @@
 # Data Model
 
-SQLite is authoritative for logical projects, their registered workspaces and credential-free run settings, pellets, and memories. FTS5 tables are derived indexes and can always be rebuilt.
+SQLite is authoritative for logical projects, their registered workspaces, credential-free run settings, durable execution evidence, pellets, and memories. FTS5 tables are derived indexes and can always be rebuilt.
 
 This model intentionally contains no dependency, edge, epic, tag, group, task-note, task-event, agent, PID, session, claim, lease, heartbeat, expiry, assignment-history, or vector table. A workspace row is a Git worktree coordination identity, not an agent or security principal. Group is a nullable scalar on a pellet, not an entity. Memory is documented separately in [memory.md](memory.md); CLI behavior is in [cli-spec.md](cli-spec.md).
 
@@ -194,7 +194,85 @@ CREATE INDEX memories_project_approval_idx
 
 `pellets.rowid` is a database-internal surrogate used by SQLite and FTS. It is never shown as the public pellet ID.
 
-`memories.memory_id` is a database-local, user-visible identity for a removable record. Under [SQLite's `AUTOINCREMENT` allocation rules](https://sqlite.org/autoinc.html), an automatically allocated ID from a committed row is never assigned to a different memory after removal. SQLite may leave gaps, and an allocation rolled back before commit may be reused. This is the only column that needs that guarantee: the additional sequence-maintenance cost is not justified for the internal `pellets.rowid` or unrelated keys, which remain plain `INTEGER PRIMARY KEY` columns.
+`memories.memory_id` is a database-local, user-visible identity for a removable record. Under [SQLite's `AUTOINCREMENT` allocation rules](https://sqlite.org/autoinc.html), an automatically allocated ID from a committed row is never assigned to a different memory after removal. SQLite may leave gaps, and an allocation rolled back before commit may be reused. `execution_runs.run_id` uses the same guarantee so an exact review target can never identify another attempt. Internal `pellets.rowid` and unrelated keys remain plain `INTEGER PRIMARY KEY` columns.
+
+## Durable execution evidence
+
+Migration 7 adds `execution_runs` and `execution_run_activity`; its
+[SQL](../internal/storage/sqlite/migrations/0007_execution_runs.sql) is the
+normative table and constraint contract. These records do not participate in
+queue selection, priorities, pellet lifecycle, or assignment history.
+
+Each run is one numbered attempt against stable `project_id`, `workspace_id`,
+and monotonic `pellet_number`. The public project code is joined on read, so
+renames change display references without changing associations. A run retains
+the title/description snapshot captured under its creation transaction, starting
+HEAD, credential-free effective settings, mode (`run_one`, `drain`, `watch`, or
+reserved `review_checkpoint`), exact nullable external-ID/group filters, and an
+optional reference to the exact stopped attempt being explicitly resumed.
+Resume creates another attempt and retains the former thread identity; it does
+not erase the prior turn, outcome, or snapshot. The reserved review mode adds no
+checkpoint scope, dependency, or scheduler behavior.
+
+States are `running`, `awaiting_input`, `interrupted`, `needs_attention`, and
+`completed`. They are independent of `open`, `in_progress`, `closed`, and
+`maybe_later` pellet states. A partial unique index allows one running or
+awaiting-input attempt per workspace. Updates require the current revision
+under `BEGIN IMMEDIATE`; stopped progress cannot be rewritten or restarted.
+An outstanding operation may still reconcile its returned conversation IDs
+after a concurrent event has recorded a terminal outcome.
+Phases record intent before preflight, thread/turn start, implementation,
+verification, commit, close, review, or finalization. Adding phase vocabulary
+requires a forward migration and matching application validation; it does not
+create a generic event type. Timestamps use fixed-width UTC RFC3339 with nine
+fractional digits. A stopped attempt has an explicit finish time and outcome;
+uncertainty is `unknown`, never success inferred from process exit.
+
+Before a consequential Codex call, `BeginExecutionOperation` writes one
+allowlisted `pending_operation` (`thread/start`, `thread/resume`, `turn/start`,
+or `turn/interrupt`) with its reservation revision and original turn ID. A
+second operation on that run cannot reserve or dispatch until this marker is
+reconciled, even if intervening progress has advanced the row revision.
+`FinishExecutionOperation` matches the reservation revision and merges returned
+conversation IDs into current progress under the writer lock. It preserves
+concurrent phase, state, summaries, commit evidence, and terminal outcomes.
+These markers coordinate requests, not process ownership or leases.
+
+An interrupt marker is durable evidence that interruption was requested; its
+acknowledgement never establishes that the turn stopped. The bounded activity
+also retains the operation name. Pending markers survive database reopen and
+block new attempts and activity retention until explicitly reconciled. After a
+crash, an operator must reconcile the exact operation against Codex or confirm
+that its supervisor stopped and finish it with a stable uncertainty error;
+opening the database never dispatches or replays that request.
+
+At most 64 recent activity summaries of 1,024 UTF-8 bytes each are retained per
+attempt. Each title and description snapshot is capped at 1 MiB, settings at
+32 KiB, each exact filter at 4 KiB, and conversation IDs/error classifications
+at 256 ASCII characters. Oversized inputs fail rather than silently truncating
+evidence. Listing uses an exclusive run-ID cursor and a required limit of at
+most 100. This is bounded orchestration evidence: no credentials, raw config,
+environment, stderr, prompts, full transcripts, or arbitrary event payloads.
+Callers author concise summaries and stable error classifications themselves.
+
+Commit evidence is a full SHA-1 or SHA-256 object ID with a verification time,
+recorded only after application-level Git object, HEAD, and starting-commit
+ancestry checks. It is immutable once present. Completed runs require this
+evidence and Codex thread/turn IDs; they do not themselves close the pellet or
+assert that tests passed. Read-time availability is separate from the stored
+historical outcome.
+
+Pellet purge deliberately does not cascade to run evidence. `pellet_present`
+reports whether the original queue row remains, while its original snapshot
+and commit still identify the review target. Explicit `PruneRunActivity` takes
+a cutoff and batch limit (1–1,000), trims only stopped attempts without pending
+operations, removes their summaries and
+activity, and marks the pruning. Run IDs, snapshots, settings, final phase,
+outcome, timestamps, conversation IDs and commit evidence have no automatic
+expiry and no deletion API. Outstanding review checkpoints therefore need no
+generic pin/dependency graph. Missing run IDs fail explicitly; missing Git
+objects or Codex threads are reported unavailable without substituting current
+HEAD, a newer run, or an edited pellet. Full transcripts remain owned by Codex.
 
 `projects.git_common_dir` is the repository-sameness key. `project_workspaces` is the authoritative workspace relation; its globally unique root and Git-directory identities prevent one worktree from attaching to two projects. Composite uniqueness on `(project_id, workspace_id)` supports the pellet composite foreign key, which makes cross-project workspace ownership impossible even when application checks are bypassed.
 

@@ -264,6 +264,10 @@ func TestPrepareRunUsesLocalAccountCatalogAndNarrowDatabaseAccess(t *testing.T) 
 	if !prepared.Account.Ready || prepared.Account.Type != "chatgpt" || len(prepared.Models) != 2 {
 		t.Fatalf("preflight = account %#v, models %#v", prepared.Account, prepared.Models)
 	}
+	evidence := prepared.EvidenceSettings
+	if evidence.Codex.Executable != prepared.Client.Runtime().Executable || evidence.Codex.Model != RecommendedModel || evidence.Codex.ReasoningEffort != RecommendedReasoningEffort || evidence.Codex.Limits != prepared.Settings.Limits || evidence.ApprovalPolicy != "on-request" || evidence.ApprovalsReviewer != "auto_review" || evidence.SandboxMode != "workspace-write" || !reflect.DeepEqual(evidence.WritableRoots, []string{existingRoot, databaseDir}) || evidence.NetworkAccess || !evidence.ExcludeSlashTmp || !evidence.ExcludeTmpdirEnvVar {
+		t.Fatalf("effective run evidence = %#v", evidence)
+	}
 	if strings.Contains(strings.TrimSpace(string(mustJSON(t, prepared))), "must-not-escape") {
 		t.Fatal("account email escaped into prepared run state")
 	}

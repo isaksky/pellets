@@ -182,12 +182,13 @@ type ModelInfo struct {
 // PreparedRun retains only non-secret preflight state. In particular it does
 // not expose account email, credential material, or the installed raw config.
 type PreparedRun struct {
-	Client   *Client
-	Settings RunSettings
-	Account  AccountStatus
-	Models   []ModelInfo
-	thread   map[string]any
-	turn     map[string]any
+	Client           *Client
+	Settings         RunSettings
+	Account          AccountStatus
+	Models           []ModelInfo
+	EvidenceSettings storage.EffectiveRunSettings
+	thread           map[string]any
+	turn             map[string]any
 }
 
 func (prepared *PreparedRun) ThreadStartParams() map[string]any {
@@ -293,7 +294,27 @@ func PrepareRun(ctx context.Context, options PrepareOptions) (_ *PreparedRun, er
 	if settings.ReasoningEffort != "" {
 		turn["effort"] = settings.ReasoningEffort
 	}
-	return &PreparedRun{Client: client, Settings: settings, Account: account, Models: models, thread: thread, turn: turn}, nil
+	evidenceSettings := storage.EffectiveRunSettings{
+		Codex:          storage.CodexRunSettings{Executable: client.Runtime().Executable, Model: settings.Model, ReasoningEffort: settings.ReasoningEffort, Limits: settings.Limits},
+		ApprovalPolicy: "on-request", ApprovalsReviewer: "auto_review", SandboxMode: "workspace-write",
+		WritableRoots: append([]string(nil), writableRoots...), NetworkAccess: effective.Sandbox.NetworkAccess,
+		ExcludeSlashTmp: effective.Sandbox.ExcludeSlashTmp, ExcludeTmpdirEnvVar: effective.Sandbox.ExcludeTmpdirEnvVar,
+	}
+	if evidenceSettings.Codex.Model == "" {
+		evidenceSettings.Codex.Model = effective.Model
+	}
+	if evidenceSettings.Codex.Model == "" {
+		for _, model := range models {
+			if model.Default {
+				evidenceSettings.Codex.Model = model.Model
+				break
+			}
+		}
+	}
+	if evidenceSettings.Codex.ReasoningEffort == "" {
+		evidenceSettings.Codex.ReasoningEffort = effective.ReasoningEffort
+	}
+	return &PreparedRun{Client: client, Settings: settings, Account: account, Models: models, EvidenceSettings: evidenceSettings, thread: thread, turn: turn}, nil
 }
 
 // requirePelletsTool checks the same cwd and inherited environment supplied to
@@ -454,8 +475,9 @@ func checkManagedPolicy(requirements *managedRequirements) error {
 }
 
 type effectiveConfig struct {
-	Model   string
-	Sandbox struct {
+	Model           string
+	ReasoningEffort string
+	Sandbox         struct {
 		WritableRoots       []string
 		NetworkAccess       bool
 		ExcludeSlashTmp     bool
@@ -471,6 +493,7 @@ func readEffectiveConfig(ctx context.Context, client Session, workspace string) 
 	var response struct {
 		Config *struct {
 			Model                 string `json:"model"`
+			ReasoningEffort       string `json:"model_reasoning_effort"`
 			SandboxWorkspaceWrite *struct {
 				WritableRoots       []string `json:"writable_roots"`
 				NetworkAccess       bool     `json:"network_access"`
@@ -482,7 +505,7 @@ func readEffectiveConfig(ctx context.Context, client Session, workspace string) 
 	if json.Unmarshal(result, &response) != nil || response.Config == nil {
 		return effectiveConfig{}, fmt.Errorf("%w: invalid config/read response", ErrProtocol)
 	}
-	effective := effectiveConfig{Model: response.Config.Model}
+	effective := effectiveConfig{Model: response.Config.Model, ReasoningEffort: response.Config.ReasoningEffort}
 	if sandbox := response.Config.SandboxWorkspaceWrite; sandbox != nil {
 		effective.Sandbox.WritableRoots = append([]string(nil), sandbox.WritableRoots...)
 		effective.Sandbox.NetworkAccess = sandbox.NetworkAccess

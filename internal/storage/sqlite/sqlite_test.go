@@ -283,8 +283,8 @@ func TestMemoryIDsAreNeverReusedAfterRemoval(t *testing.T) {
 		)`).Scan(&autoincrementTables); err != nil {
 		t.Fatal(err)
 	}
-	if autoincrementTables != "memories" {
-		t.Fatalf("tables declared AUTOINCREMENT = %q, want only memories", autoincrementTables)
+	if autoincrementTables != "execution_runs,memories" {
+		t.Fatalf("tables declared AUTOINCREMENT = %q, want execution_runs,memories", autoincrementTables)
 	}
 }
 
@@ -1535,6 +1535,8 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 	t.Helper()
 	wantTables := []string{
 		"application_metadata",
+		"execution_run_activity",
+		"execution_runs",
 		"memories",
 		"memories_fts",
 		"memories_fts_config",
@@ -1554,6 +1556,9 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 		"workspace_run_settings",
 	}
 	wantIndexes := []string{
+		"execution_runs_retention_idx",
+		"execution_runs_workspace_active_idx",
+		"execution_runs_workspace_recent_idx",
 		"memories_project_approval_idx",
 		"pellet_add_requests_created_idx",
 		"pellets_active_priority_idx",
@@ -1600,7 +1605,7 @@ func assertObjectNames(t *testing.T, db *sql.DB, objectType string, want []strin
 
 func assertStrictTables(t *testing.T, db *sql.DB) {
 	t.Helper()
-	want := []string{"application_metadata", "memories", "pellet_add_requests", "pellets", "project_code_redirects", "project_workspaces", "projects", "workspace_run_settings"}
+	want := []string{"application_metadata", "execution_run_activity", "execution_runs", "memories", "pellet_add_requests", "pellets", "project_code_redirects", "project_workspaces", "projects", "workspace_run_settings"}
 	rows, err := db.Query("PRAGMA table_list")
 	if err != nil {
 		t.Fatal(err)

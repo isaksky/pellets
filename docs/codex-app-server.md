@@ -140,6 +140,39 @@ The runtime still applies protected paths and managed requirements.
 
 ## Runner interface
 
+The foreground supervisor's persistence boundary is
+`app.ExecutionRecorder`, backed by schema-7 execution records. Begin an attempt
+with the resolved workspace and `PreparedRun.EvidenceSettings` before a thread
+or turn starts. The allowlisted evidence settings capture the resolved
+executable/transport limits, known effective model/effort, sandbox roots and
+policy; empty effort means the runtime has not exposed a concrete default.
+Neither raw configuration nor account data is included.
+
+Use `CallCodex` for recorded thread start/resume, turn start, and interrupt
+requests. It saves the intended phase before invoking the session and saves
+an explicit pending operation before dispatch, including `turn/interrupt`.
+Only one consequential call may be pending for a run. Returned IDs reconcile
+using that operation's reservation revision, so concurrent event progress can
+advance the row without losing the response or being overwritten by it. The
+event consumer still runs concurrently. If a
+call or response is uncertain, its attempt stops at `needs_attention` with
+`unknown` outcome and a stable error code. A bounded save using a fresh context
+records request cancellation where possible. If that save fails, stop and
+reconcile the last persisted intent; never automatically replay a consequential
+call. Pending markers block further dispatch and new attempts until explicitly
+reconciled through the storage operation boundary. An interrupt response alone
+does not mark a turn stopped.
+
+`Save` records state/phase changes and concise application-authored summaries.
+`VerifyCommit` checks the full commit object, current HEAD and starting-HEAD
+ancestry using the registered worktree before recording immutable commit
+evidence. `MarkInterrupted` is explicit and requires the supervisor to be known
+stopped. `InspectEvidence` reads one exact run ID, checks original Git objects,
+and optionally checks `thread/read` without turns; absent/unavailable/unchecked
+evidence is separate from historical outcome. It does not read or store a full
+transcript. No recorder operation selects work, creates commits, closes
+pellets, starts a scheduler, or resumes on database open.
+
 The small `Session` interface provides `Call`, `Respond`, `Events`,
 `LatestCompletion`, `Wait`, and `Close`. Request parameters/results and event
 payloads retain Codex JSON rather than copying its large generated object model.

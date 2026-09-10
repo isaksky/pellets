@@ -440,6 +440,13 @@ open-ended model ID, supported reasoning effort, and
 bounded transport limits; normal Codex defaults remain valid. This does not
 introduce a second model runtime or make normal Pellets use depend on Codex.
 
+The internal execution recorder also persists attempts, Codex thread/turn IDs,
+captured settings and filters, interruption outcomes, and verified commit
+evidence. These records survive reconnects, project renames, and pellet purge;
+bounded activity retention preserves the original review target. They do not
+add public run controls or another queue. Credentials and full transcripts
+remain outside Pellets. See [execution evidence](docs/data-model.md#durable-execution-evidence).
+
 Press Ctrl+C to stop. Pellets immediately acknowledges the interrupt on stderr,
 closes live-update streams, and allows ordinary requests up to five seconds to
 finish. A second Ctrl+C forces exit if shutdown stalls. Stdout remains reserved
