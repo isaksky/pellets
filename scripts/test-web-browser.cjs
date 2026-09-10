@@ -60,14 +60,23 @@ const until = async (predicate, message) => {
   assert.equal(await page.locator('.row-link').count(), 2);
 
   // Check actual pointer hit targets across every cell, not just the ID link.
-  const hitTargets = await page.locator('.task-row').evaluateAll(rows => rows.flatMap(row =>
-    Array.from(row.cells).map(cell => {
-      const box = cell.getBoundingClientRect();
-      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
-      return {expected: row.dataset.rowId, actual: hit?.closest('.task-row')?.dataset.rowId};
-    })
-  ));
-  for (const hit of hitTargets) assert.equal(hit.actual, hit.expected, 'Cell hit target belongs to another row');
+  const hitTargets = [];
+  for (let rowIndex = 0; rowIndex < await page.locator('.task-row').count(); rowIndex++) {
+    const row = page.locator('.task-row').nth(rowIndex);
+    for (let cellIndex = 0; cellIndex < await row.locator('td').count(); cellIndex++) {
+      const cell = row.locator('td').nth(cellIndex);
+      await cell.scrollIntoViewIfNeeded();
+      hitTargets.push(await cell.evaluate(cell => {
+        const row = cell.closest('.task-row');
+        const box = cell.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+        return {expected: row.dataset.rowId, actual: hit?.closest('.task-row')?.dataset.rowId,
+          box: {x: box.x, y: box.y, width: box.width, height: box.height},
+          hit: hit ? `${hit.tagName}.${hit.className}` : null};
+      }));
+    }
+  }
+  for (const hit of hitTargets) assert.equal(hit.actual, hit.expected, `Cell hit target belongs to another row: ${JSON.stringify(hit)}`);
   // Physical clicks in the bottom row's status and the top row's title must
   // resolve to their own records, including after opening/closing an inspector.
   const modifiedURL = await page.locator('.row-link').first().getAttribute('href');

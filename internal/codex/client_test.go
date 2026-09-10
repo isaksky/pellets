@@ -388,12 +388,15 @@ func TestInstalledRuntime(t *testing.T) {
 		t.Fatalf("installed preflight returned account %#v and %d models", prepared.Account, len(prepared.Models))
 	}
 	params := prepared.ThreadStartParams()
+	if params["approvalPolicy"] != "on-request" || params["approvalsReviewer"] != "auto_review" || params["sandbox"] != "workspace-write" {
+		t.Fatalf("installed runtime did not accept the automatic-review policy shape: %#v", params)
+	}
 	params["ephemeral"] = true
 	result, err := prepared.Client.Call(ctx, ThreadStart, params)
 	if err != nil || !strings.Contains(string(result), `"thread"`) {
 		t.Fatalf("ephemeral thread settings preflight: %s, %v", result, err)
 	}
-	t.Logf("verified %s (%s), local account/config/requirements, %d models, and ephemeral thread settings; no model turn started",
+	t.Logf("verified %s (%s), local account/config/requirements, %d models, and ephemeral workspace-write/on-request/auto_review thread settings; no model turn started",
 		prepared.Client.Runtime().Version, prepared.Client.Runtime().Executable, len(prepared.Models))
 }
 

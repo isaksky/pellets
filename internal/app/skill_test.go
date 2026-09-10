@@ -61,6 +61,8 @@ func TestPelletsSkillGoldenPortableContract(t *testing.T) {
 		"`pl` on the inherited child `PATH`", "missing tool",
 		"open-ended model ID", "normal Codex defaults", "gpt-5.6-sol", "high", "workspace-write",
 		"on-request", "approvals_reviewer=auto_review", "managed restrictions", "bound database",
+		"deterministic versioned Pellets skill/help prefix", "never a promise or inference of a cache hit",
+		"Keep planning in Pellets", "without resending it",
 	} {
 		if !strings.Contains(body, required) {
 			t.Errorf("skill body does not contain %q", required)

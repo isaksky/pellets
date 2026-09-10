@@ -476,6 +476,14 @@ open-ended model ID, supported reasoning effort, and
 bounded transport limits; normal Codex defaults remain valid. This does not
 introduce a second model runtime or make normal Pellets use depend on Codex.
 
+New conversations receive a deterministic Pellets workflow prefix before the
+selected task. Pellets reuses the captured conversation on Resume instead of
+resending that prefix, and exposes cached-input-token telemetry only when Codex
+reports it. This stable-prefix layout is intended to make provider caching
+possible; it does not promise a cache hit or infer one when telemetry is absent.
+Pellets remains the task-planning source of truth—runs and checkpoints retain
+execution evidence, not a parallel plan or backlog.
+
 The internal execution recorder also persists attempts, Codex thread/turn IDs,
 captured settings and filters, interruption outcomes, and verified commit
 evidence. These records survive reconnects, project renames, and pellet purge;
@@ -566,6 +574,22 @@ path (or set `NODE_PATH`), and set `PLAYWRIGHT_CHANNEL=chrome` to use installed
 Chrome instead of Playwright's Chromium. It covers the Datastar navigation,
 forms, live refresh, conflict handling, and keyboard flows. Node and Playwright
 are development tools only; `pl server` serves embedded assets and works offline.
+
+The foreground execution integration is part of `go test ./...`. Its scripted
+app-server runs only in disposable Git repositories and databases and makes no
+account, network, or model call. It covers Run one, filtered Drain, idle Watch
+wakeup, linked-worktree concurrency/evidence, concise activity, questions and
+follow-ups, stop/shutdown, explicit Resume, checkpoint review, and idempotent
+finding triage. To check an installed Codex version and the real ephemeral
+thread request shape—including `workspace-write`, `on-request`, and
+`approvals_reviewer=auto_review`—without starting a model turn, opt in explicitly:
+
+```text
+PELLETS_CODEX_LIVE=1 go test ./internal/codex -run '^TestInstalledRuntime$' -v
+```
+
+Normal tests skip this check. It uses the current OS user's installed Codex and
+account/configuration reads; Codex continues to own those credentials.
 
 The cross-build script verifies `CGO_ENABLED=0` artifacts for macOS
 AMD64/ARM64 and Windows AMD64. Stable release automation uses the Go 1.26.5

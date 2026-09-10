@@ -457,6 +457,67 @@ Every existing-row mutation submits a complete-row optimistic token. A mismatch 
 
 Live refresh is invalidation-only. One pinned read-only/query-only monitor connection compares `PRAGMA data_version` from that same connection at a bounded interval only while SSE clients exist. A changed value is coalesced into a small SSE event; native `EventSource` triggers authoritative Datastar list/detail GETs. Slower Datastar polling and every initial load recover missed events. SSE carries no row payload, database path, or capability and never owns a database connection. Every GET uses a separate read-only/query-only path and closes SQLite rows before response output.
 
+#### Foreground execution controls
+
+Codex execution is an optional browser/server capability, not a new public CLI
+runner command. The user chooses one already registered workspace, optional
+exact group and external-ID filters, a bounded limit (100 by default), and one
+of Run one, Drain, or Watch. Run one completes at most one eligible Pellet;
+Drain repeats until the queue is empty, the limit is reached, or attention is
+required; Watch additionally waits on database invalidation and a bounded
+recovery check. Idle Watch starts no Codex process and makes no model call.
+Filters and the remaining limit are copied into every attempt and cannot be
+broadened by a later browser request.
+
+An existing in-progress Pellet requires the explicit Resume control and must
+match both saved filters. Resume restores the exact prior attempt, worktree,
+branch, phase, Codex thread/turn, schedule mode, and remaining limit after
+validating current ownership and Git/queue evidence. Server startup only marks
+abandoned attempts interrupted or needing attention; it never resumes them.
+A missing conversation, ambiguous pending call, changed scope, missing commit,
+or unconfirmed process cleanup remains visible for recovery rather than being
+silently retried. Stop after Pellet permits the active unit to finish; Stop now
+interrupts it. Stopping `pl server` stops admission and every Codex process it
+owns before releasing the workspace execution lock.
+
+Workspace settings contain only an executable selector, optional open-ended
+model ID, optional runtime-supported reasoning effort, and bounded transport
+limits. Empty model/effort preserve Codex defaults. One-run overrides do not
+rewrite the saved row. Preflight uses the installed runtime's local account,
+configuration, managed requirements, and model catalog; Codex owns credential
+storage and refresh, and Pellets stores neither credentials nor account email.
+New prepared conversations use `workspace-write`, `on-request`, and
+`approvals_reviewer=auto_review`. Automatic approval REVIEW evaluates eligible
+requests; it is not blanket approval and does not disable managed restrictions,
+questions, denials, timeouts, or the sandbox.
+
+The implementation turn may edit and test only the exact selected ordinary
+Pellet. On an exact successful result, the server verifies unchanged ownership
+and starting HEAD, stages only the reported changed paths, creates and verifies
+one Pellet-ID commit, then closes that Pellet. A commit alone, queue closure
+alone, or a no-op result cannot advance the schedule. Finalization recovery
+reuses durable tree/commit/close evidence and never repeats a completed
+implementation, commit, or close.
+
+Ready review checkpoints use a fresh detached read-only Codex review context
+and independently present every selected result commit, including
+noncontiguous commits and evidence produced in different registered worktrees.
+A selected Pellet still in progress in another workspace leaves the checkpoint
+waiting. A successful clean review or fully reconciled finding triage closes
+the checkpoint without creating a Git commit. Each valid distinct finding
+becomes one ordinary follow-up immediately after the checkpoint; permanent
+finding receipts and stable add request IDs prevent duplicates across lost
+responses, receipt expiry, closure failures, and explicit Resume. Review and
+triage never fix code, push, create a PR, or automatically create another
+checkpoint.
+
+New conversations receive a deterministic, versioned Pellets prefix before the
+variable task. Resume retains the captured conversation and does not resend the
+full prefix. Reported cached-input-token counts are telemetry only: the stable
+layout is intended to permit caching but never promises or infers a cache hit.
+Runs and checkpoints are execution evidence; planning remains in Pellets and no
+parallel Markdown plan or server backlog is created.
+
 ## JSON contract
 
 ### Envelope

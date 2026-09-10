@@ -665,10 +665,33 @@ the shared protocol, evidence, and server boundaries. Windows builds and test
 cross-compilation validate portability, but only running those tests on Windows
 validates native Job Object and file-lock behavior.
 
-An explicit, optional smoke check validates the installed runtime, performs
-local account/config/requirements and model reads, and starts one ephemeral
-thread with the prepared policy to validate its real request shape. It never
-starts a model turn:
+The release workflow exercises the complete contract through these independent,
+traceable checks:
+
+| Contract | Deterministic coverage |
+| --- | --- |
+| Run one, filtered Drain, bounded Watch, idle wakeup, immutable filters | `TestSchedulerRealDriverModesLimitAndExactBinding`, `TestSchedulerWatchDatabaseMonitorWakeup`, and `TestSchedulerWatchIdleRecoveryReadinessAndImmutableFilters` |
+| Concise activity, user questions, one-time approval decisions, active-turn follow-up | `TestConciseCodexActivityDoesNotExposeProtocolContent` and the interaction/steering scheduler tests |
+| Browser disconnect, Stop after Pellet, Stop now, foreground shutdown, explicit Resume | scheduler stop/recovery tests plus `TestSupervisorDisconnectShutdownAndDescendants` |
+| Linked-worktree concurrency and checkpoint evidence from multiple worktrees | `TestSupervisorLinkedWorktreesExecuteConcurrently` and `TestCheckpointReviewerUsesExactCommitsFromDifferentWorktrees` |
+| Checkpoint readiness, selected work in another workspace, noncontiguous commits, and completion without a commit | checkpoint SQLite tests, `TestCheckpointReviewerUsesFreshDetachedContextAndExactCommitSet`, and `TestCheckpointPolicyBypassesOrdinaryFinalizer` |
+| Lost-response/expired-receipt recovery and duplicate-free partial triage | checkpoint triage SQLite/application tests |
+| Server forms, checkpoint composer, live refresh, conflict recovery, keyboard navigation | Go web-handler/asset tests plus `node scripts/test-web-browser.cjs` |
+
+`go test ./...` runs the Go rows with fake app-server children and temporary
+repositories/databases. On macOS it also runs the Darwin/Unix process-custody
+implementation natively. `scripts/verify-cross-builds.sh` proves only CGo-free
+Darwin/Windows compilation and target metadata; it is not native Windows
+validation. The supported Windows lifecycle boundary is validated when the
+same full suite runs on the native Windows AMD64 CI runner, exercising Job
+Objects and Windows file locks there. The Playwright script is a separate local
+browser regression and also creates only disposable state.
+
+An explicit, optional smoke check validates the installed runtime version,
+performs local account/config/requirements and model reads, and starts one
+ephemeral thread with the prepared `workspace-write`, `on-request`, and
+`approvals_reviewer=auto_review` policy to validate the real automatic-review
+request shape. It never starts a model turn:
 
 ```text
 PELLETS_CODEX_LIVE=1 go test ./internal/codex -run '^TestInstalledRuntime$' -v

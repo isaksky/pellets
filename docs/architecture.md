@@ -254,6 +254,16 @@ steering, stopping, and resuming are explicit user actions. The automatic
 approval mode is `REVIEW`: it is neither blanket approval nor a disabled
 sandbox.
 
+Before a new conversation, the scheduler snapshots the installed Pellets skill,
+the exact supported `pl` help surface, and the executable version, then places
+that deterministic versioned material before the variable Pellet prompt. It
+reuses the conversation on Resume and does not resend the full prefix. Snapshot
+reuse is invalidated when the source skill or executable changes. The layout is
+intended to permit upstream prefix caching, but Pellets reports a cache only
+when Codex supplies cached-input-token telemetry and never promises a hit.
+These execution records do not replace the Pellets queue as the planning source
+of truth.
+
 `storage.ExecutionRunDatabase` and `app.ExecutionRecorder` implement that
 evidence boundary. Run creation captures stable identities and the pellet
 snapshot atomically. Codex conversation transitions persist intent before the

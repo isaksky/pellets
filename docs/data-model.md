@@ -133,6 +133,8 @@ CREATE TABLE pellets (
     created_at   REAL NOT NULL,
     updated_at   REAL NOT NULL,
     completed_at REAL,
+    kind         TEXT NOT NULL DEFAULT 'ordinary',
+    implementation_revision INTEGER NOT NULL DEFAULT 1,
 
     UNIQUE (project_id, number),
     FOREIGN KEY (project_id, workspace_id)
@@ -141,6 +143,8 @@ CREATE TABLE pellets (
     CHECK (trim(title) <> ''),
     CHECK (external_id IS NULL OR external_id <> ''),
     CHECK (group_id IS NULL OR group_id <> ''),
+    CHECK (kind IN ('ordinary', 'review_checkpoint')),
+    CHECK (implementation_revision > 0),
     CHECK (status IN ('open', 'in_progress', 'closed', 'maybe_later')),
     CHECK (
         (status = 'in_progress' AND workspace_id IS NOT NULL)
@@ -684,3 +688,23 @@ completed-review receipt may be explicitly reconciled after a crash before lock
 cleanup without a second review or queue transition. Interrupted reconciliation
 descendants retain that authority only through an exact bounded lineage to the
 completed receipt.
+
+Migration 14 adds `checkpoint_triage` and
+`checkpoint_finding_assessments`. The first table keys the immutable reviewed
+result and exact reviewer conversation to
+`(project_id, checkpoint_number, implementation_revision)`. The second keeps
+one bounded structured disposition for each stable SHA-256 finding identity,
+with a deterministic ordinal and the assessor thread/turn receipt. It may name
+an existing ordinary Pellet, an earlier duplicate finding, or the one follow-up
+Pellet created for a valid issue. It stores no dependency or parent/child edge.
+
+The assessment row and any valid finding's ordinary Pellet, short-lived add
+request receipt, and permanent finding-to-Pellet identity are reconciled in one
+immediate transaction. The permanent row prevents a lost reply, expired add
+receipt, closure failure, or resumed attempt from allocating a duplicate.
+Completed dispositions survive partial triage, while missing dispositions stay
+unfinished rather than being interpreted as a clean result. Checkpoint closure
+occurs only after every finding is reconciled, in the same final transaction as
+successful run completion. Review checkpoints have no result commit: their
+exact selected implementation commits remain in the review snapshot, while the
+checkpoint itself completes and closes without modifying Git.
