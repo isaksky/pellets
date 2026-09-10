@@ -60,6 +60,7 @@ import { action, actions } from "./datastar-1.0.3.js";
       var response = await fetch(form.action, {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: body.toString()});
       if (!response.ok) throw new Error("run action rejected");
       confirmed = true;
+      delete form.dataset.dirty;
       feedback.hidden = true;
       refreshRegions();
     } catch (_) {
@@ -166,6 +167,7 @@ import { action, actions } from "./datastar-1.0.3.js";
 
   function protectedTarget(target) {
     return target && ((target.id === "project-drawer" && target.classList.contains("open")) ||
+      (target.id === "run-dashboard" && target.querySelector("form[data-no-run-resume][data-dirty='true']")) ||
       (target.id === "project-record" && target.open));
   }
 

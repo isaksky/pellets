@@ -154,6 +154,10 @@ h3 { font-size: .86rem; letter-spacing: .01em; }
 .run-controls form:first-child { flex-wrap: wrap; align-items: end; }
 .run-filter { width: min(150px, 100%); font-size: .64rem; }
 .run-filter input { padding: .35rem .45rem; font-size: .72rem; }
+.run-controls form[data-no-run-resume] { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); width: 100%; gap: .6rem; }
+form[data-no-run-resume] p { grid-column: 1 / -1; margin: 0; color: var(--text-muted); font-size: .75rem; }
+form[data-no-run-resume] label { min-width: 0; width: auto; font-size: .72rem; }
+form[data-no-run-resume] button { justify-self: start; align-self: end; }
 .area-tabs { display: flex; gap: 1.3rem; height: 50px; align-items: end; border-bottom: 1px solid var(--border); }
 .area-tabs a { display: flex; gap: .4rem; align-items: center; height: 100%; padding-top: .9rem; border-bottom: 2px solid transparent; color: var(--text-muted); font-weight: 600; font-size: .85rem; }
 .area-tabs a[aria-current="page"] { color: var(--text); border-color: var(--accent); }

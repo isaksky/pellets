@@ -70,6 +70,13 @@ type RunCapture struct {
 	PromptPrefix      PromptPrefix         `json:"prompt_prefix"`
 }
 
+// RunMatchesPelletGeneration conservatively treats unknown legacy generations
+// as matching: absence of revision evidence cannot authorize a new conversation.
+func RunMatchesPelletGeneration(run ExecutionRun, pellet Pellet) bool {
+	return run.ProjectID == pellet.ProjectID && run.PelletNumber == pellet.Reference.Number &&
+		(run.ImplementationRevision == 0 || run.ImplementationRevision == pellet.ImplementationRevision)
+}
+
 // RunProgress contains only orchestration evidence. Summary is application-
 // authored concise text, never arbitrary Codex output. ErrorCode is a stable
 // classification; raw error messages and stderr must not be stored here.

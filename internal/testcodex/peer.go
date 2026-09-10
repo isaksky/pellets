@@ -94,6 +94,9 @@ func Run() bool {
 			}
 		case "configRequirements/read":
 			result = map[string]any{"requirements": nil}
+			if mode == "config_disallows_review" {
+				result = map[string]any{"requirements": map[string]any{"allowedApprovalsReviewers": []string{"user"}}}
+			}
 		case "config/read":
 			result = map[string]any{"config": map[string]any{"model": "test-model"}}
 		case "model/list":

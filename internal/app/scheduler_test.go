@@ -666,6 +666,87 @@ func TestSchedulerRevalidatesFiltersAfterPreflightAndStopsWithoutRetry(t *testin
 	}
 }
 
+func TestSchedulerResumeRevalidatesGenerationAfterPreflight(t *testing.T) {
+	ctx := context.Background()
+	s, request, q := schedulerFixture(t, installSupervisorPeer(t), "schedule_input_live")
+	firstHandle := startSchedule(t, s, request)
+	first := awaitActiveRun(t, s, true)
+	firstHandle.StopNow()
+	awaitSchedule(t, firstHandle)
+	stopped, err := s.options.Supervisor.ReadRun(ctx, s.options.Database, first.ID)
+	if err != nil || stopped.State != "interrupted" {
+		t.Fatalf("original interrupted run: %#v %v", stopped, err)
+	}
+	if err := os.WriteFile(filepath.Join(s.options.Database.Root, "fake-mode"), []byte("schedule_success"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	entered, proceed := make(chan struct{}), make(chan struct{})
+	prepare := s.options.Supervisor.options.Prepare
+	s.options.Supervisor.options.Prepare = func(ctx context.Context, options codex.PrepareOptions) (*codex.PreparedRun, error) {
+		close(entered)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-proceed:
+		}
+		return prepare(ctx, options)
+	}
+	request.ResumePellet, request.ResumeFrom = &first.PelletNumber, &first.ID
+	h := startSchedule(t, s, request)
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("resume preflight did not begin")
+	}
+	ref := domain.PelletReference{ProjectCode: first.ProjectCode, Number: first.PelletNumber}
+	for _, operation := range []storage.PelletLifecycleOperation{storage.PelletRelease, storage.PelletStart} {
+		if _, err := q.TransitionPellet(ctx, request.Selected, ref, storage.PelletLifecycleRequest{Operation: operation}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(proceed)
+	status := awaitSchedule(t, h)
+	if status.State != "needs_attention" || status.Reason != "execution_run_conflict" || status.Completed != 0 {
+		t.Fatalf("stale resume result: %+v", status)
+	}
+	runs, err := s.options.Supervisor.ListWorkspaceRuns(ctx, s.options.Database, request.Selected.Workspace.ID, 8)
+	if err != nil || len(runs) != 1 || runs[0].ID != stopped.ID || runs[0].Revision != stopped.Revision || runs[0].State != "interrupted" {
+		t.Fatalf("stale resume changed durable history: %#v %v", runs, err)
+	}
+	current, err := q.ReadPellet(ctx, request.Selected, ref)
+	if err != nil || current.Status != domain.PelletInProgress || current.Workspace == nil || current.Workspace.ID != request.Selected.Workspace.ID || current.ImplementationRevision != first.ImplementationRevision+1 {
+		t.Fatalf("new generation ownership changed: %#v %v", current, err)
+	}
+	starts := 0
+	for _, event := range readPeerEvents(t, s.options.Database.Root) {
+		if event.Method == "thread/resume" {
+			t.Fatal("resumed old conversation after lifecycle generation changed")
+		}
+		if event.Method == "turn/start" {
+			starts++
+		}
+	}
+	if starts != 1 {
+		t.Fatalf("stale resume started extra turns: %d", starts)
+	}
+	// The new generation still has no run. Explicit fresh recovery remains
+	// possible without continuing the interrupted generation's conversation.
+	s.options.Supervisor.options.Prepare = prepare
+	request.ResumeFrom = nil
+	if fresh := awaitSchedule(t, startSchedule(t, s, request)); fresh.Completed != 1 {
+		t.Fatalf("fresh recovery after rejected continuation: %+v", fresh)
+	}
+	runs, err = s.options.Supervisor.ListWorkspaceRuns(ctx, s.options.Database, request.Selected.Workspace.ID, 8)
+	if err != nil || len(runs) != 2 || runs[0].ResumeFrom != nil || runs[0].ImplementationRevision != current.ImplementationRevision {
+		t.Fatalf("fresh recovery retained old generation: %#v %v", runs, err)
+	}
+	for _, event := range readPeerEvents(t, s.options.Database.Root) {
+		if event.Method == "thread/resume" {
+			t.Fatal("fresh recovery resumed old conversation")
+		}
+	}
+}
+
 func TestSchedulerCompetingServerCannotSelectWhileExecutionOwned(t *testing.T) {
 	executable := installSupervisorPeer(t)
 	s, r, _ := schedulerFixture(t, executable, "schedule_gate")

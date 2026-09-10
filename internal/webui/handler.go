@@ -237,6 +237,17 @@ type runWorkspaceView struct {
 	Busy              bool
 	UngroupedFilter   bool
 	RecoveryAttention string
+	NoRunResume       *noRunResumeView
+}
+
+// No conversation or schedule intent has been captured for this owned pellet.
+// These are suggestions from its current metadata, never claimed as saved
+// schedule filters. The browser explicitly chooses the new schedule mode.
+type noRunResumeView struct {
+	PelletNumber           int64
+	ImplementationRevision int64
+	ExternalID             string
+	Group                  string
 }
 
 type runView struct {
@@ -551,14 +562,18 @@ func (h *handler) runWorkspaceViews(request *http.Request, project storage.Proje
 	if err != nil {
 		return nil, err
 	}
-	owners := make(map[int64]string, len(inProgress))
+	owners := make(map[int64]storage.Pellet, len(inProgress))
 	for _, pellet := range inProgress {
 		if pellet.Workspace != nil {
-			owners[pellet.Workspace.ID] = pellet.Reference.String()
+			owners[pellet.Workspace.ID] = pellet
 		}
 	}
 	for _, workspace := range project.Workspaces {
-		view := runWorkspaceView{ID: workspace.ID, Root: localPath(workspace.RootPath), ActivePellet: owners[workspace.ID]}
+		view := runWorkspaceView{ID: workspace.ID, Root: localPath(workspace.RootPath)}
+		owned, hasOwned := owners[workspace.ID]
+		if hasOwned {
+			view.ActivePellet = owned.Reference.String()
+		}
 		runs, err := h.application.WorkspaceRuns(request.Context(), workspace.ID)
 		if err != nil {
 			return nil, err
@@ -580,6 +595,25 @@ func (h *handler) runWorkspaceViews(request *http.Request, project storage.Proje
 				view.Schedule = &scheduleView{ID: schedule.ID, Mode: schedule.Mode, State: schedule.State, StopAfter: schedule.StopAfterPellet, ExternalID: textOrDash(schedule.ExternalID), Group: textOrDash(schedule.Group)}
 				view.Busy = true
 			}
+		}
+		if hasOwned {
+			currentGenerationRun := len(runs) > 0 && storage.RunMatchesPelletGeneration(runs[0], owned)
+			if view.Run != nil && !currentGenerationRun {
+				view.Run.CanResume = false
+			}
+			// A previous pellet's terminal run must not hide a newly CLI-started
+			// pellet or a reopened generation whose preflight failed before capture.
+			if !view.Busy && !currentGenerationRun {
+				view.NoRunResume = &noRunResumeView{PelletNumber: owned.Reference.Number, ImplementationRevision: owned.ImplementationRevision}
+				if owned.ExternalID != nil {
+					view.NoRunResume.ExternalID = *owned.ExternalID
+				}
+				if owned.Group != nil {
+					view.NoRunResume.Group = *owned.Group
+				}
+			}
+			// Ordinary queue controls cannot resume an owned pellet.
+			view.Busy = true
 		}
 		views = append(views, view)
 	}

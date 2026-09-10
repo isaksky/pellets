@@ -521,6 +521,16 @@ idempotent policy. An uncertain Windows crash receipt remains fenced because
 the current unnamed Job Object cannot be inspected after server death; see
 [recovery limits](docs/codex-app-server.md#startup-and-explicit-recovery).
 
+If preflight failed before a run was recorded, or `pl start-next` claimed the
+pellet without running Codex, its workspace card still offers explicit Resume.
+There is no saved conversation or durable schedule intent in this case. Choose
+a new Run one, Drain, or Watch mode and confirm its limit and exact filters;
+the form initially suggests the pellet's current metadata, independently of
+the page filters. Blank filters mean any value. Resume revalidates the exact
+owned pellet and repaired preflight before starting a new conversation.
+A reopened pellet has a new implementation revision; a completed run from its
+previous revision does not prevent this recovery or supply the new conversation.
+
 Ordinary runs require a clean worktree. Codex implements and verifies the exact
 pellet, then returns a structured result. The server checks the reported files,
 stages only those paths, creates one pellet-ID commit, verifies it, and closes
@@ -572,8 +582,13 @@ The optional browser regression suite uses Playwright and a temporary database:
 `node scripts/test-web-browser.cjs`. Make `playwright` available on Node's module
 path (or set `NODE_PATH`), and set `PLAYWRIGHT_CHANNEL=chrome` to use installed
 Chrome instead of Playwright's Chromium. It covers the Datastar navigation,
-forms, live refresh, conflict handling, and keyboard flows. Node and Playwright
-are development tools only; `pl server` serves embedded assets and works offline.
+forms, live refresh, conflict handling, and keyboard flows. Also run
+`node scripts/test-web-recovery-browser.cjs` for authentication/config
+failure before run capture, repaired explicit Resume, server restart, and
+CLI-started ownership. This uses the compiled server and a deterministic Codex
+protocol peer in disposable repositories, without a model service or account.
+Node and Playwright are development tools only; `pl server` serves embedded
+assets and works offline.
 
 The foreground execution integration is part of `go test ./...`. Its scripted
 app-server runs only in disposable Git repositories and databases and makes no

@@ -330,7 +330,12 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 					queue.Close()
 					return nil, err
 				}
-				if len(runs) != 0 && runs[0].PelletNumber == *request.ResumePellet {
+				pellet, err := queue.ReadPellet(ctx, request.Selected, domain.PelletReference{ProjectCode: request.Selected.Project.Code, Number: *request.ResumePellet})
+				if err != nil {
+					queue.Close()
+					return nil, err
+				}
+				if len(runs) != 0 && storage.RunMatchesPelletGeneration(runs[0], pellet) {
 					queue.Close()
 					return nil, scheduleError("schedule_exact_resume_required", "Resume must reference the exact saved attempt and conversation")
 				}
@@ -352,7 +357,10 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 					return nil, scheduleError("checkpoint_resume_policy_required", "this checkpoint needs its idempotent recovery policy before Resume; its saved phase and follow-ups are preserved")
 				}
 				p, err := queue.ReadPellet(ctx, request.Selected, domain.PelletReference{ProjectCode: request.Selected.Project.Code, Number: previous.PelletNumber})
-				if err != nil || p.Title != previous.PelletTitle || p.Description != previous.PelletDescription || (previous.Mode == "review_checkpoint") != s.isCheckpoint(p) {
+				// Open/deferred pellets still fail the atomic ownership/lifecycle
+				// check below; preserve that more specific recovery explanation.
+				generationChanged := (p.Status == domain.PelletInProgress || p.Status == domain.PelletClosed) && !storage.RunMatchesPelletGeneration(previous, p)
+				if err != nil || generationChanged || p.Title != previous.PelletTitle || p.Description != previous.PelletDescription || (previous.Mode == "review_checkpoint") != s.isCheckpoint(p) {
 					queue.Close()
 					return nil, errors.Join(scheduleError("resume_scope_changed", "the saved pellet scope, filters, or checkpoint policy changed; reconcile that edit before Resume"), err)
 				}

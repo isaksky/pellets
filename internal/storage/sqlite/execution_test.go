@@ -90,6 +90,62 @@ func TestPreThreadRetryKeepsFreshPromptPrefix(t *testing.T) {
 	}
 }
 
+func TestImplementationResumeRejectsChangedGenerationAtCaptureAndDispatch(t *testing.T) {
+	for _, boundary := range []string{"capture", "dispatch"} {
+		t.Run(boundary, func(t *testing.T) {
+			ctx := context.Background()
+			db, original, fixture := createTestRun(t)
+			original = updateRun(t, db, original, storage.RunProgress{Phase: "implementation", State: "interrupted", Outcome: "unknown", ThreadID: "original-thread", TurnID: "original-turn"}, "")
+			capture := original.RunCapture
+			capture.ResumeFrom = &original.ID
+			var resumed storage.ExecutionRun
+			if boundary == "dispatch" {
+				var err error
+				resumed, err = db.CreateExecutionRun(ctx, capture)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			q := fixture.open(t)
+			defer q.Close()
+			ref := domain.PelletReference{ProjectCode: original.ProjectCode, Number: original.PelletNumber}
+			for _, operation := range []storage.PelletLifecycleOperation{storage.PelletRelease, storage.PelletStart} {
+				if _, err := q.TransitionPellet(ctx, fixture.main, ref, storage.PelletLifecycleRequest{Operation: operation}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			current, err := q.ReadPellet(ctx, fixture.main, ref)
+			if err != nil || current.ImplementationRevision != original.ImplementationRevision+1 {
+				t.Fatalf("lifecycle did not advance generation: %#v %v", current, err)
+			}
+			if boundary == "capture" {
+				if _, err := db.CreateExecutionRun(ctx, capture); domain.PublicError(err).Code != "execution_run_conflict" {
+					t.Fatalf("stale continuation captured: %v", err)
+				}
+				assertQueryInt(t, db.db, `SELECT COUNT(*) FROM execution_runs`, 1)
+				capture.ResumeFrom = nil
+				fresh, err := db.CreateExecutionRun(ctx, capture)
+				if err != nil || fresh.ImplementationRevision != current.ImplementationRevision || fresh.ThreadID != "" || fresh.ResumeFrom != nil {
+					t.Fatalf("fresh current-generation recovery: %#v %v", fresh, err)
+				}
+			} else {
+				for _, operation := range []string{"thread/resume", "turn/start"} {
+					if _, err := db.BeginExecutionOperation(ctx, resumed.ID, resumed.Revision, operation); domain.PublicError(err).Code != "execution_run_conflict" {
+						t.Fatalf("stale %s dispatch accepted: %v", operation, err)
+					}
+				}
+				unchanged, err := db.ReadExecutionRun(ctx, resumed.ID)
+				if err != nil || unchanged.Revision != resumed.Revision || unchanged.PendingOperation != "" {
+					t.Fatalf("rejected dispatch changed run: %#v %v", unchanged, err)
+				}
+				if _, err := db.BeginExecutionOperation(ctx, resumed.ID, resumed.Revision, "turn/interrupt"); err != nil {
+					t.Fatalf("generation change prevented cancellation: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestFinalizationEvidenceIsImmutableAndInheritedExactly(t *testing.T) {
 	db, run, _ := createTestRun(t)
 	progress := storage.RunProgress{Phase: "close", State: "running", ThreadID: "thread", TurnID: "turn", Finalization: &storage.FinalizationEvidence{Files: []string{"source.go"}, Tree: strings.Repeat("c", 40), Subject: "demo-1: implement"}}
@@ -361,6 +417,19 @@ func TestExecutionExactCaptureAndCommitEvidenceCannotChange(t *testing.T) {
 	if _, err := queue.UpdatePellet(context.Background(), fixture.main, domain.PelletReference{ProjectCode: fixture.main.Project.Code, Number: run.PelletNumber}, storage.PelletChanges{Group: storage.NullableTextChange{Set: true, Value: &group}, ExternalID: storage.NullableTextChange{Set: true, Value: &external}}); err != nil {
 		t.Fatal(err)
 	}
+	capture.ResumeFrom = &run.ID
+	if _, err := db.CreateExecutionRun(context.Background(), capture); domain.PublicError(err).Code != "execution_run_conflict" {
+		t.Fatalf("Resume accepted the generation preceding metadata changes: %v", err)
+	}
+	// Metadata changes create a new generation. Exercise exact captured filters
+	// and commit immutability on a fresh run for that current generation.
+	capture.ResumeFrom = nil
+	run, err := db.CreateExecutionRun(context.Background(), capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run = updateRun(t, db, run, storage.RunProgress{Phase: "implementation", State: "interrupted", Outcome: "unknown"}, "")
+	capture = run.RunCapture
 	capture.Group, capture.ExternalID, capture.ResumeFrom = &group, &external, &run.ID
 	capture.Mode = "watch"
 	capture.Settings.Codex.Model = "new-effective-model"

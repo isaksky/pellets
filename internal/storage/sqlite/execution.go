@@ -100,12 +100,12 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 				}
 			}
 			completedReceipt := implementationReceipt || reviewReceipt
-			if (pellet.Kind == domain.PelletReviewCheckpoint && previous.ImplementationRevision != pellet.ImplementationRevision) || !storage.SameReviewScope(previous.CheckpointScope, pellet.Checkpoint) {
+			if previous.ImplementationRevision != pellet.ImplementationRevision || !storage.SameReviewScope(previous.CheckpointScope, pellet.Checkpoint) {
 				return storage.ExecutionRunConflict(previous.ID)
 			}
-			// A continuation retains the generation it actually implemented,
-			// including unknown legacy generations. Resume cannot manufacture
-			// fresh review evidence after a reopen or scope edit.
+			// Validate every continuation against the generation read under this
+			// write lock: lifecycle changes can race the earlier preflight.
+			// Unknown legacy generations cannot authorize a continuation either.
 			implementationRevision = previous.ImplementationRevision
 			if previous.ProjectID != c.ProjectID || previous.WorkspaceID != c.WorkspaceID || previous.PelletNumber != c.PelletNumber || storage.RunActive(previous.State) || previous.State == "completed" && !completedReceipt {
 				return storage.ExecutionRunConflict(previous.ID)
@@ -456,6 +456,18 @@ func (db *ProjectDatabase) BeginExecutionOperation(ctx context.Context, id, revi
 			}
 		default:
 			return storage.InvalidExecutionRun("unsupported pending execution operation")
+		}
+		if current.ResumeFrom != nil && operation != "turn/interrupt" {
+			// Recheck at dispatch too, since a lifecycle change can happen after
+			// capture. Cancellation must remain available for an existing turn.
+			var implementationRevision int64
+			err := conn.QueryRowContext(ctx, `SELECT implementation_revision FROM pellets WHERE project_id=? AND number=?`, current.ProjectID, current.PelletNumber).Scan(&implementationRevision)
+			if errors.Is(err, sql.ErrNoRows) || err == nil && implementationRevision != current.ImplementationRevision {
+				return storage.ExecutionRunConflict(id)
+			}
+			if err != nil {
+				return err
+			}
 		}
 		stamp := runUpdateTime(current).Format(runTimeFormat)
 		_, err = conn.ExecContext(ctx, `UPDATE execution_runs SET phase=?, pending_operation=?, pending_revision=revision+1, pending_turn_id=turn_id, revision=revision+1, updated_at=? WHERE run_id=?`, progress.Phase, operation, stamp, id)

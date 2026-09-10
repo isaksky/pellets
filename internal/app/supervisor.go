@@ -456,7 +456,14 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 	request.Capture.PromptPrefix = prepared.PromptPrefix
 	run, err = supervisor.options.Recorder.Begin(processCtx, request.Database, request.Selected, request.Capture)
 	if err != nil {
-		return run, err
+		// Atomic capture may reject a lifecycle/filter change during preflight.
+		// If no run was created, confirmed cleanup can remove this pre-run
+		// receipt, but must preserve any prior recovery evidence.
+		closeErr := prepared.Client.Close()
+		if run.ID == 0 && closeErr == nil && lock.Owner() == nil {
+			closeErr = lock.Clean()
+		}
+		return run, errors.Join(err, closeErr)
 	}
 	if err := lock.Record(executionlock.Owner{Database: request.Database.Path, RunID: run.ID}); err != nil {
 		return run, err

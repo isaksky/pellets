@@ -370,6 +370,26 @@ in-memory receipt with the latest durable run so reconnects remain authoritative
 Its Run one, Drain, Watch, Stop after, Stop now, and eligible Resume controls use
 these form endpoints and refresh from the server; cards contain only bounded
 application-authored activity, never Codex transcripts, command text, or output.
+An owned pellet with no latest attempt also has an explicit Resume form, even
+after server restart or a CLI `start-next`. Selection can commit ownership
+before settings/authentication preflight creates the first run. In that gap,
+the form explicitly reconstructs schedule intent: a required new mode choice,
+visible limit, and editable exact filters initially suggested from the owned
+pellet's metadata. It does not claim to preserve the failed schedule's mode or
+filters. It sends `resume_pellet` without `resume_from`; the supervisor's
+worktree lock, identity checks, atomic ownership/filter validation, and fresh
+preflight still apply. Existing latest-attempt recovery requires its exact
+`resume_from`; ordinary queue actions cannot bypass explicit Resume.
+The current implementation revision distinguishes a reopened pellet from its
+older completed attempt even when its number is unchanged. Fresh recovery must
+not reuse that older conversation; a run for the current revision still
+requires exact-attempt Resume. Unknown legacy revision evidence remains
+conservative and cannot authorize a fresh conversation or continuation.
+Every continuation revalidates the implementation revision atomically at run
+capture and before dispatching a new conversation operation. Release/restart
+during preflight therefore rejects the stale attempt without creating a run;
+after confirmed process cleanup, explicit fresh recovery remains available
+for the newly owned revision.
 Pending questions render all supplied question text, choices, Other/free-text
 support, and secret inputs (whose values are never persisted). POST
 `/projects/CODE/runs/RUN/interaction` binds the rendered run revision and exact
@@ -690,6 +710,9 @@ traceable checks:
 | Checkpoint readiness, selected work in another workspace, noncontiguous commits, and completion without a commit | checkpoint SQLite tests, `TestCheckpointReviewerUsesFreshDetachedContextAndExactCommitSet`, and `TestCheckpointPolicyBypassesOrdinaryFinalizer` |
 | Lost-response/expired-receipt recovery and duplicate-free partial triage | checkpoint triage SQLite/application tests |
 | Server forms, checkpoint composer, live refresh, conflict recovery, keyboard navigation | Go web-handler/asset tests plus `node scripts/test-web-browser.cjs` |
+| Owned pellet without a run: authentication/config repair, restart, CLI start, reconstructed modes/filters, duplicate exclusion | `TestHTTPResumeWithoutRunRepairsPreflightAndReconstructsExactIntent` plus `node scripts/test-web-recovery-browser.cjs` |
+| Reopened generation starts fresh; current generation retains exact-attempt recovery | `TestHTTPReopenedGenerationResumesWithFreshConversationAfterPreflightRepair`, `TestHTTPCurrentGenerationRunRequiresExactAttemptAndPreventsOverlap`, and the recovery browser suite |
+| Lifecycle generation changes during preflight or before continuation dispatch | `TestSchedulerResumeRevalidatesGenerationAfterPreflight` and `TestImplementationResumeRejectsChangedGenerationAtCaptureAndDispatch` |
 
 `go test ./...` runs the Go rows with fake app-server children and temporary
 repositories/databases. On macOS it also runs the Darwin/Unix process-custody
