@@ -275,13 +275,16 @@ Acceptance criteria:
 
 - A checkpoint requires explicit scope and records only its relationship to the
   run and concise outcome; normal work remains test → commit → close.
-- Review starts a separate Codex context and cannot change the run's worktree
-  or silently alter queue lifecycle state.
+- Review starts through installed app-server `review/start`, detached from an
+  empty seed thread rather than implementation history. It snapshots each
+  selected commit independently and cannot change the run's worktree or
+  silently alter queue lifecycle state.
 - Focused follow-up pellets are deduplicated before creation and retain the
   ordinary queue model; no dependency, parent/child, or epic edge is stored.
-- Tests cover scope validation, separate-context construction, duplicate
-  follow-up prevention, interrupted review cleanup, and unchanged ordinary
-  queue semantics.
+- Tests cover scope validation, separate-context construction, exact
+  noncontiguous selection, missing objects, clean/findings results, side-effect
+  detection, cancellation/resume, duplicate follow-up prevention, interrupted
+  cleanup, and unchanged ordinary queue semantics.
 
 ## Milestone 9: portable agent skill installer
 

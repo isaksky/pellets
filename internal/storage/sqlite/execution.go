@@ -83,7 +83,7 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 			return storage.ExecutionRunConflict(active)
 		}
 		threadID := ""
-		turnID, finalization, phase := "", "null", "preflight"
+		turnID, finalization, reviewSnapshot, reviewResult, phase := "", "null", "null", "null", "preflight"
 		resultCommit := ""
 		var verifiedStamp *string
 		if c.ResumeFrom != nil {
@@ -91,7 +91,15 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 			if err != nil {
 				return err
 			}
-			completedReceipt := previous.State == "completed" && resumingClosed && previous.Finalization != nil && previous.ResultCommit != "" && previous.Phase == "finalization"
+			implementationReceipt := previous.State == "completed" && resumingClosed && previous.Finalization != nil && previous.ResultCommit != "" && previous.Phase == "finalization"
+			reviewReceipt := false
+			if resumingClosed {
+				reviewReceipt, err = completedReviewLineage(ctx, conn, previous)
+				if err != nil {
+					return err
+				}
+			}
+			completedReceipt := implementationReceipt || reviewReceipt
 			if (pellet.Kind == domain.PelletReviewCheckpoint && previous.ImplementationRevision != pellet.ImplementationRevision) || !storage.SameReviewScope(previous.CheckpointScope, pellet.Checkpoint) {
 				return storage.ExecutionRunConflict(previous.ID)
 			}
@@ -105,7 +113,7 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 			if !reflect.DeepEqual(previous.ExternalID, c.ExternalID) || !reflect.DeepEqual(previous.Group, c.Group) {
 				return storage.ExecutionRunConflict(previous.ID)
 			}
-			if resumingClosed && (previous.Finalization == nil || previous.ResultCommit == "" || previous.Phase != "close" && !completedReceipt) {
+			if resumingClosed && !completedReceipt && (previous.Finalization == nil || previous.ResultCommit == "" || previous.Phase != "close") {
 				return storage.ExecutionRunConflict(previous.ID)
 			}
 			c.StartingHead = previous.StartingHead
@@ -125,7 +133,7 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 			}
 			threadID = previous.ThreadID
 			phase, turnID = previous.Phase, previous.TurnID
-			if completedReceipt {
+			if implementationReceipt {
 				phase = "close"
 			}
 			if previous.Finalization != nil {
@@ -139,6 +147,20 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 					return err
 				}
 				finalization = string(encoded)
+			}
+			if previous.ReviewSnapshot != nil {
+				encoded, err := json.Marshal(previous.ReviewSnapshot)
+				if err != nil {
+					return err
+				}
+				reviewSnapshot = string(encoded)
+			}
+			if previous.ReviewResult != nil {
+				encoded, err := json.Marshal(previous.ReviewResult)
+				if err != nil {
+					return err
+				}
+				reviewResult = string(encoded)
 			}
 			if previous.ThreadID != "" {
 				// A resumed conversation keeps the exact prefix that established
@@ -168,11 +190,11 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 		now := time.Now().UTC().Format(runTimeFormat)
 		result, err := conn.ExecContext(ctx, `INSERT INTO execution_runs(
 			project_id, workspace_id, pellet_number, attempt, resume_from, mode, external_id, group_id,
-		settings_json, prompt_prefix_json, starting_head, pellet_title, pellet_description, thread_id, turn_id, finalization_json, result_commit, commit_verified_at, phase, state, revision, created_at, updated_at)
+			settings_json, prompt_prefix_json, starting_head, pellet_title, pellet_description, thread_id, turn_id, finalization_json, review_snapshot_json, review_result_json, result_commit, commit_verified_at, phase, state, revision, created_at, updated_at)
 			VALUES (?, ?, ?, (SELECT COALESCE(MAX(attempt), 0) + 1 FROM execution_runs WHERE project_id = ? AND pellet_number = ?),
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', 1, ?, ?)`,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', 1, ?, ?)`,
 			c.ProjectID, c.WorkspaceID, c.PelletNumber, c.ProjectID, c.PelletNumber, c.ResumeFrom,
-			c.Mode, c.ExternalID, c.Group, string(encoded), string(prefix), c.StartingHead, title, description, threadID, turnID, finalization, resultCommit, verifiedStamp, phase, now, now)
+			c.Mode, c.ExternalID, c.Group, string(encoded), string(prefix), c.StartingHead, title, description, threadID, turnID, finalization, reviewSnapshot, reviewResult, resultCommit, verifiedStamp, phase, now, now)
 		if err != nil {
 			return err
 		}
@@ -286,8 +308,12 @@ func (db *ProjectDatabase) UpdateExecutionRun(ctx context.Context, request stora
 			if pellet.ImplementationRevision != current.ImplementationRevision || !storage.SameReviewScope(pellet.Checkpoint, current.CheckpointScope) {
 				return storage.ExecutionRunConflict(current.ID)
 			}
+			return storage.InvalidExecutionRun("review checkpoint completion must use the atomic review completion operation")
 		}
 		if current.Finalization != nil && !reflect.DeepEqual(current.Finalization, p.Finalization) {
+			return storage.ExecutionRunConflict(current.ID)
+		}
+		if current.ReviewSnapshot != nil && !reflect.DeepEqual(current.ReviewSnapshot, p.ReviewSnapshot) || current.ReviewResult != nil && !reflect.DeepEqual(current.ReviewResult, p.ReviewResult) {
 			return storage.ExecutionRunConflict(current.ID)
 		}
 		finalization, err := json.Marshal(p.Finalization)
@@ -295,6 +321,14 @@ func (db *ProjectDatabase) UpdateExecutionRun(ctx context.Context, request stora
 			return err
 		}
 		interaction, err := json.Marshal(p.Interaction)
+		if err != nil {
+			return err
+		}
+		reviewSnapshot, err := json.Marshal(p.ReviewSnapshot)
+		if err != nil {
+			return err
+		}
+		reviewResult, err := json.Marshal(p.ReviewResult)
 		if err != nil {
 			return err
 		}
@@ -315,7 +349,7 @@ func (db *ProjectDatabase) UpdateExecutionRun(ctx context.Context, request stora
 		if request.VerifiedCommit != "" && resultCommit == "" {
 			resultCommit, verified = request.VerifiedCommit, &now
 		}
-		if p.State == "completed" && (resultCommit == "" || p.ThreadID == "" || p.TurnID == "") {
+		if p.State == "completed" && (p.ThreadID == "" || p.TurnID == "" || current.CheckpointScope == nil && resultCommit == "" || current.CheckpointScope != nil && p.ReviewResult == nil) {
 			return storage.InvalidExecutionRun("completion requires verified commit and Codex thread/turn evidence")
 		}
 		var finished, verifiedStamp *string
@@ -326,8 +360,8 @@ func (db *ProjectDatabase) UpdateExecutionRun(ctx context.Context, request stora
 			s := verified.Format(runTimeFormat)
 			verifiedStamp = &s
 		}
-		_, err = conn.ExecContext(ctx, `UPDATE execution_runs SET phase=?, state=?, thread_id=?, turn_id=?, outcome=?, error_code=?, summary=?, cached_input_tokens=?, finalization_json=?, interaction_json=?, result_commit=?, commit_verified_at=?, revision=revision+1, updated_at=?, finished_at=? WHERE run_id=?`,
-			p.Phase, p.State, p.ThreadID, p.TurnID, p.Outcome, p.ErrorCode, p.Summary, p.CachedInputTokens, string(finalization), string(interaction), resultCommit, verifiedStamp, stamp, finished, current.ID)
+		_, err = conn.ExecContext(ctx, `UPDATE execution_runs SET phase=?, state=?, thread_id=?, turn_id=?, outcome=?, error_code=?, summary=?, cached_input_tokens=?, finalization_json=?, interaction_json=?, review_snapshot_json=?, review_result_json=?, result_commit=?, commit_verified_at=?, revision=revision+1, updated_at=?, finished_at=? WHERE run_id=?`,
+			p.Phase, p.State, p.ThreadID, p.TurnID, p.Outcome, p.ErrorCode, p.Summary, p.CachedInputTokens, string(finalization), string(interaction), string(reviewSnapshot), string(reviewResult), resultCommit, verifiedStamp, stamp, finished, current.ID)
 		if err != nil {
 			return err
 		}
@@ -411,6 +445,11 @@ func (db *ProjectDatabase) BeginExecutionOperation(ctx context.Context, id, revi
 				return storage.ExecutionRunConflict(id)
 			}
 			progress.Phase = "turn_start"
+		case "review/start":
+			if current.ThreadID == "" || current.CheckpointScope == nil {
+				return storage.ExecutionRunConflict(id)
+			}
+			progress.Phase = "review"
 		case "turn/interrupt":
 			if current.TurnID == "" {
 				return storage.ExecutionRunConflict(id)
@@ -463,6 +502,11 @@ func (db *ProjectDatabase) FinishExecutionOperation(ctx context.Context, result 
 					return storage.ExecutionRunConflict(result.ID)
 				}
 				progress.TurnID = result.TurnID
+			case "review/start":
+				if result.ThreadID == "" || result.ThreadID == current.ThreadID || result.TurnID == "" {
+					return storage.ExecutionRunConflict(result.ID)
+				}
+				progress.ThreadID, progress.TurnID = result.ThreadID, result.TurnID
 			case "turn/interrupt":
 				if result.ThreadID != "" || result.TurnID != "" {
 					return storage.ExecutionRunConflict(result.ID)
@@ -498,6 +542,109 @@ func (db *ProjectDatabase) FinishExecutionOperation(ctx context.Context, result 
 		return err
 	})
 	return run, err
+}
+
+// CompleteReviewCheckpoint atomically records a successful structured review
+// and closes only its still-owned, unchanged checkpoint. An explicit resume may
+// also reconcile the exact completed-review receipt after a supervisor crashed
+// before cleaning its local lock; that path never closes the Pellet twice.
+func (db *ProjectDatabase) CompleteReviewCheckpoint(ctx context.Context, id, revision int64) (run storage.ExecutionRun, err error) {
+	if id < 1 || revision < 1 {
+		return run, storage.InvalidExecutionRun("run ID and revision must be positive")
+	}
+	err = db.writeRun(ctx, func(conn *sql.Conn) error {
+		current, err := readExecutionRun(ctx, conn, id)
+		if err != nil {
+			return err
+		}
+		if current.Revision != revision || !storage.RunActive(current.State) || current.PendingOperation != "" || current.Mode != "review_checkpoint" || current.CheckpointScope == nil || current.ReviewSnapshot == nil || current.ReviewResult == nil || current.ThreadID == "" || current.TurnID == "" {
+			return storage.ExecutionRunConflict(id)
+		}
+		snapshotScope := &storage.ReviewCheckpoint{Version: current.CheckpointScope.Version, Ready: current.CheckpointScope.Ready, Targets: current.ReviewSnapshot.Targets}
+		if !storage.SameReviewScope(snapshotScope, current.CheckpointScope) {
+			return storage.ExecutionRunConflict(id)
+		}
+		pellet, err := loadPellet(ctx, conn, current.ProjectID, current.PelletNumber)
+		if err != nil {
+			return err
+		}
+		if err := requireCheckpointReady(pellet); err != nil {
+			return err
+		}
+		if pellet.ImplementationRevision != current.ImplementationRevision || !storage.SameReviewScope(pellet.Checkpoint, current.CheckpointScope) || pellet.Title != current.PelletTitle || pellet.Description != current.PelletDescription {
+			return storage.ExecutionRunConflict(id)
+		}
+		owned := pellet.Status == domain.PelletInProgress && pellet.Workspace != nil && pellet.Workspace.ID == current.WorkspaceID
+		reconcile := false
+		if current.ResumeFrom != nil && pellet.Status == domain.PelletClosed && pellet.Workspace == nil {
+			receipt, readErr := readExecutionRun(ctx, conn, *current.ResumeFrom)
+			if readErr != nil {
+				return readErr
+			}
+			lineage, lineageErr := completedReviewLineage(ctx, conn, receipt)
+			if lineageErr != nil {
+				return lineageErr
+			}
+			reconcile = lineage && storage.SameReviewReconciliationEvidence(current, receipt)
+		}
+		if !owned && !reconcile {
+			return storage.ExecutionRunConflict(id)
+		}
+		now := runUpdateTime(current)
+		stamp := now.Format(runTimeFormat)
+		summary := "Review completed with findings; the checkpoint is closed for follow-up triage."
+		if current.ReviewResult.Status == "clean" {
+			summary = "Review completed cleanly; the checkpoint is closed."
+		}
+		progress := current.RunProgress
+		progress.Phase, progress.State, progress.Outcome, progress.ErrorCode, progress.Summary = "review", "completed", "succeeded", "", summary
+		if err := storage.ValidateRunProgress(progress); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE execution_runs SET phase='review', state='completed', outcome='succeeded', error_code='', summary=?, revision=revision+1, updated_at=?, finished_at=? WHERE run_id=?`, summary, stamp, stamp, id); err != nil {
+			return err
+		}
+		if owned {
+			pelletStamp, err := captureJulianTimestamp(ctx, conn)
+			if err != nil {
+				return err
+			}
+			if _, err := conn.ExecContext(ctx, `UPDATE pellets SET status='closed', workspace_id=NULL, priority=NULL, completed_at=?, updated_at=? WHERE project_id=? AND number=?`, pelletStamp, pelletStamp, current.ProjectID, current.PelletNumber); err != nil {
+				return err
+			}
+		}
+		if err := appendRunActivity(ctx, conn, id, current.Revision+1, stamp, progress); err != nil {
+			return err
+		}
+		run, err = readExecutionRun(ctx, conn, id)
+		return err
+	})
+	return run, err
+}
+
+func completedReviewLineage(ctx context.Context, q runQuery, run storage.ExecutionRun) (bool, error) {
+	seen := make(map[int64]bool)
+	for depth := 0; depth < 1000; depth++ {
+		if seen[run.ID] {
+			return false, nil
+		}
+		seen[run.ID] = true
+		if storage.CompletedReviewReceipt(run) {
+			return true, nil
+		}
+		if !storage.ReviewReconciliationAttempt(run) {
+			return false, nil
+		}
+		parent, err := readExecutionRun(ctx, q, *run.ResumeFrom)
+		if err != nil {
+			return false, err
+		}
+		if !storage.SameReviewReconciliationEvidence(run, parent) {
+			return false, nil
+		}
+		run = parent
+	}
+	return false, nil
 }
 
 func runUpdateTime(run storage.ExecutionRun) time.Time {
@@ -551,12 +698,12 @@ type runQuery interface {
 }
 
 func readExecutionRun(ctx context.Context, q runQuery, id int64) (run storage.ExecutionRun, err error) {
-	var settings, promptPrefix, finalization, interaction, created, updated, checkpointScope string
+	var settings, promptPrefix, finalization, interaction, reviewSnapshot, reviewResult, created, updated, checkpointScope string
 	var finished, verified sql.NullString
 	err = q.QueryRowContext(ctx, `SELECT r.run_id, r.attempt, r.revision, r.project_id, r.workspace_id, r.pellet_number,
 		r.resume_from, r.mode, r.external_id, r.group_id, r.settings_json, r.prompt_prefix_json, r.starting_head, r.pellet_title, r.pellet_description,
 		r.phase, r.state, r.thread_id, r.turn_id, r.outcome, r.error_code, r.summary, r.cached_input_tokens, r.finalization_json, r.result_commit,
-		r.interaction_json, r.commit_verified_at, r.created_at, r.updated_at, r.finished_at, r.activity_pruned, p.code, r.pending_operation, r.pending_revision, r.pending_turn_id,
+		r.interaction_json, r.review_snapshot_json, r.review_result_json, r.commit_verified_at, r.created_at, r.updated_at, r.finished_at, r.activity_pruned, p.code, r.pending_operation, r.pending_revision, r.pending_turn_id,
 		EXISTS(SELECT 1 FROM pellets WHERE project_id=r.project_id AND number=r.pellet_number),
 		w.root_path, w.root_path_relative, w.git_dir, w.git_dir_relative, p.git_common_dir, p.git_common_dir_relative, r.starting_ref, r.schedule_mode, r.schedule_remaining, r.implementation_revision, r.checkpoint_scope_json
 		FROM execution_runs r JOIN projects p ON p.project_id=r.project_id
@@ -564,7 +711,7 @@ func readExecutionRun(ctx context.Context, q runQuery, id int64) (run storage.Ex
 		&run.ID, &run.Attempt, &run.Revision, &run.ProjectID, &run.WorkspaceID, &run.PelletNumber,
 		&run.ResumeFrom, &run.Mode, &run.ExternalID, &run.Group, &settings, &promptPrefix, &run.StartingHead, &run.PelletTitle, &run.PelletDescription,
 		&run.Phase, &run.State, &run.ThreadID, &run.TurnID, &run.Outcome, &run.ErrorCode, &run.Summary, &run.CachedInputTokens, &finalization, &run.ResultCommit,
-		&interaction, &verified, &created, &updated, &finished, &run.ActivityPruned, &run.ProjectCode, &run.PendingOperation, &run.PendingRevision, &run.PendingTurnID, &run.PelletPresent,
+		&interaction, &reviewSnapshot, &reviewResult, &verified, &created, &updated, &finished, &run.ActivityPruned, &run.ProjectCode, &run.PendingOperation, &run.PendingRevision, &run.PendingTurnID, &run.PelletPresent,
 		&run.WorkspaceRoot.Value, &run.WorkspaceRoot.Relative, &run.WorkspaceGitDir.Value, &run.WorkspaceGitDir.Relative, &run.GitCommonDir.Value, &run.GitCommonDir.Relative, &run.StartingRef, &run.ScheduleMode, &run.ScheduleRemaining, &run.ImplementationRevision, &checkpointScope)
 	if errors.Is(err, sql.ErrNoRows) {
 		return run, storage.ExecutionRunNotFound(id)
@@ -585,6 +732,12 @@ func readExecutionRun(ctx context.Context, q runQuery, id int64) (run storage.Ex
 		return run, err
 	}
 	if err := json.Unmarshal([]byte(interaction), &run.Interaction); err != nil {
+		return run, err
+	}
+	if err := json.Unmarshal([]byte(reviewSnapshot), &run.ReviewSnapshot); err != nil {
+		return run, err
+	}
+	if err := json.Unmarshal([]byte(reviewResult), &run.ReviewResult); err != nil {
 		return run, err
 	}
 	if err := storage.ValidateRunCapture(run.RunCapture); err != nil {

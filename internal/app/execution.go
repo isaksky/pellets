@@ -94,6 +94,15 @@ func (recorder ExecutionRecorder) Save(ctx context.Context, database Database, r
 	return recorder.save(ctx, database, request)
 }
 
+func (recorder ExecutionRecorder) CompleteReviewCheckpoint(ctx context.Context, database Database, id, revision int64) (storage.ExecutionRun, error) {
+	repo, err := recorder.repository(ctx, database)
+	if err != nil {
+		return storage.ExecutionRun{}, err
+	}
+	run, operationErr := repo.CompleteReviewCheckpoint(ctx, id, revision)
+	return run, errors.Join(operationErr, repo.Close())
+}
+
 // MarkInterrupted is used only after the foreground supervisor is known to
 // have stopped. Opening a database or listing records never invokes it. The
 // last durable phase and conversation IDs survive for explicit reconciliation.
@@ -149,6 +158,11 @@ func (recorder ExecutionRecorder) CallCodex(ctx context.Context, database Databa
 			return run, nil, storage.ExecutionRunConflict(id)
 		}
 		progress.Phase = "turn_start"
+	case codex.ReviewStart:
+		if run.ThreadID == "" || run.CheckpointScope == nil || params["threadId"] != run.ThreadID {
+			return run, nil, storage.ExecutionRunConflict(id)
+		}
+		progress.Phase = "review"
 	case codex.TurnInterrupt:
 		if run.TurnID == "" || params["threadId"] != run.ThreadID || params["turnId"] != run.TurnID {
 			return run, nil, storage.ExecutionRunConflict(id)
@@ -170,7 +184,8 @@ func (recorder ExecutionRecorder) CallCodex(ctx context.Context, database Databa
 	completion := storage.ExecutionOperationResult{ID: id, PendingRevision: run.PendingRevision}
 	if callErr == nil && operation != codex.TurnInterrupt {
 		var result struct {
-			Thread struct {
+			ReviewThreadID string `json:"reviewThreadId"`
+			Thread         struct {
 				ID string `json:"id"`
 			} `json:"thread"`
 			Turn struct {
@@ -193,6 +208,12 @@ func (recorder ExecutionRecorder) CallCodex(ctx context.Context, database Databa
 				} else {
 					progress.TurnID = result.Turn.ID
 				}
+			case codex.ReviewStart:
+				if result.ReviewThreadID == "" || result.ReviewThreadID == run.ThreadID || result.Turn.ID == "" {
+					callErr = codex.ErrProtocol
+				} else {
+					progress.ThreadID, progress.TurnID = result.ReviewThreadID, result.Turn.ID
+				}
 			}
 		}
 	}
@@ -205,7 +226,7 @@ func (recorder ExecutionRecorder) CallCodex(ctx context.Context, database Databa
 		switch operation {
 		case codex.ThreadStart, codex.ThreadResume:
 			completion.ThreadID = progress.ThreadID
-		case codex.TurnStart:
+		case codex.TurnStart, codex.ReviewStart:
 			completion.ThreadID, completion.TurnID = progress.ThreadID, progress.TurnID
 		}
 	}

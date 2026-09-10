@@ -172,6 +172,7 @@ func (supervisor *ExecutionSupervisor) reconcileConversation(ctx context.Context
 	}
 	last := ""
 	found := previous.TurnID == ""
+	previousTurnStatus := ""
 	for _, turn := range result.Thread.Turns {
 		if turn.ID == "" || turn.Status != "completed" && turn.Status != "interrupted" && turn.Status != "failed" {
 			return scheduleError("resume_turn_unconfirmed", "a saved turn has no terminal outcome; inspect Codex history before continuing")
@@ -179,10 +180,14 @@ func (supervisor *ExecutionSupervisor) reconcileConversation(ctx context.Context
 		last = turn.ID
 		if turn.ID == previous.TurnID {
 			found = true
+			previousTurnStatus = turn.Status
 		}
 	}
 	if !found {
 		return scheduleError("resume_turn_missing", "the recorded turn is missing from Codex history; restore it before Resume")
+	}
+	if previous.Mode == "review_checkpoint" && previous.ReviewResult != nil && previousTurnStatus != "completed" {
+		return scheduleError("review_resume_turn_unsuccessful", "the saved reviewer result does not have a successfully completed terminal turn")
 	}
 	// A phase can outlive its settled call. Only an actual pending turn start
 	// permits a new history identity; no saved turn means history must be empty.

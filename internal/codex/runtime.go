@@ -35,7 +35,9 @@ var requiredOperationFields = map[Operation][]string{
 var requiredSchemaValues = map[string][]string{
 	"AskForApproval":    {"on-request"},
 	"ApprovalsReviewer": {"auto_review"},
-	"SandboxMode":       {"workspace-write"},
+	"SandboxMode":       {"workspace-write", "read-only"},
+	"ReviewDelivery":    {"detached"},
+	"ReviewTarget":      {"custom"},
 }
 
 var requiredResponseFields = map[string][]string{
@@ -43,6 +45,7 @@ var requiredResponseFields = map[string][]string{
 	"v2/ModelListResponse.json":              {"data", "nextCursor"},
 	"v2/ConfigReadResponse.json":             {"config"},
 	"v2/ConfigRequirementsReadResponse.json": {"requirements"},
+	"v2/ReviewStartResponse.json":            {"reviewThreadId", "turn"},
 }
 
 var requiredResponseDefinitions = map[string]map[string][]string{

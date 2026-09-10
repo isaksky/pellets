@@ -290,10 +290,18 @@ stale or post-restart responses fail closed. Follow-ups use expected-turn
 steering and start a new turn only after the prior turn is known idle.
 
 Ordinary server-supervised work follows test → commit → close. A review
-checkpoint has explicit scope and a separate Codex review context; it can
-produce deduplicated focused follow-up pellets, but it does not create a
-general dependency graph, generic event stream, Git UI, push/PR operation, or
-plugin framework.
+checkpoint freezes exact selected commits and applicable committed repository
+instructions, then runs `review/start` detached from a new empty read-only seed
+thread. App-server's native rendered review text is normalized into a durable
+structured clean/findings result, Git/worktree side effects are rejected, and
+successful evidence plus checkpoint closure are atomic. Clean output requires
+the scope-bound marker because arbitrary headerless app-server review prose is
+not proof of a parsed structured result. A crash receipt left after that atomic
+transaction can be explicitly reconciled without repeating the review or close;
+interrupted descendants must retain an exact bounded lineage to that receipt.
+Deduplicated focused follow-up creation is a separate phase; review does not
+create a general dependency graph, generic event stream, Git UI, push/PR
+operation, or plugin framework.
 
 Do not replace this design with SQLite update, pre-update, WAL, commit, or filesystem hooks. SQLite's [`sqlite3_update_hook`](https://sqlite.org/c3ref/update_hook.html) is connection-local, omits several write classes, and cannot observe other processes as the source of truth. Pellets adds no change-log table, notification trigger, watcher, or notification-only write.
 

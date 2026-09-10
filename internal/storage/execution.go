@@ -2,8 +2,10 @@ package storage
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -89,6 +91,51 @@ type RunProgress struct {
 	// only the bounded fields needed to render and correlate a response; answers,
 	// credentials, command text, and transcript content are never retained.
 	Interaction *RunInteraction `json:"interaction,omitempty"`
+	// ReviewSnapshot freezes the exact checkpoint inputs before any reviewer
+	// conversation exists. ReviewResult is the bounded, structured result from
+	// that conversation. Both are immutable once written.
+	ReviewSnapshot *ReviewSnapshot `json:"review_snapshot,omitempty"`
+	ReviewResult   *ReviewResult   `json:"review_result,omitempty"`
+}
+
+type ReviewSnapshot struct {
+	Version                int                 `json:"version"`
+	RepositoryHead         string              `json:"repository_head"`
+	RepositoryStatusSHA256 string              `json:"repository_status_sha256"`
+	RepositoryRefsSHA256   string              `json:"repository_refs_sha256"`
+	Targets                []ReviewTarget      `json:"targets"`
+	Commits                []ReviewCommit      `json:"commits"`
+	Instructions           []ReviewInstruction `json:"instructions"`
+}
+
+type ReviewCommit struct {
+	Reference    string   `json:"reference"`
+	WorkspaceID  int64    `json:"workspace_id"`
+	StartingHead string   `json:"starting_head"`
+	ResultCommit string   `json:"result_commit"`
+	Files        []string `json:"files"`
+}
+
+type ReviewInstruction struct {
+	Commit string `json:"commit"`
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+	Text   string `json:"text"`
+}
+
+type ReviewResult struct {
+	Version  int             `json:"version"`
+	Status   string          `json:"status"`
+	Summary  string          `json:"summary"`
+	Findings []ReviewFinding `json:"findings"`
+}
+
+type ReviewFinding struct {
+	Title    string `json:"title"`
+	Body     string `json:"body"`
+	Priority int    `json:"priority"`
+	File     string `json:"file,omitempty"`
+	Line     int    `json:"line,omitempty"`
 }
 
 type RunInteraction struct {
@@ -181,6 +228,7 @@ type ExecutionRunDatabase interface {
 	InterruptExecutionRun(context.Context, int64, int64, string) (ExecutionRun, error)
 	BeginExecutionOperation(context.Context, int64, int64, string) (ExecutionRun, error)
 	FinishExecutionOperation(context.Context, ExecutionOperationResult) (ExecutionRun, error)
+	CompleteReviewCheckpoint(context.Context, int64, int64) (ExecutionRun, error)
 	PruneRunActivity(context.Context, time.Time, int) (int64, error)
 	Close() error
 }
@@ -196,7 +244,10 @@ type ExecutionOperationResult struct {
 }
 
 var fullCommitID = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
-var safeRunID = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,256}$`)
+var (
+	safeRunID = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,256}$`)
+	hexDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
+)
 
 func IsFullCommitID(value string) bool { return fullCommitID.MatchString(value) }
 
@@ -337,6 +388,75 @@ func ValidateRunProgress(p RunProgress) error {
 	if p.CachedInputTokens != nil && *p.CachedInputTokens < 0 {
 		return InvalidExecutionRun("cached input tokens must be nonnegative")
 	}
+	if err := ValidateReviewSnapshot(p.ReviewSnapshot); err != nil {
+		return err
+	}
+	if err := ValidateReviewResult(p.ReviewResult); err != nil {
+		return err
+	}
+	if p.ReviewResult != nil && p.ReviewSnapshot == nil {
+		return InvalidExecutionRun("review result requires its immutable scope snapshot")
+	}
+	return nil
+}
+
+func ValidateReviewSnapshot(snapshot *ReviewSnapshot) error {
+	if snapshot == nil {
+		return nil
+	}
+	if snapshot.Version != 1 || !IsFullCommitID(snapshot.RepositoryHead) || !hexDigest.MatchString(snapshot.RepositoryStatusSHA256) || !hexDigest.MatchString(snapshot.RepositoryRefsSHA256) || len(snapshot.Targets) == 0 || len(snapshot.Targets) > 1000 || len(snapshot.Commits) != len(snapshot.Targets) {
+		return InvalidExecutionRun("invalid immutable review snapshot")
+	}
+	resultCommits := make(map[string]bool, len(snapshot.Commits))
+	for i, commit := range snapshot.Commits {
+		target := snapshot.Targets[i]
+		if target.Reason != "ready" || target.Status == nil || *target.Status != domain.PelletClosed || target.ImplementationRevision == nil || *target.ImplementationRevision < 1 || target.Evidence == nil ||
+			commit.Reference == "" || commit.WorkspaceID < 1 || !IsFullCommitID(commit.StartingHead) || !IsFullCommitID(commit.ResultCommit) || len(commit.Files) == 0 || len(commit.Files) > 10000 ||
+			commit.Reference != target.Reference || commit.WorkspaceID != target.Evidence.WorkspaceID || commit.StartingHead != target.Evidence.StartingHead || commit.ResultCommit != target.Evidence.ResultCommit {
+			return InvalidExecutionRun("invalid immutable review commit scope")
+		}
+		resultCommits[commit.ResultCommit] = true
+		for j, file := range commit.Files {
+			if file == "" || len(file) > 4096 || !utf8.ValidString(file) || strings.ContainsRune(file, 0) || j > 0 && commit.Files[j-1] >= file {
+				return InvalidExecutionRun("invalid immutable review file scope")
+			}
+		}
+	}
+	seenInstructions := make(map[string]bool, len(snapshot.Instructions))
+	for _, instruction := range snapshot.Instructions {
+		digest := fmt.Sprintf("%x", sha256.Sum256([]byte(instruction.Text)))
+		key := instruction.Commit + "\x00" + instruction.Path
+		if !resultCommits[instruction.Commit] || instruction.Path == "" || len(instruction.Path) > 4096 || !hexDigest.MatchString(instruction.SHA256) || instruction.SHA256 != digest || seenInstructions[key] || !utf8.ValidString(instruction.Path+instruction.Text) || strings.ContainsRune(instruction.Path+instruction.Text, 0) {
+			return InvalidExecutionRun("invalid immutable repository instruction snapshot")
+		}
+		seenInstructions[key] = true
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil || len(encoded) > MaxRunSnapshotBytes {
+		return InvalidExecutionRun("immutable review snapshot exceeds its storage bound")
+	}
+	return nil
+}
+
+func ValidateReviewResult(result *ReviewResult) error {
+	if result == nil {
+		return nil
+	}
+	if result.Version != 1 || result.Status != "clean" && result.Status != "findings" || strings.TrimSpace(result.Summary) == "" || len(result.Findings) > 1000 {
+		return InvalidExecutionRun("invalid structured review result")
+	}
+	if (result.Status == "clean") != (len(result.Findings) == 0) {
+		return InvalidExecutionRun("review status does not match its findings")
+	}
+	for _, finding := range result.Findings {
+		if strings.TrimSpace(finding.Title) == "" || strings.TrimSpace(finding.Body) == "" || finding.Priority < 0 || finding.Priority > 3 || finding.Line < 0 || len(finding.File) > 4096 || !utf8.ValidString(finding.Title+finding.Body+finding.File) || strings.ContainsRune(finding.Title+finding.Body+finding.File, 0) {
+			return InvalidExecutionRun("invalid structured review finding")
+		}
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil || len(encoded) > MaxRunSnapshotBytes {
+		return InvalidExecutionRun("structured review result exceeds its storage bound")
+	}
 	return nil
 }
 
@@ -394,6 +514,42 @@ func ValidateRunInteraction(interaction *RunInteraction) error {
 }
 
 func RunActive(state string) bool { return state == "running" || state == "awaiting_input" }
+
+// CompletedReviewReceipt identifies the durable result of the transaction that
+// both completed a review attempt and closed its checkpoint. A supervisor may
+// crash before cleaning its local execution lock, so this exact shape is also
+// the authority for an explicit, idempotent closed-checkpoint reconciliation.
+func CompletedReviewReceipt(run ExecutionRun) bool {
+	return run.Mode == "review_checkpoint" && run.Phase == "review" && run.State == "completed" && run.Outcome == "succeeded" &&
+		run.PendingOperation == "" && run.ThreadID != "" && run.TurnID != "" && run.CheckpointScope != nil && run.ReviewSnapshot != nil && run.ReviewResult != nil &&
+		run.ResultCommit == "" && run.CommitVerifiedAt == nil && run.Finalization == nil
+}
+
+// ReviewReconciliationAttempt is a stopped descendant that retained all review
+// evidence but did not itself complete the already-closed checkpoint receipt.
+// Its ancestry must still be walked back to CompletedReviewReceipt before it
+// can authorize another explicit Resume.
+func ReviewReconciliationAttempt(run ExecutionRun) bool {
+	return run.ResumeFrom != nil && run.Mode == "review_checkpoint" && run.Phase == "review" &&
+		(run.State == "interrupted" || run.State == "needs_attention") && (run.Outcome == "failed" || run.Outcome == "cancelled" || run.Outcome == "unknown") &&
+		run.PendingOperation == "" && run.ThreadID != "" && run.TurnID != "" && run.CheckpointScope != nil && run.ReviewSnapshot != nil && run.ReviewResult != nil &&
+		run.ResultCommit == "" && run.CommitVerifiedAt == nil && run.Finalization == nil
+}
+
+// SameReviewReconciliationEvidence proves that child is the next attempt in
+// parent's exact review-reconciliation lineage. Effective runtime settings may
+// be re-resolved between attempts, but the scope, conversation and result may
+// not change.
+func SameReviewReconciliationEvidence(child, parent ExecutionRun) bool {
+	return child.ResumeFrom != nil && *child.ResumeFrom == parent.ID && child.ID > parent.ID && child.Attempt == parent.Attempt+1 &&
+		child.ProjectID == parent.ProjectID && child.WorkspaceID == parent.WorkspaceID && child.PelletNumber == parent.PelletNumber && child.ProjectCode == parent.ProjectCode &&
+		child.ImplementationRevision == parent.ImplementationRevision && child.StartingHead == parent.StartingHead && child.StartingRef == parent.StartingRef &&
+		child.PelletTitle == parent.PelletTitle && child.PelletDescription == parent.PelletDescription && child.ThreadID == parent.ThreadID && child.TurnID == parent.TurnID &&
+		child.Mode == parent.Mode && child.ScheduleMode == parent.ScheduleMode && child.ScheduleRemaining == parent.ScheduleRemaining && child.PelletPresent == parent.PelletPresent &&
+		reflect.DeepEqual(child.ExternalID, parent.ExternalID) && reflect.DeepEqual(child.Group, parent.Group) && reflect.DeepEqual(child.PromptPrefix, parent.PromptPrefix) &&
+		SameReviewScope(child.CheckpointScope, parent.CheckpointScope) && reflect.DeepEqual(child.ReviewSnapshot, parent.ReviewSnapshot) && reflect.DeepEqual(child.ReviewResult, parent.ReviewResult) &&
+		child.ResultCommit == "" && child.CommitVerifiedAt == nil && child.Finalization == nil
+}
 
 func InvalidExecutionRun(message string) error {
 	return domain.NewError(domain.Usage, "invalid_execution_run", message, nil)

@@ -39,6 +39,8 @@ func WriteSchema(dir, mode string) {
 			"AskForApproval":       map[string]any{"enum": []string{"on-request", "never"}},
 			"ApprovalsReviewer":    map[string]any{"enum": []string{"user", "auto_review"}},
 			"SandboxMode":          map[string]any{"enum": []string{"read-only", "workspace-write"}},
+			"ReviewDelivery":       map[string]any{"enum": []string{"inline", "detached"}},
+			"ReviewTarget":         map[string]any{"oneOf": []any{map[string]any{"properties": map[string]any{"type": map[string]any{"enum": []string{"custom"}}}}}},
 		}
 		if mode == "missing-policy-value" {
 			definitions["ApprovalsReviewer"] = map[string]any{"enum": []string{"user"}}
@@ -71,6 +73,7 @@ func WriteSchema(dir, mode string) {
 		"ConfigRequirementsReadResponse.json": {fields: []string{"requirements"}, definitions: map[string][]string{
 			"ConfigRequirements": {"allowedApprovalPolicies", "allowedSandboxModes"},
 		}},
+		"ReviewStartResponse.json": {fields: []string{"reviewThreadId", "turn"}},
 	}
 	v2 := filepath.Join(dir, "v2")
 	if err := os.Mkdir(v2, 0700); err != nil {

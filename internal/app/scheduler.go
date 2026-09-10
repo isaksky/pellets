@@ -356,7 +356,12 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 					queue.Close()
 					return nil, errors.Join(scheduleError("resume_scope_changed", "the saved pellet scope, filters, or checkpoint policy changed; reconcile that edit before Resume"), err)
 				}
-				if previous.Finalization != nil && previous.ResultCommit != "" && (previous.Phase == "close" || previous.State == "completed") {
+				reviewReceipt, lineageErr := s.completedReviewLineage(ctx, previous)
+				if lineageErr != nil {
+					queue.Close()
+					return nil, lineageErr
+				}
+				if (previous.Finalization != nil && previous.ResultCommit != "" && (previous.Phase == "close" || previous.State == "completed")) || reviewReceipt {
 					p, err := queue.ReadPellet(ctx, request.Selected, domain.PelletReference{ProjectCode: request.Selected.Project.Code, Number: previous.PelletNumber})
 					if err != nil {
 						queue.Close()
@@ -489,6 +494,31 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 
 func scheduleError(code, message string) error {
 	return domain.NewError(domain.Conflict, code, message, nil)
+}
+
+func (s *Scheduler) completedReviewLineage(ctx context.Context, run storage.ExecutionRun) (bool, error) {
+	seen := make(map[int64]bool)
+	for depth := 0; depth < 1000; depth++ {
+		if seen[run.ID] {
+			return false, nil
+		}
+		seen[run.ID] = true
+		if storage.CompletedReviewReceipt(run) {
+			return true, nil
+		}
+		if !storage.ReviewReconciliationAttempt(run) {
+			return false, nil
+		}
+		parent, err := s.options.Supervisor.options.Recorder.Read(ctx, s.options.Database, *run.ResumeFrom)
+		if err != nil {
+			return false, err
+		}
+		if !storage.SameReviewReconciliationEvidence(run, parent) {
+			return false, nil
+		}
+		run = parent
+	}
+	return false, nil
 }
 
 func (s *Scheduler) validateCompletion(ctx context.Context, run storage.ExecutionRun, selected storage.ResolvedProject) error {

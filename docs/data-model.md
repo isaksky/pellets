@@ -667,3 +667,20 @@ transactional creation. Existing web create forms may omit the optional
 `review_targets` comma-separated field. Inspector and list reads expose current
 checkpoint state; complete-row optimistic tokens also include that observation,
 so a stale UI operation cannot ignore intervening target changes.
+
+Migration 13 rebuilds the execution tables to admit `review/start` as a
+consequential pending operation and to distinguish successful review completion
+from ordinary commit completion. `review_snapshot_json` retains the bounded
+immutable Pellet/commit/path/repository-instruction snapshot plus the pre-review
+HEAD plus repository-state and refs digests. The state digest covers porcelain
+status, exact index entries, and the contents and modes of every tracked or
+unignored worktree path, including already-dirty files. `review_result_json`
+retains the bounded structured clean/findings outcome normalized from
+app-server's native rendered review text. Successful ordinary attempts still
+require a verified result commit and no review result; successful checkpoint
+attempts require a review result and never manufacture a result commit. Review
+completion and checkpoint closure occur in one writer transaction. A
+completed-review receipt may be explicitly reconciled after a crash before lock
+cleanup without a second review or queue transition. Interrupted reconciliation
+descendants retain that authority only through an exact bounded lineage to the
+completed receipt.

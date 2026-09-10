@@ -56,9 +56,10 @@ func main() {
 	}
 	webRunner := webui.Runner{
 		OpenScheduler: func(ctx context.Context, supervisor *app.ExecutionSupervisor, database app.Database, subscribe func() (<-chan struct{}, func())) *app.Scheduler {
-			return app.NewScheduler(ctx, app.SchedulerOptions{Database: database, Supervisor: supervisor, Subscribe: subscribe, OpenQueue: func(ctx context.Context, path string) (storage.SchedulerQueue, error) {
+			openQueue := func(ctx context.Context, path string) (storage.SchedulerQueue, error) {
 				return sqlite.OpenPelletRepository(ctx, path)
-			}})
+			}
+			return app.NewScheduler(ctx, app.SchedulerOptions{Database: database, Supervisor: supervisor, Subscribe: subscribe, OpenQueue: openQueue, Checkpoints: app.NewCheckpointReviewPolicy(database, openQueue)})
 		},
 		OpenSupervisor: func(ctx context.Context) *app.ExecutionSupervisor {
 			return app.NewExecutionSupervisor(ctx, app.SupervisorOptions{

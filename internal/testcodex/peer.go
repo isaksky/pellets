@@ -99,6 +99,8 @@ func Run() bool {
 		case "thread/start", "thread/resume":
 			if mode == "schedule_prethread_failure" && message.Method == "thread/start" {
 				result = map[string]any{}
+			} else if strings.HasPrefix(mode, "review_") && message.Method == "thread/start" {
+				result = map[string]any{"thread": map[string]any{"id": "review-seed"}}
 			} else {
 				result = map[string]any{"thread": map[string]any{"id": "thread"}}
 			}
@@ -117,7 +119,11 @@ func Run() bool {
 			}
 			cwd, err := os.Getwd()
 			must(err)
-			result = map[string]any{"thread": map[string]any{"id": "thread", "cwd": cwd, "status": map[string]any{"type": "notLoaded"}, "turns": []any{map[string]any{"id": "turn", "status": "interrupted"}}}}
+			threadID, turnID := "thread", "turn"
+			if strings.HasPrefix(mode, "review_") {
+				threadID, turnID = "review-thread", "review-turn"
+			}
+			result = map[string]any{"thread": map[string]any{"id": threadID, "cwd": cwd, "status": map[string]any{"type": "notLoaded"}, "turns": []any{map[string]any{"id": turnID, "status": "completed"}}}}
 			if mode == "schedule_missing_history" {
 				result = map[string]any{}
 			}
@@ -127,6 +133,13 @@ func Run() bool {
 			if mode == "schedule_advanced_history" {
 				result = map[string]any{"thread": map[string]any{"id": "thread", "cwd": cwd, "status": map[string]any{"type": "notLoaded"}, "turns": []any{map[string]any{"id": "turn", "status": "completed"}, map[string]any{"id": "external-turn", "status": "completed"}}}}
 			}
+		case "review/start":
+			reviewThreadID := "review-thread"
+			if mode == "review_same_context" {
+				reviewThreadID = "review-seed"
+			}
+			result = map[string]any{"reviewThreadId": reviewThreadID, "turn": map[string]any{"id": "review-turn", "status": "inProgress", "items": []any{}}}
+			scheduledTurn = append(scheduledTurn[:0], message.Params...)
 		case "turn/interrupt":
 			if mode == "hang-interrupt" {
 				continue
@@ -138,6 +151,54 @@ func Run() bool {
 			continue
 		}
 		write(map[string]any{"id": message.ID, "result": result})
+		if message.Method == "review/start" && strings.HasPrefix(mode, "review_") {
+			if mode == "review_gate" {
+				waitFile("fake-complete")
+			}
+			if mode == "review_side_effect" {
+				must(os.WriteFile("review-side-effect.txt", []byte("changed"), 0600))
+			}
+			if mode == "review_dirty_side_effect" {
+				must(os.WriteFile("code-1.txt", []byte("dirty-after\n"), 0600))
+			}
+			write(map[string]any{"method": "item/started", "params": map[string]any{"threadId": "review-thread", "turnId": "review-turn", "item": map[string]any{"type": "enteredReviewMode", "id": "review-turn", "review": "exact checkpoint"}}})
+			if mode == "review_interaction" {
+				write(map[string]any{"id": "review-request", "method": "item/tool/requestUserInput", "params": map[string]any{"threadId": "review-thread", "turnId": "review-turn", "itemId": "review-item", "questions": []any{map[string]any{"id": "permission", "header": "Permission", "question": "Change external state?", "options": []any{map[string]any{"label": "Yes", "description": "Mutate state"}}}}}})
+			}
+			if mode != "review_missing_result" {
+				review := cleanReviewMarker(scheduledTurn)
+				if mode == "review_findings" {
+					cwd, err := os.Getwd()
+					must(err)
+					review = "The exact changes have one correctness issue.\n\nReview comment:\n\n- [P1] Handle edge case — " + filepath.Join(cwd, "demo-1.txt") + ":1-1\n  The selected change misses the empty input case."
+				}
+				if mode == "review_malformed_result" {
+					review = "Reviewer failed to output a response."
+				}
+				if mode == "review_json_result" {
+					review = `{"version":1,"status":"clean","summary":"invented wire contract","findings":[]}`
+				}
+				if mode == "review_fallback_prose" {
+					review = "The model returned prose that could not be parsed as ReviewOutputEvent."
+				}
+				if mode == "review_truncated_json" {
+					review = `{"findings":[],"overall_correctness":"patch is correct"`
+				}
+				if mode == "review_fenced_malformed" {
+					review = "```json\n{\"findings\": []}\n```"
+				}
+				write(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "review-thread", "turnId": "review-turn", "item": map[string]any{"type": "exitedReviewMode", "id": "review-turn", "review": review}}})
+			}
+			if mode == "review_result_gate" {
+				waitFile("fake-complete")
+			}
+			turnStatus := "completed"
+			if mode == "review_failed" {
+				turnStatus = "failed"
+			}
+			write(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "review-thread", "turn": map[string]any{"id": "review-turn", "status": turnStatus}}})
+			continue
+		}
 		if message.Method == "turn/steer" && mode == "schedule_followup_live" {
 			writeScheduledCompletion(write, mode, scheduledTurn)
 			continue
@@ -181,6 +242,21 @@ func Run() bool {
 		}
 	}
 	return true
+}
+
+func cleanReviewMarker(params json.RawMessage) string {
+	var request struct {
+		Target struct {
+			Instructions string `json:"instructions"`
+		} `json:"target"`
+	}
+	must(json.Unmarshal(params, &request))
+	const prefix = "PELLETS_REVIEW_CLEAN_V1 sha256:"
+	start := strings.Index(request.Target.Instructions, prefix)
+	if start < 0 || len(request.Target.Instructions) < start+len(prefix)+64 {
+		panic("review request lacks its scope-bound clean marker")
+	}
+	return request.Target.Instructions[start : start+len(prefix)+64]
 }
 
 func writeScheduledCompletion(write func(any), mode string, params json.RawMessage) {

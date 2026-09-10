@@ -297,13 +297,13 @@ func (execution *WorkspaceExecution) Call(ctx context.Context, operation codex.O
 		return nil, codex.ErrClosed
 	}
 	switch operation {
-	case codex.ThreadStart, codex.ThreadResume, codex.TurnStart, codex.TurnInterrupt:
+	case codex.ThreadStart, codex.ThreadResume, codex.TurnStart, codex.TurnInterrupt, codex.ReviewStart:
 		run, err := execution.Read(ctx)
 		if err != nil {
 			return nil, err
 		}
 		_, response, err := execution.recorder.CallCodex(ctx, execution.database, run.ID, run.Revision, execution.prepared.Client, operation, params)
-		if operation == codex.TurnStart && err == nil {
+		if (operation == codex.TurnStart || operation == codex.ReviewStart) && err == nil {
 			execution.turnStarted.Store(true)
 		}
 		return response, err
@@ -340,6 +340,22 @@ func (execution *WorkspaceExecution) Save(ctx context.Context, progress storage.
 		}
 	}
 	return execution.recorder.Save(ctx, execution.database, storage.UpdateExecutionRun{ID: execution.id, ExpectedRevision: revision, Progress: progress})
+}
+
+func (execution *WorkspaceExecution) CompleteReviewCheckpoint(ctx context.Context, revision int64) (storage.ExecutionRun, error) {
+	ctx, cancel, err := execution.operationContext(ctx)
+	if err != nil {
+		return storage.ExecutionRun{}, err
+	}
+	defer cancel()
+	run, err := execution.Read(ctx)
+	if err != nil {
+		return run, err
+	}
+	if completedTurnStatus(execution.LatestCompletion(), run.ThreadID, run.TurnID) != "completed" && (run.ResumeFrom == nil || run.ReviewResult == nil) {
+		return run, storage.InvalidExecutionRun("review completion requires the exact review turn's successful terminal notification")
+	}
+	return execution.recorder.CompleteReviewCheckpoint(ctx, execution.database, run.ID, revision)
 }
 
 func (execution *WorkspaceExecution) VerifyCommit(ctx context.Context, revision int64, commit string) (storage.ExecutionRun, error) {

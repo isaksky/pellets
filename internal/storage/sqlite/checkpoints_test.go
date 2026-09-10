@@ -432,9 +432,21 @@ func TestReviewCheckpointFiltersAndRenameDoNotChangeReviewScope(t *testing.T) {
 	if !current.Checkpoint.Ready || current.Checkpoint.Targets[0].Reference != "renamed-1" || current.Checkpoint.Targets[0].SelectedReference != "code-1" || !storage.SameReviewScope(current.Checkpoint, run.CheckpointScope) {
 		t.Fatalf("rename changed identity: %+v", current.Checkpoint)
 	}
-	transitionReviewTest(t, r, selected, current, storage.PelletClose)
-	completed := updateRun(t, db, run, storage.RunProgress{Phase: "review", State: "completed", Outcome: "succeeded", ThreadID: "review-thread", TurnID: "review-turn"}, strings.Repeat("d", 40))
+	target := current.Checkpoint.Targets[0]
+	run = updateRun(t, db, run, storage.RunProgress{
+		Phase: "review", State: "running", ThreadID: "review-thread", TurnID: "review-turn",
+		ReviewSnapshot: &storage.ReviewSnapshot{Version: 1, RepositoryHead: run.StartingHead, RepositoryStatusSHA256: strings.Repeat("a", 64), RepositoryRefsSHA256: strings.Repeat("b", 64), Targets: current.Checkpoint.Targets, Commits: []storage.ReviewCommit{{Reference: target.Reference, WorkspaceID: target.Evidence.WorkspaceID, StartingHead: target.Evidence.StartingHead, ResultCommit: target.Evidence.ResultCommit, Files: []string{"reviewed.go"}}}},
+		ReviewResult:   &storage.ReviewResult{Version: 1, Status: "clean", Summary: "clean", Findings: []storage.ReviewFinding{}},
+	}, "")
+	completed, err := db.CompleteReviewCheckpoint(ctx, run.ID, run.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if completed.State != "completed" {
 		t.Fatal("rename prevented review completion")
+	}
+	current, err = r.ReadPellet(ctx, selected, cp.Reference)
+	if err != nil || current.Status != domain.PelletClosed {
+		t.Fatalf("atomic completion did not close checkpoint: %+v %v", current, err)
 	}
 }

@@ -411,11 +411,48 @@ Capture freezes the exact selected Pellet identities, implementation revisions,
 and retained run/commit evidence, with a 1 MiB encoded snapshot bound. Resume,
 close, and completed saves recheck the same scope; changed evidence is a conflict.
 Queue/database readiness supplies exact commit identities across worktrees. The
-review driver must additionally resolve those Git objects and validate the
-actual review and deduplicated triage receipts before claiming review success.
-Production Codex review/triage execution is a separate integration from this
-metadata/readiness contract; no new lifecycle status, lease, or generic
-dependency graph is introduced.
+production review driver revalidates that readiness, resolves every recorded
+starting/result commit object through the shared Git repository, and freezes a
+versioned snapshot before starting a conversation. The snapshot contains the
+selected Pellet descriptions and identities, each exact commit and changed
+path, and applicable committed `AGENTS.md` contents plus hashes. Missing objects
+stop for attention; the driver never checks out, merges, or cherry-picks
+evidence into existence.
+
+`review/start` uses `delivery: "detached"` with a `custom` target. Detached
+delivery forks its source history, so Pellets first creates a new empty seed
+thread with the usual `on-request`/`auto_review` policy reduced to a read-only
+sandbox. The reviewer conversation therefore contains no implementation
+discussion. Its instructions enumerate every result commit independently and
+forbid replacing noncontiguous or cross-worktree selections with a broad range.
+Codex parses the built-in review rubric internally; app-server exposes the
+rendered native review text in `exitedReviewMode.review`, not that internal JSON
+event. With no findings, that renderer exposes only `overall_explanation`, the
+same field Codex uses for raw parse-fallback prose, so arbitrary headerless text
+cannot prove a clean structured review. The custom scope requires a SHA-256
+scope-bound clean marker as that explanation. Pellets accepts only that exact
+marker or a native `Review comment:`/`Full review comments:` finding block,
+validates each absolute location against the frozen changed-file set, and
+normalizes it into the bounded durable clean/findings record. Empty,
+interrupted, fallback, malformed, truncated, fenced, or invented JSON wire
+results stop for attention. Pellets then verifies that HEAD, exact index
+entries, tracked and unignored worktree contents, repository refs, and
+checkpoint scope did not change, and atomically records success and closes the
+checkpoint. Finding-to-Pellet triage remains a separate policy.
+
+`review/start` is never replayed during recovery. If a final structured result
+was already persisted, explicit Resume rechecks the exact conversation history,
+scope, commit objects, and repository state before completing without another
+review. If that atomic completion already closed the checkpoint but a crash
+left the execution-lock receipt, the completed-review receipt authorizes one
+explicit reconciliation attempt. It reuses the exact snapshot, native result,
+thread and turn, performs no second `review/start` or Pellet close, and clears
+the fence only after the checks succeed. If that reconciliation is interrupted,
+another explicit Resume may follow only its bounded, cycle-checked chain back
+to the completed receipt; every parent/child scope, conversation, result,
+attempt, and prompt identity must match exactly. Otherwise Resume stops for
+manual attention. No new lifecycle status, lease, or generic dependency graph
+is introduced.
 
 ## Run settings, authentication, and policy
 
