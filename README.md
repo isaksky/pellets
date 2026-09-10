@@ -427,6 +427,12 @@ removal, and other irreversible actions are intentionally absent.
 `pl web` remains a deprecated compatibility alias with the same options and
 foreground behavior. New scripts and documentation must use `pl server`.
 
+The internal [Codex stdio adapter](docs/codex-app-server.md) is available for
+foreground runner integration; the inspector does not start Codex yet. The
+adapter verifies the installed runtime's protocol and preserves conversations
+through its thread read/resume operations. It does not introduce a second model
+runtime or make normal Pellets use depend on Codex.
+
 Press Ctrl+C to stop. Pellets immediately acknowledges the interrupt on stderr,
 closes live-update streams, and allows ordinary requests up to five seconds to
 finish. A second Ctrl+C forces exit if shutdown stalls. Stdout remains reserved

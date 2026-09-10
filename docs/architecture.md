@@ -52,6 +52,7 @@ internal/storage/       storage interfaces used by app
 internal/storage/sqlite explicit SQL, migrations, FTS maintenance
 internal/output/        JSON v1 and human renderers
 internal/webui/         loopback HTTP, templates/assets, SSE invalidation
+internal/codex/         optional installed app-server stdio protocol adapter
 internal/testutil/      integration database and command helpers
 ```
 
@@ -82,6 +83,15 @@ Rules:
 The storage layer is replaceable for tests, but replacement with a different production database is not a product goal.
 
 The database-independent skill path is `cmd/pl -> cli -> app -> filesystem`, with existing Git discovery injected into the application service. It does not import or construct a storage implementation.
+
+The optional `internal/codex` boundary directly owns an installed
+`codex app-server` child over stdio and exposes a small session interface for a
+future foreground runner. It has no database dependency and is not constructed
+by normal queue, memory, or inspector paths. It verifies the installed runtime's
+stable generated schema before initialization, preserves ordered events and
+terminal outcomes, and leaves approval decisions and run persistence to its
+caller. See [codex-app-server.md](codex-app-server.md) for operations, bounded
+buffering, cancellation, process ownership, and deterministic fake-peer tests.
 
 ## Portable agent skill installer
 
