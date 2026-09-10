@@ -427,9 +427,10 @@ removal, and other irreversible actions are intentionally absent.
 `pl web` remains a deprecated compatibility alias with the same options and
 foreground behavior. New scripts and documentation must use `pl server`.
 
-The internal [Codex stdio adapter](docs/codex-app-server.md) and run preflight
-are available for foreground runner integration; the inspector does not start
-Codex yet. They verify the installed runtime's protocol, local account, normal
+The internal [Codex stdio adapter](docs/codex-app-server.md), run preflight,
+and workspace supervisor are wired to the foreground server lifetime. The
+inspector does not expose execution controls yet. Preflight verifies the
+installed runtime's protocol, local account, normal
 workspace configuration, managed requirements, and model capabilities without
 copying credentials or starting a model turn. Prepared runs use
 `workspace-write` plus `on-request` automatic approval review, retain narrow
@@ -447,7 +448,18 @@ bounded activity retention preserves the original review target. They do not
 add public run controls or another queue. Credentials and full transcripts
 remain outside Pellets. See [execution evidence](docs/data-model.md#durable-execution-evidence).
 
-Press Ctrl+C to stop. Pellets immediately acknowledges the interrupt on stderr,
+The supervisor permits one active execution per canonical Git worktree across
+participating servers. Existing linked worktrees and independent projects may
+run concurrently with their own cwd and settings. This lock is separate from
+`pl start-next`; external agents that do not participate can still conflict and
+must be coordinated separately. Server shutdown stops admission, requests an
+active turn's interruption, then stops and reaps its owned Codex process family
+before releasing the lock. It never selects processes by name or terminates
+unrelated Codex sessions. Crashes or unconfirmed cleanup leave an explicit
+recovery fence with the exact database/run receipt; restarting does not replay
+work. Do not delete `pellets-execution.lock` from Git's worktree metadata.
+
+Press Ctrl+C to stop (SIGTERM also requests orderly shutdown). Pellets immediately acknowledges the interrupt on stderr,
 closes live-update streams, and allows ordinary requests up to five seconds to
 finish. A second Ctrl+C forces exit if shutdown stalls. Stdout remains reserved
 for the listener URL.

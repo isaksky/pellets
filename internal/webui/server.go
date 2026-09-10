@@ -38,6 +38,7 @@ type Runner struct {
 	OpenApplication ApplicationOpener
 	OpenMonitor     MonitorOpener
 	OpenBrowser     BrowserOpener
+	OpenSupervisor  func(context.Context) *app.ExecutionSupervisor
 	Listen          func(network, address string) (net.Listener, error)
 	MonitorInterval time.Duration
 	CoalesceDelay   time.Duration
@@ -54,7 +55,7 @@ type Options struct {
 	Stderr           io.Writer
 }
 
-func (runner Runner) Run(ctx context.Context, options Options) error {
+func (runner Runner) Run(ctx context.Context, options Options) (runErr error) {
 	if runner.OpenApplication == nil || runner.OpenMonitor == nil {
 		return errors.New("web runner is not configured")
 	}
@@ -69,6 +70,13 @@ func (runner Runner) Run(ctx context.Context, options Options) error {
 		return err
 	}
 	defer application.Close()
+	if runner.OpenSupervisor != nil {
+		application.Executions = runner.OpenSupervisor(ctx)
+		if application.Executions == nil {
+			return errors.New("server supervisor is not configured")
+		}
+		defer func() { runErr = errors.Join(runErr, application.Executions.Close()) }()
+	}
 	monitor, err := runner.OpenMonitor(ctx, options.DatabasePath)
 	if err != nil {
 		return err
@@ -142,6 +150,9 @@ func (runner Runner) Run(ctx context.Context, options Options) error {
 
 	select {
 	case <-ctx.Done():
+		if application.Executions != nil {
+			application.Executions.StopScheduling()
+		}
 		// End persistent streams before draining ordinary requests. Shutdown
 		// does not cancel active HTTP request contexts itself.
 		cancelMonitor()
@@ -155,6 +166,10 @@ func (runner Runner) Run(ctx context.Context, options Options) error {
 		<-monitorDone
 		return nil
 	case err := <-serveErrors:
+		if application.Executions != nil {
+			application.Executions.StopScheduling()
+		}
+		_ = httpServer.Close()
 		cancelMonitor()
 		<-monitorDone
 		if err == nil || errors.Is(err, http.ErrServerClosed) {

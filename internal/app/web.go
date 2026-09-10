@@ -12,9 +12,10 @@ import (
 // tool. Reader and writer lifetimes are server-scoped, but every returned row
 // is fully materialized before this layer hands it to HTTP rendering.
 type WebApplication struct {
-	Reader  storage.WebReader
-	Writer  storage.WebWriter
-	Current *storage.ResolvedProject
+	Reader     storage.WebReader
+	Writer     storage.WebWriter
+	Current    *storage.ResolvedProject
+	Executions *ExecutionSupervisor
 }
 
 func (application *WebApplication) Close() error {

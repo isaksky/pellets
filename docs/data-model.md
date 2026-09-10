@@ -246,6 +246,15 @@ crash, an operator must reconcile the exact operation against Codex or confirm
 that its supervisor stopped and finish it with a stable uncertainty error;
 opening the database never dispatches or replays that request.
 
+After confirmed owned-process cleanup, `InterruptExecutionRun` preserves the
+last phase, conversation IDs, and any pending marker while recording
+`interrupted` with `supervisor_stopped`. The outcome is `unknown` unless the
+supervisor observed the exact turn's cancelled/failed terminal outcome. It also handles an attempt
+already marked `needs_attention` by a cancelled RPC; it never rewrites completed
+success. Workspace execution exclusion is an OS lock in canonical Git metadata,
+not a PID/session/lease table. A leftover database/run receipt fences execution
+after a server crash or unconfirmed cleanup without changing queue lifecycle.
+
 At most 64 recent activity summaries of 1,024 UTF-8 bytes each are retained per
 attempt. Each title and description snapshot is capped at 1 MiB, settings at
 32 KiB, each exact filter at 4 KiB, and conversation IDs/error classifications

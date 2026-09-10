@@ -106,6 +106,7 @@ type ExecutionRunDatabase interface {
 	ReadExecutionRun(context.Context, int64) (ExecutionRun, error)
 	ListWorkspaceRuns(context.Context, int64, int64, int) ([]ExecutionRun, error)
 	UpdateExecutionRun(context.Context, UpdateExecutionRun) (ExecutionRun, error)
+	InterruptExecutionRun(context.Context, int64, int64, string) (ExecutionRun, error)
 	BeginExecutionOperation(context.Context, int64, int64, string) (ExecutionRun, error)
 	FinishExecutionOperation(context.Context, ExecutionOperationResult) (ExecutionRun, error)
 	PruneRunActivity(context.Context, time.Time, int) (int64, error)

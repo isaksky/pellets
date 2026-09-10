@@ -62,6 +62,7 @@ var (
 	ErrBufferFull  = errors.New("codex buffer limit reached; drain events promptly or increase the configured limit")
 	ErrProtocol    = errors.New("invalid Codex app-server protocol message")
 	ErrUnsupported = errors.New("unsupported Codex app-server capability; update the configured Codex executable")
+	ErrCleanup     = errors.New("owned Codex process cleanup could not be confirmed")
 )
 
 // Config selects a local executable. Arguments are optional Codex global

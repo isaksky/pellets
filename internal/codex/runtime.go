@@ -178,7 +178,7 @@ func probe(ctx context.Context, cfg Config, args ...string) (output string, err 
 	out := &tailBuffer{limit: 64 << 10}
 	stderr := &tailBuffer{limit: cfg.StderrBytes}
 	cmd.Stdout, cmd.Stderr = out, stderr
-	tree, err := startProcessTree(cmd)
+	tree, err := startOwnedProcess(ctx, cmd)
 	if err != nil {
 		return "", fmt.Errorf("start Codex %s: %w", args[0], err)
 	}
@@ -192,11 +192,16 @@ func probe(ctx context.Context, cfg Config, args ...string) (output string, err 
 		}
 		return out.String(), nil
 	case <-ctx.Done():
-		if tree.terminate() != nil {
+		if tree.terminate() != nil && !tree.hasCustodian() {
 			_ = cmd.Process.Kill()
 		}
-		<-done
-		return "", fmt.Errorf("Codex %s: %w", args[0], ctx.Err())
+		var settlementErr error
+		select {
+		case <-done:
+		case <-time.After(processSettlementTimeout):
+			settlementErr = errors.Join(ErrCleanup, errors.New("Codex probe did not settle before the close deadline"))
+		}
+		return "", errors.Join(fmt.Errorf("Codex %s: %w", args[0], ctx.Err()), settlementErr)
 	}
 }
 

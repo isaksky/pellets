@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -20,6 +21,11 @@ type processTree struct {
 	once sync.Once
 	err  error
 }
+
+func startOwnedProcess(_ context.Context, cmd *exec.Cmd) (*processTree, error) {
+	return startProcessTree(cmd)
+}
+func (p *processTree) hasCustodian() bool { return false }
 
 func (p *processTree) refresh() error { return nil }
 
@@ -118,5 +124,8 @@ func (p *processTree) terminate() error {
 			time.Sleep(10 * time.Millisecond)
 		}
 	})
+	if p.err != nil {
+		return errors.Join(ErrCleanup, p.err)
+	}
 	return p.err
 }

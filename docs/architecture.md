@@ -214,6 +214,27 @@ and the inspector remain usable when Codex is absent or unauthenticated. The
 server never creates a worktree, remote listener, daemon, background start/stop
 service, or persistent worker.
 
+`app.ExecutionSupervisor` is constructed by the foreground server and closed
+on every server return path. Its internal `Start` accepts an explicit execution
+driver and a resolved existing workspace. It takes a process-safe lock in that
+worktree's canonical Git directory before settings, preflight, evidence, or
+Codex startup. Linked worktrees and independent projects run concurrently;
+aliases and separate server/database connections cannot bypass one worktree's
+lock. `start-next` coordinates the queue and is not an execution lock. External
+agents that do not participate still require explicit coordination.
+
+Run contexts belong to the supervisor, so browser disconnection and HTTP
+cancellation stop only the request. Shutdown stops admission and drivers,
+requests bounded active-turn interruption, and stops/reaps owned descendants
+before recording interruption and releasing exclusion. Unix supervised
+invocations use a short-lived custodian that holds the inherited lock through
+cleanup even if the foreground process dies. Windows uses kill-on-close Job
+Objects. Neither mechanism chooses processes by name or owns unrelated Codex
+sessions. Failed cleanup, unsettled drivers, uncertain persistence, and crashes
+leave a receipt in the lock file and an explicit recovery conflict; no restart
+automatically runs or reconciles that work. See [the supervision contract and
+platform limits](codex-app-server.md#foreground-workspace-supervision).
+
 The credential-free workspace setting is persisted by stable workspace ID with
 opaque complete-row version checks; a project-code rename cannot retarget it. That setting
 and the non-persistent per-run overlay select only the

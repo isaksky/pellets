@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -128,6 +129,14 @@ func TestServerInterruptHelper(t *testing.T) {
 }
 
 func TestServerSecondInterruptForcesExit(t *testing.T) {
+	testServerSecondSignal(t, os.Interrupt, "interrupt")
+}
+
+func TestServerTerminationRequestsOrderlyShutdownThenForcesExit(t *testing.T) {
+	testServerSecondSignal(t, syscall.SIGTERM, "terminated")
+}
+
+func testServerSecondSignal(t *testing.T, signal os.Signal, exitText string) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows cannot send os.Interrupt to a child process")
 	}
@@ -171,17 +180,17 @@ func TestServerSecondInterruptForcesExit(t *testing.T) {
 		}
 	}
 	expect(output, "ready")
-	if err := command.Process.Signal(os.Interrupt); err != nil {
+	if err := command.Process.Signal(signal); err != nil {
 		t.Fatal(err)
 	}
 	expect(feedback, "Stopping server… Press Ctrl+C again to force exit.")
 	expect(output, "draining")
-	if err := command.Process.Signal(os.Interrupt); err != nil {
+	if err := command.Process.Signal(signal); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case err := <-done:
-		if err == nil || !strings.Contains(err.Error(), "interrupt") {
+		if err == nil || !strings.Contains(err.Error(), exitText) {
 			t.Fatalf("force exit = %v", err)
 		}
 	case <-time.After(time.Second):

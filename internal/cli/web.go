@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"pellets/internal/domain"
 )
@@ -41,7 +42,7 @@ func ServerCommand(run ServerRunner) Command {
 		RunForeground: func(ctx context.Context, invocation Invocation, stdout, stderr io.Writer) error {
 			runContext, cancel := context.WithCancel(ctx)
 			interrupts := make(chan os.Signal, 1)
-			signal.Notify(interrupts, os.Interrupt)
+			signal.Notify(interrupts, os.Interrupt, syscall.SIGTERM)
 			finished, signalDone := make(chan struct{}), make(chan struct{})
 			go func() {
 				defer close(signalDone)

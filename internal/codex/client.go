@@ -26,6 +26,8 @@ type outbound struct {
 	ack  chan error
 }
 
+const processSettlementTimeout = 2 * time.Second
+
 // Client owns one child process. The server's final turn outcome and its process
 // exit are separate: inspect LatestCompletion and drain Events even if Wait fails.
 type Client struct {
@@ -80,7 +82,7 @@ func Start(ctx context.Context, cfg Config) (*Client, error) {
 	}
 	c.stdin, c.stdout = stdin, stdout
 	c.cmd.Stdin, c.cmd.Stdout, c.cmd.Stderr = input, output, c.stderr
-	c.tree, err = startProcessTree(c.cmd)
+	c.tree, err = startOwnedProcess(ctx, c.cmd)
 	if err != nil {
 		input.Close()
 		stdin.Close()
@@ -136,8 +138,8 @@ func Start(ctx context.Context, cfg Config) (*Client, error) {
 	}
 	if err != nil {
 		c.stop(err)
-		<-c.finished
-		return nil, fmt.Errorf("initialize %s: %w (stderr: %s)", info.Version, errors.Join(err, c.cleanupErr), c.Stderr())
+		cleanupErr := c.Close()
+		return nil, fmt.Errorf("initialize %s: %w (stderr: %s)", info.Version, errors.Join(err, cleanupErr), c.Stderr())
 	}
 	return c, nil
 }
@@ -450,7 +452,7 @@ func (c *Client) stop(err error) {
 		// Freeze/discover the owned Unix tree before closing stdin can make the
 		// leader exit and orphan children that just started in another session.
 		cleanupErr := c.tree.terminate()
-		if cleanupErr != nil {
+		if cleanupErr != nil && !c.tree.hasCustodian() {
 			_ = c.cmd.Process.Kill()
 		}
 		c.stdin.Close()
@@ -475,12 +477,26 @@ func (c *Client) Wait(ctx context.Context) error {
 }
 
 // Close forcibly ends this owned app-server process family, waits for the
-// app-server to be reaped, and reports any process-family cleanup failure.
+// app-server to be reaped within a bound, and reports any cleanup uncertainty.
+// A Unix custodian keeps its execution lock while delayed termination settles;
+// the parent's reaper continues without blocking foreground final persistence.
 // A runner should interrupt an active turn and observe completion before Close
 // when it needs a graceful persisted interruption outcome.
 func (c *Client) Close() error {
 	c.stop(ErrClosed)
-	<-c.finished
+	c.mu.Lock()
+	cleanupErr := c.cleanupErr
+	c.mu.Unlock()
+	if cleanupErr != nil {
+		return cleanupErr
+	}
+	select {
+	case <-c.finished:
+	case <-time.After(processSettlementTimeout):
+		c.mu.Lock()
+		c.cleanupErr = errors.Join(ErrCleanup, errors.New("owned process did not settle before the close deadline"))
+		c.mu.Unlock()
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.cleanupErr

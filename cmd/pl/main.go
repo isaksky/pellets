@@ -55,6 +55,17 @@ func main() {
 		},
 	}
 	webRunner := webui.Runner{
+		OpenSupervisor: func(ctx context.Context) *app.ExecutionSupervisor {
+			return app.NewExecutionSupervisor(ctx, app.SupervisorOptions{
+				ClientVersion: version,
+				Recorder: app.ExecutionRecorder{Open: func(ctx context.Context, path string) (storage.ExecutionRunDatabase, error) {
+					return sqlite.OpenExecutionRunDatabase(ctx, path)
+				}},
+				Settings: app.WorkspaceRunSettingsManager{Open: func(ctx context.Context, path string) (storage.WorkspaceRunSettingsDatabase, error) {
+					return sqlite.OpenWorkspaceRunSettingsDatabase(ctx, path)
+				}},
+			})
+		},
 		OpenApplication: func(ctx context.Context, databaseRoot, databasePath, workingDirectory string) (*app.WebApplication, error) {
 			database := app.Database{Root: databaseRoot, Path: databasePath}
 			var current *storage.ResolvedProject

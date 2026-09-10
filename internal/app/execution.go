@@ -73,14 +73,16 @@ func (recorder ExecutionRecorder) Save(ctx context.Context, database Database, r
 // have stopped. Opening a database or listing records never invokes it. The
 // last durable phase and conversation IDs survive for explicit reconciliation.
 func (recorder ExecutionRecorder) MarkInterrupted(ctx context.Context, database Database, id, revision int64) (storage.ExecutionRun, error) {
-	run, err := recorder.Read(ctx, database, id)
+	return recorder.markInterrupted(ctx, database, id, revision, "unknown")
+}
+
+func (recorder ExecutionRecorder) markInterrupted(ctx context.Context, database Database, id, revision int64, outcome string) (storage.ExecutionRun, error) {
+	repo, err := recorder.repository(ctx, database)
 	if err != nil {
-		return run, err
+		return storage.ExecutionRun{}, err
 	}
-	progress := run.RunProgress
-	progress.State, progress.Outcome, progress.ErrorCode = "interrupted", "unknown", "supervisor_stopped"
-	progress.Summary = ""
-	return recorder.Save(ctx, database, storage.UpdateExecutionRun{ID: id, ExpectedRevision: revision, Progress: progress})
+	run, err := repo.InterruptExecutionRun(ctx, id, revision, outcome)
+	return run, errors.Join(err, repo.Close())
 }
 
 func (recorder ExecutionRecorder) save(ctx context.Context, database Database, request storage.UpdateExecutionRun) (storage.ExecutionRun, error) {

@@ -20,6 +20,7 @@ type processIdentity struct {
 }
 
 type processTree struct {
+	custodian                  *processCustodian
 	pid                        int
 	rootStarted                uint64
 	once                       sync.Once
@@ -61,6 +62,9 @@ func startProcessTree(cmd *exec.Cmd) (*processTree, error) {
 // Called before protocol messages are delivered as well as periodically. This
 // retains descendants that later become orphans when the app-server exits.
 func (p *processTree) refresh() error {
+	if p.custodian != nil {
+		return p.custodian.refresh()
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.stopping {
@@ -133,7 +137,29 @@ func signalIdentity(identity processIdentity, signal syscall.Signal) error {
 	return err
 }
 
+// The custodian uses this after an uncertain termination attempt. Observation
+// does not unlock, retry execution, or adopt reused PIDs. New descendants of a
+// still-live owned ancestor remain discoverable until the entire tree stops.
+func (p *processTree) confirmStopped() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	table, err := processSnapshot()
+	if err != nil || p.discover(table) != nil {
+		return false
+	}
+	for pid, identity := range p.known {
+		current, exists := table[pid]
+		if exists && current.started == identity.started && !current.zombie {
+			return false
+		}
+	}
+	return true
+}
+
 func (p *processTree) terminate() error {
+	if p.custodian != nil {
+		return p.custodian.terminate()
+	}
 	p.once.Do(func() {
 		close(p.stopTracking)
 		<-p.trackingDone
@@ -211,5 +237,8 @@ func (p *processTree) terminate() error {
 			time.Sleep(time.Millisecond)
 		}
 	})
+	if p.err != nil {
+		return errors.Join(ErrCleanup, p.err)
+	}
 	return p.err
 }

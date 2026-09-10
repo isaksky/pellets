@@ -208,6 +208,45 @@ func (db *ProjectDatabase) UpdateExecutionRun(ctx context.Context, request stora
 	return run, err
 }
 
+// InterruptExecutionRun is a supervisor-only transition after owned processes
+// have stopped. A cancelled RPC may already have marked needs_attention; retain
+// its identities and pending marker while recording the foreground interruption.
+// This never clears uncertain operations or permits replay by itself.
+func (db *ProjectDatabase) InterruptExecutionRun(ctx context.Context, id, revision int64, outcome string) (run storage.ExecutionRun, err error) {
+	if id < 1 || revision < 1 {
+		return run, storage.InvalidExecutionRun("run ID and revision must be positive")
+	}
+	if outcome != "unknown" && outcome != "cancelled" && outcome != "failed" {
+		return run, storage.InvalidExecutionRun("interruption requires an unknown or observed nonsuccess outcome")
+	}
+	err = db.writeRun(ctx, func(conn *sql.Conn) error {
+		current, err := readExecutionRun(ctx, conn, id)
+		if err != nil {
+			return err
+		}
+		if current.Revision != revision || current.State == "completed" {
+			return storage.ExecutionRunConflict(id)
+		}
+		if current.State == "interrupted" {
+			run = current
+			return nil
+		}
+		progress := current.RunProgress
+		progress.State, progress.Outcome, progress.ErrorCode, progress.Summary = "interrupted", outcome, "supervisor_stopped", ""
+		stamp := runUpdateTime(current).Format(runTimeFormat)
+		_, err = conn.ExecContext(ctx, `UPDATE execution_runs SET state='interrupted', outcome=?, error_code='supervisor_stopped', summary='', revision=revision+1, updated_at=?, finished_at=? WHERE run_id=?`, outcome, stamp, stamp, id)
+		if err != nil {
+			return err
+		}
+		if err := appendRunActivity(ctx, conn, id, current.Revision+1, stamp, progress); err != nil {
+			return err
+		}
+		run, err = readExecutionRun(ctx, conn, id)
+		return err
+	})
+	return run, err
+}
+
 // BeginExecutionOperation serializes external calls without holding a SQLite
 // transaction across the call. Progress may advance while this marker remains.
 func (db *ProjectDatabase) BeginExecutionOperation(ctx context.Context, id, revision int64, operation string) (run storage.ExecutionRun, err error) {

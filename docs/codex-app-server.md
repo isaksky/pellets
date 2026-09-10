@@ -1,7 +1,9 @@
 # Installed Codex protocol adapter
 
 `internal/codex` implements the process/protocol and run-preparation boundary
-for a future foreground server runner. The inspector does not construct it yet. Queue, memory, and UI
+used by `app.ExecutionSupervisor`. The foreground server constructs the
+supervisor; a supplied execution driver invokes preparation. Browser execution
+controls and scheduling are separate layers. Queue, memory, and UI
 use therefore neither probes Codex nor requires installation or authentication.
 There is no Node/Python SDK, model/tool loop, daemon, or WebSocket client.
 
@@ -40,7 +42,7 @@ Each probe and initialization have a 15-second timeout. The context passed to
 `Start` owns the entire session lifetime, so use a run-lifetime context rather
 than canceling it immediately after startup. `Close`, lifetime cancellation, or
 a protocol failure closes the owned pipes, terminates the owned process family,
-and waits for the app-server to be reaped. Cleanup failures remain visible through
+and makes a bounded attempt to reap the app-server. Cleanup uncertainty remains visible through
 `Close` and `Wait`. A child
 exit allows the reader to drain terminal frames before final shutdown; leaked
 inherited pipes are cut off after one second. Stderr is drained independently
@@ -68,7 +70,9 @@ This is unprivileged lifecycle cleanup, not a kernel sandbox. macOS has no Job
 Object/cgroup equivalent here: a descendant that both changes session and loses
 all observed ancestors before any snapshot or protocol event can remain
 unobservable. The adapter does not claim to contain arbitrary double-forking
-daemons or forcibly interrupted Pellets processes. Normal `setsid` execution
+daemons. Direct adapter use without a supervisor also cannot clean up after a
+forcibly terminated Pellets process. Supervised invocations use the custodian
+described below. Normal `setsid` execution
 with live or already-observed ancestry is covered, including app-server exit
 after those descendants have been reported. PID/start-time checks also avoid
 adopting unrelated processes when a recorded PID is reused.
@@ -83,9 +87,93 @@ The Windows implementation uses the documented
 
 This ownership belongs to the protocol adapter because malformed transport or
 failed initialization can terminate a session before a runner has an active
-turn. The later foreground runner owns graceful turn interruption, durable run
-outcomes, and restart policy; it must not be needed to clean up an adapter that
+turn. The foreground supervisor owns graceful turn interruption and durable run
+outcomes; it is not needed to clean up an adapter that
 fails or is closed directly.
+
+## Foreground workspace supervision
+
+`app.ExecutionSupervisor.Start` admits an explicitly resolved existing
+workspace and captured pellet plus an `ExecutionDriver`. It validates the Git
+root, worktree Git directory, and common directory, takes a nonblocking OS lock
+on `pellets-execution.lock` inside the canonical worktree Git directory, then
+revalidates the identity under that lock. Unix uses `flock`; Windows uses
+`LockFileEx`. The inode is persistent and must never be unlinked. Database IDs,
+project codes, path aliases, and `start-next` do not substitute for this lock.
+Another participating process receives `workspace_execution_busy` before
+preflight or Codex startup. Independent worktrees, including linked worktrees
+in the same project/database, can run concurrently.
+
+Acceptance returns an `ExecutionHandle`. Its `Result` wait is independently
+cancellable; HTTP disconnect and cancelled browser requests do not cancel
+accepted execution. The supervisor loads that workspace's settings, performs
+the real `codex.PrepareRun`, captures execution evidence, and calls its driver
+with a run context and `WorkspaceExecution`. The driver receives prepared
+thread/turn parameters, recorded `Call` transitions, explicit responses,
+bounded events, and evidence operations. It does not receive the raw client's
+process lifetime. It must consume events and honor cancellation, and cannot
+launch unmanaged processes. This boundary supplies no queue scheduling,
+prompts, worktree management, or commit/close policy. Returning without verified
+completion records `needs_attention`/`unknown`; a successful process exit never
+proves a successful run. A completed save additionally requires the exact
+turn's successful terminal notification.
+
+`Close` first rejects admission and cancels all drivers. Each run gets a
+three-second interrupt budget, including waiting for an in-flight recorded
+call to reconcile, sending `turn/interrupt` when an active identity is known,
+and observing the exact `turn/completed`. An acknowledgement alone does not
+finish this wait. Expiry escalates to adapter process-family termination and
+reaping. Observed interrupted/failed turn outcomes are retained as cancelled/failed;
+forced stops without a terminal notification retain unknown. Event consumption
+continues during interruption. A cancelled or
+uncertain start is not replayed to obtain an ID. Driver settlement and the final
+evidence save each have a five-second bound. The lock is cleaned/released only
+after owned processes stop and final evidence is saved with no pending call;
+unconfirmed process cleanup never records a confirmed interruption. All active
+runs stop concurrently. The web runner closes its supervisor on every return
+path, including listener failure, output failure, cancellation, and HTTP errors.
+SIGINT and SIGTERM request orderly shutdown; a second interrupt may force exit.
+
+On macOS/Linux, each supervised invocation (including version, schema, and
+`pl --version` probes) is launched by a short-lived re-execution of the same
+Pellets executable. This process custodian inherits the execution lock and a
+private control socket; the runtime inherits neither descriptor. The
+custodian owns the actual process family, performs periodic and synchronous
+pre-notification ancestry discovery, and reaps the root after cleanup. Closing
+the control socket, including on foreground SIGKILL or a crash, triggers the
+same bounded descendant cleanup. The server does not kill the custodian when
+cleanup is uncertain. The inherited `flock` remains held through cleanup even
+after the server disappears. This helper performs no autonomous work, queue
+selection, restart, or persistent service. The Unix unobserved-detachment limit
+above still applies; simultaneous killing of the custodian defeats user-space
+cleanup. Windows uses its existing kill-on-close Job Object instead of a
+custodian; no child executes before job assignment.
+
+If the OS cannot finish termination or reap a root, the custodian reports
+cleanup uncertainty before waiting further. Parent initialization, probes, and
+`Client.Close` have bounded settlement waits; the supervisor can persist
+`needs_attention` with `process_cleanup_unconfirmed` and stop serving. The
+custodian retains its inherited lock until the root is actually reaped and all
+owned identities are confirmed stopped, including descendants of a still-live
+root. Delayed settlement never clears the durable recovery receipt or turns an
+uncertain outcome into success. No replacement run is admitted during this wait.
+
+While a run is owned, the lock file stores only its database path and available
+run ID. A crash, unknown cleanup, unsettled driver, or failed final save leaves
+that receipt as a conservative recovery fence even after the OS lock becomes
+available. `workspace_execution_recovery_required` reports the exact receipt
+and lock path; existing run/operation evidence remains inspectable. There is no
+automatic recovery, PID stealing, deletion of a stale lock file, or public
+recovery command at this boundary. Explicit reconciliation must establish the
+owned work stopped and resolve the exact saved attempt before reuse. This also
+prevents the Windows asynchronous job-termination window from allowing a
+duplicate run after server death.
+
+These locks coordinate participating Pellets servers only. An independently
+started Codex session, editor agent, or direct CLI worker can still change the
+same checkout or resume its in-progress pellet. Coordinate those external
+workers explicitly. Neither the supervisor nor its cleanup searches for or
+kills processes by executable name.
 
 ## Run settings, authentication, and policy
 
@@ -241,7 +329,7 @@ to recover continuity when a terminal notification was never received.
 
 ## Verification
 
-`go test ./internal/codex` uses scripted Go test subprocesses. It requires no
+`go test ./internal/codex ./internal/app` uses scripted Go test subprocesses. It requires no
 installed Codex, live credentials, model calls, or external network. Tests cover
 handshake order, argument preservation, operation routing, interleaved events
 and bidirectional requests, cancellation/interruption, limits, malformed/truncated
@@ -254,6 +342,16 @@ liveness checks; tests verify cleanup on close, lifetime cancellation, malformed
 output, event overflow, parent exit, and probe exit/cancellation. Unix variants
 call `setsid()` in both descendant generations and assert an unrelated detached
 process remains alive. Identity tests cover PID reuse and orphaned sessions.
+
+Supervisor integration tests use disposable Git repositories/databases and
+prepared fake app-server processes with child/grandchild sessions. They cover
+cross-process exclusion, symlink aliases, linked-worktree and project
+concurrency, cwd/settings separation, preflight failures and retry, actual HTTP
+disconnect, graceful and forced interruption, runtime crash, and foreground
+process death with orphan prevention and a fenced restart. Race tests exercise
+the shared protocol, evidence, and server boundaries. Windows builds and test
+cross-compilation validate portability, but only running those tests on Windows
+validates native Job Object and file-lock behavior.
 
 An explicit, optional smoke check validates the installed runtime, performs
 local account/config/requirements and model reads, and starts one ephemeral

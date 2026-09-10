@@ -337,7 +337,7 @@ func requirePelletsToolWithin(ctx context.Context, workspace string, timeout tim
 	command.Stdout = io.Discard
 	command.Stderr = io.Discard
 	command.WaitDelay = time.Second
-	tree, err := startProcessTree(command)
+	tree, err := startOwnedProcess(ctx, command)
 	if err != nil {
 		return errors.Join(
 			fmt.Errorf("%w: could not start `pl --version` in the inherited child environment; reinstall Pellets or fix the executable, then retry", ErrToolUnavailable),
@@ -362,7 +362,7 @@ func requirePelletsToolWithin(ctx context.Context, workspace string, timeout tim
 		select {
 		case waitErr = <-done:
 		case <-time.After(pelletsToolWaitTimeout):
-			waitErr = errors.New("Pellets tool process did not finish after bounded process-tree cleanup")
+			waitErr = errors.Join(ErrCleanup, errors.New("Pellets tool process did not finish after bounded process-tree cleanup"))
 		}
 		if ctx.Err() != nil {
 			return errors.Join(ctx.Err(), cleanupErr, waitErr)
