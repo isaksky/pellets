@@ -671,6 +671,14 @@ const startNextMaxAttempts = 2
 // though BEGIN IMMEDIATE normally prevents a competing writer from changing
 // the selected row before assignment.
 func (repository *PelletRepository) StartNextPellet(ctx context.Context, project storage.ResolvedProject, externalID, group *string) (storage.NextSelection, error) {
+	return repository.startNextPellet(ctx, project, externalID, group, nil)
+}
+
+func (repository *PelletRepository) SelectScheduledPellet(ctx context.Context, project storage.ResolvedProject, selection storage.ScheduleSelection) (storage.NextSelection, error) {
+	return repository.startNextPellet(ctx, project, selection.ExternalID, selection.Group, &selection)
+}
+
+func (repository *PelletRepository) startNextPellet(ctx context.Context, project storage.ResolvedProject, externalID, group *string, scheduled *storage.ScheduleSelection) (storage.NextSelection, error) {
 	if err := validatePelletProjectContext(project); err != nil {
 		return storage.NextSelection{}, err
 	}
@@ -699,9 +707,30 @@ func (repository *PelletRepository) StartNextPellet(ctx context.Context, project
 	if err := ensureStoredProjectWorkspace(ctx, connection, project); err != nil {
 		return storage.NextSelection{}, err
 	}
-	for attempt := 0; attempt < startNextMaxAttempts; attempt++ {
+	attempts := startNextMaxAttempts
+	if scheduled != nil {
+		attempts = 1
+	}
+	for attempt := 0; attempt < attempts; attempt++ {
 		owned, err := loadWorkspaceInProgressPellet(ctx, connection, project)
 		if err == nil {
+			if scheduled != nil {
+				if scheduled.ResumePellet == nil || *scheduled.ResumePellet != owned.Reference.Number {
+					return storage.NextSelection{}, domain.NewError(domain.Conflict, "schedule_resume_required", "explicit Resume of the exact in-progress pellet is required", map[string]any{"pellet": owned.Reference.String()})
+				}
+				if !storage.MatchesSchedule(owned, externalID, group) {
+					return storage.NextSelection{}, domain.NewError(domain.Conflict, "schedule_filter_mismatch", "the in-progress pellet does not match the captured exact filters", nil)
+				}
+				if scheduled.Ready != nil {
+					ready, err := scheduled.Ready(ctx, owned)
+					if err != nil {
+						return storage.NextSelection{}, err
+					}
+					if !ready {
+						return storage.NextSelection{Reason: storage.NextNotReady}, nil
+					}
+				}
+			}
 			selection := storage.NextSelection{Reason: storage.NextResumeInProgress, Pellet: &owned}
 			if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
 				return storage.NextSelection{}, pelletStorageError("commit start-next resume", err)
@@ -711,6 +740,9 @@ func (repository *PelletRepository) StartNextPellet(ctx context.Context, project
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return storage.NextSelection{}, pelletStorageError("read current workspace pellet for start-next", err)
+		}
+		if scheduled != nil && scheduled.ResumePellet != nil {
+			return storage.NextSelection{}, domain.NewError(domain.Conflict, "schedule_resume_changed", "the exact pellet is no longer in progress in this workspace", nil)
 		}
 
 		candidate, err := loadNextOpenPellet(ctx, connection, project, externalID, group)
@@ -723,6 +755,15 @@ func (repository *PelletRepository) StartNextPellet(ctx context.Context, project
 		}
 		if err != nil {
 			return storage.NextSelection{}, pelletStorageError("select open pellet for start-next", err)
+		}
+		if scheduled != nil && scheduled.Ready != nil {
+			ready, err := scheduled.Ready(ctx, candidate)
+			if err != nil {
+				return storage.NextSelection{}, err
+			}
+			if !ready {
+				return storage.NextSelection{Reason: storage.NextNotReady}, nil
+			}
 		}
 
 		timestamp, err := captureJulianTimestamp(ctx, connection)
@@ -759,6 +800,9 @@ func (repository *PelletRepository) StartNextPellet(ctx context.Context, project
 		return storage.NextSelection{Reason: storage.NextOpen, Pellet: &started}, nil
 	}
 
+	if scheduled != nil {
+		return storage.NextSelection{}, domain.NewError(domain.Conflict, "schedule_selection_conflict", "the scheduled selection changed; no retry was attempted", map[string]any{"workspace_id": project.Workspace.ID})
+	}
 	return storage.NextSelection{}, domain.NewError(
 		domain.Conflict,
 		"start_next_conflict",

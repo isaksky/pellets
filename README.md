@@ -8,7 +8,7 @@ memory in a shared local `.pellets/pellets.db`.
 Pellets is one CGo-free executable with SQLite embedded. It has no account,
 telemetry, cloud synchronization, plugin runtime, daemon, or required service.
 Git must be available for repository and worktree discovery. Its optional
-foreground server can later supervise an already-installed Codex runtime, but
+foreground server can supervise an already-installed Codex runtime, but
 ordinary queue, memory, and inspection use never require Codex or an account.
 
 ## Install
@@ -428,8 +428,9 @@ removal, and other irreversible actions are intentionally absent.
 foreground behavior. New scripts and documentation must use `pl server`.
 
 The internal [Codex stdio adapter](docs/codex-app-server.md), run preflight,
-and workspace supervisor are wired to the foreground server lifetime. The
-inspector does not expose execution controls yet. Preflight verifies the
+and workspace scheduler are wired to the foreground server lifetime. Internal
+HTTP interfaces expose Run one, Drain, Watch, explicit Resume, and both stop
+actions; browser execution controls are still separate work. Preflight verifies the
 installed runtime's protocol, local account, normal
 workspace configuration, managed requirements, and model capabilities without
 copying credentials or starting a model turn. Prepared runs use
@@ -445,7 +446,7 @@ The internal execution recorder also persists attempts, Codex thread/turn IDs,
 captured settings and filters, interruption outcomes, and verified commit
 evidence. These records survive reconnects, project renames, and pellet purge;
 bounded activity retention preserves the original review target. They do not
-add public run controls or another queue. Credentials and full transcripts
+add another queue. Credentials and full transcripts
 remain outside Pellets. See [execution evidence](docs/data-model.md#durable-execution-evidence).
 
 The supervisor permits one active execution per canonical Git worktree across
@@ -458,6 +459,16 @@ before releasing the lock. It never selects processes by name or terminates
 unrelated Codex sessions. Crashes or unconfirmed cleanup leave an explicit
 recovery fence with the exact database/run receipt; restarting does not replay
 work. Do not delete `pellets-execution.lock` from Git's worktree metadata.
+
+Schedules require an explicitly chosen existing workspace and freeze exact
+group/external-ID filters. Run one completes one pellet; Drain advances until
+none are eligible; Watch waits for database changes with a 30-second recovery
+check and makes zero model calls while idle. Both repeating modes stop at a
+visible configurable limit (100 by default). Existing in-progress work needs
+explicit Resume and must match the filters. Stop after pellet lets active work
+finish; Stop now interrupts it. Only an exact successful turn, verified new
+commit, and closed target pellet permit advancement. Failures stop for attention
+without hidden retries. See [scheduler interfaces](docs/codex-app-server.md#foreground-scheduler).
 
 Press Ctrl+C to stop (SIGTERM also requests orderly shutdown). Pellets immediately acknowledges the interrupt on stderr,
 closes live-update streams, and allows ordinary requests up to five seconds to

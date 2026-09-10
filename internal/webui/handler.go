@@ -68,6 +68,8 @@ func (h *handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		h.serveAsset(response, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/events":
 		h.serveEvents(response, request)
+	case request.Method == http.MethodGet && len(pathSegments(request.URL.Path)) == 4 && pathSegments(request.URL.Path)[2] == "schedules":
+		h.readSchedule(response, request)
 	case request.Method == http.MethodGet:
 		if request.Header.Get("Datastar-Request") == "true" {
 			response = &datastarResponse{ResponseWriter: response, request: request}

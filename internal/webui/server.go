@@ -39,6 +39,7 @@ type Runner struct {
 	OpenMonitor     MonitorOpener
 	OpenBrowser     BrowserOpener
 	OpenSupervisor  func(context.Context) *app.ExecutionSupervisor
+	OpenScheduler   func(context.Context, *app.ExecutionSupervisor, app.Database, func() (<-chan struct{}, func())) *app.Scheduler
 	Listen          func(network, address string) (net.Listener, error)
 	MonitorInterval time.Duration
 	CoalesceDelay   time.Duration
@@ -104,6 +105,13 @@ func (runner Runner) Run(ctx context.Context, options Options) (runErr error) {
 		return fmt.Errorf("create CSRF capability: %w", err)
 	}
 	hub := newEventHub()
+	if runner.OpenScheduler != nil {
+		application.Scheduler = runner.OpenScheduler(ctx, application.Executions, app.Database{Root: options.DatabaseRoot, Path: options.DatabasePath}, hub.subscribe)
+		if application.Scheduler == nil {
+			return errors.New("server scheduler is not configured")
+		}
+		defer application.Scheduler.Close()
+	}
 	interval := runner.MonitorInterval
 	if interval <= 0 {
 		interval = defaultMonitorInterval
@@ -150,6 +158,9 @@ func (runner Runner) Run(ctx context.Context, options Options) (runErr error) {
 
 	select {
 	case <-ctx.Done():
+		if application.Scheduler != nil {
+			application.Scheduler.StopScheduling()
+		}
 		if application.Executions != nil {
 			application.Executions.StopScheduling()
 		}
@@ -166,6 +177,9 @@ func (runner Runner) Run(ctx context.Context, options Options) (runErr error) {
 		<-monitorDone
 		return nil
 	case err := <-serveErrors:
+		if application.Scheduler != nil {
+			application.Scheduler.StopScheduling()
+		}
 		if application.Executions != nil {
 			application.Executions.StopScheduling()
 		}

@@ -27,7 +27,8 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 	err = db.writeRun(ctx, func(conn *sql.Conn) error {
 		var title, description, status string
 		var workspace sql.NullInt64
-		err := conn.QueryRowContext(ctx, `SELECT title, description, status, workspace_id FROM pellets WHERE project_id = ? AND number = ?`, c.ProjectID, c.PelletNumber).Scan(&title, &description, &status, &workspace)
+		var externalID, group sql.NullString
+		err := conn.QueryRowContext(ctx, `SELECT title, description, status, workspace_id, external_id, group_id FROM pellets WHERE project_id = ? AND number = ?`, c.ProjectID, c.PelletNumber).Scan(&title, &description, &status, &workspace, &externalID, &group)
 		if errors.Is(err, sql.ErrNoRows) {
 			return storage.InvalidExecutionRun("the exact pellet no longer exists")
 		}
@@ -36,6 +37,9 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 		}
 		if c.Mode != "review_checkpoint" && (status != "in_progress" || workspace.Int64 != c.WorkspaceID) {
 			return storage.InvalidExecutionRun("implementation must use this workspace's in-progress pellet")
+		}
+		if c.Mode != "review_checkpoint" && (c.ExternalID != nil && (!externalID.Valid || *c.ExternalID != externalID.String) || c.Group != nil && (!group.Valid || *c.Group != group.String)) {
+			return storage.InvalidExecutionRun("the exact pellet no longer matches the captured filters")
 		}
 		if len(title) > storage.MaxRunSnapshotBytes || len(description) > storage.MaxRunSnapshotBytes {
 			return storage.InvalidExecutionRun("pellet snapshot exceeds the storage bound; it cannot be silently truncated")

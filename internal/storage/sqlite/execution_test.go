@@ -259,10 +259,15 @@ func TestExecutionConcurrentUpdatesCannotOverwriteEvidence(t *testing.T) {
 
 func TestExecutionExactCaptureAndCommitEvidenceCannotChange(t *testing.T) {
 	t.Parallel()
-	db, run, _ := createTestRun(t)
+	db, run, fixture := createTestRun(t)
 	run = updateRun(t, db, run, storage.RunProgress{Phase: "implementation", State: "interrupted", Outcome: "unknown"}, "")
 	capture := run.RunCapture
 	group, external := " exact group ", "source:Some/Issue#12"
+	queue := fixture.open(t)
+	defer queue.Close()
+	if _, err := queue.UpdatePellet(context.Background(), fixture.main, domain.PelletReference{ProjectCode: fixture.main.Project.Code, Number: run.PelletNumber}, storage.PelletChanges{Group: storage.NullableTextChange{Set: true, Value: &group}, ExternalID: storage.NullableTextChange{Set: true, Value: &external}}); err != nil {
+		t.Fatal(err)
+	}
 	capture.Group, capture.ExternalID, capture.ResumeFrom = &group, &external, &run.ID
 	capture.Mode = "watch"
 	capture.Settings.Codex.Model = "new-effective-model"

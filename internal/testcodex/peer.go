@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -71,11 +72,13 @@ func Run() bool {
 			result = map[string]any{"config": map[string]any{"model": "test-model"}}
 		case "model/list":
 			result = map[string]any{"data": []any{map[string]any{"id": "test-model", "model": "test-model", "displayName": "Test", "isDefault": true, "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "high"}}}}, "nextCursor": nil}
-		case "thread/start":
+		case "thread/start", "thread/resume":
 			result = map[string]any{"thread": map[string]any{"id": "thread"}}
 		case "turn/start":
-			spawn("child")
-			waitFile("fake-child-ready")
+			if !strings.HasPrefix(mode, "schedule_") {
+				spawn("child")
+				waitFile("fake-child-ready")
+			}
 			result = map[string]any{"turn": map[string]any{"id": "turn"}}
 		case "thread/read":
 			if mode == "crash" {
@@ -92,6 +95,17 @@ func Run() bool {
 			continue
 		}
 		write(map[string]any{"id": message.ID, "result": result})
+		if message.Method == "turn/start" && strings.HasPrefix(mode, "schedule_") {
+			if mode == "schedule_gate" {
+				waitFile("fake-complete")
+			}
+			completeScheduled(mode, message.Params)
+			status := "completed"
+			if mode == "schedule_failed" {
+				status = "failed"
+			}
+			write(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread", "turn": map[string]any{"id": "turn", "status": status}}})
+		}
 	}
 	return true
 }

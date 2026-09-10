@@ -46,6 +46,10 @@ func (h *handler) serveMutation(response http.ResponseWriter, request *http.Requ
 	project := projectSummary.Project
 
 	switch {
+	case len(segments) == 3 && segments[2] == "schedules":
+		h.startSchedule(response, request, project)
+	case len(segments) == 5 && segments[2] == "schedules":
+		h.stopSchedule(response, request, project, segments[3], segments[4])
 	case len(segments) == 3 && segments[2] == "pellets":
 		h.createPellet(response, request, project)
 	case len(segments) == 5 && segments[2] == "pellets":

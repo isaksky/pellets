@@ -716,6 +716,14 @@ func TestSupervisorAcceptedSettingsAndFiltersAreIndependentSnapshots(t *testing.
 		return prepare(ctx, options)
 	}
 	model, group := "test-model", "original-group"
+	queue, err := sqlite.OpenPelletRepository(context.Background(), request.Database.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = queue.UpdatePellet(context.Background(), request.Selected, domain.PelletReference{ProjectCode: request.Selected.Project.Code, Number: request.Capture.PelletNumber}, storage.PelletChanges{Group: storage.NullableTextChange{Set: true, Value: &group}})
+	if closeErr := queue.Close(); err != nil || closeErr != nil {
+		t.Fatal(errors.Join(err, closeErr))
+	}
 	request.Overrides.Model = &model
 	request.Capture.Group = &group
 	ready := make(chan *WorkspaceExecution, 1)

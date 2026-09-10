@@ -16,6 +16,26 @@ type WebApplication struct {
 	Writer     storage.WebWriter
 	Current    *storage.ResolvedProject
 	Executions *ExecutionSupervisor
+	Scheduler  *Scheduler
+}
+
+// StartSchedule resolves only an explicitly chosen already registered workspace.
+// It never uses Current as an implicit execution target or registers a worktree.
+func (application *WebApplication) StartSchedule(ctx context.Context, project storage.Project, workspaceID int64, request ScheduleRequest) (*ScheduleHandle, error) {
+	if application.Scheduler == nil {
+		return nil, scheduleError("scheduler_unavailable", "foreground scheduling is unavailable")
+	}
+	summary, err := application.Project(ctx, project.Code)
+	if err != nil {
+		return nil, err
+	}
+	for _, workspace := range summary.Project.Workspaces {
+		if workspace.ID == workspaceID {
+			request.Selected = storage.ResolvedProject{Project: summary.Project, Workspace: workspace}
+			return application.Scheduler.Start(ctx, request)
+		}
+	}
+	return nil, scheduleError("schedule_workspace_unavailable", "choose an existing workspace in this project")
 }
 
 func (application *WebApplication) Close() error {

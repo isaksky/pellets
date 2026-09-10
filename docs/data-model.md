@@ -214,6 +214,14 @@ Resume creates another attempt and retains the former thread identity; it does
 not erase the prior turn, outcome, or snapshot. The reserved review mode adds no
 checkpoint scope, dependency, or scheduler behavior.
 
+Ordinary run creation revalidates both captured filters against the exact
+in-progress pellet under the creation transaction, so edits during preflight
+cannot silently broaden the scheduled scope. Foreground schedules themselves
+are in-memory receipts, not another persisted queue or restart trigger. Their
+selection/start transaction and optional read-only checkpoint readiness hook
+add no schema or dependency edges; each dispatched pellet creates its own
+ordinary execution attempt.
+
 States are `running`, `awaiting_input`, `interrupted`, `needs_attention`, and
 `completed`. They are independent of `open`, `in_progress`, `closed`, and
 `maybe_later` pellet states. A partial unique index allows one running or

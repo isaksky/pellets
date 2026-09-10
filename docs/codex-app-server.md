@@ -2,8 +2,8 @@
 
 `internal/codex` implements the process/protocol and run-preparation boundary
 used by `app.ExecutionSupervisor`. The foreground server constructs the
-supervisor; a supplied execution driver invokes preparation. Browser execution
-controls and scheduling are separate layers. Queue, memory, and UI
+supervisor and `app.Scheduler`; its concrete execution driver delegates exact
+selected pellets to Codex. Browser execution controls are a separate layer. Queue, memory, and UI
 use therefore neither probes Codex nor requires installation or authentication.
 There is no Node/Python SDK, model/tool loop, daemon, or WebSocket client.
 
@@ -174,6 +174,64 @@ started Codex session, editor agent, or direct CLI worker can still change the
 same checkout or resume its in-progress pellet. Coordinate those external
 workers explicitly. Neither the supervisor nor its cleanup searches for or
 kills processes by executable name.
+
+## Foreground scheduler
+
+`app.Scheduler` owns Run one (`run_one`), Drain (`drain`), and Watch (`watch`)
+for an explicitly chosen existing registered workspace. Requests copy their
+mode, exact nonempty group/external-ID filters, optional exact Resume pellet
+and previous attempt ID, overrides, and limit before returning a receipt.
+Omitted filters mean unfiltered; supplied bytes are never trimmed or broadened.
+One active schedule is admitted per workspace in this server. The supervisor's
+cross-process Git lock is acquired before the transactional queue selection,
+and empty/unready selections release it without starting Codex preflight.
+
+Scheduled selection is a storage operation distinct from CLI `start-next`:
+the existing owner cannot bypass filters or imply Resume. Missing or stale
+Resume and filter mismatches stop visibly without model calls. Open selection
+and start are one immediate transaction, with no scheduler retry. The selected
+number is captured in one execution attempt; the concrete driver sends that
+exact pellet's reference/title/description to Codex and forbids further selection.
+Capture creation revalidates ownership and filters after preflight.
+
+The driver starts/resumes the recorded thread, starts one implementation turn,
+and asks Codex to implement, verify, commit, then close the exact pellet through
+`pl`. It never substitutes another model/tool loop. Advancement requires the
+exact successful terminal turn notification, a new full Git commit verified as
+HEAD and descended from starting HEAD, the exact closed pellet, durable
+completed/succeeded evidence, and confirmed supervisor cleanup. Turn-end,
+closed status alone, missing/purged evidence, interrupted/failed turns, input
+requests, or preflight errors stop for attention; none triggers a hidden retry.
+
+Run one finishes after one validated pellet. Drain selects afresh after each
+completion, respecting intervening adds, edits, moves, closes, and deferrals.
+Watch subscribes to the server's shared SQLite data-version monitor before its
+first selection, including with no browser connected, and waits without model
+calls when empty or unready. A fresh 30-second recovery timer per idle wait
+repairs missed notifications without catch-up polling. Repeating modes stop at
+`limit_reached`, default 100; explicit limits range from 1 through 10000.
+`StopAfter` finishes active work before stopping; when idle it stops immediately.
+`StopNow` cancels selection/preflight and requests supervised interruption of
+active Codex. Browser disconnect cannot cancel accepted work. Server shutdown
+stops schedules before closing the supervisor. Schedule receipts are
+foreground-memory state; restart never reconstructs or restarts schedules.
+
+The minimal server interface is form-encoded and uses the existing exact
+Host/Origin and double-submit CSRF checks. POST `/projects/CODE/schedules`
+requires `_csrf`, `workspace_id`, and `mode`, with optional `external_id`,
+`group`, `resume_pellet`, `resume_from`, and `limit`. It returns a 202 JSON
+schedule receipt. GET `/projects/CODE/schedules/ID` returns its current captured
+filters, counters, state, and reason. POST that path plus `/stop-after` or
+`/stop-now`, with `_csrf`, requests the corresponding stop. IDs are scoped to
+the running server; project checks prevent retargeting a receipt. Polished
+browser controls and interactive question handling remain separate work.
+
+`SchedulerOptions.Ready` is the narrow checkpoint integration hook. It receives
+the exact candidate under the queue writer transaction, must perform read-only
+checks, and returns false to leave an unready candidate untouched. Run one and
+Drain then stop with `checkpoint_not_ready`; Watch waits for invalidation or
+bounded recovery. The checkpoint owner will supply readiness semantics and
+review dispatch; this hook introduces no checkpoint schema or dependency graph.
 
 ## Run settings, authentication, and policy
 

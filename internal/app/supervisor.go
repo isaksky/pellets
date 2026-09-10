@@ -93,6 +93,12 @@ func NewExecutionSupervisor(ctx context.Context, options SupervisorOptions) *Exe
 // process-safe lock and again under it. The lock precedes settings, preflight,
 // run creation, and every Codex process. start-next alone is not exclusion.
 func (supervisor *ExecutionSupervisor) Start(ctx context.Context, request ExecutionRequest, driver ExecutionDriver) (*ExecutionHandle, error) {
+	return supervisor.start(ctx, request, driver, nil)
+}
+
+// Selection runs under process-safe worktree exclusion, before Codex preflight.
+// Empty queues never launch a runtime. The callback must select atomically.
+func (supervisor *ExecutionSupervisor) start(ctx context.Context, request ExecutionRequest, driver ExecutionDriver, selectCapture func(context.Context) (*storage.RunCapture, error)) (*ExecutionHandle, error) {
 	if driver == nil || supervisor.options.Recorder.Open == nil || supervisor.options.Settings.Open == nil {
 		return nil, storage.InvalidExecutionRun("supervisor requires a recorder, settings store, and run driver")
 	}
@@ -138,6 +144,13 @@ func (supervisor *ExecutionSupervisor) Start(ctx context.Context, request Execut
 			return nil, ctx.Err()
 		}
 		return nil, domain.NewError(domain.Conflict, "server_stopping", "the foreground server has stopped accepting work", nil)
+	}
+	if selectCapture != nil {
+		capture, err := selectCapture(ctx)
+		if err != nil || capture == nil {
+			return nil, errors.Join(err, lock.Close())
+		}
+		request.Capture = *capture
 	}
 	if err := lock.Record(executionlock.Owner{Database: request.Database.Path}); err != nil {
 		lock.Close()
