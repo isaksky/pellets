@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -83,6 +84,9 @@ func TestCheckpointReviewerUsesFreshDetachedContextAndExactCommitSet(t *testing.
 				if finding.Title != "Handle edge case" || finding.Body != "The selected change misses the empty input case." || finding.Priority != 1 || finding.File != "demo-1.txt" || finding.Line != 1 {
 					t.Fatalf("native finding normalization: %#v", finding)
 				}
+				if run.CheckpointTriage == nil || len(run.CheckpointTriage.Assessments) != 1 || run.CheckpointTriage.Assessments[0].Decision != "valid" || run.CheckpointTriage.Assessments[0].PelletNumber < 1 || run.CheckpointTriage.Assessments[0].ThreadID == run.ThreadID {
+					t.Fatalf("separate triage receipt missing: %+v", run.CheckpointTriage)
+				}
 			}
 			closed, err := s.options.OpenQueue(context.Background(), s.options.Database.Path)
 			if err != nil {
@@ -101,6 +105,21 @@ func TestCheckpointReviewerUsesFreshDetachedContextAndExactCommitSet(t *testing.
 				}
 				if event.Method == "review/start" {
 					_ = json.Unmarshal(event.Params, &review)
+				}
+				if event.Method == "turn/start" {
+					var params map[string]any
+					_ = json.Unmarshal(event.Params, &params)
+					if strings.HasPrefix(fmt.Sprint(params["threadId"]), "triage-thread-") {
+						if params["sandboxPolicy"].(map[string]any)["type"] != "readOnly" || params["outputSchema"] == nil {
+							t.Fatalf("triage turn not read-only/structured: %+v", params)
+						}
+						input := params["input"].([]any)[0].(map[string]any)["text"].(string)
+						for _, required := range []string{"applicable AGENTS.md", "active_queue", "prior_assessments", "verifiable acceptance criteria"} {
+							if !strings.Contains(input, required) {
+								t.Fatalf("triage prompt omits %q", required)
+							}
+						}
+					}
 				}
 			}
 			if seed["sandbox"] != "read-only" || seed["approvalsReviewer"] != "auto_review" {

@@ -62,6 +62,8 @@ func Run() bool {
 	scanner := bufio.NewScanner(os.Stdin)
 	write := func(value any) { must(json.NewEncoder(os.Stdout).Encode(value)) }
 	var scheduledTurn json.RawMessage
+	reviewStarted := false
+	triageCount := 0
 	for scanner.Scan() {
 		var message struct {
 			ID     json.RawMessage `json:"id"`
@@ -100,12 +102,17 @@ func Run() bool {
 			if mode == "schedule_prethread_failure" && message.Method == "thread/start" {
 				result = map[string]any{}
 			} else if strings.HasPrefix(mode, "review_") && message.Method == "thread/start" {
-				result = map[string]any{"thread": map[string]any{"id": "review-seed"}}
+				thread := "review-seed"
+				if reviewStarted {
+					triageCount++
+					thread = fmt.Sprintf("triage-thread-%d-%d", os.Getpid(), triageCount)
+				}
+				result = map[string]any{"thread": map[string]any{"id": thread}}
 			} else {
 				result = map[string]any{"thread": map[string]any{"id": "thread"}}
 			}
 		case "turn/start":
-			if !strings.HasPrefix(mode, "schedule_") {
+			if !strings.HasPrefix(mode, "schedule_") && !strings.HasPrefix(mode, "review_") {
 				spawn("child")
 				waitFile("fake-child-ready")
 			}
@@ -114,6 +121,9 @@ func Run() bool {
 		case "turn/steer":
 			result = map[string]any{"turnId": "turn"}
 		case "thread/read":
+			if strings.HasPrefix(mode, "review_") {
+				reviewStarted = true
+			}
 			if mode == "crash" {
 				os.Exit(9)
 			}
@@ -134,6 +144,7 @@ func Run() bool {
 				result = map[string]any{"thread": map[string]any{"id": "thread", "cwd": cwd, "status": map[string]any{"type": "notLoaded"}, "turns": []any{map[string]any{"id": "turn", "status": "completed"}, map[string]any{"id": "external-turn", "status": "completed"}}}}
 			}
 		case "review/start":
+			reviewStarted = true
 			reviewThreadID := "review-thread"
 			if mode == "review_same_context" {
 				reviewThreadID = "review-seed"
@@ -151,6 +162,47 @@ func Run() bool {
 			continue
 		}
 		write(map[string]any{"id": message.ID, "result": result})
+		if message.Method == "turn/start" && strings.HasPrefix(mode, "review_") {
+			var params struct {
+				ThreadID string `json:"threadId"`
+				Input    []struct {
+					Text string `json:"text"`
+				} `json:"input"`
+			}
+			must(json.Unmarshal(message.Params, &params))
+			prompt := params.Input[0].Text
+			marker := "Immutable input and current queue:\n"
+			var input struct {
+				FindingID string `json:"finding_id"`
+			}
+			must(json.Unmarshal([]byte(prompt[strings.Index(prompt, marker)+len(marker):]), &input))
+			assessment := map[string]any{"finding_id": input.FindingID, "decision": "valid", "reason": "The empty input branch omits the required result in demo-1.txt:1.", "title": "Handle the empty input case", "context": "Empty input currently misses the required result at demo-1.txt:1.", "acceptance": "Add a deterministic empty-input regression and make it pass.", "duplicate_of": "", "existing_number": 0}
+			for _, decision := range []string{"invalid", "already_fixed", "stylistic"} {
+				if mode == "review_findings_"+decision {
+					assessment["decision"] = decision
+				}
+			}
+			text, err := json.Marshal(assessment)
+			must(err)
+			if mode == "review_findings_triage_malformed" || mode == "review_findings_partial" && triageCount == 2 {
+				text = []byte(`{"decision":"valid"}`)
+			}
+			if mode == "review_findings_triage_side_effect" {
+				must(os.WriteFile("triage-side-effect.txt", []byte("changed"), 0600))
+			}
+			if mode == "review_findings_triage_interaction" {
+				write(map[string]any{"id": "triage-request", "method": "item/tool/requestUserInput", "params": map[string]any{"threadId": params.ThreadID, "turnId": "turn", "questions": []any{}}})
+			}
+			if mode != "review_findings_triage_missing" {
+				write(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": params.ThreadID, "turnId": "turn", "item": map[string]any{"type": "agentMessage", "phase": "final_answer", "text": string(text)}}})
+			}
+			terminal := "completed"
+			if mode == "review_findings_triage_failed" {
+				terminal = "failed"
+			}
+			write(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": params.ThreadID, "turn": map[string]any{"id": "turn", "status": terminal}}})
+			continue
+		}
 		if message.Method == "review/start" && strings.HasPrefix(mode, "review_") {
 			if mode == "review_gate" {
 				waitFile("fake-complete")
@@ -167,10 +219,13 @@ func Run() bool {
 			}
 			if mode != "review_missing_result" {
 				review := cleanReviewMarker(scheduledTurn)
-				if mode == "review_findings" {
+				if strings.HasPrefix(mode, "review_findings") {
 					cwd, err := os.Getwd()
 					must(err)
 					review = "The exact changes have one correctness issue.\n\nReview comment:\n\n- [P1] Handle edge case — " + filepath.Join(cwd, "demo-1.txt") + ":1-1\n  The selected change misses the empty input case."
+					if mode == "review_findings_partial" {
+						review += "\n\n- [P2] Handle another edge — " + filepath.Join(cwd, "demo-1.txt") + ":1-1\n  The selected change also mishandles the second input case."
+					}
 				}
 				if mode == "review_malformed_result" {
 					review = "Reviewer failed to output a response."

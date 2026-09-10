@@ -352,7 +352,7 @@ func (execution *WorkspaceExecution) CompleteReviewCheckpoint(ctx context.Contex
 	if err != nil {
 		return run, err
 	}
-	if completedTurnStatus(execution.LatestCompletion(), run.ThreadID, run.TurnID) != "completed" && (run.ResumeFrom == nil || run.ReviewResult == nil) {
+	if completedTurnStatus(execution.LatestCompletion(), run.ThreadID, run.TurnID) != "completed" && run.CheckpointTriage == nil && (run.ResumeFrom == nil || run.ReviewResult == nil) {
 		return run, storage.InvalidExecutionRun("review completion requires the exact review turn's successful terminal notification")
 	}
 	return execution.recorder.CompleteReviewCheckpoint(ctx, execution.database, run.ID, revision)

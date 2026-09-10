@@ -45,8 +45,8 @@ func validateCheckpointClose(ctx context.Context, q projectQuery, p storage.Pell
 		return nil
 	}
 	var id, revision int64
-	var encoded string
-	err := q.QueryRowContext(ctx, `SELECT run_id,implementation_revision,checkpoint_scope_json FROM execution_runs WHERE project_id=? AND pellet_number=? AND mode='review_checkpoint' ORDER BY run_id DESC LIMIT 1`, p.ProjectID, p.Reference.Number).Scan(&id, &revision, &encoded)
+	var encoded, state string
+	err := q.QueryRowContext(ctx, `SELECT run_id,implementation_revision,checkpoint_scope_json,state FROM execution_runs WHERE project_id=? AND pellet_number=? AND mode='review_checkpoint' ORDER BY run_id DESC LIMIT 1`, p.ProjectID, p.Reference.Number).Scan(&id, &revision, &encoded, &state)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -59,6 +59,9 @@ func validateCheckpointClose(ctx context.Context, q projectQuery, p storage.Pell
 	}
 	if revision != p.ImplementationRevision || !storage.SameReviewScope(scope, p.Checkpoint) {
 		return storage.ExecutionRunConflict(id)
+	}
+	if state != "completed" {
+		return storage.InvalidExecutionRun("a checkpoint execution must reconcile all findings and use atomic review completion before closing")
 	}
 	return nil
 }

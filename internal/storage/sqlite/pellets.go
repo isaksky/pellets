@@ -75,6 +75,20 @@ func (repository *PelletRepository) CreatePellet(ctx context.Context, project st
 		}
 	}()
 
+	pellet, err := createPelletInTransaction(ctx, connection, project, normalized)
+	if err != nil {
+		return storage.Pellet{}, err
+	}
+	if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
+		return storage.Pellet{}, pelletStorageError("commit pellet creation", err)
+	}
+	committed = true
+	return pellet, nil
+}
+
+// Callers must validate input and hold the writer transaction. Keeping the
+// ordinary add path here lets checkpoint receipts commit with their Pellet.
+func createPelletInTransaction(ctx context.Context, connection *sql.Conn, project storage.ResolvedProject, normalized storage.NewPellet) (storage.Pellet, error) {
 	timestamp, err := captureJulianTimestamp(ctx, connection)
 	if err != nil {
 		return storage.Pellet{}, pelletStorageError("capture pellet creation timestamp", err)
@@ -97,10 +111,6 @@ func (repository *PelletRepository) CreatePellet(ctx context.Context, project st
 			return storage.Pellet{}, err
 		}
 		if found {
-			if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
-				return storage.Pellet{}, pelletStorageError("commit pellet add replay", err)
-			}
-			committed = true
 			return replay, nil
 		}
 	}
@@ -172,10 +182,6 @@ func (repository *PelletRepository) CreatePellet(ctx context.Context, project st
 			return storage.Pellet{}, err
 		}
 	}
-	if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
-		return storage.Pellet{}, pelletStorageError("commit pellet creation", err)
-	}
-	committed = true
 	return pellet, nil
 }
 

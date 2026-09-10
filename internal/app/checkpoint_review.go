@@ -27,7 +27,7 @@ type checkpointReviewer struct {
 }
 
 // NewCheckpointReviewPolicy wires the production app-server reviewer into the
-// scheduler. Finding-to-pellet triage intentionally remains a later policy.
+// scheduler, followed by separate read-only finding triage and reconciliation.
 func NewCheckpointReviewPolicy(database Database, openQueue func(context.Context, string) (storage.SchedulerQueue, error)) *CheckpointExecutionPolicy {
 	r := &checkpointReviewer{database: database, openQueue: openQueue}
 	return &CheckpointExecutionPolicy{Drive: r.drive, Resume: r.resume, ValidateCompletion: r.validateCompletion}
@@ -96,8 +96,7 @@ func (r *checkpointReviewer) resume(ctx context.Context, execution *WorkspaceExe
 	if err := r.verifyUnchanged(ctx, run); err != nil {
 		return err
 	}
-	_, err = execution.CompleteReviewCheckpoint(ctx, run.Revision)
-	return err
+	return r.triage(ctx, execution, false)
 }
 
 func (r *checkpointReviewer) consume(ctx context.Context, execution *WorkspaceExecution, root string) error {
@@ -160,8 +159,7 @@ func (r *checkpointReviewer) consume(ctx context.Context, execution *WorkspaceEx
 			if err := r.verifyUnchanged(ctx, run); err != nil {
 				return err
 			}
-			_, err = execution.CompleteReviewCheckpoint(ctx, run.Revision)
-			return err
+			return r.triage(ctx, execution, true)
 		}
 	}
 }

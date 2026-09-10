@@ -561,6 +561,9 @@ func (db *ProjectDatabase) CompleteReviewCheckpoint(ctx context.Context, id, rev
 			return storage.ExecutionRunConflict(id)
 		}
 		snapshotScope := &storage.ReviewCheckpoint{Version: current.CheckpointScope.Version, Ready: current.CheckpointScope.Ready, Targets: current.ReviewSnapshot.Targets}
+		if err := requireCompletedTriage(ctx, conn, current); err != nil {
+			return err
+		}
 		if !storage.SameReviewScope(snapshotScope, current.CheckpointScope) {
 			return storage.ExecutionRunConflict(id)
 		}
@@ -592,7 +595,7 @@ func (db *ProjectDatabase) CompleteReviewCheckpoint(ctx context.Context, id, rev
 		}
 		now := runUpdateTime(current)
 		stamp := now.Format(runTimeFormat)
-		summary := "Review completed with findings; the checkpoint is closed for follow-up triage."
+		summary := "Review and finding triage completed; all follow-ups are durably reconciled and the checkpoint is closed."
 		if current.ReviewResult.Status == "clean" {
 			summary = "Review completed cleanly; the checkpoint is closed."
 		}
@@ -768,6 +771,12 @@ func readExecutionRun(ctx context.Context, q runQuery, id int64) (run storage.Ex
 			return run, err
 		}
 		run.CommitVerifiedAt = &t
+	}
+	if run.ReviewResult != nil {
+		run.CheckpointTriage, err = readCheckpointTriage(ctx, q, run)
+		if err != nil {
+			return run, err
+		}
 	}
 	rows, err := q.QueryContext(ctx, `SELECT revision, at, phase, state, summary, operation FROM execution_run_activity WHERE run_id=? ORDER BY revision DESC LIMIT ?`, id, storage.MaxRunActivity)
 	if err != nil {

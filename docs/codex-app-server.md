@@ -437,13 +437,46 @@ normalizes it into the bounded durable clean/findings record. Empty,
 interrupted, fallback, malformed, truncated, fenced, or invented JSON wire
 results stop for attention. Pellets then verifies that HEAD, exact index
 entries, tracked and unignored worktree contents, repository refs, and
-checkpoint scope did not change, and atomically records success and closes the
-checkpoint. Finding-to-Pellet triage remains a separate policy.
+checkpoint scope did not change, and records the successful reviewer terminal
+receipt before entering the separate triage phase.
+
+Each unfinished distinct finding is assessed in a fresh read-only Codex thread,
+with a structured final answer and exact successful terminal event required.
+The assessor inspects current code, applicable repository instructions, the
+immutable reviewed snapshot, every open/in-progress Pellet in the project, and
+earlier assessments. Explicit dispositions distinguish invalid, already-fixed,
+stylistic, duplicate, existing-Pellet, and valid issues; every disposition keeps
+its evidence-based reason and exact assessor thread/turn IDs. Identical native
+comments share a stable finding identity; semantic duplicates identify the
+earlier assessment, and existing issues identify an ordinary active Pellet.
+The complete active queue is bounded without truncation and its digest is
+rechecked under the writer lock before accepting an assessment. Concurrent
+queue changes pause the checkpoint for reassessment of that unfinished finding.
+
+For each valid distinct issue, the server creates one ordinary Pellet with
+actionable context and acceptance criteria. Follow-ups retain the checkpoint's
+exact group/external-ID and are inserted immediately after it, in recorded
+finding order. The ordinary add transaction writes both a stable request-ID
+receipt and a permanent finding-to-Pellet reconciliation receipt. These
+permanent receipts outlive the two-day add cache, including when a reply is
+lost, a run is resumed, or the created Pellet is subsequently closed or purged.
+A failure within that transaction rolls back allocation and both receipts;
+already completed assessments remain available in `checkpoint_triage` on run
+reads. Failed or partial triage never becomes a clean result. The server checks
+the repository for side effects after every assessment and only closes the
+checkpoint once every finding is durably disposed of. Closure failure preserves
+all follow-ups and receipts for explicit Resume. Clean reviews need no assessor
+turns or follow-ups. Checkpoint execution creates no repository commit, performs
+no code fixes, and never schedules another review checkpoint automatically.
+Drain and Watch may consume its ordinary follow-ups within their saved filters
+and remaining limits.
 
 `review/start` is never replayed during recovery. If a final structured result
 was already persisted, explicit Resume rechecks the exact conversation history,
-scope, commit objects, and repository state before completing without another
-review. If that atomic completion already closed the checkpoint but a crash
+scope, commit objects, and repository state before resuming only unfinished
+triage, without another review or recreating completed follow-ups. An unfinished
+read-only assessment may use a fresh context after the previous supervisor and
+its process tree have been reconciled. If atomic completion already closed the checkpoint but a crash
 left the execution-lock receipt, the completed-review receipt authorizes one
 explicit reconciliation attempt. It reuses the exact snapshot, native result,
 thread and turn, performs no second `review/start` or Pellet close, and clears

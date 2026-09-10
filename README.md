@@ -336,6 +336,17 @@ task form accepts optional Review targets and its inspector shows this scope.
 Execution requires the separate checkpoint review policy; an absent policy is
 reported before dispatch. See [the CLI contract](docs/cli-spec.md#pl-add).
 
+Checkpoint execution reviews the exact commits, then independently triages
+findings against current code, repository instructions, and existing active
+Pellets. Each valid distinct issue becomes an ordinary follow-up with context
+and acceptance criteria, immediately after the checkpoint in deterministic
+order and with its exact group/external-ID. Invalid, already-fixed, stylistic,
+duplicate, and already-queued issues retain explicit dispositions. Permanent
+finding receipts prevent duplicate creation across crashes and expired add
+request IDs. Resume preserves completed triage and finishes only the remaining
+findings; closure waits for every follow-up to be durably reconciled. Reviews
+and triage do not fix code, create commits, or create another checkpoint.
+
 ## Search tasks and operate memory
 
 Task search covers title, description, and external-ID text across every

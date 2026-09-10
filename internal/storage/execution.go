@@ -187,6 +187,7 @@ type RunActivity struct {
 type ExecutionRun struct {
 	ImplementationRevision int64             `json:"implementation_revision"`
 	CheckpointScope        *ReviewCheckpoint `json:"checkpoint_scope,omitempty"`
+	CheckpointTriage       *CheckpointTriage `json:"checkpoint_triage,omitempty"`
 	ID                     int64             `json:"id"`
 	Attempt                int64             `json:"attempt"`
 	Revision               int64             `json:"revision"`
@@ -221,6 +222,7 @@ type UpdateExecutionRun struct {
 }
 
 type ExecutionRunDatabase interface {
+	CheckpointTriageDatabase
 	CreateExecutionRun(context.Context, RunCapture) (ExecutionRun, error)
 	ReadExecutionRun(context.Context, int64) (ExecutionRun, error)
 	ListWorkspaceRuns(context.Context, int64, int64, int) ([]ExecutionRun, error)
