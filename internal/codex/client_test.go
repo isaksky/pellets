@@ -21,6 +21,13 @@ import (
 // TestMain makes this test binary a deterministic stdio peer. Normal tests never
 // launch an installed runtime, contact a model, or read credentials.
 func TestMain(m *testing.M) {
+	if mode := os.Getenv("PELLETS_CODEX_TEST_TOOL_MODE"); mode != "" {
+		name := strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe")
+		if name == "pl" {
+			pelletsToolPeer(mode)
+			os.Exit(0)
+		}
+	}
 	if mode := os.Getenv("PELLETS_CODEX_TEST_PEER"); mode != "" {
 		peer(mode)
 		os.Exit(0)
@@ -308,7 +315,7 @@ func TestRPCErrorPreservesData(t *testing.T) {
 }
 
 func TestStartupFailuresAndSchemaCompatibility(t *testing.T) {
-	for _, mode := range []string{"bad-version", "missing-method", "missing-field", "schema-fail", "startup-fail", "bad-initialize"} {
+	for _, mode := range []string{"bad-version", "missing-method", "missing-field", "missing-response-field", "missing-policy-value", "schema-fail", "startup-fail", "bad-initialize"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
@@ -316,7 +323,7 @@ func TestStartupFailuresAndSchemaCompatibility(t *testing.T) {
 			if err == nil || errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("expected immediate actionable failure: %v", err)
 			}
-			if (mode == "missing-method" || mode == "missing-field" || mode == "bad-version" || mode == "schema-fail") && !errors.Is(err, ErrUnsupported) {
+			if (mode == "missing-method" || mode == "missing-field" || mode == "missing-response-field" || mode == "missing-policy-value" || mode == "bad-version" || mode == "schema-fail") && !errors.Is(err, ErrUnsupported) {
 				t.Fatal(err)
 			}
 		})
@@ -362,18 +369,30 @@ func TestInstalledRuntime(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	c, err := Start(ctx, Config{})
+	workspace, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
-	// These only inspect local configuration. Do not start threads or model work.
-	for _, op := range []Operation{ConfigRead, ConfigRequirementsRead} {
-		if _, err := c.Call(ctx, op, map[string]any{}); err != nil {
-			t.Fatalf("%s: %v", op, err)
-		}
+	database := filepath.Join(t.TempDir(), "pellets.db")
+	if err := os.WriteFile(database, []byte("preflight only"), 0600); err != nil {
+		t.Fatal(err)
 	}
-	t.Logf("verified %s (%s), initialization and local configuration reads", c.Runtime().Version, c.Runtime().Executable)
+	prepared, err := PrepareRun(ctx, PrepareOptions{WorkspaceDir: workspace, DatabasePath: database})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer prepared.Client.Close()
+	if !prepared.Account.Ready || len(prepared.Models) == 0 {
+		t.Fatalf("installed preflight returned account %#v and %d models", prepared.Account, len(prepared.Models))
+	}
+	params := prepared.ThreadStartParams()
+	params["ephemeral"] = true
+	result, err := prepared.Client.Call(ctx, ThreadStart, params)
+	if err != nil || !strings.Contains(string(result), `"thread"`) {
+		t.Fatalf("ephemeral thread settings preflight: %s, %v", result, err)
+	}
+	t.Logf("verified %s (%s), local account/config/requirements, %d models, and ephemeral thread settings; no model turn started",
+		prepared.Client.Runtime().Version, prepared.Client.Runtime().Executable, len(prepared.Models))
 }
 
 func peer(mode string) {
@@ -477,6 +496,10 @@ func peer(mode string) {
 		m = read()
 		var method string
 		_ = json.Unmarshal(m["method"], &method)
+		if strings.HasPrefix(mode, "preflight-") {
+			peerPreflight(mode, method, m, response)
+			continue
+		}
 		if strings.HasPrefix(mode, "descendants") {
 			if method == "turn/start" {
 				spawnDescendant("descendant-child", os.Stdout)
@@ -587,6 +610,64 @@ func peer(mode string) {
 		default:
 			response(m["id"], map[string]any{"method": method, "params": m["params"], "args": os.Args[1:]})
 		}
+	}
+}
+
+func peerPreflight(mode, method string, message map[string]json.RawMessage, response func(json.RawMessage, any)) {
+	switch method {
+	case "account/read":
+		if mode == "preflight-signed-out" {
+			response(message["id"], map[string]any{"account": nil, "requiresOpenaiAuth": true})
+			return
+		}
+		response(message["id"], map[string]any{
+			"account":            map[string]any{"type": "chatgpt", "email": "must-not-escape@example.test", "planType": "team"},
+			"requiresOpenaiAuth": true,
+		})
+	case "configRequirements/read":
+		if mode == "preflight-policy-blocked" {
+			response(message["id"], map[string]any{"requirements": map[string]any{
+				"allowedApprovalPolicies": []any{"never"}, "allowedSandboxModes": []any{"read-only"},
+			}})
+			return
+		}
+		if mode == "preflight-reviewer-blocked" {
+			response(message["id"], map[string]any{"requirements": map[string]any{
+				"allowedApprovalsReviewers": []any{"user"},
+			}})
+			return
+		}
+		response(message["id"], map[string]any{"requirements": nil})
+	case "config/read":
+		roots := []string{}
+		if root := os.Getenv("PELLETS_CODEX_TEST_WRITABLE_ROOT"); root != "" {
+			roots = append(roots, root)
+		}
+		response(message["id"], map[string]any{"config": map[string]any{
+			"model": "runtime-default", "model_reasoning_effort": "medium",
+			"sandbox_workspace_write": map[string]any{
+				"writable_roots": roots, "network_access": false,
+				"exclude_slash_tmp": true, "exclude_tmpdir_env_var": true,
+			},
+		}, "origins": map[string]any{}})
+	case "model/list":
+		var params struct {
+			Cursor string `json:"cursor"`
+		}
+		_ = json.Unmarshal(message["params"], &params)
+		if params.Cursor == "page-2" {
+			response(message["id"], map[string]any{"data": []any{map[string]any{
+				"id": "runtime-default-id", "model": "runtime-default", "displayName": "Runtime Default", "isDefault": true,
+				"supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "medium"}, map[string]any{"reasoningEffort": "high"}},
+			}}, "nextCursor": nil})
+			return
+		}
+		response(message["id"], map[string]any{"data": []any{map[string]any{
+			"id": RecommendedModel, "model": RecommendedModel, "displayName": "Sol", "isDefault": false,
+			"supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "low"}, map[string]any{"reasoningEffort": "high"}},
+		}}, "nextCursor": "page-2"})
+	default:
+		response(message["id"], map[string]any{})
 	}
 }
 
@@ -822,9 +903,9 @@ func TestProbeTerminationCleansDescendants(t *testing.T) {
 func peerSchema(dir, mode string) {
 	files := map[string]map[string][]string{
 		"ClientRequest.json": {
-			"initialize": {"clientInfo", "capabilities"}, "thread/start": {"cwd"},
+			"initialize": {"clientInfo", "capabilities"}, "thread/start": {"cwd", "approvalPolicy", "approvalsReviewer", "config", "model", "sandbox"},
 			"thread/read": {"threadId", "includeTurns"}, "thread/resume": {"threadId"},
-			"turn/start": {"threadId", "input"}, "turn/steer": {"threadId", "input", "expectedTurnId"},
+			"turn/start": {"threadId", "input", "approvalPolicy", "approvalsReviewer", "cwd", "effort", "model", "sandboxPolicy"}, "turn/steer": {"threadId", "input", "expectedTurnId"},
 			"turn/interrupt": {"threadId", "turnId"}, "account/read": {"refreshToken"},
 			"account/rateLimits/read": {}, "model/list": {"cursor"}, "config/read": {"includeLayers"},
 			"configRequirements/read": {}, "review/start": {"threadId", "target", "delivery"},
@@ -844,7 +925,15 @@ func peerSchema(dir, mode string) {
 	}
 	for file, methods := range files {
 		var variants []any
-		definitions := map[string]any{"BooleanSchemaExample": map[string]any{"properties": map[string]any{"disabled": false}}}
+		definitions := map[string]any{
+			"BooleanSchemaExample": map[string]any{"properties": map[string]any{"disabled": false}},
+			"AskForApproval":       map[string]any{"enum": []string{"on-request", "never"}},
+			"ApprovalsReviewer":    map[string]any{"enum": []string{"user", "auto_review"}},
+			"SandboxMode":          map[string]any{"enum": []string{"read-only", "workspace-write"}},
+		}
+		if mode == "missing-policy-value" {
+			definitions["ApprovalsReviewer"] = map[string]any{"enum": []string{"user"}}
+		}
 		for method, fields := range methods {
 			name := strings.ReplaceAll(method, "/", "_") + "Params"
 			properties := map[string]any{}
@@ -856,6 +945,46 @@ func peerSchema(dir, mode string) {
 		}
 		data, _ := json.Marshal(map[string]any{"oneOf": variants, "definitions": definitions})
 		if err := os.WriteFile(filepath.Join(dir, file), data, 0600); err != nil {
+			panic(err)
+		}
+	}
+	responses := map[string]struct {
+		fields      []string
+		definitions map[string][]string
+	}{
+		"GetAccountResponse.json": {fields: []string{"account", "requiresOpenaiAuth"}},
+		"ModelListResponse.json": {fields: []string{"data", "nextCursor"}, definitions: map[string][]string{
+			"Model": {"id", "model", "displayName", "isDefault", "supportedReasoningEfforts"}, "ReasoningEffortOption": {"reasoningEffort"},
+		}},
+		"ConfigReadResponse.json": {fields: []string{"config"}, definitions: map[string][]string{
+			"Config": {"model", "sandbox_workspace_write"}, "SandboxWorkspaceWrite": {"writable_roots", "network_access", "exclude_slash_tmp", "exclude_tmpdir_env_var"},
+		}},
+		"ConfigRequirementsReadResponse.json": {fields: []string{"requirements"}, definitions: map[string][]string{
+			"ConfigRequirements": {"allowedApprovalPolicies", "allowedSandboxModes"},
+		}},
+	}
+	v2 := filepath.Join(dir, "v2")
+	if err := os.Mkdir(v2, 0700); err != nil {
+		panic(err)
+	}
+	for file, response := range responses {
+		properties := make(map[string]any, len(response.fields))
+		for _, field := range response.fields {
+			properties[field] = map[string]any{}
+		}
+		definitions := make(map[string]any, len(response.definitions))
+		for name, fields := range response.definitions {
+			definitionProperties := make(map[string]any, len(fields))
+			for _, field := range fields {
+				definitionProperties[field] = map[string]any{}
+			}
+			definitions[name] = map[string]any{"properties": definitionProperties}
+		}
+		if mode == "missing-response-field" && file == "ModelListResponse.json" {
+			delete(definitions["ReasoningEffortOption"].(map[string]any)["properties"].(map[string]any), "reasoningEffort")
+		}
+		data, _ := json.Marshal(map[string]any{"properties": properties, "definitions": definitions})
+		if err := os.WriteFile(filepath.Join(v2, file), data, 0600); err != nil {
 			panic(err)
 		}
 	}

@@ -243,13 +243,24 @@ Acceptance criteria:
 - Starting a run is explicit. The server reports a clear actionable failure
   when Codex is unavailable or unauthenticated, without degrading queue,
   memory, or inspector use.
+- Credential-free settings persist by stable workspace identity with
+  optimistic conflict detection, while one-run overlays cover the
+  executable, optional open-ended model ID, optional runtime-validated effort,
+  and bounded transport limits. Normal installed defaults remain available and
+  `gpt-5.6-sol`/`high` is offered as a preset rather than forced.
+- Account, effective cwd configuration, managed requirements, and paged model
+  capabilities are read through app-server. Codex retains all credential
+  storage and refresh; Pellets retains neither account email nor raw config.
 - Closing a browser tab does not stop a run. Server cancellation stops every
   child it owns, waits for bounded cleanup, records the outcome, and leaves no
   daemon, separate persistent worker, remote listener, or automatic restart.
 - Questions, steering, stopping, and explicit resume are distinct user actions;
   no restart or reconnect path silently resumes interrupted work.
-- The default automatic approval mode is `REVIEW`; tests reject blanket
-  approval and disabled-sandbox configuration.
+- The default automatic approval mode is `REVIEW`, represented by the verified
+  `workspace-write`, `on-request`, and `approvals_reviewer=auto_review` runtime
+  settings. Tests reject blanket approval, disabled-sandbox configuration, and
+  managed-policy conflicts. An out-of-worktree bound database receives only
+  its immediate directory as an additional writable root.
 - Deterministic fake child processes may test lifecycle edges, while an
   installed-runtime integration check verifies the actual invocation/config
   contract without requiring Codex for ordinary test runs.

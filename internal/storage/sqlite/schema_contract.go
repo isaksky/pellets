@@ -92,6 +92,7 @@ func buildProductionSchemaContracts() {
 		{version: 3, name: "project-workspaces", sql: migration3SQL},
 		{version: 4, name: "project-code-redirects", sql: migration4SQL},
 		{version: 5, name: "pellet-add-requests", sql: migration5SQL},
+		{version: 6, name: "workspace-run-settings", sql: migration6SQL},
 	}
 	productionSchemaContracts.byVersion = make(map[int][]schemaObjectDefinition, len(endpoints))
 	for _, endpoint := range endpoints {

@@ -1,6 +1,6 @@
 # Data Model
 
-SQLite is authoritative for logical projects, their registered workspaces, pellets, and memories. FTS5 tables are derived indexes and can always be rebuilt.
+SQLite is authoritative for logical projects, their registered workspaces and credential-free run settings, pellets, and memories. FTS5 tables are derived indexes and can always be rebuilt.
 
 This model intentionally contains no dependency, edge, epic, tag, group, task-note, task-event, agent, PID, session, claim, lease, heartbeat, expiry, assignment-history, or vector table. A workspace row is a Git worktree coordination identity, not an agent or security principal. Group is a nullable scalar on a pellet, not an entity. Memory is documented separately in [memory.md](memory.md); CLI behavior is in [cli-spec.md](cli-spec.md).
 
@@ -94,6 +94,31 @@ CREATE TABLE project_workspaces (
     CHECK (updated_at >= created_at)
 ) STRICT;
 
+CREATE TABLE workspace_run_settings (
+    workspace_id      INTEGER PRIMARY KEY
+                      REFERENCES project_workspaces(workspace_id) ON DELETE CASCADE,
+    codex_executable  TEXT NOT NULL DEFAULT '',
+    model             TEXT NOT NULL DEFAULT '',
+    reasoning_effort  TEXT NOT NULL DEFAULT '',
+    max_message_bytes INTEGER NOT NULL DEFAULT 0,
+    event_buffer      INTEGER NOT NULL DEFAULT 0,
+    max_pending       INTEGER NOT NULL DEFAULT 0,
+    stderr_bytes      INTEGER NOT NULL DEFAULT 0,
+    revision          INTEGER NOT NULL DEFAULT 1,
+    created_at        REAL NOT NULL,
+    updated_at        REAL NOT NULL,
+
+    CHECK (codex_executable = '' OR (trim(codex_executable) = codex_executable AND length(codex_executable) <= 4096)),
+    CHECK (model = '' OR (trim(model) = model AND length(model) <= 512)),
+    CHECK (reasoning_effort = '' OR (trim(reasoning_effort) = reasoning_effort AND length(reasoning_effort) <= 128)),
+    CHECK (max_message_bytes = 0 OR max_message_bytes BETWEEN 256 AND 67108864),
+    CHECK (event_buffer BETWEEN 0 AND 65536),
+    CHECK (max_pending BETWEEN 0 AND 4096),
+    CHECK (stderr_bytes BETWEEN 0 AND 1048576),
+    CHECK (revision > 0),
+    CHECK (updated_at >= created_at)
+) STRICT;
+
 CREATE TABLE pellets (
     rowid        INTEGER PRIMARY KEY,
     project_id   INTEGER NOT NULL REFERENCES projects(project_id) ON DELETE RESTRICT,
@@ -172,6 +197,15 @@ CREATE INDEX memories_project_approval_idx
 `memories.memory_id` is a database-local, user-visible identity for a removable record. Under [SQLite's `AUTOINCREMENT` allocation rules](https://sqlite.org/autoinc.html), an automatically allocated ID from a committed row is never assigned to a different memory after removal. SQLite may leave gaps, and an allocation rolled back before commit may be reused. This is the only column that needs that guarantee: the additional sequence-maintenance cost is not justified for the internal `pellets.rowid` or unrelated keys, which remain plain `INTEGER PRIMARY KEY` columns.
 
 `projects.git_common_dir` is the repository-sameness key. `project_workspaces` is the authoritative workspace relation; its globally unique root and Git-directory identities prevent one worktree from attaching to two projects. Composite uniqueness on `(project_id, workspace_id)` supports the pellet composite foreign key, which makes cross-project workspace ownership impossible even when application checks are bypassed.
+
+`workspace_run_settings` is an optional one-to-one record keyed by the stable
+workspace ID, so project-code renames and path presentation do not retarget it.
+It contains only an executable selector, open-ended model and reasoning-effort
+strings, and local transport limits. Empty strings and zero limits mean normal
+defaults. It contains no credential, token, account identity, raw Codex config,
+prompt, or transcript. Saves compare an opaque complete-row version after
+`BEGIN IMMEDIATE`; stale drafts fail without a write and an unchanged current
+save is idempotent.
 
 Each path has a companion `*_relative` flag. A relative slash-normalized value is interpreted from the database root. A Git location outside that root is stored as a normalized absolute path. On platforms with case-insensitive path identity, normalization folds case before comparison. Paths are local diagnostics, not portable repository IDs. Automatic bootstrap updates a moved workspace only after an outside-transaction check establishes that its old root is absent; a live duplicate conflicts. Removed worktrees remain registered and can own in-progress work until explicit recovery. There is no automatic cleanup.
 
@@ -476,3 +510,9 @@ retained; retries do not extend their original timestamp. Expiration removes
 only receipts. Identical retries return the original snapshot (with the current
 canonical project code); mismatched inputs return `request_id_conflict` without
 writes. Number allocation and FTS writes happen only for new requests.
+
+Migration 6 adds the strict `workspace_run_settings` table. Existing workspaces
+receive no row and therefore retain normal Codex defaults. Its foreign key uses
+the stable workspace identity, and existing projects, codes and redirects,
+queue and memory rows, request receipts, metadata, and FTS indexes are unchanged.
+Migration assertion failure restores the complete version-5 schema and version.

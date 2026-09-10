@@ -427,11 +427,18 @@ removal, and other irreversible actions are intentionally absent.
 `pl web` remains a deprecated compatibility alias with the same options and
 foreground behavior. New scripts and documentation must use `pl server`.
 
-The internal [Codex stdio adapter](docs/codex-app-server.md) is available for
-foreground runner integration; the inspector does not start Codex yet. The
-adapter verifies the installed runtime's protocol and preserves conversations
-through its thread read/resume operations. It does not introduce a second model
-runtime or make normal Pellets use depend on Codex.
+The internal [Codex stdio adapter](docs/codex-app-server.md) and run preflight
+are available for foreground runner integration; the inspector does not start
+Codex yet. They verify the installed runtime's protocol, local account, normal
+workspace configuration, managed requirements, and model capabilities without
+copying credentials or starting a model turn. Prepared runs use
+`workspace-write` plus `on-request` automatic approval review, retain narrow
+access to an out-of-worktree bound Pellets database, and preserve conversations
+through thread read/resume operations. Credential-free settings are persisted
+by stable workspace identity, and one-run overrides may select an executable,
+open-ended model ID, supported reasoning effort, and
+bounded transport limits; normal Codex defaults remain valid. This does not
+introduce a second model runtime or make normal Pellets use depend on Codex.
 
 Press Ctrl+C to stop. Pellets immediately acknowledges the interrupt on stderr,
 closes live-update streams, and allows ordinary requests up to five seconds to

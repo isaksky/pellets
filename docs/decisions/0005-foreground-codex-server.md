@@ -35,7 +35,9 @@ long-lived foreground process, not a tab, owns the work it starts.
   restart never resumes a run automatically. Questions, steering, stopping,
   and resuming are explicit.
 - Automatic approval uses `REVIEW` by default. Pellets does not grant blanket
-  approval or disable the sandbox.
+  approval or disable the sandbox. The installed runtime expresses this as
+  `workspace-write`, `on-request`, and `approvals_reviewer=auto_review`;
+  organization-managed restrictions remain authoritative.
 - Normal work remains test → commit → close. Review checkpoints have explicit
   scope and a separate Codex review context. Any resulting focused follow-up
   pellets are deduplicated; review does not create dependencies, an epic, or a

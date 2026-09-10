@@ -1551,6 +1551,7 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 		"project_code_redirects",
 		"project_workspaces",
 		"projects",
+		"workspace_run_settings",
 	}
 	wantIndexes := []string{
 		"memories_project_approval_idx",
@@ -1599,7 +1600,7 @@ func assertObjectNames(t *testing.T, db *sql.DB, objectType string, want []strin
 
 func assertStrictTables(t *testing.T, db *sql.DB) {
 	t.Helper()
-	want := []string{"application_metadata", "memories", "pellet_add_requests", "pellets", "project_code_redirects", "project_workspaces", "projects"}
+	want := []string{"application_metadata", "memories", "pellet_add_requests", "pellets", "project_code_redirects", "project_workspaces", "projects", "workspace_run_settings"}
 	rows, err := db.Query("PRAGMA table_list")
 	if err != nil {
 		t.Fatal(err)

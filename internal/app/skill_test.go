@@ -57,7 +57,10 @@ func TestPelletsSkillGoldenPortableContract(t *testing.T) {
 		"external-id", "group", "focused", "--created-by agent", "--created-by human",
 		"pl memory approve", "Never edit the SQLite database directly", "commit `.pellets`",
 		"dependencies", "epics", "agent/PID ownership", "leases", "heartbeats",
-		"parallel Markdown task queue",
+		"parallel Markdown task queue", "account status through app-server", "Codex owns credential storage and refresh",
+		"`pl` on the inherited child `PATH`", "missing tool",
+		"open-ended model ID", "normal Codex defaults", "gpt-5.6-sol", "high", "workspace-write",
+		"on-request", "approvals_reviewer=auto_review", "managed restrictions", "bound database",
 	} {
 		if !strings.Contains(body, required) {
 			t.Errorf("skill body does not contain %q", required)

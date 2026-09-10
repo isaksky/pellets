@@ -86,10 +86,11 @@ The database-independent skill path is `cmd/pl -> cli -> app -> filesystem`, wit
 
 The optional `internal/codex` boundary directly owns an installed
 `codex app-server` child over stdio and exposes a small session interface for a
-future foreground runner. It has no database dependency and is not constructed
-by normal queue, memory, or inspector paths. It verifies the installed runtime's
+future foreground runner. A separate application/storage boundary persists only
+credential-free settings by stable workspace ID; normal queue, memory, and
+inspector paths do not construct Codex. It verifies the installed runtime's
 stable generated schema before initialization, preserves ordered events and
-terminal outcomes, and leaves approval decisions and run persistence to its
+terminal outcomes, and leaves approval decisions and execution-record persistence to its
 caller. See [codex-app-server.md](codex-app-server.md) for operations, bounded
 buffering, cancellation, process ownership, and deterministic fake-peer tests.
 
@@ -213,6 +214,17 @@ and the inspector remain usable when Codex is absent or unauthenticated. The
 server never creates a worktree, remote listener, daemon, background start/stop
 service, or persistent worker.
 
+The credential-free workspace setting is persisted by stable workspace ID with
+opaque complete-row version checks; a project-code rename cannot retarget it. That setting
+and the non-persistent per-run overlay select only the
+Codex executable, an optional open-ended model ID, an optional runtime-supported
+reasoning effort, and bounded local transport limits. Empty model and effort
+retain Codex defaults; `gpt-5.6-sol`/`high` is an offered preset, not a product
+default. Preflight reads local account status, effective cwd configuration,
+managed requirements, and the model catalog through app-server. It never reads
+or stores credentials, account email, or raw configuration. Codex retains
+credential storage and refresh under the inherited OS user and Codex home.
+
 The execution model reserves one active run per registered worktree. A durable
 run record preserves the concise activity, conversation linkage, selected
 worktree, state, and explicit stop/interruption outcome needed to inspect an
@@ -220,6 +232,13 @@ interrupted run, but restart never resumes it automatically. Questions,
 steering, stopping, and resuming are explicit user actions. The automatic
 approval mode is `REVIEW`: it is neither blanket approval nor a disabled
 sandbox.
+
+Concretely, prepared threads and turns use `workspace-write`, `on-request`, and
+`approvals_reviewer=auto_review`. Managed restrictions still apply, and
+questions, denials, timeouts, and errors remain visible. When the bound database
+is outside the selected worktree, only its immediate directory is added to the
+effective workspace-write roots; Pellets never substitutes a broader grant or
+a replacement database.
 
 Ordinary server-supervised work follows test → commit → close. A review
 checkpoint has explicit scope and a separate Codex review context; it can
