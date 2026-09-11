@@ -52,9 +52,12 @@ type Command struct {
 	// parsing and usage validation, so bootstrap can never be triggered by an
 	// invalid invocation.
 	NeedsCurrentWorkspace func(globals GlobalOptions, input any) bool
-	Parse                 func(args []string) (any, error)
-	Validate              func(globals GlobalOptions, input any) error
-	Run                   func(ctx context.Context, invocation Invocation) (any, error)
+	// AllowOutsideGit permits database-only startup when workspace bootstrap
+	// reports that the current directory is not in a Git worktree.
+	AllowOutsideGit bool
+	Parse           func(args []string) (any, error)
+	Validate        func(globals GlobalOptions, input any) error
+	Run             func(ctx context.Context, invocation Invocation) (any, error)
 	// RunForeground owns stdout/stderr and blocks for a foreground tool. It is
 	// mutually exclusive with Run and bypasses JSON/human result rendering.
 	RunForeground func(ctx context.Context, invocation Invocation, stdout, stderr io.Writer) error
@@ -184,6 +187,14 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 						} else {
 							var database discovery.Database
 							database, err = a.bootstrapCurrent(context.Background(), invocation.WorkingDirectory)
+							if err != nil && parsed.command.AllowOutsideGit && domain.PublicError(err).Code == "git_repository_not_found" {
+								database, err = discovery.FindDatabase(invocation.WorkingDirectory)
+								if err != nil && domain.PublicError(err).Code == "database_not_found" {
+									err = domain.NewError(domain.NotFound, "database_not_found",
+										"no Pellets database was found in the current directory or its ancestors; run inside a Git worktree or create a common-parent database with pl init-db",
+										domain.PublicError(err).Details)
+								}
+							}
 							if err == nil {
 								invocation.Database = &database
 							}

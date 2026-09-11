@@ -74,6 +74,13 @@ func TestCompiledServerDiscoveryStartupAndCleanShutdown(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".pellets", "pellets.db")); err != nil {
 		t.Fatalf("first-use server did not bootstrap the project database: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(root, ".git", "pellets-database.json")); err != nil {
+		t.Fatalf("first-use server did not bind the project database: %v", err)
+	}
+	projects := decodeFoundationSuccess[[]foundationProject](t, runFoundationCLI(t, executable, root, "project", "list"), "project list")
+	if len(projects) != 1 || projects[0].Code != "webtest" || len(projects[0].Workspaces) != 1 {
+		t.Fatalf("first-use server registration = %#v", projects)
+	}
 	result := runFoundationCLI(t, executable, root, "add", "compiled server task")
 	if result.exit != 0 || result.stderr != "" {
 		t.Fatalf("add = exit %d stdout %q stderr %q", result.exit, result.stdout, result.stderr)

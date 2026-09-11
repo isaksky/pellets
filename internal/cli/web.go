@@ -30,6 +30,7 @@ func ServerCommand(run ServerRunner) Command {
 		Usage:                 "pl [--project CODE] server [--port PORT] [--no-open]",
 		Parse:                 parseServerOptions,
 		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
+		AllowOutsideGit:       true,
 		Validate: func(globals GlobalOptions, _ any) error {
 			if globals.Human || globals.Pretty {
 				return domain.NewError(domain.Usage, "format_not_supported", "server does not use JSON or human output formatting", nil)
