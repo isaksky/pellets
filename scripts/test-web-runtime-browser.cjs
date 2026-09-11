@@ -32,7 +32,7 @@ async function start(root) {
   execFileSync('go', ['build', '-o', binary, './cmd/pl'], {cwd: repository});
   execFileSync('go', ['test', '-c', '-o', peer, './internal/app'], {cwd: repository});
   browser = await chromium.launch({headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {})});
-  for (const mode of [...(process.platform === 'win32' ? [] : ['runtime_probe_gate']), 'runtime_old', 'schedule_runtime_error', 'schedule_rpc_error', 'schedule_unfinished']) {
+  for (const mode of [...(process.platform === 'win32' ? [] : ['runtime_probe_gate']), 'runtime_old', 'schedule_runtime_error', 'schedule_rpc_error', 'schedule_unfinished', 'schedule_noop']) {
     const root = path.join(temporary, mode); fs.mkdirSync(root);
     const git = (...args) => execFileSync('git', args, {cwd: root, stdio: 'pipe'});
     const cli = (...args) => JSON.parse(execFileSync(binary, args, {cwd: root, env: environment, encoding: 'utf8'})).data;
@@ -71,12 +71,17 @@ async function start(root) {
     let status;
     while (Date.now() < deadline) {
       const response = await page.request.get(origin + `/projects/${pellet.project}/schedules/1`);
-      if (response.status() === 200) {status = await response.json(); if (status.state === 'needs_attention') break;}
+      if (response.status() === 200) {status = await response.json(); if (['needs_attention', 'completed'].includes(status.state)) break;}
       await new Promise(resolve => setTimeout(resolve, 50));
     }
-    assert.equal(status?.state, 'needs_attention');
+    assert.equal(status?.state, mode === 'schedule_noop' ? 'completed' : 'needs_attention');
     await page.reload();
-    if (mode === 'runtime_old') {
+    if (mode === 'schedule_noop') {
+      assert.equal(cli('show', pellet.id).status, 'closed');
+      assert.equal(git('rev-list', '--count', 'HEAD').toString().trim(), '1', 'Already-satisfied work created a dummy commit');
+      assert.match(await page.locator('.run-facts').innerText(), /Completed/);
+      assert.equal(await page.getByRole('button', {name: 'Resume', exact: true}).count(), 0);
+    } else if (mode === 'runtime_old') {
       assert.equal(cli('show', pellet.id).status, 'open', 'Old runtime claimed pellet');
       assert.match(await page.locator('body').innerText(), /0\.154\.0/);
       assert.equal(await page.locator('.run-facts').count(), 0);
@@ -101,6 +106,18 @@ async function start(root) {
       const events = fs.readFileSync(path.join(root, 'fake-events.jsonl'), 'utf8');
       await stop(); origin = await start(root); await page.goto(origin + route); await check();
       assert.equal(fs.readFileSync(path.join(root, 'fake-events.jsonl'), 'utf8'), events, 'Restart resumed a run');
+      if (mode === 'schedule_unfinished') {
+        cli('close', pellet.id);
+        await page.reload();
+        assert.equal(await page.getByRole('button', {name: 'Resume', exact: true}).count(), 0);
+        assert.equal(await page.locator('.run-notice.warning').count(), 0);
+        assert.match(await page.locator('.run-facts').innerText(), /Resolved/);
+        assert.match(await page.locator('body').innerText(), /No active pellet/);
+        await stop(); origin = await start(root); await page.goto(origin + route);
+        assert.equal(await page.getByRole('button', {name: 'Resume', exact: true}).count(), 0);
+        assert.equal(await page.locator('.run-notice.warning').count(), 0);
+        console.log('PASS closed pellet clears stale warnings and Resume across restart');
+      }
       if (mode === 'schedule_runtime_error' && process.env.PELLETS_BROWSER_SCREENSHOT) await page.screenshot({path: process.env.PELLETS_BROWSER_SCREENSHOT, fullPage: true});
       if (mode === 'schedule_runtime_error') {
         fs.writeFileSync(path.join(root, 'runtime-repair.txt'), 'keep this repair');

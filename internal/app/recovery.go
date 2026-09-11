@@ -321,7 +321,7 @@ func (supervisor *ExecutionSupervisor) reconcileConversation(ctx context.Context
 	return errors.Join(err, db.Close())
 }
 
-// Ordinary implementation resumes from today's clean repository. Old HEAD is
+// Ordinary implementation resumes from the current repository. Old HEAD is
 // evidence for the old attempt; finalization and reviews still bind exact work.
 func checkResumeHead(ctx context.Context, root string, previous storage.ExecutionRun, head string) error {
 	if head == previous.StartingHead {
@@ -329,9 +329,6 @@ func checkResumeHead(ctx context.Context, root string, previous storage.Executio
 	}
 	if !storage.ResumeUsesCurrentHead(previous) {
 		return missingRunEvidence("implementation_head_changed")
-	}
-	if err := requireCleanWorktree(ctx, root); err != nil {
-		return domain.WrapError(domain.Conflict, "resume_worktree_dirty", "Commits changed since this attempt and there are uncommitted changes. Commit or stash those changes, then use Resume; your previous attempt is preserved.", nil, err)
 	}
 	return nil
 }

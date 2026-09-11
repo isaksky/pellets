@@ -43,22 +43,8 @@ func requireHead(ctx context.Context, root, expected string) error {
 	return nil
 }
 
-func requireCleanWorktree(ctx context.Context, root string) error {
-	status, err := executionGit(ctx, root, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none")
-	if err != nil {
-		return err
-	}
-	if status != "" {
-		return scheduleError("implementation_worktree_dirty", "new ordinary work requires a clean index and worktree, including untracked files")
-	}
-	return nil
-}
-
 // Paths are literal identities, never pathspec expressions or directories.
 func validateImplementationFiles(files []string) error {
-	if len(files) == 0 {
-		return scheduleError("implementation_no_changes", "ready without a committable change requires attention")
-	}
 	if len(files) > 10000 {
 		return storage.InvalidExecutionRun("too many implementation files")
 	}
@@ -92,15 +78,17 @@ func changedFiles(ctx context.Context, root string) ([]string, error) {
 	return slices.Compact(files), nil
 }
 
-func requireExactFiles(ctx context.Context, root string, files []string) error {
+func requireReportedFiles(ctx context.Context, root string, files []string) error {
 	actual, err := changedFiles(ctx, root)
 	if err != nil {
 		return err
 	}
 	expected := slices.Clone(files)
 	slices.Sort(expected)
-	if !slices.Equal(actual, expected) {
-		return scheduleError("implementation_files_changed", "worktree changes do not match the exact implementation files")
+	for _, file := range expected {
+		if !slices.Contains(actual, file) {
+			return scheduleError("implementation_files_changed", "a reported implementation file is no longer changed")
+		}
 	}
 	return nil
 }
@@ -125,8 +113,10 @@ func implementationTree(ctx context.Context, root, head string, files []string) 
 	if _, err = git("read-tree", head); err != nil {
 		return "", err
 	}
-	if _, err = git(append([]string{"add", "--"}, files...)...); err != nil {
-		return "", err
+	if len(files) > 0 {
+		if _, err = git(append([]string{"add", "--"}, files...)...); err != nil {
+			return "", err
+		}
 	}
 	return git("write-tree")
 }
@@ -145,16 +135,8 @@ func (s *Scheduler) prepareFinalization(ctx context.Context, execution *Workspac
 	if err := validateImplementationFiles(files); err != nil {
 		return err
 	}
-	if err := requireExactFiles(ctx, root, files); err != nil {
+	if err := requireReportedFiles(ctx, root, files); err != nil {
 		return err
-	}
-	// The implementation phase must not stage anything.
-	staged, err := executionGit(ctx, root, "diff", "--cached", "--name-only", "-z", "HEAD", "--")
-	if err != nil {
-		return err
-	}
-	if staged != "" {
-		return scheduleError("implementation_index_changed", "implementation staged changes before finalization")
 	}
 	tree, err := implementationTree(ctx, root, run.StartingHead, files)
 	if err != nil {
@@ -164,13 +146,13 @@ func (s *Scheduler) prepareFinalization(ctx context.Context, execution *Workspac
 	if err != nil {
 		return err
 	}
-	if tree == startingTree {
+	if tree == startingTree && len(files) != 0 {
 		return scheduleError("implementation_no_changes", "ready without a committable change requires attention")
 	}
 	progress := run.RunProgress
 	progress.Phase = "verification"
 	progress.Summary = "Structured implementation result and exact changed files verified."
-	progress.Finalization = &storage.FinalizationEvidence{Files: slices.Clone(files), Tree: tree, Subject: runReference(run) + ": implement pellet"}
+	progress.Finalization = &storage.FinalizationEvidence{NoChanges: len(files) == 0, Files: slices.Clone(files), Tree: tree, Subject: runReference(run) + ": implement pellet"}
 	run, err = execution.Save(ctx, progress, run.Revision)
 	if err != nil {
 		return err
@@ -198,11 +180,11 @@ func (s *Scheduler) finalize(ctx context.Context, execution *WorkspaceExecution,
 	if run.ResultCommit != "" && head != run.ResultCommit {
 		return missingRunEvidence("result_commit_not_head")
 	}
-	if head == run.StartingHead {
+	if head == run.StartingHead && !f.NoChanges {
 		if err := s.requireOwnership(ctx, run); err != nil {
 			return err
 		}
-		if err := requireExactFiles(ctx, root, f.Files); err != nil {
+		if err := requireReportedFiles(ctx, root, f.Files); err != nil {
 			return err
 		}
 		tree, err := implementationTree(ctx, root, run.StartingHead, f.Files)
@@ -211,20 +193,6 @@ func (s *Scheduler) finalize(ctx context.Context, execution *WorkspaceExecution,
 		}
 		if tree != f.Tree {
 			return missingRunEvidence("finalization_tree_changed")
-		}
-		indexBefore, err := executionGit(ctx, root, "write-tree")
-		if err != nil {
-			return err
-		}
-		startingTree, err := executionGit(ctx, root, "rev-parse", run.StartingHead+"^{tree}")
-		if err != nil {
-			return err
-		}
-		// git add writes the index atomically. A resumed staging boundary can
-		// see either our original index or our exact expected tree, never an
-		// independently staged hunk that would be overwritten by add.
-		if indexBefore != startingTree && indexBefore != f.Tree {
-			return missingRunEvidence("finalization_index_changed")
 		}
 		progress := run.RunProgress
 		progress.Phase, progress.Summary = "commit", "Exact tree verified; staging and one commit pending."
@@ -235,20 +203,13 @@ func (s *Scheduler) finalize(ctx context.Context, execution *WorkspaceExecution,
 		if _, err = executionGit(ctx, root, append([]string{"--literal-pathspecs", "add", "--"}, f.Files...)...); err != nil {
 			return err
 		}
-		indexTree, err := executionGit(ctx, root, "write-tree")
-		if err != nil {
-			return err
-		}
-		if indexTree != f.Tree {
-			return missingRunEvidence("finalization_index_changed")
-		}
 		if err := requireHead(ctx, root, run.StartingHead); err != nil {
 			return err
 		}
 		if err := s.requireOwnership(ctx, run); err != nil {
 			return err
 		}
-		if _, err = executionGit(ctx, root, "commit", "-m", f.Subject); err != nil {
+		if _, err = executionGit(ctx, root, append([]string{"--literal-pathspecs", "commit", "--only", "-m", f.Subject, "--"}, f.Files...)...); err != nil {
 			return errors.Join(scheduleError("finalization_commit_unconfirmed", "commit failed or its result is uncertain; preserve the index and reconcile this attempt"), err)
 		}
 		head, err = executionGit(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
@@ -259,9 +220,6 @@ func (s *Scheduler) finalize(ctx context.Context, execution *WorkspaceExecution,
 	// This same branch reconciles a crash immediately after Git committed,
 	// even if recording the result commit never succeeded. It never recommits.
 	if err := validateFinalizationCommit(ctx, root, run, head); err != nil {
-		return err
-	}
-	if err := requireCleanWorktree(ctx, root); err != nil {
 		return err
 	}
 	run, err = execution.VerifyCommit(ctx, run.Revision, head)
@@ -308,12 +266,19 @@ func (s *Scheduler) finalize(ctx context.Context, execution *WorkspaceExecution,
 		return err
 	}
 	progress = run.RunProgress
-	progress.Phase, progress.State, progress.Outcome, progress.Summary = "finalization", "completed", "succeeded", "Implementation, exact single commit, clean worktree, and closed pellet verified."
+	progress.Phase, progress.State, progress.Outcome, progress.Summary = "finalization", "completed", "succeeded", "Implementation result and closed pellet verified; unrelated edits preserved."
 	_, err = execution.Save(ctx, progress, run.Revision)
 	return err
 }
 
 func validateFinalizationCommit(ctx context.Context, root string, run storage.ExecutionRun, commit string) error {
+	if run.Finalization != nil && run.Finalization.NoChanges {
+		tree, err := executionGit(ctx, root, "rev-parse", commit+"^{tree}")
+		if err != nil || commit != run.StartingHead || tree != run.Finalization.Tree || len(run.Finalization.Files) != 0 {
+			return errors.Join(missingRunEvidence("no_change_evidence_changed"), err)
+		}
+		return nil
+	}
 	if commit == run.StartingHead || run.Finalization == nil {
 		return missingRunEvidence("result_commit_unchanged")
 	}

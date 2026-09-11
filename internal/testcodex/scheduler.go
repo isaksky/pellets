@@ -58,6 +58,9 @@ func completeScheduled(mode string, params json.RawMessage) string {
 		target.Reference = "wrong-999"
 	}
 	outcome := "ready"
+	if mode == "schedule_noop" {
+		outcome = "already_satisfied"
+	}
 	verification := "Disposable integration peer: verified exact file content."
 	if mode == "schedule_unfinished" {
 		outcome = "needs_attention"

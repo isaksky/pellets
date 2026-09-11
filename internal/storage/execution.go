@@ -206,9 +206,10 @@ type InteractionOption struct {
 }
 
 type FinalizationEvidence struct {
-	Files   []string `json:"files"`
-	Tree    string   `json:"tree"`
-	Subject string   `json:"subject"`
+	NoChanges bool     `json:"no_changes,omitempty"`
+	Files     []string `json:"files"`
+	Tree      string   `json:"tree"`
+	Subject   string   `json:"subject"`
 }
 
 type RunActivity struct {
@@ -374,7 +375,7 @@ func ValidateRunProgress(p RunProgress) error {
 	}
 	if p.Finalization != nil {
 		f := p.Finalization
-		if !IsFullCommitID(f.Tree) || len(f.Files) == 0 || len(f.Files) > 10000 || len(f.Subject) == 0 || len(f.Subject) > 240 || strings.ContainsAny(f.Subject, "\x00\r\n") {
+		if !IsFullCommitID(f.Tree) || (len(f.Files) == 0 && !f.NoChanges) || (f.NoChanges && len(f.Files) != 0) || len(f.Files) > 10000 || len(f.Subject) == 0 || len(f.Subject) > 240 || strings.ContainsAny(f.Subject, "\x00\r\n") {
 			return InvalidExecutionRun("invalid finalization evidence")
 		}
 		for _, file := range f.Files {
@@ -462,7 +463,7 @@ func ValidateReviewSnapshot(snapshot *ReviewSnapshot) error {
 	for i, commit := range snapshot.Commits {
 		target := snapshot.Targets[i]
 		if target.Reason != "ready" || target.Status == nil || *target.Status != domain.PelletClosed || target.ImplementationRevision == nil || *target.ImplementationRevision < 1 || target.Evidence == nil ||
-			commit.Reference == "" || commit.WorkspaceID < 1 || !IsFullCommitID(commit.StartingHead) || !IsFullCommitID(commit.ResultCommit) || len(commit.Files) == 0 || len(commit.Files) > 10000 ||
+			commit.Reference == "" || commit.WorkspaceID < 1 || !IsFullCommitID(commit.StartingHead) || !IsFullCommitID(commit.ResultCommit) || (len(commit.Files) == 0 && commit.StartingHead != commit.ResultCommit) || len(commit.Files) > 10000 ||
 			commit.Reference != target.Reference || commit.WorkspaceID != target.Evidence.WorkspaceID || commit.StartingHead != target.Evidence.StartingHead || commit.ResultCommit != target.Evidence.ResultCommit {
 			return InvalidExecutionRun("invalid immutable review commit scope")
 		}
@@ -613,7 +614,7 @@ func ExecutionRunNotFound(id int64) error {
 }
 
 // ResumeUsesCurrentHead applies only before ordinary commit finalization.
-// The application must verify a clean worktree when replacing an old baseline.
+// Existing unfinished work is preserved when replacing an old baseline.
 func ResumeUsesCurrentHead(run ExecutionRun) bool {
 	if run.Mode == "review_checkpoint" || run.Finalization != nil || run.ResultCommit != "" {
 		return false

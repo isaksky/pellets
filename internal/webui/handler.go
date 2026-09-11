@@ -661,6 +661,12 @@ func (h *handler) runWorkspaceViews(request *http.Request, project storage.Proje
 			if runs[0].State == "completed" && h.application.Executions != nil && h.application.Executions.RecoveryPending(h.application.Database, runs[0]) {
 				run.CanResume = runs[0].PelletPresent
 			}
+			if !hasOwned && !storage.RunActive(runs[0].State) && run.State != "completed" {
+				run.CanResume, run.Attention, run.Interrupted, run.Awaiting = false, false, false, false
+				run.State, run.Error, run.Outcome = "resolved", "", ""
+				run.AutoReview = false
+				run.Activity = "This attempt ended. The pellet is no longer active in this workspace."
+			}
 			view.Run = &run
 			view.Busy = storage.RunActive(runs[0].State)
 		}
@@ -670,6 +676,9 @@ func (h *handler) runWorkspaceViews(request *http.Request, project storage.Proje
 				view.Schedule = &scheduleView{ID: schedule.ID, Mode: schedule.Mode, State: schedule.State, StopAfter: schedule.StopAfterPellet, ExternalID: textOrDash(schedule.ExternalID), Group: textOrDash(schedule.Group)}
 				view.Busy = true
 			}
+		}
+		if !hasOwned && view.Run != nil && view.Run.State == "resolved" {
+			view.RecoveryAttention = ""
 		}
 		if hasOwned {
 			currentGenerationRun := len(runs) > 0 && storage.RunMatchesPelletGeneration(runs[0], owned)
@@ -1084,6 +1093,8 @@ func runStateLabel(state string) string {
 	switch state {
 	case "awaiting_input":
 		return "Awaiting input"
+	case "resolved":
+		return "Resolved"
 	case "needs_attention":
 		return "Needs attention"
 	case "interrupted":

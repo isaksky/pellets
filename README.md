@@ -548,7 +548,7 @@ without hidden retries. See [scheduler interfaces](docs/codex-app-server.md#fore
 Startup marks abandoned active attempts interrupted or needing attention and
 waits for explicit Resume. Resume shows the saved pellet, phase, mode, remaining
 limit, and exact filters. For ordinary implementation before finalization, Resume adopts the current HEAD
-when the worktree is clean, preserves the previous attempt, and asks Codex to
+while preserving unfinished edits and the previous attempt, and asks Codex to
 reassess the code. It checks the original worktree/branch, ownership,
 commit evidence, and saved Codex history before continuing. Missing or ambiguous
 evidence stays visible and preserved. Checkpoint recovery requires its own
@@ -566,13 +566,14 @@ owned pellet and repaired preflight before starting a new conversation.
 A reopened pellet has a new implementation revision; a completed run from its
 previous revision does not prevent this recovery or supply the new conversation.
 
-Ordinary runs require a clean worktree. Codex implements and verifies the exact
+Ordinary runs preserve existing edits. Codex implements and verifies the exact
 pellet, then returns a structured result. The server checks the reported files,
 stages only those paths, creates one pellet-ID commit, verifies it, and closes
 the pellet. Codex's implementation phase cannot commit, close, release, defer,
 select more work, or create follow-ups. Explicit finalization recovery reuses
 the persisted tree and existing commit without repeating implementation or
-tests. Interference and no-op results require attention; changes are preserved.
+tests. Verified already-satisfied work closes without a new commit. Unrelated
+staged and unstaged edits remain intact and do not block completion.
 
 Press Ctrl+C to stop (SIGTERM also requests orderly shutdown). Pellets immediately acknowledges the interrupt on stderr,
 closes live-update streams, and allows ordinary requests up to five seconds to

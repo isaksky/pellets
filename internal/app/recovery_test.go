@@ -98,7 +98,7 @@ func TestRecoveryMissingWorktreePreservesEvidence(t *testing.T) {
 
 func TestRecoveryResumeValidatesBeforeStartingCodex(t *testing.T) {
 	executable := installSupervisorPeer(t)
-	for _, test := range []struct{ name, code string }{{"branch", "resume_branch_changed"}, {"head_dirty", "resume_worktree_dirty"}, {"lifecycle", "schedule_resume_changed"}, {"missing_history", "resume_history_unavailable"}, {"active_history", "resume_history_not_stopped"}, {"checkpoint", "checkpoint_resume_policy_required"}} {
+	for _, test := range []struct{ name, code string }{{"branch", "resume_branch_changed"}, {"lifecycle", "schedule_resume_changed"}, {"missing_history", "resume_history_unavailable"}, {"active_history", "resume_history_not_stopped"}, {"checkpoint", "checkpoint_resume_policy_required"}} {
 		t.Run(test.name, func(t *testing.T) {
 			supervisor, execution := supervisorFixture(t, executable)
 			if err := os.WriteFile(filepath.Join(execution.Database.Root, "fake-events.jsonl"), nil, 0600); err != nil {
@@ -120,12 +120,6 @@ func TestRecoveryResumeValidatesBeforeStartingCodex(t *testing.T) {
 			}
 			if test.name == "branch" {
 				gitForExecutionTest(t, execution.Database.Root, "switch", "-c", "changed-at-same-head")
-			}
-			if test.name == "head_dirty" {
-				gitForExecutionTest(t, execution.Database.Root, "commit", "--allow-empty", "-m", "external work")
-				if err := os.WriteFile(filepath.Join(execution.Database.Root, "uncommitted.txt"), []byte("keep me"), 0600); err != nil {
-					t.Fatal(err)
-				}
 			}
 			if test.name == "lifecycle" {
 				q, err := sqlite.OpenPelletRepository(context.Background(), execution.Database.Path)
@@ -396,7 +390,7 @@ func TestRecoveryUnfinishedTurnAndChildExitPauseSavedMode(t *testing.T) {
 			if err != nil || untouched.Status != domain.PelletOpen {
 				t.Fatalf("next pellet changed: %+v %v", untouched, err)
 			}
-			if mode == "schedule_unfinished" && !strings.Contains(previous.Summary, "unfinished work") {
+			if mode == "schedule_unfinished" && !strings.Contains(previous.Summary, "browser test failed on a hidden table cell") {
 				t.Fatalf("pause was not explained: %+v", previous)
 			}
 			if err := os.WriteFile(filepath.Join(s.options.Database.Root, "fake-mode"), []byte("schedule_success"), 0600); err != nil {

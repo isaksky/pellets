@@ -249,7 +249,7 @@ func TestSchedulerFinalizationRecoveryNeverReimplementsOrRecommits(t *testing.T)
 	}
 }
 
-func TestSchedulerRejectsDirtyNewWorkWithoutSelecting(t *testing.T) {
+func TestSchedulerPreservesDirtyNewWork(t *testing.T) {
 	executable := installSupervisorPeer(t)
 	s, request, q := schedulerFixture(t, executable, "schedule_success")
 	file := filepath.Join(s.options.Database.Root, "unrelated.txt")
@@ -257,11 +257,11 @@ func TestSchedulerRejectsDirtyNewWorkWithoutSelecting(t *testing.T) {
 		t.Fatal(err)
 	}
 	status := awaitSchedule(t, startSchedule(t, s, request))
-	if status.State != "needs_attention" || status.Reason != "implementation_worktree_dirty" || status.Started != 0 {
+	if status.State != "completed" || status.Completed != 1 {
 		t.Fatalf("dirty start = %+v", status)
 	}
 	p, err := q.ReadPellet(context.Background(), request.Selected, domain.PelletReference{ProjectCode: request.Selected.Project.Code, Number: 1})
-	if err != nil || p.Status != domain.PelletOpen {
+	if err != nil || p.Status != domain.PelletClosed {
 		t.Fatalf("dirty selection mutated queue: %+v %v", p, err)
 	}
 	if data, err := os.ReadFile(file); err != nil || string(data) != "preserve\n" {
@@ -273,10 +273,7 @@ func TestSchedulerRejectsWrongReportsAndInterference(t *testing.T) {
 	executable := installSupervisorPeer(t)
 	for _, test := range []struct{ mode, code string }{
 		{"schedule_wrong_report", "implementation_report_invalid"},
-		{"schedule_noop", "implementation_no_changes"},
-		{"schedule_unreported_file", "implementation_files_changed"},
-		{"schedule_staged", "implementation_index_changed"},
-		{"schedule_commit_only", "implementation_head_changed"},
+		{"schedule_commit_only", "implementation_report_invalid"},
 	} {
 		t.Run(test.mode, func(t *testing.T) {
 			s, request, q := schedulerFixture(t, executable, test.mode)
@@ -313,7 +310,7 @@ func TestFinalizationLiteralPathsAndMetadataBoundary(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(database.Root, ".git", "info", "exclude"), []byte("/pellets.db*\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := requireExactFiles(context.Background(), database.Root, files); err != nil {
+	if err := requireReportedFiles(context.Background(), database.Root, files); err != nil {
 		t.Fatal(err)
 	}
 	head := gitForExecutionTest(t, database.Root, "rev-parse", "HEAD")
@@ -498,5 +495,141 @@ func TestFinalizationRejectsHookChangedCommit(t *testing.T) {
 	}
 	if data, err := os.ReadFile(filepath.Join(s.options.Database.Root, "hook-file.txt")); err != nil || string(data) != "unexpected hook change" {
 		t.Fatal("hook diagnostics discarded")
+	}
+}
+
+func TestAutomationCompletesWithoutOwningEveryEdit(t *testing.T) {
+	for _, mode := range []string{"schedule_noop", "schedule_unreported_file", "schedule_staged"} {
+		t.Run(mode, func(t *testing.T) {
+			s, request, _ := schedulerFixture(t, installSupervisorPeer(t), mode)
+			root := s.options.Database.Root
+			before := gitForExecutionTest(t, root, "rev-parse", "HEAD")
+			if err := os.WriteFile(filepath.Join(root, "other.txt"), []byte("staged work"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			gitForExecutionTest(t, root, "add", "other.txt")
+			status := awaitSchedule(t, startSchedule(t, s, request))
+			if status.State != "completed" || status.Completed != 1 {
+				t.Fatalf("%+v", status)
+			}
+			run, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, status.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "schedule_noop" && (run.ResultCommit != before || !run.Finalization.NoChanges) {
+				t.Fatalf("no-op created a commit: %+v", run)
+			}
+			if got := gitForExecutionTest(t, root, "diff", "--cached", "--name-only"); got != "other.txt" {
+				t.Fatalf("lost staged work: %s", got)
+			}
+			if mode != "schedule_noop" {
+				if got := gitForExecutionTest(t, root, "show", "--format=", "--name-only", "HEAD"); got != "demo-1.txt" {
+					t.Fatalf("committed unrelated work: %s", got)
+				}
+			}
+			if mode == "schedule_unreported_file" {
+				if data, err := os.ReadFile(filepath.Join(root, "unrelated.txt")); err != nil || string(data) != "preserve" {
+					t.Fatal("lost unrelated edit")
+				}
+			}
+		})
+	}
+}
+
+func TestResumeChangedHeadPreservesUnfinishedEdits(t *testing.T) {
+	s, request, _ := schedulerFixture(t, installSupervisorPeer(t), "schedule_unfinished")
+	first := awaitSchedule(t, startSchedule(t, s, request))
+	previous, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, first.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := s.options.Database.Root
+	gitForExecutionTest(t, root, "commit", "--allow-empty", "-m", "repair")
+	head := gitForExecutionTest(t, root, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(root, "unfinished.txt"), []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "fake-mode"), []byte("schedule_success"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	request.ResumeFrom, request.ResumePellet = &previous.ID, &previous.PelletNumber
+	result := awaitSchedule(t, startSchedule(t, s, request))
+	if result.State != "completed" {
+		t.Fatalf("%+v", result)
+	}
+	run, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, result.RunID)
+	if err != nil || run.StartingHead != head || run.ThreadID != previous.ThreadID {
+		t.Fatalf("bad resume: %+v %v", run, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(root, "unfinished.txt")); err != nil || string(data) != "keep" {
+		t.Fatal("lost unfinished work")
+	}
+}
+
+func TestAlreadySatisfiedRecoveryDoesNotCreateCommitOrRepeatTurn(t *testing.T) {
+	executable := installSupervisorPeer(t)
+	for _, boundary := range []string{"after_commit", "before_close", "after_close"} {
+		t.Run(boundary, func(t *testing.T) {
+			s, request, q := schedulerFixture(t, executable, "schedule_noop")
+			originalOpen := s.options.Supervisor.options.Recorder.Open
+			var failed atomic.Bool
+			s.options.Supervisor.options.Recorder.Open = func(ctx context.Context, path string) (storage.ExecutionRunDatabase, error) {
+				db, err := originalOpen(ctx, path)
+				if err != nil {
+					return nil, err
+				}
+				return finalizationFailureDatabase{ExecutionRunDatabase: db, fail: func(update storage.UpdateExecutionRun) bool {
+					atBoundary := boundary == "before_staging" && update.Progress.Phase == "commit" || boundary == "after_commit" && update.VerifiedCommit != "" || boundary == "before_close" && update.Progress.Phase == "close" || boundary == "after_close" && update.Progress.State == "completed"
+					return atBoundary && failed.CompareAndSwap(false, true)
+				}}, nil
+			}
+			first := awaitSchedule(t, startSchedule(t, s, request))
+			if first.State != "needs_attention" || !failed.Load() {
+				t.Fatalf("first = %+v", first)
+			}
+			previous, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, first.RunID)
+			if err != nil || previous.Finalization == nil {
+				t.Fatalf("durable intent: %+v %v", previous, err)
+			}
+			if boundary == "after_commit" && previous.ResultCommit != "" {
+				t.Fatal("failure did not precede commit evidence save")
+			}
+			p, err := q.ReadPellet(context.Background(), request.Selected, domain.PelletReference{ProjectCode: request.Selected.Project.Code, Number: previous.PelletNumber})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (p.Status == domain.PelletClosed) != (boundary == "after_close") {
+				t.Fatalf("wrong queue boundary: %+v", p)
+			}
+			// A changed runtime behavior proves recovery cannot depend on a
+			// second successful implementation turn or repeat its tests.
+			if err := os.WriteFile(filepath.Join(s.options.Database.Root, "fake-mode"), []byte("schedule_failed"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			request.ResumePellet, request.ResumeFrom = &previous.PelletNumber, &previous.ID
+			second := awaitSchedule(t, startSchedule(t, s, request))
+			if second.State != "completed" || second.Completed != 1 {
+				t.Fatalf("recovery = %+v; supervisor error = %v", second, s.options.Supervisor.err)
+			}
+			resumed, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, second.RunID)
+			if err != nil || resumed.StartingHead != previous.StartingHead || resumed.ResultCommit == "" || resumed.Finalization == nil {
+				t.Fatalf("resumed evidence: %+v %v", resumed, err)
+			}
+			if previous.ResultCommit != "" && resumed.ResultCommit != previous.ResultCommit {
+				t.Fatal("recovery substituted verified commit identity")
+			}
+			if count := gitForExecutionTest(t, s.options.Database.Root, "rev-list", "--count", previous.StartingHead+"..HEAD"); count != "0" {
+				t.Fatalf("commit count = %s", count)
+			}
+			turns := 0
+			for _, event := range readPeerEvents(t, s.options.Database.Root) {
+				if event.Method == "turn/start" {
+					turns++
+				}
+			}
+			if turns != 1 {
+				t.Fatalf("implementation repeated %d times", turns)
+			}
+		})
 	}
 }

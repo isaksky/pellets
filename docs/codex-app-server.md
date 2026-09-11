@@ -305,11 +305,11 @@ one bounded durable interaction. The stored record contains the complete
 question/options or the minimum approval display and routing fields, never an
 answer, secret, command text, credential, or transcript.
 
-New ordinary work is checked for a clean index/worktree, including untracked
-files, inside the selection readiness boundary and again before thread start.
+Ordinary work preserves existing staged, unstaged, and untracked edits.
+The agent reports only the files belonging to the authorized pellet.
 The new thread is persisted (`ephemeral: false`) and receives the complete
 captured description plus the starting HEAD. `turn/start.outputSchema` requires
-an exact reference and starting HEAD, `ready` or `needs_attention`, exact file
+an exact reference and starting HEAD, `ready`, `already_satisfied`, or `needs_attention`, exact file
 identities, and a verification account. The driver accepts only the bound
 `item/completed` final `agentMessage` and the exact successful terminal turn.
 The implementation prompt directs Codex to resolve routine choices and fix
@@ -317,19 +317,25 @@ necessary test/tooling failures before returning. Related edits from earlier
 attempts or collaborators, including test-harness repairs in the same file,
 belong to the authorized work and do not require another coordination step.
 Concrete unresolved blockers are explained in the verification account.
-Missing, malformed, wrong-target, failed, or no-op reports stop for attention.
+Missing, malformed, wrong-target, or failed reports stop for attention.
+A verified `already_satisfied` report has an empty file list and closes without
+a new commit. Its durable evidence records the existing HEAD and tree, so
+recovery never invents a commit or repeats the implementation turn.
+Migration 15 makes these verified existing-HEAD results eligible for review
+checkpoints; the review examines the existing behavior rather than attributing
+an earlier commit diff to the pellet.
 Verification details remain in Codex's transcript; Pellets stores its bounded
 orchestration evidence, not arbitrary model output.
 
-Finalization rechecks live scope/ownership, unchanged HEAD, an untouched index,
-and agreement between the reported files and actual changes. A private Git
+Finalization rechecks live scope/ownership, unchanged HEAD, and that every
+reported file is changed. Other changed files are left alone. A private Git
 index computes the complete expected tree without staging the workspace.
 Migration 9 records that immutable tree, literal file identities, and concise
 pellet-ID subject before staging. The server stages only those paths, rechecks
-the index tree and ownership, and makes one normal Git commit. Existing Git
+ownership, and uses a path-limited Git commit to preserve other staged edits. Existing Git
 hooks and signing configuration remain effective. Before close it verifies
 the commit is HEAD with exactly the captured starting parent, expected tree,
-and expected subject, and requires a clean worktree. `.pellets` and Git metadata
+and expected subject. Unrelated worktree edits remain intact. `.pellets` and Git metadata
 paths cannot be finalized. No pathspec globs, reset, amend, push, or PR is used.
 
 Ordinary dispatch, finalization evidence, commit verification, and completion
@@ -363,9 +369,8 @@ sanitized and saved as the run summary, and shown in the workspace warning.
 The reason remains visible after restart; unfinished work is not finalized.
 
 Before finalization, ordinary Resume uses the current HEAD for its new attempt.
-When HEAD changed, the worktree and index must be clean; otherwise commit or
-stash the changes and retry Resume. The old attempt remains unchanged, the same
-conversation is resumed, and Codex is told to reassess the current code.
+Existing unfinished edits are preserved even when HEAD changed. The old attempt
+remains unchanged, the same conversation is resumed, and Codex is told to reassess the current code.
 Branch, ownership, and stopped-conversation checks still apply. The new baseline
 is rechecked before dispatch and finalization.
 
@@ -375,13 +380,13 @@ can be finalized. If the exact expected commit already exists, the server
 records/reuses it and proceeds to close without another model turn, test run,
 or commit. This also covers a commit that succeeded before its evidence save.
 A recorded close intent whose pellet is already closed can be reconciled after
-a failed terminal save without reopening it. Changed scope, ownership, files,
-index, or Git evidence stops for attention while preserving all changes and
+a failed terminal save without reopening it. Changed scope, ownership, reported files,
+or Git evidence stops for attention while preserving all changes and
 diagnostics. Process-death fences still require the supervisor's explicit
 reconciliation; no restart auto-replays an uncertain operation.
 
 `CheckpointExecutionPolicy` supplies a separate driver and completion validator
-for review checkpoints. It bypasses ordinary clean-start and implementation
+for review checkpoints. It bypasses ordinary implementation
 commit requirements; absent checkpoint policy cannot silently complete a review.
 
 Run one finishes after one validated pellet. Drain selects afresh after each
@@ -837,3 +842,7 @@ PELLETS_CODEX_LIVE=1 go test ./internal/codex -run '^TestInstalledRuntime$' -v
 ```
 
 Normal `go test ./...` skips that installed-runtime check.
+
+Stopped attempts whose pellet is no longer active in that workspace appear as
+resolved history, without an attention badge or Resume control. Their durable
+run records remain unchanged.

@@ -132,38 +132,6 @@ func TestCodexDiagnosticIdentityAndAllowlist(t *testing.T) {
 	}
 }
 
-func TestResumeRechecksChangedBaselineAfterPreflight(t *testing.T) {
-	executable := installSupervisorPeer(t)
-	s, request, _ := schedulerFixture(t, executable, "schedule_runtime_error")
-	failed := awaitSchedule(t, startSchedule(t, s, request))
-	old, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, failed.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gitForExecutionTest(t, s.options.Database.Root, "commit", "--allow-empty", "-m", "repair")
-	prepare := s.options.Supervisor.options.Prepare
-	s.options.Supervisor.options.Prepare = func(ctx context.Context, options codex.PrepareOptions) (*codex.PreparedRun, error) {
-		prepared, err := prepare(ctx, options)
-		if err == nil {
-			err = os.WriteFile(filepath.Join(s.options.Database.Root, "keep-uncommitted.txt"), []byte("preserve me"), 0600)
-		}
-		return prepared, err
-	}
-	request.ResumeFrom, request.ResumePellet = &old.ID, &old.PelletNumber
-	stopped := awaitSchedule(t, startSchedule(t, s, request))
-	if stopped.Reason != "resume_worktree_dirty" {
-		t.Fatalf("late dirt was accepted: %+v", stopped)
-	}
-	runs, err := s.options.Supervisor.options.Recorder.ListWorkspaceRuns(context.Background(), s.options.Database, old.WorkspaceID, 10)
-	if err != nil || len(runs) != 1 || runs[0].ID != old.ID {
-		t.Fatalf("captured invalid attempt: %+v %v", runs, err)
-	}
-	data, err := os.ReadFile(filepath.Join(s.options.Database.Root, "keep-uncommitted.txt"))
-	if err != nil || string(data) != "preserve me" {
-		t.Fatal("lost uncommitted work")
-	}
-}
-
 func TestResumeBaselinePolicyPreservesCommitAndReviewEvidence(t *testing.T) {
 	for _, phase := range []string{"commit", "close", "finalization", "review"} {
 		if storage.ResumeUsesCurrentHead(storage.ExecutionRun{RunProgress: storage.RunProgress{Phase: phase}}) {

@@ -621,3 +621,23 @@ func errorsJoin(errs ...error) error {
 	}
 	return nil
 }
+
+func TestCheckpointReviewsAlreadySatisfiedTarget(t *testing.T) {
+	s, request, queue := schedulerFixture(t, installSupervisorPeer(t), "schedule_noop")
+	result := awaitSchedule(t, startSchedule(t, s, request))
+	if result.State != "completed" {
+		t.Fatalf("%+v", result)
+	}
+	cp, err := queue.CreatePellet(context.Background(), request.Selected, storage.NewPellet{Title: "Review satisfied target", Kind: domain.PelletReviewCheckpoint, ReviewTargets: []domain.PelletReference{{ProjectCode: request.Selected.Project.Code, Number: 1}}})
+	if err != nil || cp.Checkpoint == nil || !cp.Checkpoint.Ready {
+		t.Fatalf("no-op blocked checkpoint: %+v %v", cp, err)
+	}
+	if err := os.WriteFile(filepath.Join(s.options.Database.Root, "fake-mode"), []byte("review_clean"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s.options.Checkpoints = NewCheckpointReviewPolicy(s.options.Database, s.options.OpenQueue)
+	result = awaitSchedule(t, startSchedule(t, s, request))
+	if result.State != "completed" {
+		t.Fatalf("review failed: %+v", result)
+	}
+}

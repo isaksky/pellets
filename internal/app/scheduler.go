@@ -390,15 +390,6 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 				if p.Kind == domain.PelletReviewCheckpoint && request.ResumeFrom == nil && (s.options.Checkpoints == nil || s.options.Checkpoints.Drive == nil) {
 					return false, scheduleError("checkpoint_policy_required", "checkpoint execution requires the separate review policy")
 				}
-				if request.ResumePellet == nil && !s.isCheckpoint(p) {
-					root, err := executionRoot(ctx, s.options.Database, storage.ExecutionRun{WorkspaceRoot: request.Selected.Workspace.RootPath, WorkspaceGitDir: request.Selected.Workspace.GitDir, GitCommonDir: request.Selected.Project.GitCommonDir})
-					if err != nil {
-						return false, err
-					}
-					if err := requireCleanWorktree(ctx, root); err != nil {
-						return false, err
-					}
-				}
 				if s.options.Ready != nil {
 					ready, err := s.options.Ready(ctx, request.Selected, p)
 					if err != nil || !ready {
@@ -569,7 +560,7 @@ func (s *Scheduler) validateCompletion(ctx context.Context, run storage.Executio
 		}
 		return s.options.Checkpoints.ValidateCompletion(ctx, run, selected)
 	}
-	if run.State != "completed" || run.Outcome != "succeeded" || run.PendingOperation != "" || run.ProjectID != selected.Project.ID || run.WorkspaceID != selected.Workspace.ID || run.ThreadID == "" || run.TurnID == "" || run.CommitVerifiedAt == nil || run.ResultCommit == "" || run.ResultCommit == run.StartingHead || run.Finalization == nil {
+	if run.State != "completed" || run.Outcome != "succeeded" || run.PendingOperation != "" || run.ProjectID != selected.Project.ID || run.WorkspaceID != selected.Workspace.ID || run.ThreadID == "" || run.TurnID == "" || run.CommitVerifiedAt == nil || run.ResultCommit == "" || run.Finalization == nil {
 		return scheduleError("schedule_completion_unverified", "the exact attempt lacks validated completion evidence")
 	}
 	return s.validateResult(ctx, run, selected)
@@ -596,7 +587,7 @@ func (s *Scheduler) validateResult(ctx context.Context, run storage.ExecutionRun
 		return err
 	}
 	head, err := executionGit(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
-	if err != nil || head != run.ResultCommit || head == run.StartingHead {
+	if err != nil || head != run.ResultCommit {
 		return errors.Join(missingRunEvidence("result_commit_not_head"), err)
 	}
 	if err := verifyRunCommit(ctx, root, head); err != nil {
@@ -604,9 +595,6 @@ func (s *Scheduler) validateResult(ctx context.Context, run storage.ExecutionRun
 	}
 	if run.Finalization != nil {
 		if err := validateFinalizationCommit(ctx, root, run, head); err != nil {
-			return err
-		}
-		if err := requireCleanWorktree(ctx, root); err != nil {
 			return err
 		}
 	}
