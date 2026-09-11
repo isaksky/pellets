@@ -56,6 +56,11 @@ func (recorder ExecutionRecorder) Begin(ctx context.Context, database Database, 
 		if err != nil {
 			return storage.ExecutionRun{}, err
 		}
+		if previous.Finalization == nil {
+			if err := checkResumeHead(ctx, root, previous, head); err != nil {
+				return storage.ExecutionRun{}, err
+			}
+		}
 		if previous.StartingRef == "" || previous.StartingRef != capture.StartingRef {
 			return storage.ExecutionRun{}, scheduleError("resume_branch_changed", "the branch changed during Resume preparation; restore and reconcile the original branch before continuing")
 		}

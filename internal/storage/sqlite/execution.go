@@ -141,7 +141,9 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 			if resumingClosed && !completedReceipt && (previous.Finalization == nil || previous.ResultCommit == "" || previous.Phase != "close") {
 				return storage.ExecutionRunConflict(previous.ID)
 			}
-			c.StartingHead = previous.StartingHead
+			if !storage.ResumeUsesCurrentHead(previous) {
+				c.StartingHead = previous.StartingHead
+			}
 			c.StartingRef = previous.StartingRef
 			c.Mode = previous.Mode
 			if previous.Mode == "review_checkpoint" {

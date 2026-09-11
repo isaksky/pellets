@@ -547,7 +547,9 @@ without hidden retries. See [scheduler interfaces](docs/codex-app-server.md#fore
 
 Startup marks abandoned active attempts interrupted or needing attention and
 waits for explicit Resume. Resume shows the saved pellet, phase, mode, remaining
-limit, and exact filters. It checks the original worktree/branch, ownership,
+limit, and exact filters. For ordinary implementation before finalization, Resume adopts the current HEAD
+when the worktree is clean, preserves the previous attempt, and asks Codex to
+reassess the code. It checks the original worktree/branch, ownership,
 commit evidence, and saved Codex history before continuing. Missing or ambiguous
 evidence stays visible and preserved. Checkpoint recovery requires its own
 idempotent policy. An uncertain Windows crash receipt remains fenced because

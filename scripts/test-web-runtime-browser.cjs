@@ -98,6 +98,32 @@ async function start(root) {
       await stop(); origin = await start(root); await page.goto(origin + route); await check();
       assert.equal(fs.readFileSync(path.join(root, 'fake-events.jsonl'), 'utf8'), events, 'Restart resumed a run');
       if (mode === 'schedule_runtime_error' && process.env.PELLETS_BROWSER_SCREENSHOT) await page.screenshot({path: process.env.PELLETS_BROWSER_SCREENSHOT, fullPage: true});
+      if (mode === 'schedule_runtime_error') {
+        fs.writeFileSync(path.join(root, 'runtime-repair.txt'), 'keep this repair');
+        git('add', 'runtime-repair.txt'); git('commit', '-m', 'repair runtime');
+        const baseline = git('rev-parse', 'HEAD').toString().trim();
+        fs.writeFileSync(path.join(root, 'fake-mode'), 'schedule_success');
+        await page.getByRole('button', {name: 'Resume', exact: true}).click();
+        const deadline = Date.now() + 20000;
+        let resumed;
+        while (Date.now() < deadline) {
+          const response = await page.request.get(origin + `/projects/${pellet.project}/schedules/1`);
+          if (response.status() === 200) { resumed = await response.json(); if (['completed','needs_attention'].includes(resumed.state)) break; }
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        assert.equal(resumed?.state, 'completed', JSON.stringify(resumed));
+        assert.equal(cli('show', pellet.id).status, 'closed');
+        assert.equal(git('rev-list', '--count', 'HEAD').toString().trim(), '3', 'Expected only initial, repair, and implementation commits');
+        assert.equal(fs.readFileSync(path.join(root, 'runtime-repair.txt'), 'utf8'), 'keep this repair');
+        const after = fs.readFileSync(path.join(root, 'fake-events.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+        assert.equal(after.filter(x => x.method === 'thread/start').length, 1);
+        assert.equal(after.filter(x => x.method === 'thread/resume').length, 1);
+        const prompt = JSON.stringify(after.filter(x => x.method === 'turn/start').at(-1));
+        assert.ok(prompt.includes(baseline)); assert.ok(prompt.includes('Commits landed since your previous attempt'));
+        await page.reload(); assert.match(await page.locator('.run-facts').innerText(), /Completed/);
+        console.log('PASS failure → repair commit → Resume at current HEAD');
+      }
+
     }
     assert.deepEqual(errors, []);
     await page.close(); await stop();

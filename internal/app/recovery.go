@@ -203,7 +203,11 @@ func (supervisor *ExecutionSupervisor) validateResume(ctx context.Context, reque
 		return previous, scheduleError("resume_branch_changed", "the worktree branch differs from the saved attempt; restore the original branch after reviewing local changes, then use Resume")
 	}
 	if previous.Finalization == nil {
-		if err := requireHead(ctx, root, previous.StartingHead); err != nil {
+		head, err := executionGit(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
+		if err != nil {
+			return previous, err
+		}
+		if err := checkResumeHead(ctx, root, previous, head); err != nil {
 			return previous, err
 		}
 	} else {
@@ -315,4 +319,19 @@ func (supervisor *ExecutionSupervisor) reconcileConversation(ctx context.Context
 	}
 	_, err = db.FinishExecutionOperation(ctx, completion)
 	return errors.Join(err, db.Close())
+}
+
+// Ordinary implementation resumes from today's clean repository. Old HEAD is
+// evidence for the old attempt; finalization and reviews still bind exact work.
+func checkResumeHead(ctx context.Context, root string, previous storage.ExecutionRun, head string) error {
+	if head == previous.StartingHead {
+		return nil
+	}
+	if !storage.ResumeUsesCurrentHead(previous) {
+		return missingRunEvidence("implementation_head_changed")
+	}
+	if err := requireCleanWorktree(ctx, root); err != nil {
+		return domain.WrapError(domain.Conflict, "resume_worktree_dirty", "Commits changed since this attempt and there are uncommitted changes. Commit or stash those changes, then use Resume; your previous attempt is preserved.", nil, err)
+	}
+	return nil
 }

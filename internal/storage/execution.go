@@ -611,3 +611,16 @@ func ExecutionRunConflict(id int64) error {
 func ExecutionRunNotFound(id int64) error {
 	return domain.NewError(domain.NotFound, "execution_run_not_found", fmt.Sprintf("execution run %d is unavailable; do not substitute another target", id), map[string]any{"run_id": id})
 }
+
+// ResumeUsesCurrentHead applies only before ordinary commit finalization.
+// The application must verify a clean worktree when replacing an old baseline.
+func ResumeUsesCurrentHead(run ExecutionRun) bool {
+	if run.Mode == "review_checkpoint" || run.Finalization != nil || run.ResultCommit != "" {
+		return false
+	}
+	switch run.Phase {
+	case "commit", "close", "finalization", "review":
+		return false
+	}
+	return true
+}

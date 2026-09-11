@@ -353,8 +353,15 @@ before sanitization; an overlong line without a newline is omitted entirely.
 This prevents truncation from dropping a credential label while retaining its
 secret suffix, including malformed bytes and credentials split across writes.
 
-Explicit Resume preserves the original starting HEAD and immutable finalization
-record. If HEAD still matches the starting commit, the unchanged expected work
+Before finalization, ordinary Resume uses the current HEAD for its new attempt.
+When HEAD changed, the worktree and index must be clean; otherwise commit or
+stash the changes and retry Resume. The old attempt remains unchanged, the same
+conversation is resumed, and Codex is told to reassess the current code.
+Branch, ownership, and stopped-conversation checks still apply. The new baseline
+is rechecked before dispatch and finalization.
+
+Once finalization has begun, explicit Resume preserves the original starting
+HEAD and immutable finalization record. If HEAD still matches the starting commit, the unchanged expected work
 can be finalized. If the exact expected commit already exists, the server
 records/reuses it and proceeds to close without another model turn, test run,
 or commit. This also covers a commit that succeeded before its evidence save.

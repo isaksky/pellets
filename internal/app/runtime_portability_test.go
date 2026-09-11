@@ -11,6 +11,7 @@ import (
 
 	"pellets/internal/codex"
 	"pellets/internal/domain"
+	"pellets/internal/storage"
 )
 
 func TestRuntimeCompatibilityFailsBeforeClaim(t *testing.T) {
@@ -88,14 +89,33 @@ func TestCodexRuntimeErrorsPersistAndResume(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(s.options.Database.Root, "fake-mode"), []byte("schedule_success"), 0600); err != nil {
 					t.Fatal(err)
 				}
+				// The motivating failure: repair the runtime in a real commit,
+				// then Resume the still-owned pellet without undoing that fix.
+				if err := os.WriteFile(filepath.Join(s.options.Database.Root, "runtime-repair.txt"), []byte("keep this repair"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				gitForExecutionTest(t, s.options.Database.Root, "add", "runtime-repair.txt")
+				gitForExecutionTest(t, s.options.Database.Root, "commit", "-m", "repair runtime")
+				repairHead := gitForExecutionTest(t, s.options.Database.Root, "rev-parse", "HEAD")
 				r.ResumeFrom = &run.ID
 				r.ResumePellet = &run.PelletNumber
 				resumed := awaitSchedule(t, startSchedule(t, s, r))
 				if resumed.State != "completed" {
 					t.Fatalf("resume failed: %+v", resumed)
 				}
+				current, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, resumed.RunID)
+				if err != nil || current.StartingHead != repairHead || current.ThreadID != run.ThreadID || current.ResumeFrom == nil || *current.ResumeFrom != run.ID {
+					t.Fatalf("resume lost baseline/conversation: %+v %v", current, err)
+				}
+				events, err := os.ReadFile(filepath.Join(s.options.Database.Root, "fake-events.jsonl"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(string(events), "Commits landed since your previous attempt") {
+					t.Fatal("agent was not told to reassess changed code")
+				}
 				history, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, run.ID)
-				if err != nil || history.Summary != run.Summary || history.Settings.Codex.Executable != "/missing-old-machine/codex" {
+				if err != nil || history.Summary != run.Summary || history.StartingHead != run.StartingHead || history.Settings.Codex.Executable != "/missing-old-machine/codex" {
 					t.Fatal("resume erased original failure")
 				}
 			}
@@ -109,5 +129,48 @@ func TestCodexDiagnosticIdentityAndAllowlist(t *testing.T) {
 	}
 	if codexTurnDiagnostic(&event, "other", "turn") != "" || codexTurnDiagnostic(&event, "thread", "other") != "" {
 		t.Fatal("unrelated error accepted")
+	}
+}
+
+func TestResumeRechecksChangedBaselineAfterPreflight(t *testing.T) {
+	executable := installSupervisorPeer(t)
+	s, request, _ := schedulerFixture(t, executable, "schedule_runtime_error")
+	failed := awaitSchedule(t, startSchedule(t, s, request))
+	old, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, failed.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitForExecutionTest(t, s.options.Database.Root, "commit", "--allow-empty", "-m", "repair")
+	prepare := s.options.Supervisor.options.Prepare
+	s.options.Supervisor.options.Prepare = func(ctx context.Context, options codex.PrepareOptions) (*codex.PreparedRun, error) {
+		prepared, err := prepare(ctx, options)
+		if err == nil {
+			err = os.WriteFile(filepath.Join(s.options.Database.Root, "keep-uncommitted.txt"), []byte("preserve me"), 0600)
+		}
+		return prepared, err
+	}
+	request.ResumeFrom, request.ResumePellet = &old.ID, &old.PelletNumber
+	stopped := awaitSchedule(t, startSchedule(t, s, request))
+	if stopped.Reason != "resume_worktree_dirty" {
+		t.Fatalf("late dirt was accepted: %+v", stopped)
+	}
+	runs, err := s.options.Supervisor.options.Recorder.ListWorkspaceRuns(context.Background(), s.options.Database, old.WorkspaceID, 10)
+	if err != nil || len(runs) != 1 || runs[0].ID != old.ID {
+		t.Fatalf("captured invalid attempt: %+v %v", runs, err)
+	}
+	data, err := os.ReadFile(filepath.Join(s.options.Database.Root, "keep-uncommitted.txt"))
+	if err != nil || string(data) != "preserve me" {
+		t.Fatal("lost uncommitted work")
+	}
+}
+
+func TestResumeBaselinePolicyPreservesCommitAndReviewEvidence(t *testing.T) {
+	for _, phase := range []string{"commit", "close", "finalization", "review"} {
+		if storage.ResumeUsesCurrentHead(storage.ExecutionRun{RunProgress: storage.RunProgress{Phase: phase}}) {
+			t.Fatalf("rebased legacy %s evidence", phase)
+		}
+	}
+	if storage.ResumeUsesCurrentHead(storage.ExecutionRun{RunProgress: storage.RunProgress{Phase: "implementation", Finalization: &storage.FinalizationEvidence{}}}) {
+		t.Fatal("rebased finalization")
 	}
 }
