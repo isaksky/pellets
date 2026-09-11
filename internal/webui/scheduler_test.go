@@ -107,7 +107,7 @@ func TestPendingInteractionRendersAfterBrowserReconnectAndDeadProcessRejectsAnsw
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.application.TransitionPellet(context.Background(), f.projects[0], pellet.Reference, storage.PelletVersion(pellet), storage.PelletLifecycleRequest{Operation: storage.PelletStart}); err != nil {
+	if _, err := f.application.TransitionPellet(context.Background(), f.projects[0], pellet.Reference, storage.PelletVersion(pellet), storage.PelletLifecycleRequest{Operation: storage.PelletStart}, f.projects[0].Workspaces[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	recorder := app.ExecutionRecorder{Open: func(ctx context.Context, path string) (storage.ExecutionRunDatabase, error) {

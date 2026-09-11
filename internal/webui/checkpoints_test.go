@@ -38,7 +38,7 @@ func TestWebCheckpointCreationAndInspectorUseSharedContract(t *testing.T) {
 		t.Fatalf("checkpoint inspector %d: %s", response.Code, response.Body.String())
 	}
 	// The shared writer checks readiness even with the current full-row token.
-	_, err = f.application.TransitionPellet(ctx, p, cp.Reference, storage.PelletVersion(cp), storage.PelletLifecycleRequest{Operation: storage.PelletStart})
+	_, err = f.application.TransitionPellet(ctx, p, cp.Reference, storage.PelletVersion(cp), storage.PelletLifecycleRequest{Operation: storage.PelletStart}, p.Workspaces[0].ID)
 	if domain.PublicError(err).Code != "review_checkpoint_not_ready" {
 		t.Fatalf("web bypassed readiness: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestWebCheckpointRejectsStaleSelectedTargetVersions(t *testing.T) {
 	assertStale(stale, "stale-after-reorder")
 
 	stale = storage.PelletVersion(target)
-	started, err := f.application.TransitionPellet(ctx, project, target.Reference, stale, storage.PelletLifecycleRequest{Operation: storage.PelletStart})
+	started, err := f.application.TransitionPellet(ctx, project, target.Reference, stale, storage.PelletLifecycleRequest{Operation: storage.PelletStart}, project.Workspaces[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -70,6 +70,16 @@ go build -o pl ./cmd/pl
 ./pl --version
 ```
 
+To build and install from the checkout into `~/.local/bin`, run:
+
+```bash
+./scripts/build-install.sh
+```
+
+You can pass a different install directory, for example
+`./scripts/build-install.sh "$HOME/bin"`. The script works from any working
+directory and prints a `PATH` setup command if needed.
+
 ### Platform support
 
 | Target | Support and validation |

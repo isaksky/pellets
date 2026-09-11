@@ -59,7 +59,7 @@ func TestHTTPPreflightCrashReceiptPreservesMultilineFilters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.application.TransitionPellet(ctx, f.projects[0], pellet.Reference, storage.PelletVersion(pellet), storage.PelletLifecycleRequest{Operation: storage.PelletStart}); err != nil {
+	if _, err := f.application.TransitionPellet(ctx, f.projects[0], pellet.Reference, storage.PelletVersion(pellet), storage.PelletLifecycleRequest{Operation: storage.PelletStart}, f.projects[0].Workspaces[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "fake-mode"), []byte("preflight_gate"), 0600); err != nil {

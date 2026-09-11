@@ -851,7 +851,14 @@ func (repository *PelletRepository) TransitionWebPellet(ctx context.Context, pro
 }
 
 func (repository *PelletRepository) transitionPellet(ctx context.Context, project storage.ResolvedProject, reference domain.PelletReference, expectedVersion string, request storage.PelletLifecycleRequest) (storage.PelletLifecycleResult, error) {
-	if err := validatePelletProjectContext(project); err != nil {
+	// Browser project-level actions do not need a worktree. CLI transitions
+	// and starts still require a registered workspace.
+	projectOnly := expectedVersion != "" && request.Operation != storage.PelletStart && project.Workspace.ID == 0
+	validate := validatePelletProjectContext
+	if projectOnly {
+		validate = func(p storage.ResolvedProject) error { return validatePelletProject(p.Project) }
+	}
+	if err := validate(project); err != nil {
 		return storage.PelletLifecycleResult{}, err
 	}
 	if err := validateReferenceProject(project, reference); err != nil {
@@ -876,7 +883,13 @@ func (repository *PelletRepository) transitionPellet(ctx context.Context, projec
 		}
 	}()
 
-	if err := ensureStoredProjectWorkspace(ctx, connection, project); err != nil {
+	verify := ensureStoredProjectWorkspace
+	if projectOnly {
+		verify = func(ctx context.Context, q projectQuery, p storage.ResolvedProject) error {
+			return ensureStoredProject(ctx, q, p.Project)
+		}
+	}
+	if err := verify(ctx, connection, project); err != nil {
 		return storage.PelletLifecycleResult{}, err
 	}
 	if err := ensureReferenceProject(ctx, connection, project.Project, reference); err != nil {

@@ -147,7 +147,7 @@ func TestHTTPReopenedGenerationResumesWithFreshConversationAfterPreflightRepair(
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.application.TransitionPellet(ctx, f.projects[0], pellet.Reference, storage.PelletVersion(current), storage.PelletLifecycleRequest{Operation: operation}); err != nil {
+		if _, err := f.application.TransitionPellet(ctx, f.projects[0], pellet.Reference, storage.PelletVersion(current), storage.PelletLifecycleRequest{Operation: operation}, f.projects[0].Workspaces[0].ID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -294,7 +294,7 @@ func TestHTTPResumeWithoutRunRepairsPreflightAndReconstructsExactIntent(t *testi
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := f.application.TransitionPellet(context.Background(), f.projects[0], pellet.Reference, storage.PelletVersion(current), storage.PelletLifecycleRequest{Operation: storage.PelletRelease}); err != nil {
+				if _, err := f.application.TransitionPellet(context.Background(), f.projects[0], pellet.Reference, storage.PelletVersion(current), storage.PelletLifecycleRequest{Operation: storage.PelletRelease, RecoveryWorkspaceID: &current.Workspace.ID}); err != nil {
 					t.Fatal(err)
 				}
 				if got := awaitHTTPSchedule(t, f, form); got.Reason != "schedule_resume_changed" || got.RunID != 0 {
@@ -304,7 +304,7 @@ func TestHTTPResumeWithoutRunRepairsPreflightAndReconstructsExactIntent(t *testi
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := f.application.TransitionPellet(context.Background(), f.projects[0], pellet.Reference, storage.PelletVersion(current), storage.PelletLifecycleRequest{Operation: storage.PelletStart}); err != nil {
+				if _, err := f.application.TransitionPellet(context.Background(), f.projects[0], pellet.Reference, storage.PelletVersion(current), storage.PelletLifecycleRequest{Operation: storage.PelletStart}, f.projects[0].Workspaces[0].ID); err != nil {
 					t.Fatal(err)
 				}
 				gitDir, moved := filepath.Join(root, ".git"), filepath.Join(root, "fake-git-paused")

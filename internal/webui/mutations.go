@@ -270,7 +270,10 @@ func (h *handler) movePellet(response http.ResponseWriter, request *http.Request
 }
 
 func (h *handler) transitionPellet(response http.ResponseWriter, request *http.Request, project storage.Project, reference domain.PelletReference) {
-	if err := requireFields(request.PostForm, []string{"_csrf", "version", "operation", "recover_workspace_id", "confirm_recovery"}); err != nil {
+	if _, ok := request.PostForm["workspace_id"]; !ok {
+		request.PostForm.Set("workspace_id", "")
+	}
+	if err := requireFields(request.PostForm, []string{"_csrf", "version", "operation", "workspace_id", "recover_workspace_id", "confirm_recovery"}); err != nil {
 		h.renderError(response, http.StatusUnprocessableEntity, err, submittedDraft(request.PostForm))
 		return
 	}
@@ -289,7 +292,16 @@ func (h *handler) transitionPellet(response http.ResponseWriter, request *http.R
 		}
 		transition.RecoveryWorkspaceID = &workspaceID
 	}
-	result, err := h.application.TransitionPellet(request.Context(), project, reference, version, transition)
+	var workspaceIDs []int64
+	if raw := request.PostForm.Get("workspace_id"); raw != "" {
+		id, err := parsePositiveID(raw)
+		if err != nil {
+			h.renderError(response, http.StatusUnprocessableEntity, requestError("choose a valid workspace"), submittedDraft(request.PostForm))
+			return
+		}
+		workspaceIDs = append(workspaceIDs, id)
+	}
+	result, err := h.application.TransitionPellet(request.Context(), project, reference, version, transition, workspaceIDs...)
 	if err != nil {
 		h.renderMutationError(response, err, submittedDraft(request.PostForm))
 		return
@@ -392,7 +404,13 @@ func (h *handler) renderMutationError(response http.ResponseWriter, err error, d
 	if errors.As(err, &conflict) {
 		data := pageData{CSRF: h.config.CSRF, Conflict: &conflictView{Draft: draft}, StatusCode: status}
 		if conflict.Pellet != nil {
-			views := makePelletViews([]storage.Pellet{*conflict.Pellet}, conflict.Pellet.Reference.ProjectCode, nil, conflict.Pellet.Reference.String(), storage.WebPelletSort{}, nil, false)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			summary, readErr := h.application.Project(ctx, conflict.Pellet.Reference.ProjectCode)
+			cancel()
+			if readErr == nil {
+				data.Project = summary.Project
+			}
+			views := makePelletViews([]storage.Pellet{*conflict.Pellet}, conflict.Pellet.Reference.ProjectCode, nil, conflict.Pellet.Reference.String(), storage.WebPelletSort{})
 			data.SelectedPellet = &views[0]
 			if conflict.Pellet.Checkpoint != nil {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -674,3 +674,73 @@ func TestQueuePolishPreservesFilteringAndOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestDatabaseScopedLifecycleIgnoresLaunchWorkspace(t *testing.T) {
+	for _, launch := range []string{"outside", "same-project", "other-project"} {
+		t.Run(launch, func(t *testing.T) {
+			f := newHandlerFixture(t, 2)
+			switch launch {
+			case "outside":
+				f.application.Current = nil
+			case "other-project":
+				f.application.Current = &storage.ResolvedProject{Project: f.projects[1], Workspace: f.projects[1].Workspaces[0]}
+			}
+			ctx := context.Background()
+			project := f.projects[0]
+			pellet, err := f.application.CreatePellet(ctx, project, storage.NewPellet{Title: "Database scoped task"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			page := performRequest(f.handler, http.MethodGet, "/projects/project1/tasks/"+pellet.Reference.String(), "", nil)
+			if page.Code != http.StatusOK || strings.Contains(page.Body.String(), "outside a worktree") || !strings.Contains(page.Body.String(), `name="workspace_id"`) {
+				t.Fatalf("task controls: %d %s", page.Code, page.Body.String())
+			}
+			path := "/projects/project1/pellets/" + pellet.Reference.String() + "/transition"
+			transition := func(operation string, workspaceID int64, recover bool) *httptest.ResponseRecorder {
+				t.Helper()
+				form := url.Values{"_csrf": {testCSRF}, "version": {storage.PelletVersion(pellet)}, "operation": {operation}, "recover_workspace_id": {""}, "confirm_recovery": {""}}
+				if workspaceID != 0 {
+					form.Set("workspace_id", strconv.FormatInt(workspaceID, 10))
+				}
+				if recover {
+					form.Set("recover_workspace_id", strconv.FormatInt(pellet.Workspace.ID, 10))
+					form.Set("confirm_recovery", "yes")
+				}
+				response := performMutation(f.handler, path, form, testOrigin, true, "application/x-www-form-urlencoded")
+				pellet, err = f.application.Pellet(ctx, project, pellet.Reference)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return response
+			}
+			for _, op := range []string{"defer", "reopen", "close", "reopen"} {
+				if r := transition(op, 0, false); r.Code != http.StatusOK {
+					t.Fatalf("%s: %d %s", op, r.Code, r.Body.String())
+				}
+			}
+			for _, id := range []int64{0, f.projects[1].Workspaces[0].ID, 999999} {
+				if r := transition("start", id, false); r.Code == http.StatusOK {
+					t.Fatalf("invalid workspace %d accepted", id)
+				}
+				if pellet.Status != domain.PelletOpen {
+					t.Fatal("invalid start mutated task")
+				}
+			}
+			owner := project.Workspaces[0].ID
+			if r := transition("start", owner, false); r.Code != http.StatusOK {
+				t.Fatalf("start: %d %s", r.Code, r.Body.String())
+			}
+			if pellet.Workspace == nil || pellet.Workspace.ID != owner {
+				t.Fatal("wrong owner")
+			}
+			for _, op := range []string{"release", "close", "defer"} {
+				if r := transition(op, 0, false); r.Code == http.StatusOK {
+					t.Fatalf("unconfirmed %s accepted", op)
+				}
+			}
+			if r := transition("release", 0, true); r.Code != http.StatusOK {
+				t.Fatalf("confirmed release: %d %s", r.Code, r.Body.String())
+			}
+		})
+	}
+}

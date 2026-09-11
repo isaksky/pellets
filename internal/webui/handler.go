@@ -202,8 +202,6 @@ type pageData struct {
 	ProjectSummary     storage.WebProjectSummary
 	HasProject         bool
 	MultiProject       bool
-	CurrentProject     bool
-	CurrentWorkspace   *storage.Workspace
 	RunWorkspaces      []runWorkspaceView
 	Area               string
 	TasksURL           string
@@ -237,11 +235,10 @@ type projectView struct {
 }
 
 type workspaceView struct {
-	ID      int64
-	Root    string
-	GitDir  string
-	Current bool
-	Pellet  string
+	ID     int64
+	Root   string
+	GitDir string
+	Pellet string
 }
 
 // runWorkspaceView combines a process-local schedule receipt with the latest
@@ -318,8 +315,6 @@ type pelletView struct {
 	Version           string
 	URL               string
 	Selected          bool
-	OwnerCurrent      bool
-	CanLifecycle      bool
 	Group             string
 	ExternalID        string
 	Priority          string
@@ -512,11 +507,6 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 		MemoriesURL: "/projects/" + url.PathEscape(code) + "/memories",
 		CurrentURL:  pageURL.RequestURI(),
 	}
-	if h.application.Current != nil && h.application.Current.Project.ID == selected.Project.ID {
-		data.CurrentProject = true
-		workspace := h.application.Current.Workspace
-		data.CurrentWorkspace = &workspace
-	}
 	data.Projects, err = h.projectViews(request, projects, code, area)
 	if err != nil {
 		return pageData{}, err
@@ -570,7 +560,7 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 		if err != nil {
 			return pageData{}, err
 		}
-		data.Pellets = makePelletViews(pellets, selected.Project.Code, request.URL.Query(), selectedReferenceText, filters.Sort, data.CurrentWorkspace, data.CurrentProject)
+		data.Pellets = makePelletViews(pellets, selected.Project.Code, request.URL.Query(), selectedReferenceText, filters.Sort)
 		groups, err := h.application.Groups(request.Context(), selected.Project)
 		if err != nil {
 			return pageData{}, err
@@ -581,7 +571,7 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 			if err != nil {
 				return pageData{}, err
 			}
-			views := makePelletViews([]storage.Pellet{pellet}, code, request.URL.Query(), selectedReferenceText, filters.Sort, data.CurrentWorkspace, data.CurrentProject)
+			views := makePelletViews([]storage.Pellet{pellet}, code, request.URL.Query(), selectedReferenceText, filters.Sort)
 			data.SelectedPellet = &views[0]
 			if pellet.Checkpoint != nil {
 				outcome, err := h.application.CheckpointOutcome(request.Context(), pellet)
@@ -597,7 +587,7 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 			}
 			for _, candidate := range active {
 				if candidate.Reference != selectedReference && (candidate.Status == domain.PelletOpen || candidate.Status == domain.PelletInProgress) {
-					data.MoveTargets = append(data.MoveTargets, makePelletViews([]storage.Pellet{candidate}, code, nil, "", filters.Sort, data.CurrentWorkspace, data.CurrentProject)[0])
+					data.MoveTargets = append(data.MoveTargets, makePelletViews([]storage.Pellet{candidate}, code, nil, "", filters.Sort)[0])
 				}
 			}
 		}
@@ -816,10 +806,9 @@ func (h *handler) projectViews(request *http.Request, projects []storage.WebProj
 			}
 		}
 		for _, workspace := range summary.Project.Workspaces {
-			current := h.application.Current != nil && h.application.Current.Workspace.ID == workspace.ID
 			view.Workspaces = append(view.Workspaces, workspaceView{
 				ID: workspace.ID, Root: localPath(workspace.RootPath), GitDir: localPath(workspace.GitDir),
-				Current: current, Pellet: owners[workspace.ID],
+				Pellet: owners[workspace.ID],
 			})
 		}
 		views = append(views, view)
@@ -827,21 +816,19 @@ func (h *handler) projectViews(request *http.Request, projects []storage.WebProj
 	return views, nil
 }
 
-func makePelletViews(pellets []storage.Pellet, code string, query url.Values, selected string, sort storage.WebPelletSort, current *storage.Workspace, currentProject bool) []pelletView {
+func makePelletViews(pellets []storage.Pellet, code string, query url.Values, selected string, sort storage.WebPelletSort) []pelletView {
 	views := make([]pelletView, 0, len(pellets))
 	for _, pellet := range pellets {
 		view := pelletView{
 			Pellet: pellet, Version: storage.PelletVersion(pellet),
 			URL: taskURL(code, query, pellet.Reference.String(), sort), Selected: pellet.Reference.String() == selected,
 			Group: textOrDash(pellet.Group), ExternalID: textOrDash(pellet.ExternalID), Priority: "—",
-			CanLifecycle: currentProject,
 		}
 		if pellet.Priority != nil {
 			view.Priority = strconv.FormatInt(*pellet.Priority, 10)
 		}
 		if pellet.Workspace != nil {
 			view.Owner = fmt.Sprintf("workspace %d · %s", pellet.Workspace.ID, localPath(pellet.Workspace.RootPath))
-			view.OwnerCurrent = current != nil && current.ID == pellet.Workspace.ID
 		}
 		views = append(views, view)
 	}

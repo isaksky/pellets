@@ -171,18 +171,29 @@ func (application *WebApplication) MovePellet(ctx context.Context, project stora
 	return application.Writer.MoveWebPellet(ctx, project, reference, expectedVersion, placement)
 }
 
-func (application *WebApplication) TransitionPellet(ctx context.Context, project storage.Project, reference domain.PelletReference, expectedVersion string, request storage.PelletLifecycleRequest) (storage.PelletLifecycleResult, error) {
-	if application.Current == nil || application.Current.Project.ID != project.ID {
-		return storage.PelletLifecycleResult{}, domain.NewError(
-			domain.Conflict,
-			"web_workspace_unavailable",
-			"lifecycle controls are available only for the web server's current registered project workspace",
-			map[string]any{"project": project.Code},
-		)
+// TransitionPellet uses only the selected project and explicit workspace context.
+// Current is a navigation hint, never an authority for browser mutations.
+func (application *WebApplication) TransitionPellet(ctx context.Context, project storage.Project, reference domain.PelletReference, expectedVersion string, request storage.PelletLifecycleRequest, workspaceIDs ...int64) (storage.PelletLifecycleResult, error) {
+	selected := storage.ResolvedProject{Project: project}
+	if request.Operation == storage.PelletStart {
+		if len(workspaceIDs) != 1 || workspaceIDs[0] <= 0 {
+			return storage.PelletLifecycleResult{}, domain.NewError(domain.Usage, "workspace_required", "choose a workspace to start this task", nil)
+		}
+		summary, err := application.Project(ctx, project.Code)
+		if err != nil {
+			return storage.PelletLifecycleResult{}, err
+		}
+		for _, workspace := range summary.Project.Workspaces {
+			if workspace.ID == workspaceIDs[0] {
+				selected.Workspace = workspace
+				break
+			}
+		}
+		if selected.Workspace.ID == 0 {
+			return storage.PelletLifecycleResult{}, domain.NewError(domain.Usage, "workspace_not_registered", "choose a registered workspace in this project", nil)
+		}
 	}
-	current := *application.Current
-	current.Project = project
-	return application.Writer.TransitionWebPellet(ctx, current, reference, expectedVersion, request)
+	return application.Writer.TransitionWebPellet(ctx, selected, reference, expectedVersion, request)
 }
 
 func projectHasRedirect(project storage.Project, code string) bool {
