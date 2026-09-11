@@ -138,7 +138,7 @@ func TestPendingInteractionRendersAfterBrowserReconnectAndDeadProcessRejectsAnsw
 	if err != nil {
 		t.Fatal(err)
 	}
-	response := performRequest(f.handler, http.MethodGet, "/projects/project1/tasks", "", nil)
+	response := performRequest(f.handler, http.MethodGet, "/projects/project1/workspaces/1", "", nil)
 	body := response.Body.String()
 	for _, want := range []string{"Which complete choice?", "Focused", "Only the exact target.", `type="password"`, `name="request_id" value="&#34;reconnect&#34;"`} {
 		if response.Code != http.StatusOK || !strings.Contains(body, want) {
@@ -159,7 +159,7 @@ func TestPendingInteractionRendersAfterBrowserReconnectAndDeadProcessRejectsAnsw
 	if err != nil {
 		t.Fatal(err)
 	}
-	response = performRequest(f.handler, http.MethodGet, "/projects/project1/tasks", "", nil)
+	response = performRequest(f.handler, http.MethodGet, "/projects/project1/workspaces/1", "", nil)
 	for _, want := range []string{"Nothing restarts automatically", "at implementation, then continue watch (7 pellets remaining", `name="mode" value="watch"`, `name="resume_from" value="` + strconv.FormatInt(run.ID, 10) + `"`} {
 		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), want) {
 			t.Fatalf("saved recovery intent missing %q: %d %s", want, response.Code, response.Body.String())

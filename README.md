@@ -464,6 +464,15 @@ registered project, workspace, pellet state, and memory; it supports routine
 queue and memory edits with optimistic conflict detection. Purge, memory
 removal, and other irreversible actions are intentionally absent.
 
+The browser keeps the database location and project navigation visible, even
+with one project. Each project has Queue, Workspaces, and Memory views. The
+queue is shared across worktrees; workspace cards open dedicated activity and
+run controls at `/projects/CODE/workspaces/ID`. Workspace attention counts stay
+visible in the Workspaces tab while browsing the queue or memory. Search stays visible,
+with optional filters in a disclosure. Task titles open the inspector; Queue
+order restores priority sorting while retaining filters. Project details holds
+the theme setting and repository metadata.
+
 `pl web` remains a deprecated compatibility alias with the same options and
 foreground behavior. New scripts and documentation must use `pl server`.
 

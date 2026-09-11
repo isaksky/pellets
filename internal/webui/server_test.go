@@ -76,7 +76,8 @@ func TestDataVersionLoopIdlesWithoutClientsCoalescesAndDoesNotBlock(t *testing.T
 	defer unsubscribeFirst()
 	second, unsubscribeSecond := hub.subscribe()
 	defer unsubscribeSecond()
-	waitFor(t, func() bool { return monitor.callCount() >= 1 })
+	waitEvent(t, first, "initial baseline")
+	waitEvent(t, second, "initial baseline")
 	baselineCalls := monitor.callCount()
 	monitor.set(2)
 	waitFor(t, func() bool { return monitor.callCount() > baselineCalls })
@@ -173,7 +174,7 @@ func TestRealSQLiteMonitorDeliversExternalAndWebCommitsAndMissedEventsRecover(t 
 		monitor.Close()
 	}()
 	events, unsubscribe := hub.subscribe()
-	time.Sleep(15 * time.Millisecond) // establish the pinned-connection baseline
+	waitEvent(t, events, "initial baseline")
 
 	webPellet, err := fixture.application.CreatePellet(context.Background(), fixture.projects[0], storage.NewPellet{Title: "web writer commit"})
 	if err != nil {

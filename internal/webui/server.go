@@ -308,6 +308,9 @@ func runDataVersionMonitor(ctx context.Context, monitor Monitor, hub *eventHub, 
 			if !haveBaseline {
 				baseline = version
 				haveBaseline = true
+				// A commit can precede the first sample after a client connects.
+				// Refresh once at the baseline so that startup window cannot lose it.
+				hub.broadcast()
 				continue
 			}
 			if version == baseline {

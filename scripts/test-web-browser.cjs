@@ -132,7 +132,7 @@ const until = async (predicate, message) => {
   await until(async () => (await page.locator('.task-title').allTextContents()).includes('External live update'), 'CLI commit did not refresh browser');
 
   assert.equal(await page.locator('#project-counts').textContent(), '3 open · 0 active · 0 memories');
-  assert.equal(await page.locator('#area-tabs a').first().textContent(), 'Tasks 3');
+  assert.equal(await page.locator('#area-tabs a').first().textContent(), 'Queue 3');
   assert.equal(await page.evaluate(() => window.retainedRow === document.querySelector('.task-row') && window.retainedTable === document.querySelector('.table-scroll') && window.retainedFocus === document.activeElement), true, 'Live update replaced stable DOM or lost focus');
   let refreshRequests = 0;
   const countRefresh = request => {

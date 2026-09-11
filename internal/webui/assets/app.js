@@ -141,7 +141,7 @@ import { action, actions } from "./datastar-1.0.3.js";
   document.addEventListener("click", function (event) {
     var sorter = event.target.closest(".task-sort");
     if (sorter) sortOpenerID = sorter.id;
-    var opener = event.target.closest(".row-link, .memory-card > a");
+    var opener = event.target.closest(".row-link, .task-title, .memory-card > a");
     if (!opener) return;
     inspectorOpener = opener;
     inspectorOpenerHref = opener.getAttribute("href") || "";
@@ -296,6 +296,7 @@ import { action, actions } from "./datastar-1.0.3.js";
       }
       state.applied = true;
       if (patchID === state.targetID) state.primaryApplied = true;
+      if (patchID === "app-content") state.bootstrapApplied = true;
       queueMicrotask(function () { afterPatch(document.getElementById(patchID) || document); });
     } else if (detail.type === "datastar-patch-signals") {
       if (!state.applied || state.controller.signal.aborted || state.route !== routeRevision) {
@@ -312,6 +313,14 @@ import { action, actions } from "./datastar-1.0.3.js";
         var requestID = state.el.querySelector("input[name=request_id]");
         if (requestID) requestID.value = "";
         clearCheckpointSelection();
+      }
+      if (state.automatic && state.bootstrapApplied && result.status < 400 && result.url) {
+        var destination = new URL(result.url, location.href);
+        if (destination.origin === location.origin) {
+          history.replaceState(history.state, "", destination.pathname + destination.search);
+          var heading = document.querySelector(".project-heading h1");
+          document.title = heading ? heading.textContent + " · Pellets" : "Pellets";
+        }
       }
       // Related regions can refresh even when newer edits reject the inspector.
       // Advance history only if the requested destination was actually accepted.
@@ -546,7 +555,7 @@ import { action, actions } from "./datastar-1.0.3.js";
     var table = document.querySelector(".table-scroll");
     if (table) table.scrollLeft = tableScrollLeft;
     if ((!inspectorOpener || !document.contains(inspectorOpener)) && inspectorOpenerHref) {
-      Array.prototype.some.call(document.querySelectorAll(".row-link, .memory-card > a"), function (candidate) {
+      Array.prototype.some.call(document.querySelectorAll(".row-link, .task-title, .memory-card > a"), function (candidate) {
         if (candidate.getAttribute("href") !== inspectorOpenerHref) return false;
         inspectorOpener = candidate;
         return true;
@@ -639,3 +648,9 @@ import { action, actions } from "./datastar-1.0.3.js";
     if (!document.hidden) refreshRegions();
   });
 }());
+
+document.addEventListener("click", function (event) {
+ if (!event.target.closest("[data-create-memory]")) return;
+ var form = document.querySelector(".create-popover form[action$='/memories']");
+ if (form) { form.closest("details").open = true; form.querySelector("textarea").focus(); }
+});

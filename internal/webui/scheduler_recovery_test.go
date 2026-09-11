@@ -162,7 +162,7 @@ func TestHTTPReopenedGenerationResumesWithFreshConversationAfterPreflightRepair(
 		t.Fatalf("preflight captured a new run: %+v %v", runs, err)
 	}
 	oldRevision := runs[0].ImplementationRevision
-	response := performRequest(f.handler, http.MethodGet, "/projects/project1/tasks", "", nil)
+	response := performRequest(f.handler, http.MethodGet, "/projects/project1/workspaces/1", "", nil)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "data-no-run-resume") || strings.Contains(response.Body.String(), `name="resume_from"`) {
 		t.Fatalf("old generation blocked fresh Resume: %s", response.Body.String())
 	}
@@ -223,7 +223,7 @@ func TestHTTPCurrentGenerationRunRequiresExactAttemptAndPreventsOverlap(t *testi
 	if got := awaitHTTPSchedule(t, f, form); got.Reason != "schedule_exact_resume_required" || got.RunID != 0 {
 		t.Fatalf("current conversation bypassed: %+v", got)
 	}
-	response = performRequest(f.handler, http.MethodGet, "/projects/project1/tasks", "", nil)
+	response = performRequest(f.handler, http.MethodGet, "/projects/project1/workspaces/1", "", nil)
 	if strings.Contains(response.Body.String(), "data-no-run-resume") || !strings.Contains(response.Body.String(), `name="resume_from" value="`+strconv.FormatInt(run.ID, 10)+`"`) {
 		t.Fatalf("current generation recovery lost its exact attempt: %s", response.Body.String())
 	}
@@ -261,7 +261,7 @@ func TestHTTPResumeWithoutRunRepairsPreflightAndReconstructsExactIntent(t *testi
 			if err != nil || len(runs) != 0 {
 				t.Fatalf("preflight created run: %+v %v", runs, err)
 			}
-			response := performRequest(f.handler, http.MethodGet, "/projects/project1/tasks?group=n&external_id=different", "", nil)
+			response := performRequest(f.handler, http.MethodGet, "/projects/project1/workspaces/1?group=n&external_id=different", "", nil)
 			for _, want := range []string{"data-no-run-resume", "No run or saved schedule intent exists", `name="mode" required`, `name="resume_pellet" value="1"`, `name="group" value=" Exact Group "`, `name="external_id" value="Exact:ID"`} {
 				if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), want) {
 					t.Fatalf("missing recovery %q: %s", want, response.Body.String())

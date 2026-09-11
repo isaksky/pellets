@@ -12,7 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"pellets/internal/domain"
 	"pellets/internal/storage"
+	"pellets/internal/storage/sqlite"
 )
 
 func TestDatastarFragmentsAndFullPageNonce(t *testing.T) {
@@ -32,7 +34,7 @@ func TestDatastarFragmentsAndFullPageNonce(t *testing.T) {
 		}
 		previousNonce = nonce
 	}
-	for _, target := range []string{"tasks-area", "task-list", "workspace-strip", "run-dashboard", "project-record", "inspector-host"} {
+	for _, target := range []string{"tasks-area", "task-list", "run-dashboard", "project-record", "inspector-host"} {
 		response := performRequest(fixture.handler, http.MethodGet, path+"?datastar=%7B%7D", "", http.Header{
 			"Datastar-Request": {"true"}, "Pellets-Target": {target},
 		})
@@ -143,7 +145,7 @@ func TestDatastarLiveResponseBundlesRelatedRegions(t *testing.T) {
 		"Datastar-Request": {"true"}, "Pellets-Target": {"live"},
 	})
 	body := response.Body.String()
-	for _, target := range []string{"project-counts", "area-tabs", "project-record", "workspace-strip", "task-list", "inspector-host"} {
+	for _, target := range []string{"project-counts", "area-tabs", "project-record", "project-drawer", "task-list", "inspector-host"} {
 		if strings.Count(body, "data: selector #"+target+"\n") != 1 {
 			t.Errorf("expected one patch for %s", target)
 		}
@@ -211,4 +213,51 @@ func (w *failingSSEWriter) FlushError() error {
 	}
 	w.ResponseRecorder.Flush()
 	return nil
+}
+
+func TestDatastarEmptyDatabaseBecomesProjectWithoutReload(t *testing.T) {
+	fixture := newHandlerFixture(t, 0)
+	response := performRequest(fixture.handler, http.MethodGet, "/", "", nil)
+	for _, want := range []string{"No registered projects", `pl add "First issue"`, `data-on:pellets-refresh__document`, `id="app-content"`} {
+		if !strings.Contains(response.Body.String(), want) {
+			t.Fatalf("empty page missing %q", want)
+		}
+	}
+	refresh := func() *httptest.ResponseRecorder {
+		return performRequest(fixture.handler, http.MethodGet, "/?datastar=%7B%7D", "", http.Header{"Datastar-Request": {"true"}, "Pellets-Target": {"live"}})
+	}
+	response = refresh()
+	assertDatastarResult(t, response, http.StatusOK)
+	if !strings.Contains(response.Body.String(), "No registered projects") || strings.Contains(response.Body.String(), "<!doctype") {
+		t.Fatal("empty refresh is not an empty-state patch")
+	}
+	// Separate database connections model CLI registration and its first issue.
+	db, err := sqlite.OpenProjectDatabase(context.Background(), fixture.databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	project, _, err := db.RegisterProject(context.Background(), storage.ProjectRegistration{Code: "first", GitCommonDir: domain.LocalPath{Value: "first/.git", Relative: true}, WorkspaceRoot: domain.LocalPath{Value: "first", Relative: true}, GitDir: domain.LocalPath{Value: "first/.git", Relative: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := sqlite.OpenPelletRepository(context.Background(), fixture.databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	if _, err := repo.CreatePellet(context.Background(), storage.ResolvedProject{Project: project, Workspace: project.Workspaces[0]}, storage.NewPellet{Title: "First issue from CLI"}); err != nil {
+		t.Fatal(err)
+	}
+	response = refresh()
+	assertDatastarResult(t, response, http.StatusOK)
+	body := response.Body.String()
+	for _, want := range []string{"data: selector #app-content", `id="task-list"`, "First issue from CLI", `"url":"/projects/first/tasks?direction=asc\u0026sort=priority"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("bootstrap missing %q: %s", want, body)
+		}
+	}
+	if strings.Count(body, "event: datastar-patch-elements") != 1 || strings.Contains(body, "No registered projects") || response.Header().Get("Location") != "" {
+		t.Fatalf("bootstrap is not a single shell morph: %s", body)
+	}
 }

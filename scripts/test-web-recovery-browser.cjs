@@ -84,7 +84,7 @@ async function startServer(root) {
     page.setDefaultTimeout(15000);
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.goto(origin);
+    await page.goto(origin + `/projects/${target.project}/workspaces/1`);
     await page.waitForFunction(() => !document.documentElement.hasAttribute('data-nonce'));
     const resume = page.locator('form[data-no-run-resume]');
     const events = () => {
@@ -138,7 +138,7 @@ async function startServer(root) {
         };
         await until(() => [...ownedPIDs, guardian].every(pid => !alive(pid)), 'Custodian did not settle its process family after SIGKILL');
         origin = await startServer(root);
-        await page.goto(origin);
+        await page.goto(origin + `/projects/${target.project}/workspaces/1`);
         assert.equal(fs.readFileSync(lockPath, 'utf8'), receiptBytes, 'Restart changed the recovery receipt without Resume');
         assert.equal(events().filter(event => event.method === 'thread/start' || event.method === 'turn/start').length, 0, 'Restart ran work automatically');
       } else {
@@ -157,7 +157,7 @@ async function startServer(root) {
         await stopServer();
         origin = await startServer(root);
       }
-      await page.goto(origin + `/projects/${target.project}/tasks?group=n&external_id=unrelated-page-filter`);
+      await page.goto(origin + `/projects/${target.project}/workspaces/1?group=n&external_id=unrelated-page-filter`);
     } else {
       fs.writeFileSync(modeFile, 'schedule_gate');
     }

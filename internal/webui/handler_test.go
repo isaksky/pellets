@@ -99,13 +99,13 @@ func TestHandlerRendersAuthoritativeResponsiveProjectViewsAndEscapesHTML(t *test
 		t.Fatalf("GET status = %d; body=%s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	for _, required := range []string{"project1", "workspace-strip", "run-dashboard", "Workspace activity", "Run one", "Drain", "Watch", "New task", "All states", "System", "Dark", "Light", "app.js"} {
+	for _, required := range []string{"project1", "project-rail", "Database", "Workspaces", "Queue", "New task", "All states", "System", "Dark", "Light", "app.js"} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("page missing %q", required)
 		}
 	}
-	if strings.Contains(body, "project-rail") {
-		t.Fatal("one-project page rendered a project rail")
+	if strings.Contains(body, "run-dashboard") {
+		t.Fatal("queue page rendered workspace execution controls")
 	}
 	if strings.Contains(body, `<script>"unsafe"</script>`) || !strings.Contains(body, `&lt;script&gt;&#34;unsafe&#34;&lt;/script&gt;`) {
 		t.Fatalf("task title was not safely escaped: %s", body)
@@ -142,7 +142,7 @@ func TestHandlerRendersAuthoritativeResponsiveProjectViewsAndEscapesHTML(t *test
 
 func TestHandlerRefusesDisplayedUngroupedScheduleFilter(t *testing.T) {
 	fixture := newHandlerFixture(t, 1)
-	response := performRequest(fixture.handler, http.MethodGet, "/projects/project1/tasks?group=n", "", nil)
+	response := performRequest(fixture.handler, http.MethodGet, "/projects/project1/workspaces/1?group=n", "", nil)
 	if response.Code != http.StatusOK {
 		t.Fatalf("page status = %d", response.Code)
 	}
@@ -510,14 +510,14 @@ func TestHandlerProjectAndWorkspaceNavigationAreLiveFragments(t *testing.T) {
 	}
 
 	single := newHandlerFixture(t, 1)
-	headers.Set("Pellets-Target", "workspace-strip")
-	response = performRequest(single.handler, http.MethodGet, "/projects/project1/tasks", "", headers)
+	headers.Set("Pellets-Target", "run-dashboard")
+	response = performRequest(single.handler, http.MethodGet, "/projects/project1/workspaces", "", headers)
 	body = response.Body.String()
-	if response.Code != http.StatusOK || !strings.Contains(body, `id="workspace-strip"`) || !strings.Contains(body, `data: selector #area-tabs`) || strings.Contains(body, "<!doctype html>") {
+	if response.Code != http.StatusOK || !strings.Contains(body, `id="run-dashboard"`) || !strings.Contains(body, `data: selector #area-tabs`) || strings.Contains(body, "<!doctype html>") {
 		t.Fatalf("workspace strip fragment = %d %s", response.Code, body)
 	}
 	headers.Set("Pellets-Target", "project-record")
-	response = performRequest(single.handler, http.MethodGet, "/projects/project1/tasks", "", headers)
+	response = performRequest(single.handler, http.MethodGet, "/projects/project1/workspaces", "", headers)
 	body = response.Body.String()
 	if response.Code != http.StatusOK || !strings.Contains(body, `id="project-record"`) || !strings.Contains(body, "Git common directory") || !strings.Contains(body, "Workspace 1") || strings.Contains(body, "<!doctype html>") {
 		t.Fatalf("project record fragment = %d %s", response.Code, body)
@@ -628,4 +628,49 @@ func performMutation(handler http.Handler, path string, form url.Values, origin 
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	return response
+}
+
+func TestProjectHierarchyAndWorkspaceRoutes(t *testing.T) {
+	f := newHandlerFixture(t, 2)
+	for _, area := range []string{"tasks", "memories", "workspaces"} {
+		response := performRequest(f.handler, http.MethodGet, "/projects/project1/"+area, "", nil)
+		body := response.Body.String()
+		if response.Code != http.StatusOK || !strings.Contains(body, `aria-label="Projects"`) || !strings.Contains(body, `class="database-context"`) {
+			t.Fatalf("missing project shell on %s: %d", area, response.Code)
+		}
+		if strings.Contains(body, `data-schedule`) || strings.Contains(body, `id="workspace-strip"`) {
+			t.Fatalf("execution controls or duplicate strip leaked into %s", area)
+		}
+	}
+	for _, path := range []string{"/projects/project1/workspaces/0", "/projects/project1/workspaces/bad", "/projects/project1/workspaces/2"} {
+		response := performRequest(f.handler, http.MethodGet, path, "", nil)
+		if response.Code != http.StatusNotFound {
+			t.Errorf("%s = %d", path, response.Code)
+		}
+	}
+	path := "/projects/project1/workspaces/1"
+	response := performRequest(f.handler, http.MethodGet, path, "", nil)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `data-schedule`) || strings.Contains(response.Body.String(), `id="tasks-area"`) {
+		t.Fatalf("workspace detail missing controls: %d %s", response.Code, response.Body.String())
+	}
+	response = performRequest(f.handler, http.MethodGet, path, "", http.Header{"Datastar-Request": {"true"}, "Pellets-Target": {"live"}})
+	body := response.Body.String()
+	if strings.Count(body, "data: selector #run-dashboard\n") != 1 || !strings.Contains(body, `data-schedule`) || strings.Contains(body, "data: selector #task-list\n") {
+		t.Fatalf("workspace refresh lost selected detail: %s", body)
+	}
+}
+
+func TestQueuePolishPreservesFilteringAndOrder(t *testing.T) {
+	f := newHandlerFixture(t, 1)
+	p, err := f.application.CreatePellet(context.Background(), f.projects[0], storage.NewPellet{Title: "Clickable title"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := performRequest(f.handler, http.MethodGet, "/projects/project1/tasks?status=open&sort=title", "", http.Header{"Datastar-Request": {"true"}, "Pellets-Target": {"task-list"}})
+	body := response.Body.String()
+	for _, want := range []string{`data: selector #filter-summary`, `Filters <span class="badge">1</span>`, `data: selector #queue-order`, `sort=priority&amp;status=open`, `class="task-title" href="/projects/project1/tasks/` + p.Reference.String(), `title="` + formatTime(p.UpdatedAt) + `"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("filtered queue missing %q", want)
+		}
+	}
 }

@@ -40,7 +40,7 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 		}
 	}
 	for _, required := range []string{
-		`new EventSource("/events")`, `pellets-invalidate`, `data-on-interval__duration.35s`, `id="project-drawer"`, `id="workspace-strip"`, `id="project-record"`, `data-protect-dirty`,
+		`new EventSource("/events")`, `pellets-invalidate`, `data-on-interval__duration.35s`, `id="project-drawer"`, `class="database-context"`, `id="project-record"`, `data-protect-dirty`,
 		`datastar-fetch`, `target.id === "project-drawer"`, `target.id === "project-record"`,
 		`scope.matches("[data-inspector]")`, `document.querySelector("#inspector-host [data-inspector], #inspector-host .error-state")`, `classList.toggle("has-inspector", hasInspector)`,
 		`closest("form.dirty-track")`, `state.automatic && (dirtyInspector()`,
@@ -162,7 +162,7 @@ func TestTaskTitleColumnUsesAvailableWidthBeforeTruncating(t *testing.T) {
 	css := embeddedText(t, "assets/app.css")
 	templates := embeddedText(t, "templates/main.html")
 
-	if strings.Count(templates, `class="task-title-column"`) != 2 {
+	if !strings.Contains(templates, `{{if .TitleColumn}} task-title-column{{end}}`) || !strings.Contains(templates, `<td class="task-title-column">`) {
 		t.Fatal("task title header and cells must share the flexible column sizing rule")
 	}
 	for _, required := range []string{
@@ -186,11 +186,11 @@ func TestTaskDescriptionEditorUsesBoundedViewportResponsiveHeight(t *testing.T) 
 	css := embeddedText(t, "assets/app.css")
 	templates := embeddedText(t, "templates/main.html")
 
-	const taskEditor = `<textarea class="task-description-editor" name="description" rows="9">`
+	const taskEditor = `<textarea class="task-description-editor" name="description" rows="4">`
 	if !strings.Contains(templates, taskEditor) || strings.Count(templates, `task-description-editor`) != 1 {
 		t.Fatal("only the task inspector description textarea must opt into responsive sizing")
 	}
-	if !strings.Contains(css, `.task-description-editor { height: clamp(12rem, 32vh, 24rem); }`) {
+	if !strings.Contains(css, `.task-description-editor { height: auto; min-height: 7rem; max-height: 40vh; field-sizing: content; }`) {
 		t.Fatal("task inspector description height must respond to the viewport within useful bounds")
 	}
 	if !strings.Contains(css, `textarea { resize: vertical; min-height: 3.2rem; }`) {

@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -47,10 +48,24 @@ func newHandler(application *app.WebApplication, hub *eventHub, config handlerCo
 		"statusLabel":   statusLabel,
 		"runStateLabel": runStateLabel,
 		"formatTime":    formatTime,
-		"text":          nullableText,
-		"path":          localPath,
-		"eqStatus":      func(left domain.PelletStatus, right string) bool { return string(left) == right },
-		"sameID":        func(left, right int64) bool { return left == right },
+		"relativeTime":  relativeTime,
+		"filterCount": func(f filterView) int {
+			n := 0
+			if f.Status != "" {
+				n++
+			}
+			if f.Group != "" {
+				n++
+			}
+			if f.ExternalID != "" {
+				n++
+			}
+			return n
+		},
+		"text":     nullableText,
+		"path":     localPath,
+		"eqStatus": func(left domain.PelletStatus, right string) bool { return string(left) == right },
+		"sameID":   func(left, right int64) bool { return left == right },
 		"lifecycle": func(page pageData, operation string) lifecycleFormView {
 			return lifecycleFormView{Page: page, Operation: operation, Label: statusLabel(operation)}
 		},
@@ -174,33 +189,39 @@ func (h *handler) serveEvents(response http.ResponseWriter, request *http.Reques
 }
 
 type pageData struct {
-	Nonce            string
-	CSRF             string
-	Projects         []projectView
-	Project          storage.Project
-	ProjectSummary   storage.WebProjectSummary
-	HasProject       bool
-	MultiProject     bool
-	CurrentProject   bool
-	CurrentWorkspace *storage.Workspace
-	RunWorkspaces    []runWorkspaceView
-	Area             string
-	TasksURL         string
-	MemoriesURL      string
-	CurrentURL       string
-	CloseURL         string
-	Pellets          []pelletView
-	Memories         []memoryView
-	Groups           []groupView
-	Filters          filterView
-	SortHeaders      []sortHeaderView
-	SelectedPellet   *pelletView
-	SelectedMemory   *memoryView
-	MoveTargets      []pelletView
-	Flash            string
-	Conflict         *conflictView
-	Error            string
-	StatusCode       int
+	QueueOrderURL      string
+	DatabaseLabel      string
+	DatabasePath       string
+	WorkspacesURL      string
+	SelectedWorkspace  int64
+	WorkspaceAttention int
+	Nonce              string
+	CSRF               string
+	Projects           []projectView
+	Project            storage.Project
+	ProjectSummary     storage.WebProjectSummary
+	HasProject         bool
+	MultiProject       bool
+	CurrentProject     bool
+	CurrentWorkspace   *storage.Workspace
+	RunWorkspaces      []runWorkspaceView
+	Area               string
+	TasksURL           string
+	MemoriesURL        string
+	CurrentURL         string
+	CloseURL           string
+	Pellets            []pelletView
+	Memories           []memoryView
+	Groups             []groupView
+	Filters            filterView
+	SortHeaders        []sortHeaderView
+	SelectedPellet     *pelletView
+	SelectedMemory     *memoryView
+	MoveTargets        []pelletView
+	Flash              string
+	Conflict           *conflictView
+	Error              string
+	StatusCode         int
 }
 
 type projectView struct {
@@ -227,6 +248,8 @@ type workspaceView struct {
 // durable attempt. The receipt is useful while this server is alive; the run
 // remains authoritative after a browser reconnect or server restart.
 type runWorkspaceView struct {
+	Name              string
+	URL               string
 	ID                int64
 	Root              string
 	ActivePellet      string
@@ -362,7 +385,7 @@ func (h *handler) servePage(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	code, area := segments[1], segments[2]
-	if area != "tasks" && area != "memories" || len(segments) > 4 {
+	if area != "tasks" && area != "memories" && area != "workspaces" || len(segments) > 4 {
 		http.NotFound(response, request)
 		return
 	}
@@ -397,8 +420,6 @@ func (h *handler) servePage(response http.ResponseWriter, request *http.Request)
 			templateName = "memory-list"
 		case "project-drawer":
 			templateName = "project-rail"
-		case "workspace-strip":
-			templateName = "workspace-strip"
 		case "run-dashboard":
 			templateName = "run-dashboard"
 		case "project-record":
@@ -414,6 +435,11 @@ func (h *handler) servePage(response http.ResponseWriter, request *http.Request)
 }
 
 func (h *handler) serveRoot(response http.ResponseWriter, request *http.Request) {
+	stream := request.Header.Get("Datastar-Request") == "true"
+	if stream && request.Header.Get("Pellets-Target") != "live" {
+		http.Error(response, "invalid fragment target", http.StatusBadRequest)
+		return
+	}
 	projects, err := h.application.Projects(request.Context())
 	if err != nil {
 		h.renderError(response, statusForError(err), err, nil)
@@ -421,7 +447,11 @@ func (h *handler) serveRoot(response http.ResponseWriter, request *http.Request)
 	}
 	if len(projects) == 0 {
 		h.setCSRFCookie(response)
-		h.render(response, http.StatusOK, "page", pageData{CSRF: h.config.CSRF})
+		name := "page"
+		if stream {
+			name = "app-content"
+		}
+		h.render(response, http.StatusOK, name, pageData{CSRF: h.config.CSRF, DatabasePath: h.application.Database.Path, CurrentURL: "/"})
 		return
 	}
 	code := h.config.InitialProject
@@ -436,7 +466,21 @@ func (h *handler) serveRoot(response http.ResponseWriter, request *http.Request)
 	if code == "" || !slices.ContainsFunc(projects, func(project storage.WebProjectSummary) bool { return project.Project.Code == code }) {
 		code = projects[0].Project.Code
 	}
-	http.Redirect(response, request, "/projects/"+url.PathEscape(code)+"/tasks", http.StatusSeeOther)
+	path := "/projects/" + url.PathEscape(code) + "/tasks"
+	if stream {
+		// Bootstrap the regions absent from the empty page in one Datastar morph.
+		pageRequest := request.Clone(request.Context())
+		pageRequest.URL.Path, pageRequest.URL.RawQuery = path, ""
+		data, err := h.loadPage(pageRequest, code, "tasks", pathSegments(path))
+		if err != nil {
+			h.renderError(response, statusForError(err), err, nil)
+			return
+		}
+		h.setCSRFCookie(response)
+		h.render(response, http.StatusOK, "app-content", data)
+		return
+	}
+	http.Redirect(response, request, path, http.StatusSeeOther)
 }
 
 func (h *handler) loadPage(request *http.Request, code, area string, segments []string) (pageData, error) {
@@ -461,6 +505,7 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 		return pageData{}, domain.NewError(domain.NotFound, "project_not_registered", "the project is not registered in this Pellets database", map[string]any{"code": code})
 	}
 	data := pageData{
+		DatabaseLabel: h.application.Database.Root, DatabasePath: h.application.Database.Path, WorkspacesURL: "/projects/" + url.PathEscape(code) + "/workspaces",
 		CSRF: h.config.CSRF, Project: selected.Project, ProjectSummary: selected, HasProject: true,
 		MultiProject: len(projects) > 1, Area: area,
 		TasksURL:    "/projects/" + url.PathEscape(code) + "/tasks",
@@ -479,6 +524,22 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 	data.RunWorkspaces, err = h.runWorkspaceViews(request, selected.Project)
 	if err != nil {
 		return pageData{}, err
+	}
+	for _, workspace := range data.RunWorkspaces {
+		if workspace.RecoveryAttention != "" || (workspace.Run != nil && (workspace.Run.Attention || workspace.Run.Awaiting || workspace.Run.Interrupted || workspace.Run.UnownedActive)) {
+			data.WorkspaceAttention++
+		}
+	}
+	if area == "workspaces" {
+		_, filters, filterErr := parseFilters(request.URL.Query())
+		if filterErr != nil {
+			return pageData{}, filterErr
+		}
+		for i := range data.RunWorkspaces {
+			data.RunWorkspaces[i].ExternalID = filters.ExternalID
+			data.RunWorkspaces[i].Group = filters.GroupText
+			data.RunWorkspaces[i].UngroupedFilter = filters.GroupUngrouped
+		}
 	}
 	if area == "tasks" {
 		var selectedReference domain.PelletReference
@@ -502,6 +563,7 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 			data.RunWorkspaces[index].UngroupedFilter = view.GroupUngrouped
 		}
 		data.TasksURL = taskURL(code, nil, "", filters.Sort)
+		data.QueueOrderURL = taskURL(code, request.URL.Query(), selectedReferenceText, storage.WebPelletSort{})
 		data.CurrentURL = taskURL(code, request.URL.Query(), selectedReferenceText, filters.Sort)
 		data.SortHeaders = makeSortHeaderViews(code, request.URL.Query(), selectedReferenceText, filters.Sort)
 		pellets, err := h.application.Pellets(request.Context(), selected.Project, filters)
@@ -539,7 +601,7 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 				}
 			}
 		}
-	} else {
+	} else if area == "memories" {
 		selectedMemoryID := int64(0)
 		if len(segments) == 4 {
 			selectedMemoryID, err = domain.ParseMemoryID(segments[3])
@@ -562,6 +624,13 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 			data.CloseURL = data.MemoriesURL
 		}
 	}
+	if area == "workspaces" && len(segments) == 4 {
+		id, parseErr := strconv.ParseInt(segments[3], 10, 64)
+		if parseErr != nil || !slices.ContainsFunc(data.RunWorkspaces, func(w runWorkspaceView) bool { return w.ID == id }) {
+			return pageData{}, domain.NewError(domain.NotFound, "workspace_not_registered", "the workspace does not belong to this project", nil)
+		}
+		data.SelectedWorkspace = id
+	}
 	return data, nil
 }
 
@@ -579,7 +648,13 @@ func (h *handler) runWorkspaceViews(request *http.Request, project storage.Proje
 		}
 	}
 	for _, workspace := range project.Workspaces {
-		view := runWorkspaceView{ID: workspace.ID, Root: localPath(workspace.RootPath)}
+		root := workspace.RootPath.Value
+		if workspace.RootPath.Relative {
+			root = filepath.Join(h.application.Database.Root, root)
+		}
+		name := filepath.Base(filepath.Clean(root))
+		view := runWorkspaceView{ID: workspace.ID, Root: localPath(workspace.RootPath), Name: name,
+			URL: "/projects/" + url.PathEscape(project.Code) + "/workspaces/" + strconv.FormatInt(workspace.ID, 10)}
 		owned, hasOwned := owners[workspace.ID]
 		if hasOwned {
 			view.ActivePellet = owned.Reference.String()
@@ -1065,11 +1140,12 @@ func (h *handler) renderUpdates(response *datastarResponse, status int, primary 
 	if primary != "live" {
 		names = append(names, primary)
 	}
-	names = append(names, "project-counts", "area-tabs", "project-record", "run-dashboard")
-	if data.MultiProject {
-		names = append(names, "project-rail")
-	} else {
-		names = append(names, "workspace-strip")
+	names = append(names, "project-counts", "area-tabs", "project-record", "project-rail")
+	if data.Area == "workspaces" {
+		names = append(names, "run-dashboard")
+	}
+	if data.Area == "tasks" {
+		names = append(names, "filter-summary", "queue-order")
 	}
 	if data.Area == "tasks" && primary != "tasks-area" && primary != "task-list" {
 		names = append(names, "task-list")
@@ -1079,6 +1155,9 @@ func (h *handler) renderUpdates(response *datastarResponse, status int, primary 
 	}
 	if primary == "live" {
 		names = append(names, "inspector")
+	}
+	if primary == "app-content" {
+		names = []string{"app-content"}
 	}
 	type patch struct{ selector, mode, html string }
 	patches := []patch{}
@@ -1107,4 +1186,20 @@ func (h *handler) renderUpdates(response *datastarResponse, status int, primary 
 		response.patch(patch.selector, patch.mode, patch.html)
 	}
 	response.result(status, data.CurrentURL)
+}
+
+func relativeTime(value time.Time) string {
+	age := time.Since(value)
+	switch {
+	case age < time.Minute:
+		return "Just now"
+	case age < time.Hour:
+		return fmt.Sprintf("%dm ago", int(age.Minutes()))
+	case age < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(age.Hours()))
+	case age < 7*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(age.Hours()/24))
+	default:
+		return value.Format("Jan 2, 2006")
+	}
 }

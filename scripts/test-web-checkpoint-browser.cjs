@@ -71,10 +71,12 @@ async function startServer(root) {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(origin);
+    const controls = await browser.newPage();
+    await controls.goto(origin + `/projects/${target.project}/workspaces/1`);
     const endpoint = `/projects/${target.project}/schedules`;
     let scheduleID = 0;
     async function schedule(button) {
-      const accepted = page.waitForResponse(response => response.url() === origin + endpoint && response.request().method() === 'POST' && response.status() === 202);
+      const accepted = controls.waitForResponse(response => response.url() === origin + endpoint && response.request().method() === 'POST' && response.status() === 202);
       await button.click();
       await accepted;
       // The app intentionally consumes only response headers. Read the exact
@@ -87,7 +89,7 @@ async function startServer(root) {
       }, 'Schedule did not finish');
       return state;
     }
-    assert.equal((await schedule(page.getByRole('button', {name: 'Run one', exact: true}))).completed, 1);
+    assert.equal((await schedule(controls.getByRole('button', {name: 'Run one', exact: true}))).completed, 1);
     const checkpoint = cli('add', 'Review selected implementation', '--review-targets', target.id);
     const inspectorPath = `/projects/${target.project}/tasks/${checkpoint.id}`;
     await page.goto(origin + inspectorPath);
@@ -96,7 +98,7 @@ async function startServer(root) {
     assert.match(await outcome.textContent(), /Pending separate review/);
     await page.evaluate(() => { window.checkpointInspector = document.querySelector('[data-inspector]'); });
     setMode(mode);
-    const reviewed = await schedule(page.getByRole('button', {name: 'Run one', exact: true}));
+    const reviewed = await schedule(controls.getByRole('button', {name: 'Run one', exact: true}));
     await until(async () => /Review outcome: (Clean|Findings)/.test(await outcome.textContent()), 'Live review completion retained a placeholder');
     assert.equal(await page.evaluate(() => window.checkpointInspector === document.querySelector('[data-inspector]')), true, 'Live outcome replaced the inspector instead of morphing it');
     let text = await outcome.textContent();
@@ -113,10 +115,11 @@ async function startServer(root) {
       const firstFollowup = await outcome.locator('a').textContent();
       // A restarted server and new event stream recover partial durable state.
       await stopServer(); origin = await startServer(root); scheduleID = 0;
+      await controls.goto(origin + `/projects/${target.project}/workspaces/1`);
       await page.goto(origin + inspectorPath);
       assert.equal(await outcome.textContent(), text);
       setMode('review_findings');
-      assert.equal((await schedule(page.getByRole('button', {name: 'Resume', exact: true}))).completed, 1);
+      assert.equal((await schedule(controls.getByRole('button', {name: 'Resume', exact: true}))).completed, 1);
       await until(async () => /Complete.*2 of 2/s.test(await outcome.textContent()), 'Recovered triage stayed partial');
       assert.equal(await outcome.locator('a').count(), 2);
       assert.equal(await outcome.locator('a').first().textContent(), firstFollowup);
@@ -133,7 +136,7 @@ async function startServer(root) {
     // A later ordinary run changes the workspace dashboard, not this receipt.
     cli('add', 'later ordinary task');
     setMode('schedule_success');
-    assert.equal((await schedule(page.getByRole('button', {name: 'Run one', exact: true}))).completed, 1);
+    assert.equal((await schedule(controls.getByRole('button', {name: 'Run one', exact: true}))).completed, 1);
     await page.evaluate(() => document.dispatchEvent(new CustomEvent('pellets-refresh')));
     await page.waitForTimeout(500);
     assert.equal(await outcome.textContent(), text, 'Later workspace run replaced checkpoint evidence');
@@ -146,6 +149,7 @@ async function startServer(root) {
     assert.match(await outcome.textContent(), /Pending separate review/);
     assert.equal(await outcome.locator('a').count(), 0, 'New generation inherited old follow-ups');
     assert.deepEqual(errors, []);
+    await controls.close();
     await page.close(); await stopServer();
     console.log(`Checkpoint browser passed: ${mode}, durable reconnect, later run, narrow layout, exact generation.`);
   }

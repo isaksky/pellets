@@ -148,7 +148,7 @@ func TestHTTPPreflightCrashReceiptPreservesMultilineFilters(t *testing.T) {
 	if err != nil || len(runs) != 0 {
 		t.Fatalf("preflight crash created a run: %+v %v", runs, err)
 	}
-	response := performRequest(f.handler, http.MethodGet, "/projects/project1/tasks", "", nil)
+	response := performRequest(f.handler, http.MethodGet, "/projects/project1/workspaces/1", "", nil)
 	formHTML := regexp.MustCompile(`(?s)<form[^>]*data-no-run-resume.*?</form>`).FindString(response.Body.String())
 	token := regexp.MustCompile(`name="preflight_receipt" value="([0-9a-f]{64})"`).FindStringSubmatch(formHTML)
 	if response.Code != http.StatusOK || len(token) != 2 || strings.Contains(formHTML, `name="group"`) || strings.Contains(formHTML, `name="external_id"`) || !strings.Contains(formHTML, "&lt;saved&gt;") {
