@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -62,11 +63,34 @@ func preparedReviewCheckpoint(t *testing.T, executable, reviewMode string) (*Sch
 func TestCheckpointReviewerUsesFreshDetachedContextAndExactCommitSet(t *testing.T) {
 	executable := installSupervisorPeer(t)
 	for _, test := range []struct {
-		mode, status string
-		findings     int
-	}{{"review_clean", "clean", 0}, {"review_findings", "findings", 1}} {
+		mode, status, effort string
+		findings             int
+		externalDatabase     bool
+	}{
+		{mode: "review_clean", status: "clean", effort: "high"},
+		{mode: "review_findings", status: "findings", effort: "high", findings: 1, externalDatabase: true},
+		{mode: "review_clean", status: "clean"},
+	} {
 		t.Run(test.mode, func(t *testing.T) {
 			s, request, checkpoint, implementations := preparedReviewCheckpoint(t, executable, test.mode)
+			request.Overrides.ReasoningEffort = &test.effort
+			// Exercise the existing writable-root overlay that preparation adds
+			// when the shared database lives outside this worktree.
+			var overlay map[string]any
+			if test.externalDatabase {
+				database := filepath.Join(t.TempDir(), "pellets.db")
+				if err := os.WriteFile(database, nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+				s.options.Supervisor.options.Prepare = func(ctx context.Context, options codex.PrepareOptions) (*codex.PreparedRun, error) {
+					options.DatabasePath = database
+					prepared, err := codex.PrepareRun(ctx, options)
+					if err == nil {
+						overlay = prepared.ThreadStartParams()["config"].(map[string]any)
+					}
+					return prepared, err
+				}
+			}
 			handle := startSchedule(t, s, request)
 			status := awaitSchedule(t, handle)
 			if status.State != "completed" || status.Completed != 1 {
@@ -78,6 +102,13 @@ func TestCheckpointReviewerUsesFreshDetachedContextAndExactCommitSet(t *testing.
 			}
 			if run.ReviewResult == nil || run.ReviewResult.Status != test.status || len(run.ReviewResult.Findings) != test.findings || run.ReviewSnapshot == nil || len(run.ReviewSnapshot.Commits) != 2 || len(run.ReviewSnapshot.Instructions) != 2 {
 				t.Fatalf("review evidence: %#v %#v", run.ReviewSnapshot, run.ReviewResult)
+			}
+			wantEffort := test.effort
+			if wantEffort == "" {
+				wantEffort = "medium" // The fake runtime default differs from the selected high.
+			}
+			if run.Settings.Codex.Model != "test-model" || run.Settings.Codex.ReasoningEffort != wantEffort {
+				t.Fatalf("persisted review settings disagree with execution: %+v", run.Settings.Codex)
 			}
 			if test.findings == 1 {
 				finding := run.ReviewResult.Findings[0]
@@ -98,18 +129,24 @@ func TestCheckpointReviewerUsesFreshDetachedContextAndExactCommitSet(t *testing.
 				t.Fatalf("checkpoint not closed: %+v %v", pellet, err)
 			}
 
-			var seed, review map[string]any
+			var thread, seed, review map[string]any
 			for _, event := range readPeerEvents(t, s.options.Database.Root) {
 				if event.Method == "thread/start" {
-					_ = json.Unmarshal(event.Params, &seed)
+					thread = nil
+					_ = json.Unmarshal(event.Params, &thread)
 				}
 				if event.Method == "review/start" {
+					seed = thread
 					_ = json.Unmarshal(event.Params, &review)
 				}
 				if event.Method == "turn/start" {
 					var params map[string]any
 					_ = json.Unmarshal(event.Params, &params)
 					if strings.HasPrefix(fmt.Sprint(params["threadId"]), "triage-thread-") {
+						config, _ := thread["config"].(map[string]any)
+						if config["model_reasoning_effort"] != nil || params["effort"] != test.effort || params["model"] != "test-model" {
+							t.Fatalf("triage settings changed: thread=%+v turn=%+v", thread, params)
+						}
 						if params["sandboxPolicy"].(map[string]any)["type"] != "readOnly" || params["outputSchema"] == nil {
 							t.Fatalf("triage turn not read-only/structured: %+v", params)
 						}
@@ -120,11 +157,28 @@ func TestCheckpointReviewerUsesFreshDetachedContextAndExactCommitSet(t *testing.
 								t.Fatalf("triage prompt omits %q", required)
 							}
 						}
+					} else if params["effort"] != "high" {
+						t.Fatalf("ordinary implementation effort changed: %+v", params)
 					}
 				}
 			}
-			if seed["sandbox"] != "read-only" || seed["approvalsReviewer"] != "auto_review" {
+			if seed["sandbox"] != "read-only" || seed["approvalPolicy"] != "on-request" || seed["approvalsReviewer"] != "auto_review" || seed["ephemeral"] != false || seed["model"] != "test-model" {
 				t.Fatalf("seed policy: %#v", seed)
+			}
+			config, _ := seed["config"].(map[string]any)
+			if test.effort != "" {
+				if config["model_reasoning_effort"] != test.effort {
+					t.Fatalf("selected effort missing from review seed: %#v", seed)
+				}
+			} else if _, exists := config["model_reasoning_effort"]; exists {
+				t.Fatalf("runtime default was overridden: %#v", seed)
+			}
+			delete(config, "model_reasoning_effort")
+			if !reflect.DeepEqual(config, overlay) && !(len(config) == 0 && len(overlay) == 0) {
+				t.Fatalf("seed replaced the prepared config overlay: got=%#v want=%#v", config, overlay)
+			}
+			if review["effort"] != nil || review["config"] != nil {
+				t.Fatalf("unsupported review parameters: %#v", review)
 			}
 			if review["delivery"] != "detached" || review["threadId"] != "review-seed" {
 				t.Fatalf("review delivery: %#v", review)
@@ -152,6 +206,20 @@ func assertCapturedCheckpointPrefix(t *testing.T, prompt, prefix, role string) {
 	if prefix == "" || !strings.HasPrefix(prompt, prefix+role) || strings.Count(prompt, prefix) != 1 {
 		t.Fatal("fresh checkpoint conversation must start with exactly one captured prefix followed by its role restrictions")
 	}
+}
+
+func changeCheckpointResumeEffort(t *testing.T, s *Scheduler, request *ScheduleRequest) {
+	t.Helper()
+	manager := s.options.Supervisor.options.Settings
+	saved, err := manager.Load(context.Background(), s.options.Database, request.Selected.Workspace.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved.Settings.ReasoningEffort = "medium"
+	if _, err := manager.Save(context.Background(), s.options.Database, storage.SaveWorkspaceRunSettingsRequest{WorkspaceID: saved.WorkspaceID, Settings: saved.Settings, ExpectedVersion: saved.Version}); err != nil {
+		t.Fatal(err)
+	}
+	request.Overrides.ReasoningEffort = &saved.Settings.ReasoningEffort
 }
 
 func TestCheckpointReviewCompletedReceiptReconcilesCrashBeforeLockCleanup(t *testing.T) {
@@ -192,6 +260,7 @@ func TestCheckpointReviewCompletedReceiptReconcilesCrashBeforeLockCleanup(t *tes
 		t.Fatal(err)
 	}
 	request.ResumeFrom, request.ResumePellet = &receipt.ID, &receipt.PelletNumber
+	changeCheckpointResumeEffort(t, s, &request)
 	recovered := awaitSchedule(t, startSchedule(t, s, request))
 	if recovered.State != "completed" || recovered.Completed != 1 || recovered.RunID == receipt.ID {
 		failed, _ := s.options.Supervisor.ReadRun(context.Background(), s.options.Database, recovered.RunID)
@@ -200,6 +269,9 @@ func TestCheckpointReviewCompletedReceiptReconcilesCrashBeforeLockCleanup(t *tes
 	resumed, err := s.options.Supervisor.ReadRun(context.Background(), s.options.Database, recovered.RunID)
 	if err != nil || !storage.CompletedReviewReceipt(resumed) || resumed.ResumeFrom == nil || *resumed.ResumeFrom != receipt.ID {
 		t.Fatalf("reconciled review attempt: %+v %v", resumed, err)
+	}
+	if resumed.Settings.Codex.Model != receipt.Settings.Codex.Model || resumed.Settings.Codex.ReasoningEffort != "high" {
+		t.Fatalf("reconciliation relabeled the original review settings: %+v", resumed.Settings.Codex)
 	}
 	reviews := 0
 	for _, event := range readPeerEvents(t, s.options.Database.Root) {
@@ -487,6 +559,9 @@ func TestCheckpointReviewerCancellationResumesDurableResultWithoutRepeatingRevie
 	if first.State != "interrupted" || first.ReviewResult == nil {
 		t.Fatalf("cancelled evidence: %#v", first)
 	}
+	if first.Settings.Codex.ReasoningEffort != "high" {
+		t.Fatalf("cancelled review lost its selected effort: %+v", first.Settings.Codex)
+	}
 	initialTurns := 0
 	for _, event := range readPeerEvents(t, s.options.Database.Root) {
 		if event.Method == string(codex.TurnStart) {
@@ -497,12 +572,30 @@ func TestCheckpointReviewerCancellationResumesDurableResultWithoutRepeatingRevie
 		t.Fatal(err)
 	}
 	request.ResumeFrom, request.ResumePellet = &first.ID, &first.PelletNumber
+	changeCheckpointResumeEffort(t, s, &request)
 	status := awaitSchedule(t, startSchedule(t, s, request))
 	if status.State != "completed" {
 		t.Fatalf("resume status: %+v", status)
 	}
-	count, turns := 0, 0
+	resumed, err := s.options.Supervisor.ReadRun(context.Background(), s.options.Database, status.RunID)
+	if err != nil || resumed.Settings.Codex.ReasoningEffort != first.Settings.Codex.ReasoningEffort {
+		t.Fatalf("resume changed captured review effort: %+v %v", resumed.Settings.Codex, err)
+	}
+	count, turns, seeds := 0, 0, 0
 	for _, event := range readPeerEvents(t, s.options.Database.Root) {
+		if event.Method == string(codex.ThreadStart) {
+			var params map[string]any
+			if err := json.Unmarshal(event.Params, &params); err != nil {
+				t.Fatal(err)
+			}
+			if params["sandbox"] == "read-only" {
+				seeds++
+				config, _ := params["config"].(map[string]any)
+				if config["model_reasoning_effort"] != first.Settings.Codex.ReasoningEffort {
+					t.Fatalf("review seed disagrees with captured effort: %+v", params)
+				}
+			}
+		}
 		if event.Method == string(codex.ReviewStart) {
 			count++
 			var params struct{ Target struct{ Instructions string } }
@@ -515,8 +608,8 @@ func TestCheckpointReviewerCancellationResumesDurableResultWithoutRepeatingRevie
 			turns++
 		}
 	}
-	if count != 1 || turns != initialTurns {
-		t.Fatalf("review resume repeated work: review starts=%d turns=%d want=%d", count, turns, initialTurns)
+	if count != 1 || seeds != 1 || turns != initialTurns {
+		t.Fatalf("review resume repeated work: review starts=%d seeds=%d turns=%d want=%d", count, seeds, turns, initialTurns)
 	}
 }
 

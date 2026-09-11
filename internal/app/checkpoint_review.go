@@ -65,6 +65,17 @@ func (r *checkpointReviewer) drive(ctx context.Context, execution *WorkspaceExec
 	params := execution.ThreadStartParams()
 	params["ephemeral"] = false
 	params["sandbox"] = "read-only"
+	// review/start has no effort parameter and never uses TurnStartParams.
+	// Its detached thread inherits the seed's configuration, so apply the
+	// selected effort there without replacing any existing config overlay.
+	if effort := execution.prepared.Settings.ReasoningEffort; effort != "" {
+		config, _ := params["config"].(map[string]any)
+		if config == nil {
+			config = map[string]any{}
+		}
+		config["model_reasoning_effort"] = effort
+		params["config"] = config
+	}
 	if _, err = execution.Call(ctx, codex.ThreadStart, params); err != nil {
 		return scheduleError("review_seed_unconfirmed", "the fresh empty review seed conversation could not be confirmed")
 	}

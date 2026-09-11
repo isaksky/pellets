@@ -87,6 +87,7 @@ func TestCheckpointTriageResumePreservesPartialResultsAndOnlyAssessesUnfinished(
 	}
 	resume := request
 	resume.ResumeFrom, resume.ResumePellet = &run.ID, &run.PelletNumber
+	changeCheckpointResumeEffort(t, s, &resume)
 	second := awaitSchedule(t, startSchedule(t, s, resume))
 	if second.State != "completed" {
 		t.Fatalf("resumed triage: %+v error=%v", second, s.options.Supervisor.err)
@@ -101,6 +102,13 @@ func TestCheckpointTriageResumePreservesPartialResultsAndOnlyAssessesUnfinished(
 	if completed.PromptPrefix != run.PromptPrefix {
 		t.Fatal("triage resume replaced the captured prefix with changed preflight sources")
 	}
+	if completed.Settings.Codex.Model != run.Settings.Codex.Model || completed.Settings.Codex.ReasoningEffort != "high" {
+		t.Fatalf("triage resume relabeled the original review settings: %+v", completed.Settings.Codex)
+	}
+	saved, err := s.options.Supervisor.options.Settings.Load(context.Background(), s.options.Database, request.Selected.Workspace.ID)
+	if err != nil || saved.Settings.ReasoningEffort != "medium" {
+		t.Fatalf("checkpoint recovery changed future workspace preferences: %+v %v", saved.Settings, err)
+	}
 	reviews, triageTurns := 0, 0
 	findingTurns := map[string]int{}
 	for _, event := range readPeerEvents(t, s.options.Database.Root) {
@@ -111,6 +119,7 @@ func TestCheckpointTriageResumePreservesPartialResultsAndOnlyAssessesUnfinished(
 			triageTurns++
 			var params struct {
 				ThreadID          string
+				Model, Effort     string
 				Input             []struct{ Text string }
 				ApprovalsReviewer string
 				SandboxPolicy     struct{ Type string }
@@ -120,6 +129,9 @@ func TestCheckpointTriageResumePreservesPartialResultsAndOnlyAssessesUnfinished(
 			}
 			if params.ThreadID == run.ThreadID || params.ApprovalsReviewer != "auto_review" || params.SandboxPolicy.Type != "readOnly" || len(params.Input) != 1 {
 				t.Fatalf("triage context/policy changed: %+v", params)
+			}
+			if params.Model != run.Settings.Codex.Model || params.Effort != "high" {
+				t.Fatalf("unfinished assessment abandoned captured review settings: %+v", params)
 			}
 			prompt := params.Input[0].Text
 			assertCapturedCheckpointPrefix(t, prompt, run.PromptPrefix.Text, "Independently triage exactly")

@@ -144,6 +144,12 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 			c.StartingHead = previous.StartingHead
 			c.StartingRef = previous.StartingRef
 			c.Mode = previous.Mode
+			if previous.Mode == "review_checkpoint" {
+				// This lineage retains the original review, so newly observed
+				// defaults must not relabel its model or reasoning effort.
+				c.Settings.Codex.Model = previous.Settings.Codex.Model
+				c.Settings.Codex.ReasoningEffort = previous.Settings.Codex.ReasoningEffort
+			}
 			c.ScheduleMode, c.ScheduleRemaining = previous.ScheduleMode, previous.ScheduleRemaining
 			c.ExternalID, c.Group = previous.ExternalID, previous.Group
 			if previous.PelletTitle != title || previous.PelletDescription != description {

@@ -169,8 +169,16 @@ func (supervisor *ExecutionSupervisor) start(ctx context.Context, request Execut
 		}
 	}
 	if request.Capture.ResumeFrom != nil {
-		if _, err := supervisor.validateResume(ctx, request, root, lock); err != nil {
+		previous, err := supervisor.validateResume(ctx, request, root, lock)
+		if err != nil {
 			return nil, errors.Join(err, lock.Close())
+		}
+		if previous.Mode == "review_checkpoint" {
+			// Recovery reuses the original reviewer output. Keep its model and
+			// effort for both the receipt and any unfinished finding assessments;
+			// Prepare still validates current runtime/authentication and policy.
+			request.Overrides.Model = &previous.Settings.Codex.Model
+			request.Overrides.ReasoningEffort = &previous.Settings.Codex.ReasoningEffort
 		}
 	}
 	if request.Capture.ResumeFrom == nil && lock.Owner() != nil {

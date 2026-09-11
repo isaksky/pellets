@@ -167,12 +167,18 @@ func TestCheckpointTriageAtomicWritesLostResponsesExpiredRequestsAndResume(t *te
 	}
 	capture := run.RunCapture
 	capture.ResumeFrom = &stopped.ID
+	capture.Settings.Codex.Model = "new-model"
+	capture.Settings.Codex.ReasoningEffort = "medium"
+	capture.Settings.Codex.Executable = "new-runtime"
 	resumed, err := db.CreateExecutionRun(ctx, capture)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if resumed.CheckpointTriage == nil || len(resumed.CheckpointTriage.Assessments) != 1 || resumed.CheckpointTriage.Assessments[0].PelletNumber != first.PelletNumber {
 		t.Fatal("resume lost partial results")
+	}
+	if resumed.Settings.Codex.Model != run.Settings.Codex.Model || resumed.Settings.Codex.ReasoningEffort != run.Settings.Codex.ReasoningEffort || resumed.Settings.Codex.Executable != "new-runtime" {
+		t.Fatalf("resume confused historical review settings with current runtime: %+v", resumed.Settings.Codex)
 	}
 	reconcileFinding(t, db, resumed, validAssessment(b))
 	if _, err = db.CompleteReviewCheckpoint(ctx, resumed.ID, resumed.Revision); err != nil {

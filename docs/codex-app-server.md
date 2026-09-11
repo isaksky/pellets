@@ -489,9 +489,22 @@ evidence into existence.
 `review/start` uses `delivery: "detached"` with a `custom` target. Detached
 delivery forks its source history, so Pellets first creates a new empty seed
 thread with the usual `on-request`/`auto_review` policy reduced to a read-only
-sandbox. The reviewer conversation therefore contains no implementation
+sandbox. An explicitly selected reasoning effort is merged into that seed's
+`config.model_reasoning_effort` alongside any existing configuration overlay,
+because `review/start` has no effort parameter and does not send `turn/start`.
+An unset selection retains the runtime default; ordinary implementation and
+finding-triage turns continue to use their prepared `effort` parameter. This
+uses the canonical string setting in the [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
+and the stable `ThreadStartParams.config`/`ConfigReadResponse` schemas generated
+by Codex CLI 0.151.0. The reviewer conversation therefore contains no implementation
 discussion. Its instructions enumerate every result commit independently and
 forbid replacing noncontiguous or cross-worktree selections with a broad range.
+Checkpoint Resume retains the captured review model and effort in its lineage
+and any unfinished finding assessments, even if workspace settings or request
+overrides have changed. It still prepares the currently selected executable and
+revalidates authentication, policy, and support for the captured model/effort;
+it never starts another review to adopt new settings. Ordinary execution Resume
+continues to use its normal current-settings behavior.
 Codex parses the built-in review rubric internally; app-server exposes the
 rendered native review text in `exitedReviewMode.review`, not that internal JSON
 event. With no findings, that renderer exposes only `overall_explanation`, the

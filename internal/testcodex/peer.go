@@ -105,8 +105,14 @@ func Run() bool {
 			}
 		case "config/read":
 			result = map[string]any{"config": map[string]any{"model": "test-model"}}
+			if strings.HasPrefix(mode, "review_") {
+				result = map[string]any{"config": map[string]any{"model": "test-model", "model_reasoning_effort": "medium"}}
+			}
 		case "model/list":
 			result = map[string]any{"data": []any{map[string]any{"id": "test-model", "model": "test-model", "displayName": "Test", "isDefault": true, "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "high"}}}}, "nextCursor": nil}
+			if strings.HasPrefix(mode, "review_") {
+				result = map[string]any{"data": []any{map[string]any{"id": "test-model", "model": "test-model", "displayName": "Test", "isDefault": true, "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "medium"}, map[string]any{"reasoningEffort": "high"}}}}, "nextCursor": nil}
+			}
 		case "thread/start", "thread/resume":
 			if mode == "schedule_prethread_failure" && message.Method == "thread/start" {
 				result = map[string]any{}
