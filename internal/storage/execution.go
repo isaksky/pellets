@@ -64,6 +64,7 @@ type EffectiveRunSettings struct {
 // RunCapture is immutable for an attempt. Nil filters mean unfiltered; supplied
 // values retain exact bytes. An explicit resume creates a new numbered attempt.
 type RunCapture struct {
+	FreshConversation bool `json:"fresh_conversation,omitempty"`
 	// Admission-only guards, checked in the creation transaction. Zero/nil
 	// preserve callers without a preflight snapshot. Neither is persisted.
 	ExpectedImplementationRevision int64                `json:"expected_implementation_revision,omitempty"`

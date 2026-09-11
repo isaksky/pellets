@@ -80,6 +80,11 @@ func (application *WebApplication) StartSchedule(ctx context.Context, project st
 				request.ExternalID = copyScheduleFilter(previous.ExternalID)
 				request.Group = copyScheduleFilter(previous.Group)
 			}
+			if request.InteractiveAdmission {
+				if err := application.Scheduler.CheckAdmission(ctx, request); err != nil {
+					return nil, err
+				}
+			}
 			return application.Scheduler.Start(ctx, request)
 		}
 	}

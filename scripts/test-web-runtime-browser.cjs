@@ -32,7 +32,7 @@ async function start(root) {
   execFileSync('go', ['build', '-o', binary, './cmd/pl'], {cwd: repository});
   execFileSync('go', ['test', '-c', '-o', peer, './internal/app'], {cwd: repository});
   browser = await chromium.launch({headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {})});
-  for (const mode of [...(process.platform === 'win32' ? [] : ['runtime_probe_gate']), 'runtime_old', 'schedule_runtime_error', 'schedule_rpc_error', 'schedule_unfinished', 'schedule_noop']) {
+  for (const mode of [...(process.platform === 'win32' ? [] : ['runtime_probe_gate']), 'runtime_old', 'schedule_runtime_error', 'schedule_rpc_error', 'schedule_unfinished', 'schedule_fresh_choice', 'schedule_noop']) {
     const root = path.join(temporary, mode); fs.mkdirSync(root);
     const git = (...args) => execFileSync('git', args, {cwd: root, stdio: 'pipe'});
     const cli = (...args) => JSON.parse(execFileSync(binary, args, {cwd: root, env: environment, encoding: 'utf8'})).data;
@@ -41,7 +41,7 @@ async function start(root) {
     fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '\n/fake-*\n/.agents/\n');
     const pellet = cli('add', 'Runtime compatibility regression');
     cli('skill', 'install', '--scope', 'repo', '--agent', 'codex', '--yes');
-    fs.writeFileSync(path.join(root, 'fake-mode'), mode);
+    fs.writeFileSync(path.join(root, 'fake-mode'), mode === 'schedule_fresh_choice' ? 'schedule_unfinished' : mode);
     let origin = await start(root);
     const page = await browser.newPage({viewport: {width: 1280, height: 1000}});
     const errors = []; page.on('pageerror', error => errors.push(error.message));
@@ -67,6 +67,14 @@ async function start(root) {
       assert.equal(fs.readFileSync(eventsFile, 'utf8'), events, 'Restart replayed probe');
       await page.close(); await stop(); console.log('PASS pre-claim runtime probe crash custody'); continue;
     }
+    if (mode === 'runtime_old') {
+      await page.getByRole('button', {name: 'Use managed runtime and continue', exact: true}).waitFor();
+      assert.equal(cli('show', pellet.id).status, 'open');
+      assert.equal(await page.locator('.run-facts').count(), 0);
+      assert.match(await page.locator('#request-feedback').innerText(), /0\.154\.0/);
+      assert.equal((await page.request.get(origin + `/projects/${pellet.project}/schedules/1`)).status(), 404);
+      await page.close(); await stop(); console.log('PASS runtime failure shown before schedule creation'); continue;
+    }
     const deadline = Date.now() + 20000;
     let status;
     while (Date.now() < deadline) {
@@ -90,7 +98,7 @@ async function start(root) {
       assert.equal(cli('show', pellet.id).status, 'in_progress');
       const check = async () => {
         const summary = await page.locator('.run-activity').innerText();
-        if (mode === 'schedule_unfinished') {
+        if (mode === 'schedule_unfinished' || mode === 'schedule_fresh_choice') {
           assert.match(summary, /Outside-click checks passed; browser test failed on a hidden table cell/);
         } else {
           assert.match(summary, /GPT-6 Astra requires a newer Codex version/);
@@ -106,6 +114,22 @@ async function start(root) {
       const events = fs.readFileSync(path.join(root, 'fake-events.jsonl'), 'utf8');
       await stop(); origin = await start(root); await page.goto(origin + route); await check();
       assert.equal(fs.readFileSync(path.join(root, 'fake-events.jsonl'), 'utf8'), events, 'Restart resumed a run');
+      if (mode === 'schedule_fresh_choice') {
+        fs.writeFileSync(path.join(root, 'fake-mode'), 'schedule_missing_history');
+        await page.getByRole('button', {name: 'Resume', exact: true}).click();
+        await page.getByRole('button', {name: 'Start a fresh conversation', exact: true}).waitFor();
+        assert.equal(cli('show', pellet.id).status, 'in_progress');
+        assert.equal((await page.request.get(origin + `/projects/${pellet.project}/schedules/1`)).status(), 404);
+        fs.writeFileSync(path.join(root, 'fake-mode'), 'schedule_success');
+        await page.getByRole('button', {name: 'Start a fresh conversation', exact: true}).click();
+        await page.waitForFunction(() => document.querySelector('.run-facts')?.innerText.includes('Completed'));
+        assert.equal(cli('show', pellet.id).status, 'closed');
+        const after = fs.readFileSync(path.join(root, 'fake-events.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+        assert.equal(after.filter(x => x.method === 'thread/start').length, 2);
+        assert.equal(after.filter(x => x.method === 'thread/resume').length, 0);
+        assert.ok(JSON.stringify(after).includes('user chose a fresh conversation'));
+        console.log('PASS missing history offers a fresh conversation and honors the choice');
+      }
       if (mode === 'schedule_unfinished') {
         cli('close', pellet.id);
         await page.reload();

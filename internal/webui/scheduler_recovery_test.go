@@ -338,3 +338,33 @@ func TestHTTPResumeWithoutRunRepairsPreflightAndReconstructsExactIntent(t *testi
 		})
 	}
 }
+
+func TestHTTPInteractiveAdmissionReturnsProblemBeforeSchedule(t *testing.T) {
+	for _, mode := range []string{"runtime_old", "unauthenticated"} {
+		t.Run(mode, func(t *testing.T) {
+			f, root := recoveryHandlerFixture(t)
+			pellet, err := f.application.CreatePellet(context.Background(), f.projects[0], storage.NewPellet{Title: "preflight"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "fake-mode"), []byte(mode), 0600); err != nil {
+				t.Fatal(err)
+			}
+			form := url.Values{"_csrf": {testCSRF}, "workspace_id": {strconv.FormatInt(f.projects[0].Workspaces[0].ID, 10)}, "mode": {"run_one"}, "admission": {"interactive"}}
+			response := performMutation(f.handler, "/projects/"+f.projects[0].Code+"/schedules", form, testOrigin, true, "application/x-www-form-urlencoded")
+			if response.Code != http.StatusConflict || !strings.Contains(response.Header().Get("Content-Type"), "application/json") {
+				t.Fatalf("%d %s", response.Code, response.Body.String())
+			}
+			if mode == "runtime_old" && !strings.Contains(response.Body.String(), "use_managed_runtime") {
+				t.Fatal("missing repair choice")
+			}
+			current, err := f.application.Pellet(context.Background(), f.projects[0], pellet.Reference)
+			if err != nil || current.Status != domain.PelletOpen {
+				t.Fatalf("preflight claimed work: %+v %v", current, err)
+			}
+			if _, err := f.application.Scheduler.Get(1); err == nil {
+				t.Fatal("preflight created schedule")
+			}
+		})
+	}
+}

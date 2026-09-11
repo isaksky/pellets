@@ -545,6 +545,13 @@ finish; Stop now interrupts it. Only an exact successful turn, verified new
 commit, and closed target pellet permit advancement. Failures stop for attention
 without hidden retries. See [scheduler interfaces](docs/codex-app-server.md#foreground-scheduler).
 
+Run and Resume first check the runtime, sign-in, workspace, ownership, and saved
+conversation before claiming new work. If a check fails, the controls show the
+reason immediately and offer applicable recovery choices. Choosing the managed
+runtime applies to this schedule; choosing a fresh conversation preserves the
+previous attempt and existing edits. Check again retries after an external fix,
+and Cancel leaves the queue alone. Ordinary existing edits need no confirmation.
+
 Startup marks abandoned active attempts interrupted or needing attention and
 waits for explicit Resume. Resume shows the saved pellet, phase, mode, remaining
 limit, and exact filters. For ordinary implementation before finalization, Resume adopts the current HEAD

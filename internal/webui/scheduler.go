@@ -2,16 +2,19 @@ package webui
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
 	"pellets/internal/app"
+	"pellets/internal/codex"
+	"pellets/internal/domain"
 	"pellets/internal/storage"
 )
 
 func (h *handler) startSchedule(w http.ResponseWriter, r *http.Request, project storage.Project) {
 	fields := []string{"_csrf", "workspace_id", "mode"}
-	for _, optional := range []string{"external_id", "group", "group_scope", "resume_pellet", "resume_from", "limit", "preflight_receipt"} {
+	for _, optional := range []string{"external_id", "group", "group_scope", "resume_pellet", "resume_from", "limit", "preflight_receipt", "admission", "fresh_conversation", "use_managed_runtime"} {
 		if _, exists := r.PostForm[optional]; exists {
 			fields = append(fields, optional)
 		}
@@ -26,6 +29,23 @@ func (h *handler) startSchedule(w http.ResponseWriter, r *http.Request, project 
 		return
 	}
 	request := app.ScheduleRequest{Mode: r.PostForm.Get("mode")}
+	if value := r.PostForm.Get("admission"); value != "" && value != "interactive" {
+		h.renderError(w, http.StatusUnprocessableEntity, requestError("invalid admission mode"), nil)
+		return
+	}
+	request.InteractiveAdmission = r.PostForm.Get("admission") == "interactive"
+	for _, key := range []string{"fresh_conversation", "use_managed_runtime"} {
+		if value := r.PostForm.Get(key); value != "" && value != "true" {
+			h.renderError(w, http.StatusUnprocessableEntity, requestError("invalid admission choice"), nil)
+			return
+		}
+	}
+	request.FreshConversation = r.PostForm.Get("fresh_conversation") == "true"
+	if r.PostForm.Get("use_managed_runtime") == "true" {
+		managed := ""
+		request.Overrides.Executable = &managed
+	}
+
 	if token, present := r.PostForm["preflight_receipt"]; present {
 		if len(token[0]) != 64 {
 			h.renderError(w, http.StatusUnprocessableEntity, requestError("invalid preflight receipt identity"), nil)
@@ -78,7 +98,26 @@ func (h *handler) startSchedule(w http.ResponseWriter, r *http.Request, project 
 	}
 	receipt, err := h.application.StartSchedule(r.Context(), project, workspace, request)
 	if err != nil {
-		h.renderError(w, statusForError(err), err, nil)
+		if request.InteractiveAdmission {
+			public := domain.PublicError(err)
+			choices := []map[string]string{}
+			if errors.Is(err, codex.ErrUnsupported) {
+				choices = append(choices, map[string]string{"field": "use_managed_runtime", "label": "Use managed runtime and continue", "description": "Install or use Pellets’ compatible cached runtime for this run."})
+			}
+			canFresh := false
+			if request.ResumeFrom != nil && h.application.Executions != nil {
+				previous, readErr := h.application.Executions.ReadRun(r.Context(), h.application.Database, *request.ResumeFrom)
+				canFresh = readErr == nil && storage.ResumeUsesCurrentHead(previous) && !storage.RunActive(previous.State) && previous.PendingOperation == ""
+			}
+			if canFresh && (public.Code == "resume_history_unavailable" || public.Code == "resume_conversation_unidentified") {
+				choices = append(choices, map[string]string{"field": "fresh_conversation", "label": "Start a fresh conversation", "description": "Keep the pellet and existing files; preserve the previous attempt as history."})
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(statusForError(err))
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": public.Code, "message": public.Message}, "choices": choices})
+		} else {
+			h.renderError(w, statusForError(err), err, nil)
+		}
 		return
 	}
 	writeSchedule(w, http.StatusAccepted, receipt.Status())

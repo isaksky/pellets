@@ -846,3 +846,27 @@ Normal `go test ./...` skips that installed-runtime check.
 Stopped attempts whose pellet is no longer active in that workspace appear as
 resolved history, without an attention badge or Resume control. Their durable
 run records remain unchanged.
+
+### Interactive button admission
+
+Browser schedule submissions use `admission=interactive`. Before returning an
+accepted schedule, the server checks eligibility without selecting a pellet,
+acquires worktree exclusion, checks write access, prepares the runtime (including
+version compatibility, authentication and policy), and reads saved conversation
+history for Resume. No model turn or new durable attempt is created by this check.
+Preflight processes are cancelled on request cancellation or server shutdown.
+
+An admission failure returns a JSON error and applicable choices. An incompatible
+override offers `use_managed_runtime=true`, which clears the executable override
+for this schedule without changing saved settings. Missing conversation history
+can offer `fresh_conversation=true` when the old attempt is stopped, has no pending
+operation, and has not entered finalization or review. That choice creates a new
+conversation while retaining Resume lineage, pellet ownership, filters, existing
+files and the old attempt. The new conversation is told that the user chose it.
+A choice cannot bypass process cleanup or finalization evidence.
+
+Internal scheduling callers retain asynchronous receipts. The browser waits for
+interactive admission; after acceptance, execution rechecks mutable state under
+its own lock because another writer can change it after the check. Routine edits
+remain automatic. Admission failures create neither a schedule nor a claimed
+pellet, and Check again or Cancel does not resume work implicitly.

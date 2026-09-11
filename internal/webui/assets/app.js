@@ -41,6 +41,7 @@ import { action, actions } from "./datastar-1.0.3.js";
     if (fields.has("group_scope") && fields.get("group_scope") !== "ungrouped") {
       fields.set("group_scope", fields.get("group") ? "value" : "any");
     }
+    if (form.matches("form[data-schedule]")) fields.set("admission", "interactive");
     var body = new URLSearchParams();
     fields.forEach(function (value, key) {
       // Empty filter controls mean "unfiltered". Omit them so the server can
@@ -51,15 +52,50 @@ import { action, actions } from "./datastar-1.0.3.js";
     var feedback = document.getElementById("request-feedback");
     var buttons = Array.from(form.querySelectorAll("button"));
     var confirmed = false;
+    delete form.dataset.admissionChoice;
     form.dataset.schedulePending = "true";
     buttons.forEach(function (button) { button.disabled = true; });
     feedback.hidden = false;
     feedback.classList.remove("request-failed");
-    feedback.textContent = "Updating run controls…";
+    feedback.textContent = form.matches("form[data-schedule]") ? "Checking the runtime, sign-in, workspace, and saved run…" : "Updating run controls…";
     try {
       var response = await fetch(form.action, {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: body.toString()});
-      if (!response.ok) throw new Error("run action rejected");
+      if (!response.ok) {
+        var problem;
+        if ((response.headers.get("Content-Type") || "").includes("application/json")) problem = await response.json();
+        if (problem && problem.error) {
+          form.dataset.admissionChoice = "true";
+          feedback.classList.add("request-failed");
+          feedback.textContent = problem.error.message;
+          var retry = function (field) {
+            if (field) {
+              var input = form.querySelector('input[name="' + field + '"]');
+              if (!input) { input = document.createElement("input"); input.type = "hidden"; input.name = field; form.appendChild(input); }
+              input.value = "true";
+            }
+            form.requestSubmit(submitter || undefined);
+          };
+          (problem.choices || []).forEach(function (choice) {
+            if (!["fresh_conversation", "use_managed_runtime"].includes(choice.field)) return;
+            var button = document.createElement("button");
+            button.type = "button"; button.textContent = choice.label; button.title = choice.description;
+            button.addEventListener("click", function () { retry(choice.field); });
+            feedback.appendChild(button);
+          });
+          var retryButton = document.createElement("button");
+          retryButton.type = "button"; retryButton.textContent = "Check again";
+          retryButton.addEventListener("click", function () { retry(); });
+          feedback.appendChild(retryButton);
+          var cancelButton = document.createElement("button");
+          cancelButton.type = "button"; cancelButton.textContent = "Cancel";
+          cancelButton.addEventListener("click", function () { delete form.dataset.admissionChoice; feedback.hidden = true; refreshRegions(); });
+          feedback.appendChild(cancelButton);
+          return;
+        }
+        throw new Error("run action rejected");
+      }
       confirmed = true;
+      delete form.dataset.schedulePending;
       delete form.dataset.dirty;
       feedback.hidden = true;
       refreshRegions();
@@ -167,7 +203,7 @@ import { action, actions } from "./datastar-1.0.3.js";
 
   function protectedTarget(target) {
     return target && ((target.id === "project-drawer" && target.classList.contains("open")) ||
-      (target.id === "run-dashboard" && target.querySelector("form[data-no-run-resume][data-dirty='true']")) ||
+      (target.id === "run-dashboard" && target.querySelector("form[data-no-run-resume][data-dirty='true'], form[data-schedule-pending='true'], form[data-admission-choice='true']")) ||
       (target.id === "project-record" && target.open));
   }
 

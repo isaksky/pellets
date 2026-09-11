@@ -166,6 +166,12 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 			}
 			threadID = previous.ThreadID
 			phase, turnID = previous.Phase, previous.TurnID
+			if c.FreshConversation {
+				if !storage.ResumeUsesCurrentHead(previous) || storage.RunActive(previous.State) || previous.PendingOperation != "" {
+					return storage.ExecutionRunConflict(previous.ID)
+				}
+				threadID, turnID, phase = "", "", "preflight"
+			}
 			if implementationReceipt {
 				phase = "close"
 			}
@@ -195,7 +201,7 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 				}
 				reviewResult = string(encoded)
 			}
-			if previous.ThreadID != "" {
+			if previous.ThreadID != "" && !c.FreshConversation {
 				// A resumed conversation keeps the exact prefix that established
 				// its context. PrepareRun may have freshly observed changed
 				// skill/tool bytes, but the scheduler deliberately does not

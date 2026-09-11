@@ -224,10 +224,13 @@ func (supervisor *ExecutionSupervisor) validateResume(ctx context.Context, reque
 			}
 		}
 	}
-	if previous.ThreadID == "" && (previous.PendingOperation != "" || previous.Phase != "preflight") {
+	if request.Capture.FreshConversation && (!storage.ResumeUsesCurrentHead(previous) || storage.RunActive(previous.State) || previous.PendingOperation != "") {
+		return previous, scheduleError("fresh_conversation_unavailable", "The previous operation must finish or be reconciled before starting a fresh conversation.")
+	}
+	if !request.Capture.FreshConversation && previous.ThreadID == "" && (previous.PendingOperation != "" || previous.Phase != "preflight") {
 		return previous, scheduleError("resume_conversation_unidentified", "the previous thread creation is unconfirmed; locate its Codex history before continuing, without creating another conversation")
 	}
-	if storage.RunActive(previous.State) {
+	if storage.RunActive(previous.State) && !request.admissionOnly {
 		previous, err = supervisor.options.Recorder.MarkInterrupted(ctx, request.Database, previous.ID, previous.Revision)
 	}
 	return previous, err

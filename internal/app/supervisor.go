@@ -32,15 +32,17 @@ type SupervisorOptions struct {
 // ExecutionSupervisor is created once per foreground server. Accepted work is
 // independent of HTTP contexts; every exit path must call Close before exit.
 type ExecutionSupervisor struct {
-	options  SupervisorOptions
-	mu       sync.Mutex
-	stopping bool
-	runs     map[*ExecutionHandle]struct{}
-	active   map[activeExecutionKey]*WorkspaceExecution
-	wait     sync.WaitGroup
-	closed   chan struct{}
-	once     sync.Once
-	err      error
+	admissions    map[uint64]context.CancelFunc
+	nextAdmission uint64
+	options       SupervisorOptions
+	mu            sync.Mutex
+	stopping      bool
+	runs          map[*ExecutionHandle]struct{}
+	active        map[activeExecutionKey]*WorkspaceExecution
+	wait          sync.WaitGroup
+	closed        chan struct{}
+	once          sync.Once
+	err           error
 }
 
 // Execution run IDs are local to a project database. Keep the database path
@@ -51,10 +53,11 @@ type activeExecutionKey struct {
 }
 
 type ExecutionRequest struct {
-	Database  Database
-	Selected  storage.ResolvedProject
-	Capture   storage.RunCapture
-	Overrides codex.RunOverrides
+	admissionOnly bool
+	Database      Database
+	Selected      storage.ResolvedProject
+	Capture       storage.RunCapture
+	Overrides     codex.RunOverrides
 	// Only the scheduler sets this after an explicit exact-pellet Resume.
 	ResumePellet     *int64
 	PreflightReceipt string
@@ -262,6 +265,9 @@ func (supervisor *ExecutionSupervisor) StopScheduling() {
 	supervisor.mu.Lock()
 	defer supervisor.mu.Unlock()
 	supervisor.stopping = true
+	for _, cancel := range supervisor.admissions {
+		cancel()
+	}
 	for handle := range supervisor.runs {
 		handle.Stop()
 	}
@@ -484,7 +490,7 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 		}
 		return run, lock.Clean()
 	}
-	if request.Capture.ResumeFrom != nil {
+	if request.Capture.ResumeFrom != nil && !request.Capture.FreshConversation {
 		if err := supervisor.reconcileConversation(processCtx, request, root, prepared.Client); err != nil {
 			// Keep the original attempt and receipt when history is missing or
 			// ambiguous. A read-only recovery probe with confirmed cleanup must
