@@ -312,6 +312,11 @@ captured description plus the starting HEAD. `turn/start.outputSchema` requires
 an exact reference and starting HEAD, `ready` or `needs_attention`, exact file
 identities, and a verification account. The driver accepts only the bound
 `item/completed` final `agentMessage` and the exact successful terminal turn.
+The implementation prompt directs Codex to resolve routine choices and fix
+necessary test/tooling failures before returning. Related edits from earlier
+attempts or collaborators, including test-harness repairs in the same file,
+belong to the authorized work and do not require another coordination step.
+Concrete unresolved blockers are explained in the verification account.
 Missing, malformed, wrong-target, failed, or no-op reports stop for attention.
 Verification details remain in Codex's transcript; Pellets stores its bounded
 orchestration evidence, not arbitrary model output.
