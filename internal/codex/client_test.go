@@ -90,7 +90,7 @@ func wait(t *testing.T, c *Client) error {
 func TestHandshakeOperationsAndArgumentArrays(t *testing.T) {
 	literal := `test="spaces ; $(printf unsafe) & more"`
 	c := startFake(t, "echo", func(cfg *Config) { cfg.Arguments = []string{"--config", literal}; cfg.Dir = t.TempDir() })
-	if c.Runtime().Version != "codex-cli 0.151.0" || c.Runtime().UserAgent != "fake-codex" {
+	if c.Runtime().Version != "codex-cli 0.154.0" || c.Runtime().UserAgent != "fake-codex" {
 		t.Fatal(c.Runtime())
 	}
 	for op := range requiredOperations {
@@ -433,7 +433,7 @@ func peer(mode string) {
 			fmt.Println("other-runtime")
 			return
 		}
-		fmt.Println("codex-cli 0.151.0")
+		fmt.Println("codex-cli 0.154.0")
 		return
 	}
 	if len(args) == 4 && args[0] == "app-server" && args[1] == "generate-json-schema" && args[2] == "--out" {

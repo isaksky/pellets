@@ -489,7 +489,9 @@ owns before releasing the workspace execution lock.
 Workspace settings contain only an executable selector, optional open-ended
 model ID, optional runtime-supported reasoning effort, and bounded transport
 limits. Empty model/effort preserve Codex defaults. One-run overrides do not
-rewrite the saved row. Preflight uses the installed runtime's local account,
+rewrite the saved row. Runtime selection defaults to the [managed pinned package](codex-runtime.md), with
+explicit executable overrides retained. Compatibility is checked before a new
+claim. Preflight uses the selected runtime's local account,
 configuration, managed requirements, and model catalog; Codex owns credential
 storage and refresh, and Pellets stores neither credentials nor account email.
 New prepared conversations use `workspace-write`, `on-request`, and

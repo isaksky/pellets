@@ -76,6 +76,17 @@ type RunSettings struct {
 	Limits          RunLimits `json:"limits"`
 }
 
+// Machine-local environment selection never changes saved settings or their
+// validation. A one-run override, including an empty reset, has final precedence.
+func resolveLocalRunSettings(saved WorkspaceRunSettings, overrides RunOverrides) (RunSettings, error) {
+	if overrides.Executable == nil {
+		if executable, present := os.LookupEnv("PELLETS_CODEX_EXECUTABLE"); present {
+			overrides.Executable = &executable
+		}
+	}
+	return ResolveRunSettings(saved, overrides)
+}
+
 func RecommendedSettings() WorkspaceRunSettings {
 	return WorkspaceRunSettings{Model: RecommendedModel, ReasoningEffort: RecommendedReasoningEffort}
 }
@@ -110,10 +121,7 @@ func ResolveRunSettings(saved WorkspaceRunSettings, overrides RunOverrides) (Run
 			resolved.Limits.StderrBytes = *override.StderrBytes
 		}
 	}
-	if resolved.Executable == "" {
-		resolved.Executable = "codex"
-	}
-	if err := validateSettingText("Codex executable", resolved.Executable, false); err != nil {
+	if err := validateSettingText("Codex executable", resolved.Executable, true); err != nil {
 		return RunSettings{}, err
 	}
 	if err := validateSettingText("model", resolved.Model, true); err != nil {
@@ -213,10 +221,10 @@ func cloneMap(source map[string]any) map[string]any {
 	return cloned
 }
 
-// PrepareRun starts the selected installed runtime and performs read-only
+// PrepareRun starts the selected managed or overridden runtime and performs read-only
 // account/config/model preflight. It never starts a thread or model turn.
 func PrepareRun(ctx context.Context, options PrepareOptions) (_ *PreparedRun, err error) {
-	settings, err := ResolveRunSettings(options.Saved, options.Overrides)
+	settings, err := resolveLocalRunSettings(options.Saved, options.Overrides)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +255,7 @@ func PrepareRun(ctx context.Context, options PrepareOptions) (_ *PreparedRun, er
 		return nil, err
 	}
 	if !account.Ready {
-		return nil, fmt.Errorf("%w: run `codex login` with the selected executable, then retry", ErrUnauthenticated)
+		return nil, fmt.Errorf("%w: run %q login, then retry (using the same CODEX_HOME)", ErrUnauthenticated, client.Runtime().Executable)
 	}
 	requirements, err := readRequirements(ctx, client)
 	if err != nil {
@@ -297,7 +305,8 @@ func PrepareRun(ctx context.Context, options PrepareOptions) (_ *PreparedRun, er
 		turn["effort"] = settings.ReasoningEffort
 	}
 	evidenceSettings := storage.EffectiveRunSettings{
-		Codex:          storage.CodexRunSettings{Executable: client.Runtime().Executable, Model: settings.Model, ReasoningEffort: settings.ReasoningEffort, Limits: settings.Limits},
+		Runtime:        storage.CodexRuntimeEvidence{Executable: client.Runtime().Executable, Version: client.Runtime().Version, Managed: settings.Executable == ""},
+		Codex:          storage.CodexRunSettings{Executable: settings.Executable, Model: settings.Model, ReasoningEffort: settings.ReasoningEffort, Limits: settings.Limits},
 		ApprovalPolicy: "on-request", ApprovalsReviewer: "auto_review", SandboxMode: "workspace-write",
 		WritableRoots: append([]string(nil), writableRoots...), NetworkAccess: effective.Sandbox.NetworkAccess,
 		ExcludeSlashTmp: effective.Sandbox.ExcludeSlashTmp, ExcludeTmpdirEnvVar: effective.Sandbox.ExcludeTmpdirEnvVar,

@@ -84,15 +84,19 @@ The storage layer is replaceable for tests, but replacement with a different pro
 
 The database-independent skill path is `cmd/pl -> cli -> app -> filesystem`, with existing Git discovery injected into the application service. It does not import or construct a storage implementation.
 
-The optional `internal/codex` boundary directly owns an installed
+The optional `internal/codex` boundary directly owns a managed or explicitly overridden
 `codex app-server` child over stdio and exposes a small session interface for a
 future foreground runner. A separate application/storage boundary persists only
 credential-free settings by stable workspace ID; normal queue, memory, and
-inspector paths do not construct Codex. It verifies the installed runtime's
+inspector paths do not construct Codex. It verifies the runtime version floor and
 stable generated schema before initialization, preserves ordered events and
 terminal outcomes, and leaves approval decisions and execution-record persistence to its
 caller. See [codex-app-server.md](codex-app-server.md) for operations, bounded
 buffering, cancellation, process ownership, and deterministic fake-peer tests.
+
+The managed runtime is a checksum-verified official package cached per version
+and target; portable settings do not contain its resolved machine-local path.
+See [managed Codex runtime](codex-runtime.md) for distribution and recovery.
 
 ## Portable agent skill installer
 

@@ -570,6 +570,7 @@ func (db *ProjectDatabase) FinishExecutionOperation(ctx context.Context, result 
 		} else if storage.RunActive(current.State) {
 			progress.State, progress.Outcome, progress.ErrorCode = "needs_attention", "unknown", result.ErrorCode
 			progress.Interaction = nil
+			progress.Summary = result.Summary
 			finished = &now
 		}
 		if err := storage.ValidateRunProgress(progress); err != nil {
@@ -585,8 +586,8 @@ func (db *ProjectDatabase) FinishExecutionOperation(ctx context.Context, result 
 			finishedStamp = &s
 		}
 		stamp := now.Format(runTimeFormat)
-		_, err = conn.ExecContext(ctx, `UPDATE execution_runs SET thread_id=?, turn_id=?, state=?, outcome=?, error_code=?, interaction_json=?, finished_at=?, pending_operation='', pending_revision=0, pending_turn_id='', revision=revision+1, updated_at=? WHERE run_id=?`,
-			progress.ThreadID, progress.TurnID, progress.State, progress.Outcome, progress.ErrorCode, string(interaction), finishedStamp, stamp, result.ID)
+		_, err = conn.ExecContext(ctx, `UPDATE execution_runs SET thread_id=?, turn_id=?, state=?, outcome=?, error_code=?, summary=?, interaction_json=?, finished_at=?, pending_operation='', pending_revision=0, pending_turn_id='', revision=revision+1, updated_at=? WHERE run_id=?`,
+			progress.ThreadID, progress.TurnID, progress.State, progress.Outcome, progress.ErrorCode, progress.Summary, string(interaction), finishedStamp, stamp, result.ID)
 		if err != nil {
 			return err
 		}

@@ -13,7 +13,7 @@ const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-recovery-browse
 const binary = path.join(temporary, process.platform === 'win32' ? 'pl.exe' : 'pl');
 const peer = path.join(temporary, process.platform === 'win32' ? 'codex.exe' : 'codex');
 const environment = {...process.env, PATH: temporary + path.delimiter + process.env.PATH,
-  PELLETS_SUPERVISOR_PEER: '1', GORACE: 'atexit_sleep_ms=0'};
+  PELLETS_CODEX_EXECUTABLE: peer, PELLETS_SUPERVISOR_PEER: '1', GORACE: 'atexit_sleep_ms=0'};
 let browser, server;
 const until = async (predicate, message) => {
   const deadline = Date.now() + 20000;

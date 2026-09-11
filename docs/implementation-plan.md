@@ -163,7 +163,7 @@ Acceptance criteria:
 - `--approved-only` excludes unapproved results.
 - Pellet lifecycle and purge never mutate memory.
 - Removing memory requires `--yes` and removes its FTS row atomically.
-- No network, model, vector, embedding, or automatic memory creation code exists.
+- No network, model, vector, embedding, or automatic memory creation code exists in queue/memory operations. Explicit execution may download its pinned verified Codex runtime.
 
 ## Milestone 7: purge, migrations, and recovery behavior
 
@@ -445,6 +445,6 @@ Before each release, verify:
 - one logical repository has shared project state across worktrees, at most one worker is assumed per worktree, and each workspace owns at most one in-progress pellet;
 - no schema or prose invents an agent/PID/session/lease/heartbeat/expiry ownership model; narrowly defined durable server-run records remain limited to milestones 8b–8d;
 - memory has no task foreign key and uses FTS5 only;
-- no core behavior needs external network access or a vector capability; the optional server inspector uses loopback only;
+- no core behavior needs external network access or a vector capability; the optional server inspector uses loopback only; explicit execution alone may fetch a pinned, verified official Codex runtime;
 - the database is never part of a Git synchronization workflow;
 - JSON v1 fixtures and exit codes match [cli-spec.md](cli-spec.md).

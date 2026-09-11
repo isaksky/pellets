@@ -203,7 +203,11 @@ func assessCheckpointFinding(ctx context.Context, execution *WorkspaceExecution,
 				continue
 			}
 			if status != "completed" || !received {
-				return a, scheduleError("triage_result_invalid", "the exact triage turn did not complete with a valid assessment")
+				message := codexTurnDiagnostic(&event, thread.Thread.ID, turn.Turn.ID)
+				if message == "" {
+					message = "the exact triage turn did not complete with a valid assessment"
+				}
+				return a, scheduleError("triage_result_invalid", message)
 			}
 			return a, nil
 		}

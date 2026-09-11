@@ -210,7 +210,7 @@ func (supervisor *ExecutionSupervisor) start(ctx context.Context, request Execut
 		return nil, domain.NewError(domain.Conflict, "server_stopping", "the foreground server has stopped accepting work", nil)
 	}
 	if selectCapture != nil {
-		capture, err := selectCapture(ctx)
+		capture, err := selectCapture(codex.WithExecutionLock(ctx, lock.File()))
 		if err != nil || capture == nil {
 			return nil, errors.Join(err, lock.Close())
 		}
@@ -469,7 +469,7 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 			}
 			err = errors.Join(err, lock.Clean())
 		}
-		return run, err
+		return run, codexPreflightFailure(err)
 	}
 	if prepared == nil || prepared.Client == nil {
 		return run, errors.New("preparation returned no owned Codex session")
@@ -626,6 +626,10 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 				progress.Summary = "Automatic approval review requires attention."
 			default:
 				progress.Summary = executionFailureDiagnostic(err)
+			}
+			if diagnostic := codexTurnDiagnostic(execution.LatestCompletion(), run.ThreadID, run.TurnID); diagnostic != "" {
+				progress.Summary = diagnostic
+				progress.Outcome = "failed"
 			}
 			if closeErr != nil || errors.Is(err, codex.ErrCleanup) {
 				progress.ErrorCode = "process_cleanup_unconfirmed"

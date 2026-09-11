@@ -249,7 +249,7 @@ func TestResolveRunSettingsPrecedenceDefaultsAndRecommendation(t *testing.T) {
 		t.Fatalf("settings = %#v, want %#v", settings, want)
 	}
 	defaults, err := ResolveRunSettings(WorkspaceRunSettings{}, RunOverrides{})
-	if err != nil || defaults.Executable != "codex" || defaults.Model != "" || defaults.ReasoningEffort != "" {
+	if err != nil || defaults.Executable != "" || defaults.Model != "" || defaults.ReasoningEffort != "" {
 		t.Fatalf("defaults = %#v, %v", defaults, err)
 	}
 	if recommended := RecommendedSettings(); recommended.Model != RecommendedModel || recommended.ReasoningEffort != RecommendedReasoningEffort {
@@ -368,11 +368,13 @@ func TestPrepareRunUsesLocalAccountCatalogAndNarrowDatabaseAccess(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	configuredName := filepath.Base(executable)
+	t.Setenv("PATH", filepath.Dir(executable)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	prepared, err := PrepareRun(ctx, PrepareOptions{
 		WorkspaceDir: workspace, DatabasePath: database,
-		Saved: WorkspaceRunSettings{Executable: executable}, Overrides: RunOverrides{
+		Saved: WorkspaceRunSettings{Executable: configuredName}, Overrides: RunOverrides{
 			Model: stringPointer(RecommendedModel), ReasoningEffort: stringPointer(RecommendedReasoningEffort),
 		},
 	})
@@ -384,7 +386,7 @@ func TestPrepareRunUsesLocalAccountCatalogAndNarrowDatabaseAccess(t *testing.T) 
 		t.Fatalf("preflight = account %#v, models %#v", prepared.Account, prepared.Models)
 	}
 	evidence := prepared.EvidenceSettings
-	if evidence.Codex.Executable != prepared.Client.Runtime().Executable || evidence.Codex.Model != RecommendedModel || evidence.Codex.ReasoningEffort != RecommendedReasoningEffort || evidence.Codex.Limits != prepared.Settings.Limits || evidence.ApprovalPolicy != "on-request" || evidence.ApprovalsReviewer != "auto_review" || evidence.SandboxMode != "workspace-write" || !reflect.DeepEqual(evidence.WritableRoots, []string{existingRoot, databaseDir}) || evidence.NetworkAccess || !evidence.ExcludeSlashTmp || !evidence.ExcludeTmpdirEnvVar {
+	if evidence.Codex.Executable != configuredName || evidence.Runtime.Executable != prepared.Client.Runtime().Executable || evidence.Runtime.Version != "codex-cli 0.154.0" || evidence.Runtime.Managed || evidence.Codex.Model != RecommendedModel || evidence.Codex.ReasoningEffort != RecommendedReasoningEffort || evidence.Codex.Limits != prepared.Settings.Limits || evidence.ApprovalPolicy != "on-request" || evidence.ApprovalsReviewer != "auto_review" || evidence.SandboxMode != "workspace-write" || !reflect.DeepEqual(evidence.WritableRoots, []string{existingRoot, databaseDir}) || evidence.NetworkAccess || !evidence.ExcludeSlashTmp || !evidence.ExcludeTmpdirEnvVar {
 		t.Fatalf("effective run evidence = %#v", evidence)
 	}
 	if strings.Contains(strings.TrimSpace(string(mustJSON(t, prepared))), "must-not-escape") {
@@ -532,4 +534,26 @@ func mustJSON(t *testing.T, value any) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+func TestRuntimeConfigurationLegacyAndOverridePrecedence(t *testing.T) {
+	t.Setenv("PELLETS_CODEX_EXECUTABLE", "")
+	legacy := WorkspaceRunSettings{Executable: "/old/machine/codex", Model: "gpt-6-astra"}
+	managed, err := resolveLocalRunSettings(legacy, RunOverrides{})
+	if err != nil || managed.Executable != "" || managed.Model != legacy.Model {
+		t.Fatalf("explicit managed default: %+v %v", managed, err)
+	}
+	t.Setenv("PELLETS_CODEX_EXECUTABLE", "/new/machine/codex")
+	local, err := resolveLocalRunSettings(legacy, RunOverrides{})
+	if err != nil || local.Executable != "/new/machine/codex" {
+		t.Fatalf("local override: %+v %v", local, err)
+	}
+	empty := ""
+	reset, err := resolveLocalRunSettings(legacy, RunOverrides{Executable: &empty})
+	if err != nil || reset.Executable != "" {
+		t.Fatalf("one-run reset: %+v %v", reset, err)
+	}
+	if legacy.Executable != "/old/machine/codex" {
+		t.Fatal("rewrote historical settings")
+	}
 }

@@ -13,7 +13,7 @@ const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-checkpoint-brow
 const binary = path.join(temporary, process.platform === 'win32' ? 'pl.exe' : 'pl');
 const peer = path.join(temporary, process.platform === 'win32' ? 'codex.exe' : 'codex');
 const environment = {...process.env, PATH: temporary + path.delimiter + process.env.PATH,
-  PELLETS_SUPERVISOR_PEER: '1', GORACE: 'atexit_sleep_ms=0'};
+  PELLETS_CODEX_EXECUTABLE: peer, PELLETS_SUPERVISOR_PEER: '1', GORACE: 'atexit_sleep_ms=0'};
 let browser, server;
 const until = async (predicate, message) => {
   const deadline = Date.now() + 20000;
@@ -101,6 +101,9 @@ async function startServer(root) {
     const reviewed = await schedule(controls.getByRole('button', {name: 'Run one', exact: true}));
     await until(async () => /Review outcome: (Clean|Findings)/.test(await outcome.textContent()), 'Live review completion retained a placeholder');
     assert.equal(await page.evaluate(() => window.checkpointInspector === document.querySelector('[data-inspector]')), true, 'Live outcome replaced the inspector instead of morphing it');
+    // Review findings can reach the live inspector before the final triage
+    // projection, even after the schedule endpoint reports completion.
+    if (mode === 'review_findings_invalid') await until(async () => /Complete.*1 of 1/s.test(await outcome.textContent()), 'Completed invalid-finding triage stayed partial');
     let text = await outcome.textContent();
     if (mode === 'review_clean') {
       assert.match(text, /Clean/); assert.match(text, /0 of 0/); assert.match(text, /0 created/);

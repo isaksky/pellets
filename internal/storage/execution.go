@@ -39,17 +39,26 @@ type PromptPrefix struct {
 	Text            string `json:"text"`
 }
 
+// CodexRuntimeEvidence is machine-local provenance, never runtime selection.
+// Old run snapshots may lack it; their original executable remains historical.
+type CodexRuntimeEvidence struct {
+	Executable string `json:"executable"`
+	Version    string `json:"version"`
+	Managed    bool   `json:"managed"`
+}
+
 // EffectiveRunSettings is an allowlist, never a copy of app-server config,
 // request payloads, environment, account data, or transcript content.
 type EffectiveRunSettings struct {
-	Codex               CodexRunSettings `json:"codex"`
-	ApprovalPolicy      string           `json:"approval_policy"`
-	ApprovalsReviewer   string           `json:"approvals_reviewer"`
-	SandboxMode         string           `json:"sandbox_mode"`
-	WritableRoots       []string         `json:"writable_roots,omitempty"`
-	NetworkAccess       bool             `json:"network_access"`
-	ExcludeSlashTmp     bool             `json:"exclude_slash_tmp"`
-	ExcludeTmpdirEnvVar bool             `json:"exclude_tmpdir_env_var"`
+	Runtime             CodexRuntimeEvidence `json:"runtime,omitempty"`
+	Codex               CodexRunSettings     `json:"codex"`
+	ApprovalPolicy      string               `json:"approval_policy"`
+	ApprovalsReviewer   string               `json:"approvals_reviewer"`
+	SandboxMode         string               `json:"sandbox_mode"`
+	WritableRoots       []string             `json:"writable_roots,omitempty"`
+	NetworkAccess       bool                 `json:"network_access"`
+	ExcludeSlashTmp     bool                 `json:"exclude_slash_tmp"`
+	ExcludeTmpdirEnvVar bool                 `json:"exclude_tmpdir_env_var"`
 }
 
 // RunCapture is immutable for an attempt. Nil filters mean unfiltered; supplied
@@ -270,6 +279,7 @@ type ExecutionOperationResult struct {
 	ThreadID        string
 	TurnID          string
 	ErrorCode       string
+	Summary         string
 }
 
 var fullCommitID = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
@@ -310,13 +320,13 @@ func ValidateRunCapture(c RunCapture) error {
 	for _, field := range []struct {
 		value string
 		bound int
-	}{{s.Codex.Executable, 4096}, {s.Codex.Model, 512}, {s.Codex.ReasoningEffort, 128}} {
+	}{{s.Codex.Executable, 4096}, {s.Runtime.Executable, 4096}, {s.Runtime.Version, 128}, {s.Codex.Model, 512}, {s.Codex.ReasoningEffort, 128}} {
 		if len(field.value) > field.bound || !utf8.ValidString(field.value) || strings.TrimSpace(field.value) != field.value || strings.ContainsAny(field.value, "\x00\r\n") {
 			return InvalidExecutionRun("invalid effective Codex setting")
 		}
 	}
 	l := s.Codex.Limits
-	if s.Codex.Executable == "" || l.MaxMessageBytes < 256 || l.MaxMessageBytes > 64<<20 || l.EventBuffer < 1 || l.EventBuffer > 65536 || l.MaxPending < 1 || l.MaxPending > 4096 || l.StderrBytes < 1 || l.StderrBytes > 1<<20 {
+	if l.MaxMessageBytes < 256 || l.MaxMessageBytes > 64<<20 || l.EventBuffer < 1 || l.EventBuffer > 65536 || l.MaxPending < 1 || l.MaxPending > 4096 || l.StderrBytes < 1 || l.StderrBytes > 1<<20 {
 		return InvalidExecutionRun("effective transport settings must be resolved and bounded")
 	}
 	if len(s.WritableRoots) > 64 {

@@ -177,6 +177,16 @@ func TestReleaseContradictionChecklist(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		// Explicit execution may fetch only the pinned official runtime. Keep
+		// the prohibition everywhere else (queue, memory, and inspection).
+		if path == filepath.Join(repositoryRoot, "internal", "codex", "managed_runtime.go") {
+			for _, required := range []string{"https://github.com/openai/codex/releases/download/rust-v", "verifyRuntimeArchive", "PELLETS_CODEX_OFFLINE"} {
+				if !strings.Contains(string(content), required) {
+					t.Errorf("managed runtime lost download constraint %q", required)
+				}
+			}
+			return nil
+		}
 		for _, forbidden := range forbiddenNetworkClients {
 			if strings.Contains(string(content), forbidden) {
 				t.Errorf("production source %s contains external network client token %q", path, forbidden)

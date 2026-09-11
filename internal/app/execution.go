@@ -226,6 +226,7 @@ func (recorder ExecutionRecorder) CallCodex(ctx context.Context, database Databa
 	}
 	if callErr != nil {
 		completion.ErrorCode = "codex_call_unconfirmed"
+		completion.Summary = executionFailureDiagnostic(callErr)
 	} else {
 		switch operation {
 		case codex.ThreadStart, codex.ThreadResume:
@@ -235,7 +236,7 @@ func (recorder ExecutionRecorder) CallCodex(ctx context.Context, database Databa
 		}
 	}
 	// A cancelled request must still make a bounded best effort to persist its
-	// uncertain outcome. No stderr, response, or error text is copied to storage.
+	// uncertain outcome. Only a bounded, sanitized RPC message may enter the durable summary.
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	repo, saveErr := recorder.repository(saveCtx, database)

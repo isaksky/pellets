@@ -8,7 +8,7 @@ memory in a shared local `.pellets/pellets.db`.
 Pellets is one CGo-free executable with SQLite embedded. It has no account,
 telemetry, cloud synchronization, plugin runtime, daemon, or required service.
 Git must be available for repository and worktree discovery. Its optional
-foreground server can supervise an already-installed Codex runtime, but
+foreground server manages a verified, versioned Codex runtime, but
 ordinary queue, memory, and inspection use never require Codex or an account.
 
 ## Install
@@ -486,13 +486,19 @@ the theme setting and repository metadata.
 `pl web` remains a deprecated compatibility alias with the same options and
 foreground behavior. New scripts and documentation must use `pl server`.
 
+Codex execution automatically installs the reviewed 0.154.0 runtime for macOS
+AMD64/ARM64 and Windows AMD64, independently of Homebrew, Node, PATH, or the
+Codex desktop app. Runtime compatibility is checked before claiming eligible
+work. Explicit executable overrides, cache/offline setup, authentication, updates,
+legacy settings, and Resume are documented in [managed Codex runtime](docs/codex-runtime.md).
+
 The internal [Codex stdio adapter](docs/codex-app-server.md), run preflight,
 and workspace scheduler are wired to the foreground server lifetime. Internal
 HTTP interfaces expose Run one, Drain, Watch, explicit Resume, and both stop
 actions. The browser shows each registered workspace's durable latest activity,
 phase, terminal result, and current foreground receipt; controls refresh from the
 server after every action and never expose a command log or transcript. Preflight verifies the
-installed runtime's protocol, local account, normal
+managed or explicitly overridden runtime's version, protocol, local account, normal
 workspace configuration, managed requirements, and model capabilities without
 copying credentials or starting a model turn. Prepared runs use
 `workspace-write` plus `on-request` automatic approval review, retain narrow
@@ -587,7 +593,7 @@ Pellets is deliberately a local ordered queue, not a general project manager:
   agent identity, leases, heartbeats, or background orchestration.
 - It has no cloud or Git synchronization, remote API, hosted service, daemon,
   account system, or general plugin framework. Optional Codex execution is
-  local, foreground-server-owned supervision of the installed runtime, not a
+  local, foreground-server-owned supervision of the managed runtime, not a
   persistent worker or an alternative agent integration.
 - Memory is free-form keyword-searchable project knowledge, not task history,
   a dependency mechanism, or automatically generated content.
@@ -614,6 +620,8 @@ forms, live refresh, conflict handling, and keyboard flows. Also run
 failure before run capture, repaired explicit Resume, server restart, and
 CLI-started ownership. This uses the compiled server and a deterministic Codex
 protocol peer in disposable repositories, without a model service or account.
+`node scripts/test-web-runtime-browser.cjs` verifies pre-claim version rejection
+and sanitized, durable Codex errors after browser/server restart.
 `node scripts/test-web-checkpoint-browser.cjs` covers durable clean/findings
 outcomes, partial triage and recovery, follow-up navigation, server restart,
 later workspace runs, narrow inspectors, and generation isolation.
@@ -633,8 +641,9 @@ thread request shape—including `workspace-write`, `on-request`, and
 PELLETS_CODEX_LIVE=1 go test ./internal/codex -run '^TestInstalledRuntime$' -v
 ```
 
-Normal tests skip this check. It uses the current OS user's installed Codex and
-account/configuration reads; Codex continues to own those credentials.
+Normal tests skip this check. It uses the managed runtime (or
+`PELLETS_CODEX_EXECUTABLE`) and the current OS user's account/configuration;
+Codex continues to own those credentials.
 
 The cross-build script verifies `CGO_ENABLED=0` artifacts for macOS
 AMD64/ARM64 and Windows AMD64. Stable release automation uses the Go 1.26.5

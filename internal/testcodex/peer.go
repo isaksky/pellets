@@ -36,7 +36,19 @@ func Run() bool {
 		return false
 	}
 	if args[0] == "--version" {
-		fmt.Println("codex-cli 0.151.0")
+		mode, _ := os.ReadFile("fake-mode")
+		if string(mode) == "runtime_probe_gate" {
+			record("process", nil)
+			spawn("child")
+			waitFile("fake-child-ready")
+			must(os.WriteFile("fake-runtime-ready", []byte("ready"), 0600))
+			waitFile("fake-runtime-release")
+		}
+		if string(mode) == "runtime_old" {
+			fmt.Println("codex-cli 0.151.0")
+		} else {
+			fmt.Println("codex-cli 0.154.0")
+		}
 		return true
 	}
 	if args[0] == "--fake-descendant" {
@@ -127,6 +139,10 @@ func Run() bool {
 				result = map[string]any{"thread": map[string]any{"id": "thread"}}
 			}
 		case "turn/start":
+			if mode == "schedule_rpc_error" {
+				write(map[string]any{"id": json.RawMessage(message.ID), "error": map[string]any{"code": -32000, "message": runtimeFailureMessage, "data": map[string]any{"secret": "private-rpc-data"}}})
+				continue
+			}
 			if !strings.HasPrefix(mode, "schedule_") && !strings.HasPrefix(mode, "review_") {
 				spawn("child")
 				waitFile("fake-child-ready")
@@ -313,7 +329,12 @@ func Run() bool {
 			if mode == "schedule_failed" {
 				status = "failed"
 			}
-			write(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread", "turn": map[string]any{"id": "turn", "status": status}}})
+			turn := map[string]any{"id": "turn", "status": status}
+			if mode == "schedule_runtime_error" {
+				turn["status"] = "failed"
+				turn["error"] = map[string]any{"message": runtimeFailureMessage, "additionalDetails": "private-error-details"}
+			}
+			write(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread", "turn": turn}})
 		}
 	}
 	return true
@@ -402,3 +423,5 @@ func must(err error) {
 		panic(err)
 	}
 }
+
+const runtimeFailureMessage = "GPT-6 Astra requires a newer Codex version. Upgrade Codex and retry. <script>window.codexErrorInjected=true</script>\nAuthorization: Bearer private-runtime-token\napi_key=sk-private123456789"

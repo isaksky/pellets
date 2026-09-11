@@ -88,7 +88,7 @@ An `in_progress` pellet names exactly one registered workspace from its project.
 
 ### Local means local
 
-The database is never committed to Git. `pl` does not send task or memory contents over an external network. The server serves only the local browser over `127.0.0.1`, performs no runtime network fetch, and stops with its foreground process. Optional Codex supervision reuses the installed runtime's credentials, configuration, instructions, and tools; it does not create a second integration or change ordinary CLI requirements. Pellets performs no telemetry.
+The database is never committed to Git. `pl` does not send task or memory contents over an external network. The server serves only the local browser over `127.0.0.1`, stops with its foreground process, and performs no network fetch during ordinary inspection. Explicit Codex execution may fetch a pinned, checksum-verified official runtime package before claiming work. Optional Codex supervision reuses the OS user's Codex credentials, configuration, instructions, and tools; it does not create a second integration or change ordinary CLI requirements. Pellets performs no telemetry.
 
 The optional skill installer uses one embedded instruction template and local filesystem operations. Repository-scoped skills are ordinary files the user may choose to commit; `pl` never stages or commits them. Personal-scoped skills stay under the platform-resolved home directory. Installation does not inspect or open `.pellets` data.
 

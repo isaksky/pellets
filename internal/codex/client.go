@@ -58,7 +58,7 @@ func Start(ctx context.Context, cfg Config) (*Client, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	cfg, err := normalize(cfg)
+	cfg, err := resolveExecutable(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}

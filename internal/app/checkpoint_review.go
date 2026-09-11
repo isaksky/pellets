@@ -162,7 +162,11 @@ func (r *checkpointReviewer) consume(ctx context.Context, execution *WorkspaceEx
 				continue
 			}
 			if status != "completed" {
-				return scheduleError("codex_review_unsuccessful", "the exact Codex review turn did not complete successfully")
+				message := codexTurnDiagnostic(&event, run.ThreadID, run.TurnID)
+				if message == "" {
+					message = "the exact Codex review turn did not complete successfully"
+				}
+				return scheduleError("codex_review_unsuccessful", message)
 			}
 			if run.ReviewResult == nil {
 				return scheduleError("review_result_invalid", "the exact review turn lacks a structured final result")

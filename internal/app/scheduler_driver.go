@@ -205,7 +205,11 @@ func (s *Scheduler) drive(ctx context.Context, execution *WorkspaceExecution) er
 				}
 			}
 			if status != "completed" {
-				return scheduleError("codex_turn_unsuccessful", "the exact Codex turn did not complete successfully")
+				message := codexTurnDiagnostic(&event, run.ThreadID, run.TurnID)
+				if message == "" {
+					message = "The exact Codex turn did not complete successfully (" + status + "). Inspect its saved conversation."
+				}
+				return scheduleError("codex_turn_unsuccessful", message)
 			}
 			if result == nil || result.Reference != runReference(run) || result.StartingHead != run.StartingHead || strings.TrimSpace(result.Verification) == "" {
 				return scheduleError("implementation_report_invalid", "the exact turn lacks a bound structured implementation result")

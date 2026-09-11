@@ -400,11 +400,42 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 					}
 				}
 				if s.options.Ready != nil {
-					return s.options.Ready(ctx, request.Selected, p)
+					ready, err := s.options.Ready(ctx, request.Selected, p)
+					if err != nil || !ready {
+						return ready, err
+					}
 				}
 				return true, nil
 			}
+			// First evaluate eligibility without claiming. Downloads and process
+			// probes must not hold the shared queue's SQLite writer transaction.
+			runtimeNeeded := errors.New("runtime preflight required")
+			ready := selection.Ready
+			selection.Ready = func(ctx context.Context, p storage.Pellet) (bool, error) {
+				ok, err := ready(ctx, p)
+				if err != nil || !ok {
+					return ok, err
+				}
+				return false, runtimeNeeded
+			}
 			selected, err := queue.SelectScheduledPellet(ctx, request.Selected, selection)
+			if errors.Is(err, runtimeNeeded) {
+				saved, loadErr := s.options.Supervisor.options.Settings.Load(ctx, s.options.Database, request.Selected.Workspace.ID)
+				err = loadErr
+				if err == nil {
+					root, rootErr := executionRoot(ctx, s.options.Database, storage.ExecutionRun{WorkspaceRoot: request.Selected.Workspace.RootPath, WorkspaceGitDir: request.Selected.Workspace.GitDir, GitCommonDir: request.Selected.Project.GitCommonDir})
+					err = rootErr
+					if err == nil {
+						err = codex.CheckRuntime(ctx, saved.Settings, request.Overrides, root)
+					}
+				}
+				if err != nil {
+					err = codexPreflightFailure(err)
+				} else {
+					selection.Ready = ready
+					selected, err = queue.SelectScheduledPellet(ctx, request.Selected, selection)
+				}
+			}
 			err = errors.Join(err, queue.Close())
 			if err != nil {
 				return nil, err

@@ -69,7 +69,7 @@ var requiredInteractions = []string{
 
 func normalize(cfg Config) (Config, error) {
 	if cfg.Executable == "" {
-		cfg.Executable = "codex"
+		return cfg, fmt.Errorf("Codex executable was not resolved")
 	}
 	path, err := exec.LookPath(cfg.Executable)
 	if err != nil {
@@ -129,6 +129,9 @@ func inspect(ctx context.Context, cfg Config) (Runtime, error) {
 	info.Version = strings.TrimSpace(version)
 	if !regexp.MustCompile(`^codex-cli [0-9]+\.[0-9]+\.[0-9]+(?:[-+][^\s]+)?$`).MatchString(info.Version) {
 		return info, fmt.Errorf("%w: unexpected version output from %s", ErrUnsupported, cfg.Executable)
+	}
+	if err := checkRuntimeVersion(info.Version); err != nil {
+		return info, err
 	}
 	dir, err := os.MkdirTemp("", "pellets-codex-schema-")
 	if err != nil {
@@ -379,3 +382,39 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 	return n, nil
 }
 func (b *tailBuffer) String() string { b.mu.Lock(); defer b.mu.Unlock(); return string(b.data) }
+
+// Pellets uses a reviewed stable release explicitly supporting GPT-6 Astra as a
+// conservative floor for all models, including runtime-selected defaults.
+func checkRuntimeVersion(version string) error {
+	var major, minor, patch int
+	if _, err := fmt.Sscanf(version, "codex-cli %d.%d.%d", &major, &minor, &patch); err != nil || major == 0 && minor < 154 || strings.Contains(strings.TrimPrefix(version, "codex-cli "), "-") {
+		return fmt.Errorf("%w: %s; Pellets requires stable Codex CLI %s or newer (including GPT-6 Astra support); clear the executable override to use the managed runtime, or upgrade the override", ErrUnsupported, version, ManagedVersion)
+	}
+	return nil
+}
+
+func resolveExecutable(ctx context.Context, cfg Config) (Config, error) {
+	if cfg.Executable == "" {
+		var err error
+		cfg.Executable, err = ResolveManagedRuntime(ctx, "")
+		if err != nil {
+			return cfg, err
+		}
+	}
+	return normalize(cfg)
+}
+
+// CheckRuntime rejects known incompatible binaries before queue ownership is
+// changed. The actual process repeats inspection immediately before launch.
+func CheckRuntime(ctx context.Context, saved WorkspaceRunSettings, overrides RunOverrides, dir string) error {
+	settings, err := resolveLocalRunSettings(saved, overrides)
+	if err != nil {
+		return err
+	}
+	cfg, err := resolveExecutable(ctx, Config{Executable: settings.Executable, Dir: dir})
+	if err != nil {
+		return err
+	}
+	_, err = inspect(ctx, cfg)
+	return err
+}
