@@ -637,6 +637,13 @@ import { action, actions } from "./datastar-1.0.3.js";
     }
   });
 
+  document.addEventListener("click", function (event) {
+    var projectDetails = document.getElementById("project-record");
+    if (projectDetails && projectDetails.open && !projectDetails.contains(event.target)) {
+      projectDetails.open = false;
+    }
+  });
+
   if (window.EventSource) {
     var source = new EventSource("/events");
     source.addEventListener("open", refreshRegions);

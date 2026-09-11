@@ -59,12 +59,35 @@ const until = async (predicate, message) => {
   const base = `/projects/${first.project}/tasks`;
   assert.equal(await page.locator('.row-link').count(), 2);
 
+  const projectDetails = page.locator('#project-record');
+  const projectToggle = page.locator('#project-record > summary');
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({width, height: 844});
+    assert.equal(await projectDetails.evaluate(element => element.open), false);
+    await projectToggle.click();
+    assert.equal(await projectDetails.evaluate(element => element.open), true);
+    await projectDetails.locator('h3').click();
+    assert.equal(await projectDetails.evaluate(element => element.open), true);
+    await page.locator('#theme-select').selectOption('dark');
+    assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
+    assert.equal(await projectDetails.evaluate(element => element.open), true);
+    await page.locator('#theme-select').selectOption('system');
+    await projectToggle.click();
+    assert.equal(await projectDetails.evaluate(element => element.open), false);
+    await projectToggle.click();
+    await page.locator('.project-heading h1').click();
+    assert.equal(await projectDetails.evaluate(element => element.open), false);
+  }
+  await page.setViewportSize({width: 1280, height: 720});
+
   // Check actual pointer hit targets across every cell, not just the ID link.
   const hitTargets = [];
   for (let rowIndex = 0; rowIndex < await page.locator('.task-row').count(); rowIndex++) {
     const row = page.locator('.task-row').nth(rowIndex);
     for (let cellIndex = 0; cellIndex < await row.locator('td').count(); cellIndex++) {
       const cell = row.locator('td').nth(cellIndex);
+      // Hidden columns have no pointer target (including priority on desktop).
+      if (!(await cell.isVisible())) continue;
       await cell.scrollIntoViewIfNeeded();
       hitTargets.push(await cell.evaluate(cell => {
         const row = cell.closest('.task-row');
@@ -217,8 +240,11 @@ const until = async (predicate, message) => {
   await page.getByRole('button', {name: 'Save changes', exact: true}).click();
   await page.locator('.conflict-state').waitFor({state: 'detached'});
   await page.getByRole('button', {name: 'Start', exact: true}).click();
-  await page.getByRole('button', {name: 'Release', exact: true}).waitFor();
-  await page.getByRole('button', {name: 'Release', exact: true}).click();
+  const recovery = page.locator('.recovery form');
+  await recovery.waitFor();
+  await recovery.locator('select[name=operation]').selectOption('release');
+  await recovery.locator('input[name=confirm_recovery]').check();
+  await recovery.getByRole('button', {name: 'Apply confirmed recovery', exact: true}).click();
   await page.getByRole('button', {name: 'Start', exact: true}).waitFor();
 
   await page.goto(origin + base);
@@ -323,10 +349,12 @@ const until = async (predicate, message) => {
   // needs an explicit reset after the patch guards accept the response.
   page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', {name: 'Start', exact: true}).click();
-  await page.getByRole('button', {name: 'Release', exact: true}).waitFor();
+  await recovery.waitFor();
   assert.equal(await description.inputValue(), '');
   assert.equal(await page.locator('[data-inspector].is-dirty').count(), 0);
-  await page.getByRole('button', {name: 'Release', exact: true}).click();
+  await recovery.locator('select[name=operation]').selectOption('release');
+  await recovery.locator('input[name=confirm_recovery]').check();
+  await recovery.getByRole('button', {name: 'Apply confirmed recovery', exact: true}).click();
   await page.getByRole('button', {name: 'Start', exact: true}).waitFor();
 
   // Edits made after discard confirmation supersede that confirmation. Delay the

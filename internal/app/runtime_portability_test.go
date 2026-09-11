@@ -174,3 +174,21 @@ func TestResumeBaselinePolicyPreservesCommitAndReviewEvidence(t *testing.T) {
 		t.Fatal("rebased finalization")
 	}
 }
+
+func TestImplementationAttentionPreservesReason(t *testing.T) {
+	s, request, _ := schedulerFixture(t, installSupervisorPeer(t), "schedule_unfinished")
+	status := awaitSchedule(t, startSchedule(t, s, request))
+	if status.State != "needs_attention" || status.Reason != "implementation_needs_attention" {
+		t.Fatalf("unexpected outcome: %+v", status)
+	}
+	run, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, status.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(run.Summary, "browser test failed on a hidden table cell") || !strings.Contains(run.Summary, "[redacted]") || strings.Contains(run.Summary, "private-attention-token") {
+		t.Fatalf("lost or unsafe reason: %q", run.Summary)
+	}
+	if run.ResultCommit != "" || run.Finalization != nil {
+		t.Fatal("unfinished work was finalized")
+	}
+}

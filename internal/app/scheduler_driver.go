@@ -238,12 +238,12 @@ func (s *Scheduler) drive(ctx context.Context, execution *WorkspaceExecution) er
 			}
 			if result.Outcome != "ready" {
 				progress := run.RunProgress
-				progress.State, progress.Outcome, progress.ErrorCode, progress.Summary = "needs_attention", "unknown", "implementation_needs_attention", "The turn finished with unfinished work. Review the saved conversation and use Resume to continue this pellet and its saved mode."
+				progress.State, progress.Outcome, progress.ErrorCode, progress.Summary = "needs_attention", "unknown", "implementation_needs_attention", sanitizeExecutionDiagnostic("Codex", result.Verification)
 				_, err := execution.Save(ctx, progress, run.Revision)
 				if err != nil {
 					return err
 				}
-				return scheduleError("implementation_needs_attention", "implementation did not report ready")
+				return scheduleError("implementation_needs_attention", progress.Summary)
 			}
 			return s.prepareFinalization(ctx, execution, run, result.Files)
 		}

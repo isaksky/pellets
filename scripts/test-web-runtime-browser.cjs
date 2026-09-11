@@ -32,7 +32,7 @@ async function start(root) {
   execFileSync('go', ['build', '-o', binary, './cmd/pl'], {cwd: repository});
   execFileSync('go', ['test', '-c', '-o', peer, './internal/app'], {cwd: repository});
   browser = await chromium.launch({headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {})});
-  for (const mode of [...(process.platform === 'win32' ? [] : ['runtime_probe_gate']), 'runtime_old', 'schedule_runtime_error', 'schedule_rpc_error']) {
+  for (const mode of [...(process.platform === 'win32' ? [] : ['runtime_probe_gate']), 'runtime_old', 'schedule_runtime_error', 'schedule_rpc_error', 'schedule_unfinished']) {
     const root = path.join(temporary, mode); fs.mkdirSync(root);
     const git = (...args) => execFileSync('git', args, {cwd: root, stdio: 'pipe'});
     const cli = (...args) => JSON.parse(execFileSync(binary, args, {cwd: root, env: environment, encoding: 'utf8'})).data;
@@ -85,11 +85,15 @@ async function start(root) {
       assert.equal(cli('show', pellet.id).status, 'in_progress');
       const check = async () => {
         const summary = await page.locator('.run-activity').innerText();
-        assert.match(summary, /GPT-6 Astra requires a newer Codex version/);
-        assert.match(summary, /Upgrade Codex and retry/);
+        if (mode === 'schedule_unfinished') {
+          assert.match(summary, /Outside-click checks passed; browser test failed on a hidden table cell/);
+        } else {
+          assert.match(summary, /GPT-6 Astra requires a newer Codex version/);
+          assert.match(summary, /Upgrade Codex and retry/);
+        }
         assert.match(summary, /\[redacted\]/);
         const html = await page.content();
-        for (const secret of ['private-runtime-token', 'sk-private', 'private-error-details', 'private-rpc-data']) assert.ok(!html.includes(secret), secret);
+        for (const secret of ['private-runtime-token', 'sk-private', 'private-error-details', 'private-rpc-data', 'private-attention-token']) assert.ok(!html.includes(secret), secret);
         assert.equal(await page.evaluate(() => window.codexErrorInjected), undefined, 'Error HTML executed');
         assert.equal(await page.locator('script').filter({hasText: 'codexErrorInjected'}).count(), 0);
       };

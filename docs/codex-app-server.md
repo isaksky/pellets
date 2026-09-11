@@ -353,6 +353,10 @@ before sanitization; an overlong line without a newline is omitted entirely.
 This prevents truncation from dropping a credential label while retaining its
 secret suffix, including malformed bytes and credentials split across writes.
 
+When implementation reports `needs_attention`, its verification explanation is
+sanitized and saved as the run summary, and shown in the workspace warning.
+The reason remains visible after restart; unfinished work is not finalized.
+
 Before finalization, ordinary Resume uses the current HEAD for its new attempt.
 When HEAD changed, the worktree and index must be clean; otherwise commit or
 stash the changes and retry Resume. The old attempt remains unchanged, the same

@@ -58,10 +58,12 @@ func completeScheduled(mode string, params json.RawMessage) string {
 		target.Reference = "wrong-999"
 	}
 	outcome := "ready"
+	verification := "Disposable integration peer: verified exact file content."
 	if mode == "schedule_unfinished" {
 		outcome = "needs_attention"
+		verification = "Outside-click checks passed; browser test failed on a hidden table cell.\nToken=private-attention-token\n<script>window.codexErrorInjected=true</script>"
 	}
-	result, err := json.Marshal(map[string]any{"reference": target.Reference, "starting_head": target.StartingHead, "outcome": outcome, "files": files, "verification": "Disposable integration peer: verified exact file content."})
+	result, err := json.Marshal(map[string]any{"reference": target.Reference, "starting_head": target.StartingHead, "outcome": outcome, "files": files, "verification": verification})
 	must(err)
 	return string(result)
 }
