@@ -44,6 +44,29 @@ const until = async (predicate, message) => {
   browser = await engine.launch({headless: true, ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {})});
   const page = await browser.newPage();
   page.setDefaultTimeout(10000);
+  async function choose(select, value) {
+    const id=await select.getAttribute('id');
+    await page.locator('#'+id+'-trigger').click();
+    await page.locator('[role="option"][data-value="'+value+'"]').click();
+  }
+  async function editRecord() {
+    const form=page.locator('#inspector-host form.dirty-track');
+    await form.waitFor({state: 'visible'});
+    assert.equal(await page.locator('[data-edit-record]').count(), 0, 'Records must open directly in their editor');
+  }
+  // Normal row navigation uses physical clicks. Programmatic navigation while
+  // a native modal is open exercises the existing incoming-route/draft guards;
+  // the modal intentionally prevents a user clicking the background queue.
+  async function openRecord(link) {
+    if (await page.locator('#record-dialog').evaluate(el=>el.open)) await link.evaluate(el=>el.click());
+    else await link.click();
+  }
+  async function fillSearch(value) {
+    if (await page.locator('#record-dialog').evaluate(el=>el.open)) {
+      await page.locator('#search').evaluate((el,value)=>{el.value=value;el.dispatchEvent(new Event('input',{bubbles:true}));},value);
+    } else await page.locator('#search').fill(value);
+  }
+
   const errors = [], external = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error' && !message.text().includes('404')) errors.push(message.text()); });
@@ -66,16 +89,16 @@ const until = async (predicate, message) => {
     assert.equal(await projectDetails.evaluate(element => element.open), false);
     await projectToggle.click();
     assert.equal(await projectDetails.evaluate(element => element.open), true);
-    await projectDetails.locator('h3').click();
+    await projectDetails.locator('h3').first().click();
     assert.equal(await projectDetails.evaluate(element => element.open), true);
-    await page.locator('#theme-select').selectOption('dark');
+    await choose(page.locator('#theme-select'),'dark');
     assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
     assert.equal(await projectDetails.evaluate(element => element.open), true);
-    await page.locator('#theme-select').selectOption('system');
+    await choose(page.locator('#theme-select'),'gruvbox-light');
     await projectToggle.click();
     assert.equal(await projectDetails.evaluate(element => element.open), false);
     await projectToggle.click();
-    await page.locator('.project-heading h1').click();
+    await page.mouse.click(2,400);
     assert.equal(await projectDetails.evaluate(element => element.open), false);
   }
   await page.setViewportSize({width: 1280, height: 720});
@@ -84,8 +107,8 @@ const until = async (predicate, message) => {
   const hitTargets = [];
   for (let rowIndex = 0; rowIndex < await page.locator('.task-row').count(); rowIndex++) {
     const row = page.locator('.task-row').nth(rowIndex);
-    for (let cellIndex = 0; cellIndex < await row.locator('td').count(); cellIndex++) {
-      const cell = row.locator('td').nth(cellIndex);
+    for (let cellIndex = 0; cellIndex < await row.locator(':scope > .row-reference, :scope > .state-symbol, :scope > .task-title, :scope > .group-name, :scope > .owner-label').count(); cellIndex++) {
+      const cell = row.locator(':scope > .row-reference, :scope > .state-symbol, :scope > .task-title, :scope > .group-name, :scope > .owner-label').nth(cellIndex);
       // Hidden columns have no pointer target (including priority on desktop).
       if (!(await cell.isVisible())) continue;
       await cell.scrollIntoViewIfNeeded();
@@ -104,22 +127,23 @@ const until = async (predicate, message) => {
   // resolve to their own records, including after opening/closing an inspector.
   const modifiedURL = await page.locator('.row-link').first().getAttribute('href');
   const popupReady = page.context().waitForEvent('page');
-  await page.locator('.task-row').first().locator('td').nth(1).click({modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control']});
+  await page.locator('.task-row').first().locator('.task-title').click({modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control']});
   const popup = await popupReady;
   await popup.waitForLoadState();
   assert.equal(new URL(popup.url()).pathname, new URL(modifiedURL, origin).pathname, 'Modified cell click opened a different record');
   await popup.close();
   const bottomReference = await page.locator('.task-row').last().getAttribute('data-row-id');
-  const bottomStatusBox = await page.locator('.task-row').last().locator('td').nth(3).boundingBox();
+  const bottomStatusBox = await page.locator('.task-row').last().locator('.state-symbol').boundingBox();
   await page.mouse.click(bottomStatusBox.x + bottomStatusBox.width / 2, bottomStatusBox.y + bottomStatusBox.height / 2);
   await until(async () => await page.locator('#inspector-title').textContent() === bottomReference, 'Bottom cell opened a different row');
   await page.getByRole('link', {name: 'Close inspector'}).click();
   await page.locator('[data-inspector]').waitFor({state: 'detached'});
-  const firstTitleBox = await page.locator('.task-row').first().locator('td').nth(1).boundingBox();
+  const firstTitleBox = await page.locator('.task-row').first().locator('.task-title').boundingBox();
   await page.mouse.click(firstTitleBox.x + firstTitleBox.width / 2, firstTitleBox.y + firstTitleBox.height / 2);
   await page.locator('[data-inspector]').waitFor();
   await until(() => page.url().includes(first.id), 'Inspector did not update history');
-  await page.locator('form.dirty-track input[name=title]').fill('Edited browser task');
+  await editRecord();
+  await page.locator('#inspector-host form.dirty-track input[name=title]').fill('Edited browser task');
   await page.getByRole('button', {name: 'Save changes', exact: true}).click();
   await until(async () => !(await page.locator('[data-inspector].is-dirty').count()), 'Saved inspector stayed dirty');
   await until(async () => (await page.locator('.task-title').allTextContents()).includes('Edited browser task'), 'Save did not refresh list');
@@ -127,14 +151,16 @@ const until = async (predicate, message) => {
   // Close and sort immediately using the canonical inspector-free route.
   await page.getByRole('link', {name: 'Close inspector'}).click();
   await page.locator('[data-inspector]').waitFor({state: 'detached'});
-  await page.locator('#task-sort-title').click();
+  await page.locator('#queue-filters > summary').click();
+  await choose(page.locator('.filters select[name=sort]'),'title');
   await until(() => page.url().includes('sort=title'), 'Sort URL did not update');
   assert.equal(new URL(page.url()).pathname, base);
-  await until(async () => (await page.locator('[aria-sort=ascending]').textContent()).includes('Title'), 'Sort heading did not update');
-  await page.locator('#search').fill('Edited');
+  await until(async () => await page.locator('.filters select[name=sort]').inputValue()==='title' && await page.locator('.filters select[name=direction]').inputValue()==='asc', 'Sort selection did not update');
+  await page.locator('#queue-filters > summary').click();
+  await fillSearch('Edited');
   await until(async () => (await page.locator('.row-link').count()) === 1 && page.url().includes('q=Edited'), 'Search did not filter');
   const filteredURL = page.url();
-  await page.locator('#search').fill('Zulu');
+  await fillSearch('Zulu');
   await until(() => page.url().includes('q=Zulu'), 'Second search did not complete');
   await page.goBack();
   await until(async () => page.url() === filteredURL && await page.locator('#search').inputValue() === 'Edited', 'Back did not restore filters');
@@ -145,18 +171,18 @@ const until = async (predicate, message) => {
   await page.waitForFunction(() => !document.documentElement.hasAttribute('data-nonce'));
   // Allow the monitor's 300ms initial data_version baseline to be sampled.
   await page.waitForTimeout(450);
-  await page.locator('.row-link').first().focus();
+  await page.locator('.task-title').first().focus();
   await page.evaluate(() => {
     window.retainedRow = document.querySelector('.task-row');
-    window.retainedTable = document.querySelector('.table-scroll');
+    window.retainedTable = document.querySelector('#queue-rows');
     window.retainedFocus = document.activeElement;
   });
   cli('add', 'External live update');
   await until(async () => (await page.locator('.task-title').allTextContents()).includes('External live update'), 'CLI commit did not refresh browser');
 
-  assert.equal(await page.locator('#project-counts').textContent(), '3 open · 0 active · 0 memories');
-  assert.equal(await page.locator('#area-tabs a').first().textContent(), 'Queue 3');
-  assert.equal(await page.evaluate(() => window.retainedRow === document.querySelector('.task-row') && window.retainedTable === document.querySelector('.table-scroll') && window.retainedFocus === document.activeElement), true, 'Live update replaced stable DOM or lost focus');
+  assert.match((await page.locator('#project-counts').textContent()).trim(), /^3 open(?: · 0 active · 0 memories)?$/);
+  assert.match((await page.locator('#area-tabs a').first().textContent()).replace(/\s+/g,' ').trim(), /Queue 3$/);
+  assert.equal(await page.evaluate(() => window.retainedRow === document.querySelector('.task-row') && window.retainedTable === document.querySelector('#queue-rows') && window.retainedFocus === document.activeElement), true, 'Live update replaced stable DOM or lost focus');
   let refreshRequests = 0;
   const countRefresh = request => {
     if (request.headers()['pellets-target']) refreshRequests++;
@@ -166,6 +192,28 @@ const until = async (predicate, message) => {
   await page.waitForTimeout(250);
   page.off('request', countRefresh);
   assert.equal(refreshRequests, 1, 'One invalidation must use one bundled request');
+  const executionMode=page.locator('#execution .select-trigger').first();
+  const modeLabel=await executionMode.getAttribute('aria-label');
+  await executionMode.focus();
+  const focusedRefresh=page.waitForResponse(response=>response.request().headers()['pellets-target']==='live');
+  await page.evaluate(()=>document.dispatchEvent(new CustomEvent('pellets-refresh')));
+  await (await focusedRefresh).finished();
+  await page.waitForTimeout(120);
+  assert.equal(await page.evaluate(label=>document.activeElement.matches('.select-trigger')&&document.activeElement.getAttribute('aria-label')===label&&!!document.activeElement.closest('#execution'),modeLabel),true,'Live refresh lost keyboard focus on the execution selection control');
+  const rowMenu=page.locator('.task-row .row-menu').first();
+  await rowMenu.locator('summary').click();
+  const rowAction=rowMenu.locator('[data-insert-checkpoint="before"]');
+  await rowAction.focus();
+  await page.evaluate(()=>{window.retainedMenu=document.querySelector('.row-menu[open]');window.retainedMenuFocus=document.activeElement;});
+  cli('add','Menu live update');
+  await page.waitForTimeout(700);
+  assert.equal(await rowMenu.evaluate(el=>el.open),true,'Live update closed the open row action menu');
+  assert.equal(await page.evaluate(()=>document.activeElement===window.retainedMenuFocus&&window.retainedMenu===document.querySelector('.row-menu[open]')),true,'Live update lost the focused row action');
+  await rowMenu.locator('summary').click();
+  await page.evaluate(()=>document.dispatchEvent(new CustomEvent('pellets-refresh')));
+  await until(async()=>await page.locator('.task-title').filter({hasText:'Menu live update'}).count()===1,'Queued row update did not appear after closing the menu');
+
+
 
   // Hold a completed HTTP response until after a user interaction, to exercise
   // guards at patch time rather than just guards before starting requests.
@@ -193,17 +241,18 @@ const until = async (predicate, message) => {
   assert.equal(await page.locator('#project-record').evaluate(el => el.open), true);
   await page.locator('#project-record > summary').click();
 
-  await page.locator('.row-link').first().click();
+  await openRecord(page.locator('.row-link').first());
   await page.locator('[data-inspector]').waitFor();
   await page.waitForTimeout(300);
   release = await holdRefresh('inspector-host');
-  await page.locator('form.dirty-track input[name=title]').fill('Unsaved draft');
+  await editRecord();
+  await page.locator('#inspector-host form.dirty-track input[name=title]').fill('Unsaved draft');
   release();
   await page.waitForTimeout(250);
-  assert.equal(await page.locator('form.dirty-track input[name=title]').inputValue(), 'Unsaved draft');
+  assert.equal(await page.locator('#inspector-host form.dirty-track input[name=title]').inputValue(), 'Unsaved draft');
   page.once('dialog', dialog => dialog.dismiss());
   await page.getByRole('link', {name: 'Close inspector'}).click();
-  assert.equal(await page.locator('form.dirty-track input[name=title]').inputValue(), 'Unsaved draft');
+  assert.equal(await page.locator('#inspector-host form.dirty-track input[name=title]').inputValue(), 'Unsaved draft');
   const selectedURL = page.url();
   const dismissedBack = new Promise(resolve => page.once('dialog', async dialog => {
     await dialog.dismiss();
@@ -212,15 +261,15 @@ const until = async (predicate, message) => {
   await page.evaluate(() => history.back());
   await dismissedBack;
   await until(() => page.url() === selectedURL, 'Cancelled Back did not restore the inspector URL');
-  assert.equal(await page.locator('form.dirty-track input[name=title]').inputValue(), 'Unsaved draft');
-  await page.locator('#search').fill('x'.repeat(1025));
+  assert.equal(await page.locator('#inspector-host form.dirty-track input[name=title]').inputValue(), 'Unsaved draft');
+  await fillSearch('x'.repeat(1025));
   await page.locator('#task-list .error-state').waitFor();
-  assert.equal(await page.locator('form.dirty-track input[name=title]').inputValue(), 'Unsaved draft');
-  await page.locator('#search').fill('');
+  assert.equal(await page.locator('#inspector-host form.dirty-track input[name=title]').inputValue(), 'Unsaved draft');
+  await fillSearch('');
   await page.locator('#task-list .error-state').waitFor({state: 'detached'});
 
   // A second writer commits while this inspector retains an unsaved old version.
-  const submission = await page.locator('form.dirty-track').evaluate(form => ({
+  const submission = await page.locator('#inspector-host form.dirty-track').evaluate(form => ({
     action: form.action, fields: Object.fromEntries(new FormData(form))
   }));
   const competing = await page.request.post(submission.action, {
@@ -233,25 +282,26 @@ const until = async (predicate, message) => {
   await page.evaluate(() => document.dispatchEvent(new CustomEvent('pellets-refresh')));
   await page.waitForTimeout(250);
   assert.equal(await page.locator('.conflict-state').count(), 1);
-  assert.equal(await page.locator('form.dirty-track input[name=title]').inputValue(), 'Changed elsewhere');
+  assert.equal(await page.locator('#inspector-host form.dirty-track input[name=title]').inputValue(), 'Changed elsewhere');
   assert.ok((await page.evaluate(() => window.results)).includes(409));
 
-  await page.locator('form.dirty-track input[name=title]').fill('Resolved browser task');
+  await editRecord();
+  await page.locator('#inspector-host form.dirty-track input[name=title]').fill('Resolved browser task');
   await page.getByRole('button', {name: 'Save changes', exact: true}).click();
   await page.locator('.conflict-state').waitFor({state: 'detached'});
   await page.getByRole('button', {name: 'Start', exact: true}).click();
   const recovery = page.locator('.recovery form');
   await recovery.waitFor();
-  await recovery.locator('select[name=operation]').selectOption('release');
+  await choose(recovery.locator('select[name=operation]'),'release');
   await recovery.locator('input[name=confirm_recovery]').check();
   await recovery.getByRole('button', {name: 'Apply confirmed recovery', exact: true}).click();
   await page.getByRole('button', {name: 'Start', exact: true}).waitFor();
 
   await page.goto(origin + base);
-  await page.getByText('New task', {exact: true}).click();
+  await page.locator('#tasks-area .create-popover > summary').click();
   await page.locator('.create-popover input[name=title]').fill('Browser created task');
-  await page.getByRole('button', {name: 'Create task', exact: true}).click();
-  await until(async () => await page.locator('form.dirty-track input[name=title]').inputValue() === 'Browser created task', 'Task creation did not render');
+  await page.getByRole('button', {name: 'Create pellet', exact: true}).click();
+  await until(async () => await page.locator('#inspector-host form.dirty-track input[name=title]').inputValue() === 'Browser created task', 'Task creation did not render');
   assert.ok((await page.evaluate(() => window.results)).includes(201));
 
   await page.goto(origin + `/projects/${first.project}/memories`);
@@ -259,13 +309,15 @@ const until = async (predicate, message) => {
   await page.locator('.create-popover textarea').fill('Browser memory');
   await page.getByRole('button', {name: 'Create memory', exact: true}).click();
   await page.locator('[data-inspector]').waitFor();
-  await page.locator('form.dirty-track textarea').fill('Edited memory');
+  await editRecord();
+  await page.locator('#inspector-host form.dirty-track textarea').fill('Edited memory');
   await page.getByRole('button', {name: 'Save text', exact: true}).click();
   await until(async () => (await page.locator('.memory-card p').allTextContents()).includes('Edited memory'), 'Memory save did not refresh cards');
   assert.equal(new URL(page.url()).searchParams.has('datastar'), false);
 
   // Validation is transported successfully but remains an application 422.
-  await page.locator('form.dirty-track textarea').fill('   ');
+  await editRecord();
+  await page.locator('#inspector-host form.dirty-track textarea').fill('   ');
   await page.getByRole('button', {name: 'Save text', exact: true}).click();
   await page.locator('.error-state').waitFor();
   assert.ok((await page.evaluate(() => window.results)).includes(422));
@@ -274,11 +326,12 @@ const until = async (predicate, message) => {
   await until(async () => await page.locator('[data-inspector]').getAttribute('aria-modal') === 'true', 'Narrow inspector is not modal');
   await page.keyboard.press('Escape');
   await page.locator('[data-inspector]').waitFor({state: 'detached'});
-  assert.equal(await page.evaluate(() => document.activeElement.matches('.row-link')), true);
+  assert.equal(await page.evaluate(() => document.activeElement.matches('.row-link,.task-title')), true);
   // A filter typed during a save is applied after the save's bundle, so its
   // response cannot suppress the mutation result or leave stale version tokens.
-  await page.locator('.row-link').first().click();
-  await page.locator('form.dirty-track input[name=title]').fill('Queued save');
+  await openRecord(page.locator('.row-link').first());
+  await editRecord();
+  await page.locator('#inspector-host form.dirty-track input[name=title]').fill('Queued save');
   let releaseSave;
   const saveGate = new Promise(resolve => { releaseSave = resolve; });
   await page.route('**/pellets/**/edit*', async route => {
@@ -286,7 +339,7 @@ const until = async (predicate, message) => {
     await route.continue();
   });
   await page.getByRole('button', {name: 'Save changes', exact: true}).click();
-  await page.locator('#search').fill('Queued');
+  await fillSearch('Queued');
   await page.waitForTimeout(400);
   releaseSave();
   await until(async () => page.url().includes('q=Queued') && !(await page.locator('[data-inspector].is-dirty').count()), 'Filter interrupted save or was dropped');
@@ -296,8 +349,9 @@ const until = async (predicate, message) => {
 
   // A failed save must explain the failure without losing the draft or leaving
   // the submit control disabled. Hold the response to inspect its loading state.
-  await page.locator('.row-link').first().click();
-  await page.locator('form.dirty-track input[name=title]').fill('Retained failed draft');
+  await openRecord(page.locator('.row-link').first());
+  await editRecord();
+  await page.locator('#inspector-host form.dirty-track input[name=title]').fill('Retained failed draft');
   let releaseFailure;
   const failureGate = new Promise(resolve => { releaseFailure = resolve; });
   await page.route('**/pellets/**/edit*', async route => {
@@ -311,7 +365,7 @@ const until = async (predicate, message) => {
   releaseFailure();
   await until(async () => (await page.locator('#request-feedback').textContent()).includes('Save could not be confirmed'), 'Failed save had no feedback');
   assert.equal(await save.isEnabled(), true);
-  assert.equal(await page.locator('form.dirty-track input[name=title]').inputValue(), 'Retained failed draft');
+  assert.equal(await page.locator('#inspector-host form.dirty-track input[name=title]').inputValue(), 'Retained failed draft');
   assert.equal(await page.locator('[data-inspector].is-dirty').count(), 1);
   await page.unroute('**/pellets/**/edit*');
   await save.click();
@@ -321,22 +375,24 @@ const until = async (predicate, message) => {
   // same server defaults. Keying only list rows does not protect inspector forms.
   await page.setViewportSize({width: 1440, height: 1000});
   await page.goto(origin + base);
-  await page.locator('.row-link').first().click();
+  await openRecord(page.locator('.row-link').first());
   const firstInspector = await page.locator('[data-inspector]').getAttribute('id');
-  const description = page.locator('form.dirty-track textarea[name=description]');
+  const description = page.locator('#inspector-host form.dirty-track textarea[name=description]');
   assert.equal(await description.inputValue(), '');
+  await editRecord();
   await description.fill('Discard this task description');
   page.once('dialog', dialog => dialog.dismiss());
-  await page.locator('.row-link').nth(1).click();
+  await openRecord(page.locator('.row-link').nth(1));
   assert.equal(await description.inputValue(), 'Discard this task description');
   assert.equal(await page.locator('[data-inspector]').getAttribute('id'), firstInspector);
   page.once('dialog', dialog => dialog.accept());
-  await page.locator('.row-link').nth(1).click();
+  await openRecord(page.locator('.row-link').nth(1));
   await until(async () => await page.locator('[data-inspector]').getAttribute('id') !== firstInspector, 'Task inspector did not switch');
   assert.equal(await description.inputValue(), '');
   assert.equal(await page.locator('[data-inspector].is-dirty').count(), 0);
 
   // A failed lifecycle request must not reset the confirmed draft preemptively.
+  await editRecord();
   await description.fill('Keep this draft on failure');
   await page.route('**/pellets/**/transition*', route => route.fulfill({status: 503, contentType: 'text/plain', body: 'Service Unavailable'}));
   page.once('dialog', dialog => dialog.accept());
@@ -352,13 +408,14 @@ const until = async (predicate, message) => {
   await recovery.waitFor();
   assert.equal(await description.inputValue(), '');
   assert.equal(await page.locator('[data-inspector].is-dirty').count(), 0);
-  await recovery.locator('select[name=operation]').selectOption('release');
+  await choose(recovery.locator('select[name=operation]'),'release');
   await recovery.locator('input[name=confirm_recovery]').check();
   await recovery.getByRole('button', {name: 'Apply confirmed recovery', exact: true}).click();
   await page.getByRole('button', {name: 'Start', exact: true}).waitFor();
 
   // Edits made after discard confirmation supersede that confirmation. Delay the
   // navigation response and verify neither reset nor morph consumes newer text.
+  await editRecord();
   await description.fill('Draft at confirmation');
   const protectedInspector = await page.locator('[data-inspector]').getAttribute('id');
   const protectedURL = page.url();
@@ -369,7 +426,8 @@ const until = async (predicate, message) => {
     await route.continue();
   });
   page.once('dialog', dialog => dialog.accept());
-  await page.locator('.row-link').first().click();
+  await openRecord(page.locator('.row-link').first());
+  await editRecord();
   await description.fill('Newer draft after confirmation');
   releaseNavigation();
   await until(async () => (await page.locator('#request-feedback').textContent()).includes('Could not load updates'), 'Rejected navigation did not finish');
@@ -397,13 +455,14 @@ const until = async (predicate, message) => {
   await page.reload();
   const matchingMemories = page.locator('.memory-card').filter({has: page.getByText('Shared memory baseline', {exact: true})});
   assert.equal(await matchingMemories.count(), 2);
-  await matchingMemories.nth(0).locator('a').click();
+  await openRecord(matchingMemories.nth(0).locator('a'));
   const firstMemoryInspector = await page.locator('[data-inspector]').getAttribute('id');
-  await page.locator('form.dirty-track textarea').fill('Discard this memory text');
+  await editRecord();
+  await page.locator('#inspector-host form.dirty-track textarea').fill('Discard this memory text');
   page.once('dialog', dialog => dialog.accept());
-  await matchingMemories.nth(1).locator('a').click();
+  await openRecord(matchingMemories.nth(1).locator('a'));
   await until(async () => await page.locator('[data-inspector]').getAttribute('id') !== firstMemoryInspector, 'Memory inspector did not switch');
-  assert.equal(await page.locator('form.dirty-track textarea').inputValue(), 'Shared memory baseline');
+  assert.equal(await page.locator('#inspector-host form.dirty-track textarea').inputValue(), 'Shared memory baseline');
   assert.equal(await page.locator('[data-inspector].is-dirty').count(), 0);
   // Chromium reports the intentionally injected HTTP 503 on its console.
   assert.deepEqual(errors.filter(message => !message.includes('503 (Service Unavailable)')), [], 'Browser errors');

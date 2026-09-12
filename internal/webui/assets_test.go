@@ -2,6 +2,7 @@ package webui
 
 import (
 	"math"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -15,108 +16,86 @@ func TestMCPDeclineBypassesRequiredAnswerValidation(t *testing.T) {
 
 func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing.T) {
 	t.Parallel()
-	css := embeddedText(t, "assets/app.css")
+	css := embeddedText(t, "assets/app.css") + embeddedText(t, "assets/workbench.css")
 	javascript := embeddedText(t, "assets/app.js")
+	workbench := embeddedText(t, "assets/workbench.js")
 	preflight := embeddedText(t, "assets/theme-preflight.js")
-	templates := embeddedText(t, "templates/main.html")
+	templates := embeddedText(t, "templates/main.html") + embeddedText(t, "templates/workbench.html")
 	datastar := embeddedText(t, "assets/datastar-1.0.3.js")
 	license := embeddedText(t, "assets/DATASTAR-LICENSE.txt")
-
-	for name, content := range map[string]string{"CSS": css, "application JavaScript": javascript, "theme preflight": preflight, "templates": templates} {
+	for name, content := range map[string]string{"CSS": css, "application JavaScript": javascript, "Workbench JavaScript": workbench, "theme preflight": preflight, "templates": templates} {
+		// SVG's namespace identifies its vocabulary; it never loads a resource.
+		content = strings.ReplaceAll(content, "http://www.w3.org/2000/svg", "")
 		for _, forbidden := range []string{"https://", "http://", "@import", "fonts.googleapis", "cdn."} {
 			if strings.Contains(content, forbidden) {
 				t.Fatalf("%s contains runtime external reference %q", name, forbidden)
 			}
 		}
 	}
-	for _, required := range []string{
-		`:root[data-theme="dark"]`, `@media (max-width: 760px)`, `@media (prefers-reduced-motion: reduce)`,
-		`:focus-visible`, `.state-changed`, `.status-in_progress`, `.conflict-state`, `.error-state`, `.drawer-scrim[hidden]`, `.inspector-host.has-inspector`, `.inspector-host:has(.error-state)`,
-		`.task-row { position: relative; cursor: pointer; }`, `.task-row:has(.row-link:focus-visible)`,
-		`.task-sort { display: flex;`, `.task-sort:hover, .task-sort.active`, `.sort-indicator`,
-	} {
-		if !strings.Contains(css, required) {
+	for _, required := range []string{`:focus-visible`, `.state-changed`, `.status-in_progress`, `.conflict-state`, `.error-state`, `@media(max-width:600px)`, `@media(prefers-reduced-motion:reduce)`, `#record-dialog:not([open])`, `.navigation-collapsed #project-drawer`, `.execution-collapsed #execution`} {
+		if !strings.Contains(compactCSS(css), compactCSS(required)) {
 			t.Fatalf("CSS missing %q", required)
 		}
 	}
-	for _, required := range []string{
-		`new EventSource("/events")`, `pellets-invalidate`, `data-on-interval__duration.35s`, `id="project-drawer"`, `class="database-context"`, `id="project-record"`, `data-protect-dirty`,
-		`datastar-fetch`, `target.id === "project-drawer"`, `target.id === "project-record"`,
-		`scope.matches("[data-inspector]")`, `document.querySelector("#inspector-host [data-inspector], #inspector-host .error-state")`, `classList.toggle("has-inspector", hasInspector)`,
-		`closest("form.dirty-track")`, `state.automatic && (dirtyInspector()`,
-		`document.querySelector("#task-list a, #memory-list a, #main")`, `inspectorOpener = null`,
-		`sortOpenerID`, `document.getElementById(sortOpenerID)`, `sorter.focus({preventScroll: true})`,
-		`beforeunload`, `Discard unsaved inspector changes?`, `event.key === "Escape"`,
-		`event.key !== "Tab"`, `drawerFocusable`, `closeDrawer(true)`, `aria-modal`, `prefers-color-scheme`, `window.location.reload()`,
-		`form.dataset.schedulePending === "true"`, `form.dataset.schedulePending = "true"`, `if (!confirmed)`, `group_scope`,
-		`fields.has("group_scope") && fields.get("group_scope") !== "ungrouped"`,
-	} {
-		if !strings.Contains(javascript+templates+preflight, required) {
-			t.Fatalf("UI assets missing %q", required)
+	for _, required := range []string{`new EventSource("/events")`, `pellets-invalidate`, `data-on-interval__duration.35s`, `id="project-drawer"`, `id="project-record"`, `data-protect-dirty`, `datastar-fetch`, `state.automatic && (dirtyInspector()`, `beforeunload`, `Discard unsaved inspector changes?`, `form.dataset.schedulePending === "true"`, `form.dataset.schedulePending = "true"`, `if (!confirmed)`, `inspectorOpener = null`} {
+		if !strings.Contains(javascript+templates, required) {
+			t.Fatalf("authoritative update/input protection missing %q", required)
+		}
+	}
+	for _, required := range []string{`dialog.showModal()`, `event.preventDefault();closeRecord()`, `focus({preventScroll:true})`, `setSelectionRange(`, `stream.close()`, `pellets-activity`, `node.dataset.eventId`, `panel.scrollTop=top`, `localStorage.setItem("pellets-panels"`, `drafts.delete(formKey(form))`, `expansions.set(node.id,node.open)`} {
+		if !strings.Contains(compactCSS(workbench), compactCSS(required)) {
+			t.Fatalf("Workbench interaction/state contract missing %q", required)
 		}
 	}
 	if !strings.Contains(preflight, `localStorage.getItem("pellets-theme")`) || strings.Index(templates, "theme-preflight.js") > strings.Index(templates, "app.css") {
-		t.Fatal("theme choice is not applied before first stylesheet paint")
+		t.Fatal("theme choice must precede first stylesheet paint")
 	}
-	if !strings.Contains(javascript, `import { action, actions } from "./datastar-1.0.3.js"`) || !strings.Contains(templates, `<script type="module" src="/assets/app.js?v=datastar-1.0.3">`) {
-		t.Fatal("application must import the offline Datastar module before registering actions")
+	if !strings.Contains(javascript, `import { action, actions } from "./datastar-1.0.3.js"`) || !strings.Contains(javascript, `import "./workbench.js"`) {
+		t.Fatal("application must import embedded Datastar and Workbench modules")
 	}
 	for _, forbidden := range []string{"hx-", "htmx", "HX-"} {
 		if strings.Contains(templates+javascript, forbidden) {
-			t.Fatalf("UI retains obsolete transport markup %q", forbidden)
+			t.Fatalf("obsolete transport markup %q", forbidden)
 		}
 	}
-	if strings.Count(templates, `class="icon-button"`) != 2 {
-		t.Fatal("task and memory inspectors must share the corrected close control")
-	}
-	if !strings.Contains(css, `.icon-button { display: inline-grid; place-items: center; width: 36px; height: 36px;`) {
-		t.Fatal("inspector close control must center its glyph in the 36px touch target")
-	}
-	for _, required := range []string{
-		`role="dialog"`, `aria-labelledby="inspector-title"`, `aria-live="polite"`,
-		`aria-label="Close inspector"`, `aria-label="Close projects"`, `Skip to content`, `System`, `Light`, `Dark`,
-	} {
+	for _, required := range []string{`<dialog id="record-dialog"`, `aria-labelledby="inspector-title"`, `aria-live="polite"`, `aria-label="Close inspector"`, `Skip to content`, `aria-controls="project-drawer"`, `aria-controls="execution"`, `Gruvbox Light`, `Gruvbox Dark`, `>Light<`, `>Dark<`, `>Icy<`} {
 		if !strings.Contains(templates, required) {
-			t.Fatalf("markup missing %q", required)
+			t.Fatalf("accessible Workbench markup missing %q", required)
 		}
 	}
-	if len(datastar) < 30_000 || !strings.Contains(datastar, "Datastar v1.0.3") || !strings.Contains(license, "Copyright © Star Federation") {
+	footer := templates[strings.Index(templates, `<footer class="statusbar"`):]
+	if strings.Index(footer, `id="theme-select"`) > strings.Index(footer, `id="toggle-execution"`) {
+		t.Fatal("theme selector must precede the execution toggle")
+	}
+	if len(datastar) < 30000 || !strings.Contains(datastar, "Datastar v1.0.3") || !strings.Contains(license, "Copyright © Star Federation") {
 		t.Fatal("pinned Datastar distribution or license is incomplete")
 	}
 }
 
 func TestTaskRowPointerTargetKeepsOneKeyboardAccessibleNativeLink(t *testing.T) {
 	t.Parallel()
-	css := embeddedText(t, "assets/app.css")
 	templates := embeddedText(t, "templates/main.html")
-
-	if strings.Contains(css, ".row-link::after") {
-		t.Fatal("row hit targets must not depend on positioned table-row overlays")
+	start := strings.Index(templates, `{{else}}<article id="task-`)
+	if start < 0 {
+		t.Fatal("compact pellet row markup is missing")
 	}
-	rowStart := strings.Index(templates, `<tr id="task-`)
-	if rowStart < 0 {
-		t.Fatal("task row markup is missing")
+	row := templates[start:]
+	end := strings.Index(row, "</article>")
+	if end < 0 {
+		t.Fatal("compact pellet row is incomplete")
 	}
-	rowEnd := strings.Index(templates[rowStart:], ">")
-	if rowEnd < 0 {
-		t.Fatal("task row start tag is incomplete")
-	}
-	rowTag := templates[rowStart : rowStart+rowEnd+1]
+	row = row[:end]
+	tag := row[:strings.Index(row, ">")+1]
 	for _, forbidden := range []string{` role=`, ` tabindex=`, ` data-on:click=`, ` onclick=`} {
-		if strings.Contains(rowTag, forbidden) {
-			t.Fatalf("task row must not become a duplicate interactive control: %s", rowTag)
+		if strings.Contains(tag, forbidden) {
+			t.Fatalf("row became a duplicate control: %s", tag)
 		}
 	}
-	if strings.Count(templates, `class="row-link"`) != 1 || !strings.Contains(templates, `<a class="row-link" href="{{.URL}}" data-on:click="@navigate('inspector-host')">`) {
-		t.Fatal("each rendered task row must retain one native, keyboard-accessible inspector link with the complete Datastar and history contract")
+	if strings.Count(row, "<a ") != 2 || strings.Count(row, `tabindex="-1"`) != 1 || !strings.Contains(row, `class="task-title" href="{{.URL}}" data-on:click="@navigate('inspector-host')"`) {
+		t.Fatal("row reference and title must retain native pointer links with one keyboard stop to the inspector")
 	}
-	for _, required := range []string{
-		`.task-row { position: relative; cursor: pointer; }`,
-		`.task-row:has(.row-link:focus-visible)`,
-	} {
-		if !strings.Contains(css, required) {
-			t.Fatalf("task row pointer/focus contract missing %q", required)
-		}
+	if !strings.Contains(row, `<summary aria-label="Actions for {{.Pellet.Reference}}">`) || !strings.Contains(row, `role="menu"`) {
+		t.Fatal("row actions must remain independently keyboard accessible")
 	}
 }
 
@@ -125,21 +104,27 @@ func TestScheduleStartScopeSerializationNeverLeaksIntoStopForms(t *testing.T) {
 	templates := embeddedText(t, "templates/main.html")
 	javascript := embeddedText(t, "assets/app.js")
 	start := scheduleFormMarkup(t, templates, `action="/projects/{{$.Project.Code}}/schedules" method="post" data-schedule`)
-	if !strings.Contains(start, `name="group_scope"`) || !strings.Contains(start, `name="group"`) {
-		t.Fatalf("start form must carry the explicit group scope and value: %s", start)
+	for _, name := range []string{"group_scope", "group", "external_id", "q", "status"} {
+		if strings.Contains(start, `name="`+name+`"`) {
+			t.Fatalf("browsing filter %s leaked into assigned execution start: %s", name, start)
+		}
+	}
+	if !strings.Contains(start, `name="workspace_id"`) || !strings.Contains(start, `name="mode"`) || !strings.Contains(start, `Workspace group assignments`) {
+		t.Fatal("start must explicitly select workspace and intent under saved assignments")
 	}
 	for _, action := range []string{"stop-after", "stop-now"} {
 		form := scheduleFormMarkup(t, templates, `/`+action+`" method="post" data-schedule`)
-		if strings.Contains(form, `name="group_scope"`) || strings.Contains(form, `name="group"`) {
-			t.Fatalf("%s form must serialize only its stop payload: %s", action, form)
+		for _, name := range []string{"group_scope", "group", "external_id", "workspace_id", "mode"} {
+			if strings.Contains(form, `name="`+name+`"`) {
+				t.Fatalf("%s form carries unrelated %s", action, name)
+			}
 		}
 	}
-	for _, required := range []string{
-		`fields.has("group_scope") && fields.get("group_scope") !== "ungrouped"`,
-		`fields.set("group_scope", fields.get("group") ? "value" : "any");`,
-	} {
+	// Exact-group choices still exist on explicit recovery forms and must be
+	// normalized only when that form actually contains a scope field.
+	for _, required := range []string{`fields.has("group_scope") && fields.get("group_scope") !== "ungrouped"`, `fields.set("group_scope", fields.get("group") ? "value" : "any");`} {
 		if !strings.Contains(javascript, required) {
-			t.Fatalf("client serialization contract missing %q", required)
+			t.Fatalf("exact recovery filter contract missing %q", required)
 		}
 	}
 }
@@ -159,24 +144,15 @@ func scheduleFormMarkup(t *testing.T, templates, marker string) string {
 
 func TestTaskTitleColumnUsesAvailableWidthBeforeTruncating(t *testing.T) {
 	t.Parallel()
-	css := embeddedText(t, "assets/app.css")
-	templates := embeddedText(t, "templates/main.html")
-
-	if !strings.Contains(templates, `{{if .TitleColumn}} task-title-column{{end}}`) || !strings.Contains(templates, `<td class="task-title-column">`) {
-		t.Fatal("task title header and cells must share the flexible column sizing rule")
-	}
-	for _, required := range []string{
-		`.task-title-column { width: 100%; max-width: 0; }`,
-		`.task-title { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis;`,
-		`.task-row small { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis;`,
-	} {
-		if !strings.Contains(css, required) {
-			t.Fatalf("task title sizing contract missing %q", required)
+	css := embeddedText(t, "assets/workbench.css")
+	for _, required := range []string{`grid-template-columns:63px 27px minmax(0,1fr)`, `grid-template-columns:62px 24px minmax(0,1fr)`, `.task-title{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis`, `.group-name,.owner-label{`} {
+		if !strings.Contains(compactCSS(css), compactCSS(required)) {
+			t.Fatalf("compact row must give title flexible space at both widths: %q", required)
 		}
 	}
-	for _, forbidden := range []string{`.task-title { display: block; max-width:`, `max-width: 34ch`, `max-width: 38ch`} {
+	for _, forbidden := range []string{`max-width:34ch`, `max-width:38ch`, `max-width: 34ch`, `max-width: 38ch`} {
 		if strings.Contains(css, forbidden) {
-			t.Fatalf("task title or owner retained a fixed character cap %q", forbidden)
+			t.Fatalf("title retained fixed character cap %q", forbidden)
 		}
 	}
 }
@@ -200,24 +176,21 @@ func TestTaskDescriptionEditorUsesBoundedViewportResponsiveHeight(t *testing.T) 
 
 func TestThemeTextAndPrimaryControlsMeetWCAGAAContrast(t *testing.T) {
 	t.Parallel()
-	for _, pair := range []struct {
-		name       string
-		foreground string
-		background string
-		minimum    float64
-	}{
-		{name: "light body text", foreground: "#202124", background: "#f7f7f8", minimum: 4.5},
-		{name: "light muted text", foreground: "#646872", background: "#ffffff", minimum: 4.5},
-		{name: "light primary button", foreground: "#ffffff", background: "#5b5bd6", minimum: 4.5},
-		{name: "dark body text", foreground: "#ececf0", background: "#111216", minimum: 4.5},
-		{name: "dark muted text", foreground: "#a6a8b0", background: "#18191e", minimum: 4.5},
-		{name: "dark primary button", foreground: "#111216", background: "#8b8cf6", minimum: 4.5},
-		{name: "light warning badge", foreground: "#8a5b14", background: "#fff7e5", minimum: 4.5},
-		{name: "dark warning badge", foreground: "#f0bf67", background: "#3b301d", minimum: 4.5},
-	} {
-		ratio := contrastRatio(parseHexColor(t, pair.foreground), parseHexColor(t, pair.background))
-		if ratio < pair.minimum {
-			t.Errorf("%s contrast = %.2f:1, want at least %.1f:1", pair.name, ratio, pair.minimum)
+	css := embeddedText(t, "assets/workbench.css")
+	themes := regexp.MustCompile(`(?:html|:root)\[data-theme="([^"]+)"\]\s*\{([^}]+)\}`).FindAllStringSubmatch(css, -1)
+	if len(themes) != 5 {
+		t.Fatalf("expected five actual theme palettes, got %d", len(themes))
+	}
+	for _, theme := range themes {
+		tokens := map[string]string{}
+		for _, token := range regexp.MustCompile(`--([a-z-]+):\s*(#[a-f0-9]{6});`).FindAllStringSubmatch(theme[2], -1) {
+			tokens[token[1]] = token[2]
+		}
+		for _, pair := range [][2]string{{"ink", "bg"}, {"muted", "pane"}, {"dim", "bg"}, {"dim", "pane"}, {"theme-on-primary", "theme-primary"}} {
+			ratio := contrastRatio(parseHexColor(t, tokens[pair[0]]), parseHexColor(t, tokens[pair[1]]))
+			if ratio < 4.5 {
+				t.Errorf("%s %s/%s contrast = %.2f:1, want at least 4.5:1", theme[1], pair[0], pair[1], ratio)
+			}
 		}
 	}
 }
@@ -272,3 +245,5 @@ func contrastRatio(left, right rgbColor) float64 {
 	}
 	return (first + 0.05) / (second + 0.05)
 }
+
+func compactCSS(value string) string { return regexp.MustCompile(`\s+`).ReplaceAllString(value, "") }

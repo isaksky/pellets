@@ -51,7 +51,7 @@ internal/domain/        statuses, references, validation, typed errors
 internal/storage/       storage interfaces used by app
 internal/storage/sqlite explicit SQL, migrations, FTS maintenance
 internal/output/        JSON v1 and human renderers
-internal/webui/         loopback HTTP, templates/assets, SSE invalidation
+internal/webui/         loopback HTTP, templates/assets, SSE invalidation/activity
 internal/codex/         optional installed app-server stdio protocol adapter
 internal/testutil/      integration database and command helpers
 ```
@@ -289,8 +289,12 @@ preserves its last phase for subsequent user-directed recovery. See
 purge, and retention contracts. The server-owned scheduler exposes Run one/Drain/Watch,
 status, Resume, and stop HTTP interfaces alongside server-rendered browser controls.
 The browser combines foreground receipts with durable latest-run evidence per
-registered workspace, uses bounded category summaries rather than a transcript,
-and refreshes every control result authoritatively. It selects atomically under the execution lock,
+registered workspace, adds a bounded, sanitized in-memory projection of reported
+Codex activity, and refreshes every control result authoritatively. Detailed
+activity has its own cursor and nonblocking fan-out; it never competes with the
+driver event consumer or replaces durable evidence. It is unavailable after
+server restart or retention eviction. See [browser execution activity](execution-activity.md)
+for supported notifications, privacy rules, limits and the HTTP contract. It selects atomically under the execution lock,
 binds the exact pellet to Codex, and advances only after validated completion.
 Watch shares the database monitor and performs bounded idle recovery with no
 model calls. See [the scheduler contract](codex-app-server.md#foreground-scheduler)
@@ -486,3 +490,58 @@ There is no package or boundary for:
 - a daemon, remote bind address, or remote network transport.
 
 Adding any of these requires a new decision record rather than an opportunistic schema change.
+
+## Workspace group routing
+
+`storage.ProjectRouting` is a materialized project snapshot, read through a
+query-only connection. `app.WebApplication` exposes routing reads and
+version-checked assignment and opt-out mutations. SQLite stores the project
+switch and revision separately from each workspace's explicit or remaining
+assignment. Its optimistic version also includes registered workspace IDs so
+registration invalidates an editor that saw a different assignment universe.
+The same short `BEGIN IMMEDIATE` transaction checks that version, validates
+project/workspace identity, applies the mutation, and advances the revision.
+There is no assignment history, group entity, or new ownership relationship.
+
+Web scheduling enables assignment selection at the application boundary. The
+scheduler asks storage to resolve current routing and claim the next eligible
+pellet within one queue writer transaction, after acquiring the existing
+worktree execution lock. Explicit groups are inclusions; remaining groups are
+an exclusion set drawn from other explicit workspace assignments. Ungrouped
+eligibility is independent. Checkpoints test captured groups of their explicit
+targets and still pass the existing full-scope readiness predicate. Overlapping
+assignments are safe because the same claim transaction and unique ownership
+constraints govern all candidates. Ordinary CLI `next`, `start-next`, and
+`--group` retain their exact existing contracts.
+
+The selected routing policy is copied into `RunCapture.WorkspaceSelection`,
+`execution_runs.workspace_selection_json`, and the bounded preflight receipt.
+A nullable snapshot distinguishes legacy exact-filter scheduling from routing
+that was enabled but temporarily opted out at project level. Exact Resume
+restores the prior snapshot and filters from authoritative evidence, bypassing
+new assignment eligibility for the already-owned pellet. It still validates
+ownership, implementation generation, review scope, and all existing recovery
+evidence. Assignment changes never rewrite a captured run or receipt. Once the
+resumed pellet completes, Drain/Watch resolve the latest assignments at each
+subsequent claim. The database monitor wakes idle Watch after routing changes;
+server startup only reconciles evidence and never restarts schedules.
+
+The UI's workspace view uses the same policy over materialized records, retaining
+currently owned work even after reassignment. Checkpoint display follows the
+current metadata of its explicit target records, with captured groups as a
+fallback for missing targets; this changes only browsing, never review evidence
+or readiness. Browser filters remain an additional presentation-only predicate. Each assignment and each resolved
+remaining policy is bounded to 256 exact groups and 16 KiB of encoded policy;
+mutations reject configurations that would exceed those bounds before commit.
+
+
+### Workbench presentation boundary
+
+The [Workbench interface](workbench-ui.md) keeps project/workspace navigation,
+queue browsing and execution control in one shell. Native dialogs contain record
+editing and conflicts. SQLite supplies routing, scopes and all run states;
+browser theme, panel, draft and disclosure preferences never supply execution
+selection. Datastar remains responsible for HTTP mutations and authoritative HTML
+patches. Activity uses a distinct cursor stream and stable DOM items so it cannot
+replace editors or compete with the execution driver's event consumer. All CSS,
+selector controls and syntax highlighting are embedded and offline.

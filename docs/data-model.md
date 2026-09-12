@@ -643,7 +643,14 @@ attempt revision. Activity retention does not remove this evidence.
 
 The strict `review_checkpoint_targets` table stores project ID, checkpoint and
 target numbers, deterministic ordinal, original reference, and immutable scope
-snapshots. A composite FK cascades when the checkpoint itself is purged. There
+snapshots within each generation. Migration 17 adds a version-checked scope
+replacement operation that archives the old materialized scope and evidence in
+`review_checkpoint_scope_history` before starting a new generation. Existing
+execution scope snapshots and review receipts remain immutable. It also adds
+`review_checkpoint_removals` for reversible defer/restore with saved queue
+neighbors; removal never completes or purges a review. See
+[checkpoint management](checkpoint-management.md) for these boundaries.
+A composite FK cascades when the checkpoint itself is purged. There
 is deliberately no target FK: purged targets remain diagnosable. A before-delete
 trigger captures the exact currently matching execution receipt in
 `purged_evidence_run_id`, independently of the disappearing target revision.
@@ -708,3 +715,26 @@ occurs only after every finding is reconciled, in the same final transaction as
 successful run completion. Review checkpoints have no result commit: their
 exact selected implementation commits remain in the review snapshot, while the
 checkpoint itself completes and closes without modifying Git.
+
+## Workspace group assignment persistence
+
+Migration 0016 adds `project_group_routing`, keyed by stable project ID, with an
+`enabled` switch and monotonically increasing optimistic revision. A missing
+row means enabled at revision zero. `workspace_group_assignments` is keyed by
+stable workspace ID with a composite project/workspace foreign key, an
+`explicit` or `remaining` mode, independent `include_ungrouped` flag, and bounded
+JSON array of exact group strings. Missing workspace rows mean remaining groups
+plus ungrouped work. Defaults require no registration side effects or writes on
+browser reads. Assignment edits do not update pellets or their lifecycle
+generations.
+
+`execution_runs.workspace_selection_json` preserves the policy resolved at
+claim time. Existing attempts migrate to JSON null, preserving exact-filter
+schedule intent. A non-null snapshot carries enabled, mode, exact inclusions or
+exclusions, and ungrouped eligibility; it remains immutable through an attempt
+and is inherited by exact Resume. The equivalent bounded scalar JSON value in
+the preflight receipt preserves selected intent even when interruption precedes
+creation of an execution run. Legacy preflight receipts remain readable without
+inventing assignment intent. Assignment edits and scheduler claims share the
+normal SQLite writer lock, while all one-owner-per-workspace and project
+isolation constraints remain unchanged.

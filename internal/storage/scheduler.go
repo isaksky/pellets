@@ -9,9 +9,12 @@ import (
 // ScheduleSelection deliberately differs from CLI start-next: an existing
 // owner requires explicit exact Resume, and must still match both filters.
 type ScheduleSelection struct {
-	ExternalID   *string
-	Group        *string
-	ResumePellet *int64
+	UseWorkspaceAssignments bool
+	// SavedWorkspaceSelection is used only for the exact owned Resume.
+	SavedWorkspaceSelection *WorkspaceSelection
+	ExternalID              *string
+	Group                   *string
+	ResumePellet            *int64
 	// Ready is a read-only checkpoint readiness hook, evaluated while the queue
 	// writer transaction is held. False leaves the candidate untouched. It must
 	// not write to this database. Checkpoint schema/policy belongs to its owner.

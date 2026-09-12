@@ -16,17 +16,19 @@ import (
 const DefaultScheduleLimit = 100
 
 type ScheduleRequest struct {
-	InteractiveAdmission bool                    `json:"interactive_admission,omitempty"`
-	FreshConversation    bool                    `json:"fresh_conversation,omitempty"`
-	Selected             storage.ResolvedProject `json:"-"`
-	Mode                 string                  `json:"mode"`
-	ExternalID           *string                 `json:"external_id"`
-	Group                *string                 `json:"group"`
-	ResumePellet         *int64                  `json:"resume_pellet,omitempty"`
-	ResumeFrom           *int64                  `json:"resume_from,omitempty"`
-	PreflightReceipt     string                  `json:"preflight_receipt,omitempty"`
-	Limit                int                     `json:"limit"`
-	Overrides            codex.RunOverrides      `json:"overrides"`
+	UseWorkspaceAssignments bool                        `json:"use_workspace_assignments,omitempty"`
+	SavedWorkspaceSelection *storage.WorkspaceSelection `json:"saved_workspace_selection,omitempty"`
+	InteractiveAdmission    bool                        `json:"interactive_admission,omitempty"`
+	FreshConversation       bool                        `json:"fresh_conversation,omitempty"`
+	Selected                storage.ResolvedProject     `json:"-"`
+	Mode                    string                      `json:"mode"`
+	ExternalID              *string                     `json:"external_id"`
+	Group                   *string                     `json:"group"`
+	ResumePellet            *int64                      `json:"resume_pellet,omitempty"`
+	ResumeFrom              *int64                      `json:"resume_from,omitempty"`
+	PreflightReceipt        string                      `json:"preflight_receipt,omitempty"`
+	Limit                   int                         `json:"limit"`
+	Overrides               codex.RunOverrides          `json:"overrides"`
 }
 
 type ScheduleStatus struct {
@@ -143,6 +145,7 @@ func (s *Scheduler) Start(ctx context.Context, request ScheduleRequest) (*Schedu
 		}
 		request.Mode, request.Limit = previous.ScheduleMode, previous.ScheduleRemaining
 		request.ExternalID, request.Group = copyScheduleFilter(previous.ExternalID), copyScheduleFilter(previous.Group)
+		request.UseWorkspaceAssignments, request.SavedWorkspaceSelection = previous.WorkspaceSelection != nil, previous.WorkspaceSelection
 	}
 	for _, value := range []*string{request.ExternalID, request.Group} {
 		if value != nil && (*value == "" || len(*value) > 4096 || !utf8.ValidString(*value)) {
@@ -383,11 +386,11 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 							return nil, err
 						}
 						h.status.PelletNumber = previous.PelletNumber
-						return &storage.RunCapture{ProjectID: previous.ProjectID, WorkspaceID: previous.WorkspaceID, PelletNumber: previous.PelletNumber, Mode: previous.Mode, ScheduleMode: request.Mode, ScheduleRemaining: request.Limit - h.status.Completed, ExternalID: request.ExternalID, Group: request.Group, ResumeFrom: request.ResumeFrom, FreshConversation: request.FreshConversation}, nil
+						return &storage.RunCapture{WorkspaceSelection: previous.WorkspaceSelection, ProjectID: previous.ProjectID, WorkspaceID: previous.WorkspaceID, PelletNumber: previous.PelletNumber, Mode: previous.Mode, ScheduleMode: request.Mode, ScheduleRemaining: request.Limit - h.status.Completed, ExternalID: request.ExternalID, Group: request.Group, ResumeFrom: request.ResumeFrom, FreshConversation: request.FreshConversation}, nil
 					}
 				}
 			}
-			selection := storage.ScheduleSelection{ExternalID: request.ExternalID, Group: request.Group, ResumePellet: request.ResumePellet}
+			selection := storage.ScheduleSelection{ExternalID: request.ExternalID, Group: request.Group, ResumePellet: request.ResumePellet, UseWorkspaceAssignments: request.UseWorkspaceAssignments, SavedWorkspaceSelection: request.SavedWorkspaceSelection}
 			selection.Ready = func(ctx context.Context, p storage.Pellet) (bool, error) {
 				if p.Kind == domain.PelletReviewCheckpoint && request.ResumeFrom == nil && (s.options.Checkpoints == nil || s.options.Checkpoints.Drive == nil) {
 					return false, scheduleError("checkpoint_policy_required", "checkpoint execution requires the separate review policy")
@@ -442,7 +445,7 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 			if s.isCheckpoint(*selected.Pellet) {
 				mode = "review_checkpoint"
 			}
-			return &storage.RunCapture{ProjectID: request.Selected.Project.ID, WorkspaceID: request.Selected.Workspace.ID, PelletNumber: selected.Pellet.Reference.Number, ExpectedImplementationRevision: selected.Pellet.ImplementationRevision, Mode: mode, ScheduleMode: request.Mode, ScheduleRemaining: request.Limit - h.status.Completed, ExternalID: request.ExternalID, Group: request.Group, ResumeFrom: request.ResumeFrom, FreshConversation: request.FreshConversation}, nil
+			return &storage.RunCapture{WorkspaceSelection: selected.WorkspaceSelection, ProjectID: request.Selected.Project.ID, WorkspaceID: request.Selected.Workspace.ID, PelletNumber: selected.Pellet.Reference.Number, ExpectedImplementationRevision: selected.Pellet.ImplementationRevision, Mode: mode, ScheduleMode: request.Mode, ScheduleRemaining: request.Limit - h.status.Completed, ExternalID: request.ExternalID, Group: request.Group, ResumeFrom: request.ResumeFrom, FreshConversation: request.FreshConversation}, nil
 		})
 		h.execution = execution
 		if execution != nil {
@@ -523,6 +526,7 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 		}
 		request.ResumePellet, request.ResumeFrom = nil, nil
 		request.PreflightReceipt = ""
+		request.SavedWorkspaceSelection = nil
 	}
 }
 

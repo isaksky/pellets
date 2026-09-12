@@ -1,9 +1,10 @@
 (function () {
   "use strict";
-  var choice = "system";
-  try { choice = localStorage.getItem("pellets-theme") || "system"; } catch (_) {}
-  if (choice !== "light" && choice !== "dark") choice = "system";
-  var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-  document.documentElement.dataset.themeChoice = choice;
-  document.documentElement.dataset.theme = choice === "system" ? (dark ? "dark" : "light") : choice;
+  var choice="gruvbox-light", panels={};
+  try { choice=localStorage.getItem("pellets-theme")||choice; panels=JSON.parse(localStorage.getItem("pellets-panels")||"{}"); } catch (_) {}
+  if(choice==="system") choice=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";
+  if(!["gruvbox-light","gruvbox-dark","light","dark","icy"].includes(choice)) choice="gruvbox-light";
+  document.documentElement.dataset.themeChoice=choice;
+  document.documentElement.dataset.theme=choice;
+  for(var key of ["navigation","execution"]) document.documentElement.classList.toggle(key+"-collapsed",panels[key]===false);
 }());

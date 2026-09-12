@@ -92,8 +92,8 @@ async function startServer(root) {
       return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
     };
     if (scenario.failure) {
-      const start = scenario.crash ? resume : page.locator('form[data-schedule]').filter({has: page.locator('button[name=mode]')});
-      if (scenario.multiline) {
+      const start = scenario.crash ? resume : page.locator('form[data-schedule]:has(select[name=mode])').first();
+      if (scenario.crash) {
         // The HTTP API accepts opaque multiline filters. Their browser Resume
         // must restore the saved bytes without relying on HTML text inputs.
         const initial = await start.evaluate(form => Object.fromEntries(new FormData(form)));
@@ -101,16 +101,15 @@ async function startServer(root) {
           headers: {Origin: origin}, form: {...initial, mode: scenario.mode, limit: '1', group, external_id: external, group_scope: 'value'}
         });
         assert.equal(response.status(), 202);
-      } else if (scenario.crash) {
-        await start.locator('input[name=group]').fill(group);
-        await start.locator('input[name=external_id]').fill(external);
-        await start.locator('input[name=limit]').fill('1');
-        await start.locator('select[name=mode]').selectOption(scenario.mode);
-        await start.getByRole('button', {name: 'Resume', exact: true}).click();
       } else {
-        await start.locator('input[name=group]').fill(group);
-        await start.locator('input[name=external_id]').fill(external);
-        await start.locator(`button[value=${scenario.mode}]`).click();
+        // Workbench Start next uses workspace assignments. Exercise the
+        // preserved explicit-filter API to establish this recovery receipt;
+        // the subsequent recovery is still performed through the browser UI.
+        const initial = await start.evaluate(form => Object.fromEntries(new FormData(form)));
+        const response = await page.request.post(origin + `/projects/${target.project}/schedules`, {
+          headers: {Origin: origin}, form: {...initial, mode: scenario.mode, group, external_id: external, group_scope: 'value'}
+        });
+        assert.equal(response.status(), 202);
       }
       // This disposable server's first schedule is #1. Preflight may finish
       // after the ownership invalidation; reconnect to its authoritative state
@@ -180,7 +179,7 @@ async function startServer(root) {
     await page.setViewportSize({width: 390, height: 844});
     assert.equal(await resume.evaluate(form => {
       const workspace = form.closest('.run-workspace').getBoundingClientRect();
-      return Array.from(form.querySelectorAll('select, textarea, input:not([type=hidden]), button')).every(control => {
+      return Array.from(form.querySelectorAll('select, textarea, input:not([type=hidden]), button')).filter(control => control.getClientRects().length).every(control => {
         const box = control.getBoundingClientRect();
         return box.left >= workspace.left && box.right <= workspace.right;
       });
@@ -188,7 +187,7 @@ async function startServer(root) {
     await page.setViewportSize({width: 1280, height: 900});
     await resume.getByRole('button', {name: 'Resume', exact: true}).click();
     assert.equal(await resume.locator('select[name=mode]').evaluate(el => el.validity.valueMissing), true);
-    await resume.locator('select[name=mode]').selectOption(scenario.mode);
+    await resume.locator('select[name=mode]').selectOption(scenario.mode, {force: true});
     if (scenario.crash) {
       assert.equal(await resume.locator('input[name=limit]').inputValue(), '1');
       assert.equal(await resume.locator('input[name=limit]').getAttribute('readonly'), '');
@@ -266,23 +265,27 @@ async function startServer(root) {
       await resume.waitFor();
       assert.match(await resume.textContent(), /implementation revision 2/);
       assert.equal(await resume.locator('input[name=resume_from]').count(), 0);
-      await resume.locator('select[name=mode]').selectOption('run_one');
+      await resume.locator('select[name=mode]').selectOption('run_one', {force: true});
       await resume.locator('input[name=limit]').fill('1');
+      const failedAdmission = page.waitForResponse(response => response.url() === endpoint && response.request().method() === 'POST' && response.status() === 409);
       await resume.getByRole('button', {name: 'Resume', exact: true}).click();
-      await until(async () => {
-        const response = await page.request.get(endpoint + '/3');
-        return response.status() === 200 && (await response.json()).state === 'needs_attention';
-      }, 'Reopened generation did not reach authentication preflight');
+      const admissionError = await (await failedAdmission).json();
+      assert.equal(admissionError.error.code, 'codex_preflight_failed');
+      assert.match(admissionError.error.message, /not signed in/i);
+      assert.equal((await page.request.get(endpoint + '/3')).status(), 404, 'Rejected admission created a schedule');
+      assert.equal(cli('show', target.id).status, 'in_progress');
       assert.equal(events().filter(event => event.method === 'thread/start').length, 1);
       fs.writeFileSync(modeFile, 'schedule_reimplementation');
       await page.reload();
       await resume.waitFor();
-      await resume.locator('select[name=mode]').selectOption('run_one');
+      await resume.locator('select[name=mode]').selectOption('run_one', {force: true});
       await resume.locator('input[name=limit]').fill('1');
+      const repairedAdmission = page.waitForResponse(response => response.url() === endpoint && response.request().method() === 'POST' && response.status() === 202);
       await resume.getByRole('button', {name: 'Resume', exact: true}).click();
+      await repairedAdmission;
       await until(() => cli('show', target.id).status === 'closed', 'Reopened generation did not recover');
       await until(async () => {
-        const response = await page.request.get(endpoint + '/4');
+        const response = await page.request.get(endpoint + '/3');
         return response.status() === 200 && (await response.json()).completed === 1;
       }, 'Reopened generation did not complete its new run');
       assert.equal(events().filter(event => event.method === 'thread/start').length, 2);
@@ -297,7 +300,7 @@ async function startServer(root) {
     await page.reload();
     await resume.waitFor();
     assert.equal(await resume.locator('input[name=resume_pellet]').inputValue(), String(queued.number));
-    assert.equal(await page.locator('button[name=mode]:not([disabled])').count(), 0);
+    assert.equal(await page.getByRole('button', {name: '▷ Start next', exact: true}).count(), 0, 'Owned work must require explicit Resume');
     assert.deepEqual(errors, []);
     await page.close();
     await stopServer();

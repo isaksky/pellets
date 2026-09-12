@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="light dark">
   <script src="/assets/theme-preflight.js"></script>
   <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/workbench.css">
   <script type="module" src="/assets/app.js?v=datastar-1.0.3"></script>
   <title>{{if .HasProject}}{{.Project.Code}} · Pellets{{else}}Pellets{{end}}</title>
 </head>
@@ -13,6 +14,8 @@
   <div id="request-feedback" role="status" aria-live="polite" hidden></div>
   <a class="skip-link" href="#main">Skip to content</a>
   {{template "app-content" .}}
+  <dialog id="record-dialog" aria-label="Record details"><div id="inspector-host" aria-live="polite">{{template "inspector" .}}</div><button type="button" class="dialog-dismiss" data-dialog-close aria-label="Dismiss dialog">×</button></dialog>
+  <dialog id="insert-dialog" aria-label="Insert review checkpoint"></dialog>
 </body>
 </html>{{end}}
 
@@ -29,43 +32,35 @@
     </div>
   </main>
   {{else}}
-  <div class="app-shell with-projects">
+  <header class="chrome"><a class="logo" href="{{.TasksURL}}" data-on:click="@navigate('app-content')">pellets</a>{{template "breadcrumbs" .}}<div class="chrome-end">{{template "project-record" .}}</div></header>
+  <div class="app-shell with-projects" data-project="{{.Project.Code}}" data-workspace="{{.ExecutionWorkspace}}">
     {{template "project-rail" .}}
     <main id="main" class="workspace" tabindex="-1">
-      <header class="topbar">
-        <div class="project-heading">
-          <button class="drawer-button" type="button" data-drawer-toggle aria-controls="project-drawer" aria-expanded="false">Projects</button>
-          <div><span class="eyebrow">Project</span><h1>{{.Project.Code}}</h1></div>
-          {{template "project-counts" .}}
-        </div>
-        <div class="header-tools">{{template "project-record" .}}
-</div>
-      </header>
-      {{template "area-tabs" .}}
-      {{if eq .Area "tasks"}}{{template "tasks-area" .}}{{else if eq .Area "workspaces"}}{{template "run-dashboard" .}}{{else}}{{template "memories-area" .}}{{end}}
+      {{if eq .Area "memories"}}{{template "memories-area" .}}{{else}}{{template "tasks-area" .}}{{end}}
     </main>
-    <div id="inspector-host" class="inspector-host" aria-live="polite">{{template "inspector" .}}</div>
+    <aside id="execution" aria-label="Workspace execution">{{template "run-dashboard" .}}</aside>
   </div>
-  <div class="drawer-scrim" data-drawer-close hidden></div>
+  {{template "statusbar" .}}
   {{end}}
 </div>{{end}}
 
-{{define "project-rail"}}<aside class="project-rail live-fragment" id="project-drawer" aria-label="Projects" data-refresh-url="{{.CurrentURL}}">
-  <div class="brand"><span class="brand-mark" aria-hidden="true">●</span><span>Pellets</span><button class="drawer-close-button" type="button" data-drawer-close aria-label="Close projects">×</button></div>
-  <details class="database-context"><summary><span class="eyebrow">Database</span><span class="database-label" title="{{.DatabasePath}}">{{.DatabaseLabel}}</span></summary><code>{{.DatabasePath}}</code></details>
-  <nav aria-label="Projects">{{range .Projects}}{{template "project-link" .}}{{end}}</nav>
+{{define "project-rail"}}<aside class="project-rail live-fragment" id="project-drawer" aria-label="Project navigation" data-refresh-url="{{.CurrentURL}}">
+ {{template "area-tabs" .}}
+ <div class="workspace-nav-heading"><span>Workspaces</span><button type="button" class="quiet" data-project-settings aria-label="Workspace group settings">···</button></div>
+ <nav aria-label="Workspaces">{{range .RunWorkspaces}}<a class="workspace-link {{if eq $.SelectedWorkspace .ID}}active{{end}}" href="{{.URL}}" data-on:click="@navigate('app-content')" title="{{.Root}}" {{if eq $.SelectedWorkspace .ID}}aria-current="page"{{end}}><span class="workspace-dot {{if .Busy}}busy{{end}}" aria-hidden="true">●</span><span>{{.Name}}</span>{{if or .RecoveryAttention .NoRunResume}}<span class="workspace-attention" aria-label="Needs attention">!</span>{{else if .Run}}{{if or .Run.Awaiting .Run.Attention}}<span class="workspace-attention" aria-label="Needs input">!</span>{{else if .Run.Active}}<small>Running</small>{{end}}{{end}}</a>{{end}}</nav>
+ <div class="sidebar-bottom"><span>{{.Project.Code}}</span><code title="{{path .Project.GitCommonDir}}">{{path .Project.GitCommonDir}}</code></div>
 </aside>{{end}}
 
 {{define "run-dashboard"}}<section id="run-dashboard" class="run-dashboard live-fragment" aria-labelledby="run-dashboard-title" data-refresh-url="{{.CurrentURL}}">
-  <div class="run-dashboard-heading"><div><h2 id="run-dashboard-title">{{if .SelectedWorkspace}}{{range .RunWorkspaces}}{{if eq $.SelectedWorkspace .ID}}{{.Name}}{{end}}{{end}}{{else}}Workspaces{{end}}</h2></div><p>{{if .SelectedWorkspace}}Run work from the shared queue in this worktree.{{else}}Select a worktree to view activity and run work from the shared queue.{{end}}</p></div>
-  <div class="run-workspaces">{{range .RunWorkspaces}}{{if or (eq $.SelectedWorkspace 0) (eq $.SelectedWorkspace .ID)}}<article class="run-workspace" data-workspace-id="{{.ID}}">
-    <header><div>{{if eq $.SelectedWorkspace 0}}<a class="workspace-name" href="{{.URL}}">{{.Name}}</a>{{end}}<code title="{{.Root}}">{{.Root}} · Workspace {{.ID}}</code></div>{{if .ActivePellet}}<a href="/projects/{{$.Project.Code}}/tasks/{{.ActivePellet}}">{{.ActivePellet}}</a>{{else}}<span class="quiet">No active pellet</span>{{end}}</header>
-    {{if eq $.SelectedWorkspace 0}}
+  <div class="run-dashboard-heading"><div><h2 id="run-dashboard-title">Execution <span>/ </span>{{if .ExecutionWorkspace}}{{range .RunWorkspaces}}{{if eq $.ExecutionWorkspace .ID}}{{.Name}}{{end}}{{end}}{{else}}Workspaces{{end}}</h2></div></div>
+  <div class="run-workspaces">{{range .RunWorkspaces}}{{if or (eq $.ExecutionWorkspace 0) (eq $.ExecutionWorkspace .ID)}}<article class="run-workspace" data-workspace-id="{{.ID}}">
+    <header><div>{{if eq $.ExecutionWorkspace 0}}<a class="workspace-name" href="{{.URL}}">{{.Name}}</a>{{end}}<code title="{{.Root}}">{{.Root}} · Workspace {{.ID}}</code></div>{{if .ActivePellet}}<a class="current-pellet" href="/projects/{{$.Project.Code}}/tasks/{{.ActivePellet}}?execution={{.ID}}" data-on:click="@navigate('inspector-host')"><span>{{.ActivePellet}} ↗</span><strong>{{.ActiveTitle}}</strong></a>{{else}}<span class="quiet">No active pellet</span>{{end}}</header>
+    {{if eq $.ExecutionWorkspace 0}}
       <p class="workspace-status">{{if .RecoveryAttention}}Needs attention{{else if .Run}}{{runStateLabel .Run.State}}{{else if .ActivePellet}}In progress{{else}}Idle{{end}}</p><a class="quiet-button" href="{{.URL}}">Open workspace</a>
     {{else}}
-    <p><a href="{{$.WorkspacesURL}}">← All workspaces</a></p>
+
     {{if .RecoveryAttention}}<p class="run-notice warning">{{.RecoveryAttention}}</p>{{end}}
-    {{if .Run}}<dl class="run-facts"><div><dt>Pellet</dt><dd><code>{{.Run.Pellet}}</code></dd></div><div><dt>Mode</dt><dd>{{runStateLabel .Run.Mode}}</dd></div><div><dt>Model / effort</dt><dd>{{.Run.Model}} · {{.Run.Effort}}</dd></div><div><dt>Phase</dt><dd>{{runStateLabel .Run.Phase}}</dd></div><div><dt>State</dt><dd><span class="badge run-state {{.Run.State}}">{{runStateLabel .Run.State}}</span></dd></div><div><dt>Frozen filters</dt><dd>External ID: {{.Run.ExternalID}} · Group: {{.Run.Group}}</dd></div></dl>
+    {{if .Run}}<details class="run-details" id="run-details-{{$.Project.ID}}-{{.ID}}-{{.Run.ID}}"><summary>Run details</summary><dl class="run-facts"><div><dt>Pellet</dt><dd><code>{{.Run.Pellet}}</code></dd></div><div><dt>Mode</dt><dd>{{runStateLabel .Run.Mode}}</dd></div><div><dt>Model / effort</dt><dd>{{.Run.Model}} · {{.Run.Effort}}</dd></div><div><dt>Phase</dt><dd>{{runStateLabel .Run.Phase}}</dd></div><div><dt>State</dt><dd><span class="badge run-state {{.Run.State}}">{{runStateLabel .Run.State}}</span></dd></div><div><dt>Frozen filters</dt><dd>External ID: {{.Run.ExternalID}} · Group: {{.Run.Group}}</dd></div></dl></details>
       <p class="run-activity"><strong>Latest activity:</strong> {{.Run.Activity}}</p>
       {{if .Run.AutoReview}}<p class="run-notice">Automatic approval review is active; any remaining human decision is shown below.</p>{{end}}
       {{if .Run.Awaiting}}<p class="run-notice">Awaiting input for this exact run.</p>{{end}}
@@ -82,7 +77,7 @@
     {{else}}<p class="run-activity">No recorded run for this workspace.</p>{{end}}
     {{if .Schedule}}<p class="schedule-state">Schedule #{{.Schedule.ID}} · {{runStateLabel .Schedule.Mode}} · {{runStateLabel .Schedule.State}}{{if eq .Schedule.State "waiting"}} — waiting for a matching queue target{{end}}{{if .Schedule.StopAfter}} · stopping after current pellet{{end}} · frozen filters: External ID {{.Schedule.ExternalID}}, Group {{.Schedule.Group}}</p>{{end}}
     <div class="run-controls" aria-label="Controls for workspace {{.ID}}">
-      <form action="/projects/{{$.Project.Code}}/schedules" method="post" data-schedule><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="workspace_id" value="{{.ID}}">{{if .UngroupedFilter}}<input type="hidden" name="group_scope" value="ungrouped"><p class="run-notice warning">The displayed exact Ungrouped filter cannot be scheduled. Remove it before running.</p>{{else}}<input type="hidden" name="group_scope" value="{{if .Group}}value{{else}}any{{end}}"><label class="run-filter">External ID <input name="external_id" value="{{.ExternalID}}" placeholder="Exact filter"{{if .Busy}} disabled{{end}}></label><label class="run-filter">Group <input name="group" value="{{.Group}}" placeholder="Exact filter"{{if .Busy}} disabled{{end}}></label>{{end}}<div class="run-mode-buttons"><button class="primary-button" type="submit" name="mode" value="run_one"{{if or .Busy .UngroupedFilter}} disabled{{end}}>Run one</button><button type="submit" name="mode" value="drain"{{if or .Busy .UngroupedFilter}} disabled{{end}}>Drain</button><button type="submit" name="mode" value="watch"{{if or .Busy .UngroupedFilter}} disabled{{end}}>Watch</button></div><p class="run-mode-help">Run one handles the next matching task. Drain works through matching tasks until none remain. Watch continues waiting for new matches, within the schedule limit. Blank filters include all tasks.</p></form>
+      {{if not .Busy}}<form action="/projects/{{$.Project.Code}}/schedules" method="post" data-schedule><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="workspace_id" value="{{.ID}}"><div class="run-mode-buttons"><label class="run-mode-label"><select name="mode" aria-label="Execution intention"><option value="run_one">One pellet</option><option value="drain">Through matching queue</option><option value="watch">Wait for matching work</option></select></label><button class="primary-button" type="submit">▷ Start next</button></div><p class="run-filter-label">{{if $.Routing.Enabled}}Workspace group assignments{{else}}Working from the whole queue{{end}}</p></form>{{end}}
       {{if .Schedule}}<form action="/projects/{{$.Project.Code}}/schedules/{{.Schedule.ID}}/stop-after" method="post" data-schedule><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit"{{if .Schedule.StopAfter}} disabled{{end}}>Stop after</button></form><form action="/projects/{{$.Project.Code}}/schedules/{{.Schedule.ID}}/stop-now" method="post" data-schedule><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button type="submit">Stop now</button></form>{{end}}
       {{if .Run}}{{if .Run.CanResume}}<form action="/projects/{{$.Project.Code}}/schedules" method="post" data-schedule><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="workspace_id" value="{{.ID}}"><input type="hidden" name="mode" value="{{.Run.ResumeMode}}"><input type="hidden" name="resume_pellet" value="{{.Run.PelletNumber}}"><input type="hidden" name="resume_from" value="{{.Run.ID}}"><p>Resume {{.Run.Pellet}} at {{.Run.Phase}}, then continue {{.Run.ResumeMode}} ({{.Run.ResumeLimit}} pellets remaining, including this one), using its saved exact filters.</p><button type="submit"{{if .Schedule}} disabled{{end}}>Resume</button></form>{{end}}{{end}}
       {{if .NoRunResume}}<form action="/projects/{{$.Project.Code}}/schedules" method="post" data-schedule data-no-run-resume class="dirty-track">
@@ -98,18 +93,13 @@
       </form>{{end}}
     </div>
     {{end}}
+  <section id="activity-{{$.Project.ID}}-{{.ID}}-{{if .Run}}{{.Run.ID}}{{else}}none{{end}}" data-ignore-morph class="activity-panel" aria-label="Execution activity" data-activity-workspace="{{$.Project.Code}}:{{.ID}}" {{if .Run}}data-activity-url="/projects/{{$.Project.Code}}/runs/{{.Run.ID}}/activity" data-run-id="{{.Run.ID}}"{{end}}><div class="activity-heading"><h3>Activity</h3><span data-activity-count></span></div><p class="activity-availability">{{if .Run}}Loading reported activity…{{else}}No recorded activity. Start a pellet to begin.{{end}}</p><div class="activity-events" data-activity-events></div></section>
   </article>{{end}}{{end}}</div>
 </section>{{end}}
 
 {{define "project-record"}}<details class="project-record live-fragment" id="project-record" data-refresh-url="{{.CurrentURL}}">
-  <summary>Project details</summary>
-        <label class="theme-control">Theme
-          <select id="theme-select">
-            <option value="system">System</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </select>
-        </label>
+  <summary>Settings</summary>
+  {{template "routing-settings" .}}
   <dl>
 	    <div><dt>Code</dt><dd><code>{{.Project.Code}}</code></dd></div>
 	    <div><dt>Redirects</dt><dd>{{if .Project.Redirects}}{{range $index, $redirect := .Project.Redirects}}{{if $index}}, {{end}}<code>{{$redirect.Code}}</code> → <code>{{$.Project.Code}}</code>{{end}}{{else}}None{{end}}</dd></div>
@@ -127,8 +117,8 @@
 </section>{{end}}
 
 {{define "tasks-area"}}<section class="area-content" id="tasks-area" aria-labelledby="tasks-title">
-  <div class="section-heading"><div><h2 id="tasks-title">Queue</h2></div>
-    <details class="create-popover"><summary class="primary-button">New task</summary>
+  <div class="section-heading"><div>{{template "queue-title" .}}</div>
+    <details class="create-popover"><summary class="primary-button">+ New pellet</summary>
       <form action="/projects/{{.Project.Code}}/pellets" method="post" data-on:submit="@submit()" class="stack-form">
         <input type="hidden" name="_csrf" value="{{.CSRF}}">
 		<input type="hidden" name="request_id" value="">
@@ -136,15 +126,17 @@
         <label>Description <textarea name="description" rows="4"></textarea></label>
         <div class="form-grid"><label>External ID <input name="external_id"></label><label>Group <input name="group"></label></div>
         <label>Status <select name="status"><option value="open">Open</option><option value="maybe_later">Maybe later</option></select></label>
-        <button class="primary-button" type="submit">Create task</button>
+        <button class="primary-button" type="submit">Create pellet</button>
       </form>
     </details>
   </div>
+  {{template "workspace-groups" .}}
   <form class="filters" action="{{.TasksURL}}" method="get" data-on:submit="@filter()" data-on:change="evt.target.matches('select') &amp;&amp; @filter()" data-on:input__debounce.300ms="evt.target.matches('input') &amp;&amp; @filter()">
-    <input type="hidden" name="sort" value="{{.Filters.Sort}}"><input type="hidden" name="direction" value="{{.Filters.Direction}}">
-    <label>Search <input id="search" name="q" type="search" value="{{.Filters.Query}}" placeholder="Title, description, external ID" autocomplete="off"></label>
-    <details class="filter-options" id="queue-filters"{{if filterCount .Filters}} open{{end}}>{{template "filter-summary" .}}<div class="filter-fields">
-    <label>Status <select name="status"><option value="" {{if eq .Filters.Status ""}}selected{{end}}>All states</option><option value="open" {{if eq .Filters.Status "open"}}selected{{end}}>Open</option><option value="in_progress" {{if eq .Filters.Status "in_progress"}}selected{{end}}>In progress</option><option value="maybe_later" {{if eq .Filters.Status "maybe_later"}}selected{{end}}>Maybe later</option><option value="closed" {{if eq .Filters.Status "closed"}}selected{{end}}>Closed</option></select></label>
+    {{if .SelectedWorkspace}}<input type="hidden" name="workspace" value="{{.SelectedWorkspace}}">{{end}}<input type="hidden" name="execution" value="{{.ExecutionWorkspace}}">
+    <label class="search-label"><span class="visually-hidden">Search</span><input aria-label="Find a pellet" id="search" name="q" type="search" value="{{.Filters.Query}}" placeholder="Search…" autocomplete="off"></label>
+    <details class="filter-options" id="queue-filters">{{template "filter-summary" .}}<div class="filter-fields">
+    <label>Status <select name="status"><option value="active" {{if eq .Filters.Status "active"}}selected{{end}}>Active</option><option value="all" {{if eq .Filters.Status "all"}}selected{{end}}>All states</option><option value="open" {{if eq .Filters.Status "open"}}selected{{end}}>Open</option><option value="in_progress" {{if eq .Filters.Status "in_progress"}}selected{{end}}>In progress</option><option value="maybe_later" {{if eq .Filters.Status "maybe_later"}}selected{{end}}>Maybe later</option><option value="closed" {{if eq .Filters.Status "closed"}}selected{{end}}>Closed</option></select></label>
+    <label>Sort <select name="sort">{{range .SortHeaders}}<option value="{{.Key}}" {{if .Active}}selected{{end}}>{{.Label}}</option>{{end}}</select></label><label>Direction <select name="direction"><option value="asc" {{if eq .Filters.Direction "asc"}}selected{{end}}>Ascending</option><option value="desc" {{if eq .Filters.Direction "desc"}}selected{{end}}>Descending</option></select></label>
     <label>Group <select name="group">{{range .Groups}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
     <label>External ID <input name="external_id" value="{{.Filters.ExternalID}}" placeholder="Exact value"></label>
     <a class="quiet-button" href="{{.TasksURL}}">Clear filters</a>
@@ -166,13 +158,14 @@
       <div class="checkpoint-actions"><button class="primary-button" type="submit" disabled>Insert review checkpoint</button><button type="button" data-checkpoint-clear>Clear selection</button></div>
     </form>
   </section>
-  {{if .Pellets}}<div id="task-table-scroll" class="table-scroll"><table><thead><tr>{{range .SortHeaders}}<th scope="col" class="column-{{.Key}}{{if .TitleColumn}} task-title-column{{end}}"{{if .Active}} aria-sort="{{.AriaSort}}"{{end}}>{{if eq .Key "reference"}}<label class="selection-all"><input type="checkbox" data-checkpoint-select-all aria-label="Select all visible ordinary tasks"><span>Select</span></label>{{end}}<a id="task-sort-{{.Key}}" class="task-sort {{if .Active}}active{{end}}" href="{{.URL}}" data-on:click="@navigate('tasks-area')" aria-label="{{.ActionLabel}}"><span>{{.Label}}</span>{{if .Indicator}}<span class="sort-indicator" aria-hidden="true">{{.Indicator}}</span>{{end}}</a></th>{{end}}</tr></thead><tbody>
-  {{range .Pellets}}<tr id="task-{{.Pellet.Reference}}" class="task-row status-{{.Pellet.Status}} {{if .Selected}}selected{{end}}" data-row-id="{{.Pellet.Reference}}" data-row-version="{{.Version}}" data-checkpoint-kind="{{.Pellet.Kind}}" data-checkpoint-priority="{{if .Pellet.Priority}}{{.Pellet.Priority}}{{end}}" data-checkpoint-external-set="{{if .Pellet.ExternalID}}true{{else}}false{{end}}" data-checkpoint-external="{{if .Pellet.ExternalID}}{{.Pellet.ExternalID}}{{end}}" data-checkpoint-group-set="{{if .Pellet.Group}}true{{else}}false{{end}}" data-checkpoint-group="{{if .Pellet.Group}}{{.Pellet.Group}}{{end}}">
-    <td><span class="selection-control"><input type="checkbox" data-checkpoint-select aria-label="Select {{.Pellet.Reference}} for review"{{if ne .Pellet.Kind "ordinary"}} disabled title="Review checkpoints cannot be selected as review targets"{{end}}><a class="row-link" href="{{.URL}}" data-on:click="@navigate('inspector-host')"><code>{{.Pellet.Reference}}</code></a></span></td>
-    <td class="task-title-column"><a class="task-title" href="{{.URL}}" data-on:click="@navigate('inspector-host')">{{.Pellet.Title}}</a>{{if .Pellet.Checkpoint}}<small>Review checkpoint · {{if .Pellet.Checkpoint.Ready}}ready{{else}}waiting{{end}}</small>{{end}}{{if .Owner}}<small>{{.Owner}}</small>{{end}}</td>
-    <td>{{.Group}}</td><td><span class="badge status-badge {{.Pellet.Status}}">{{statusLabel .Pellet.Status}}</span></td><td class="column-priority"><code>{{.Priority}}</code></td><td><code>{{.ExternalID}}</code></td><td><time title="{{formatTime .Pellet.UpdatedAt}}" datetime="{{.Pellet.UpdatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{relativeTime .Pellet.UpdatedAt}}</time></td>
-  </tr>{{end}}</tbody></table></div>
-  {{else}}<div class="empty-state"><h3>No tasks match</h3><p>Try clearing a filter or create the first task in this project.</p></div>{{end}}
+  {{if .Pellets}}<div id="task-table-scroll" class="table-scroll"><div class="queue-caption"><span>ID</span><span>Pellet</span><span>Group</span><span>Workspace</span></div><div class="queue-rows" id="queue-rows">
+  {{range .Pellets}}{{if .Pellet.Checkpoint}}<article id="task-{{.Pellet.Reference}}" class="checkpoint-row" data-checkpoint-priority="{{if .Pellet.Priority}}{{.Pellet.Priority}}{{end}}" data-row-id="{{.Pellet.Reference}}" data-row-version="{{.Version}}" data-scope="{{.ScopeRefs}}" data-scope-total="{{.ScopeTotal}}" aria-label="Review checkpoint {{.Pellet.Reference}}"><a class="checkpoint-open row-link" href="{{.URL}}" data-on:click="@navigate('inspector-host')"><span aria-hidden="true">♧</span><span>{{.Pellet.Title}}</span><small>{{if eqStatus .Pellet.Status "closed"}}Closed{{else if .Pellet.Checkpoint.Removed}}Removed{{else if eqStatus .Pellet.Status "in_progress"}}Owned{{else if .Pellet.Checkpoint.Ready}}Ready{{else}}Waiting{{end}}</small><small class="scope-count">{{if eq .ScopeVisible .ScopeTotal}}{{.ScopeTotal}}{{else}}{{.ScopeVisible}} of {{.ScopeTotal}}{{end}}</small><span class="checkpoint-rule"></span></a><span class="visually-hidden">Reviews {{.ScopeRefs}}</span>{{if eqStatus .Pellet.Status "open"}}<form class="checkpoint-remove-form" action="/projects/{{.Pellet.Reference.ProjectCode}}/checkpoints/{{.Pellet.Reference}}/remove" method="post" data-checkpoint-remove data-checkpoint-remove-inline><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{.Version}}"><button type="submit" class="checkpoint-remove quiet" aria-label="Remove checkpoint {{.Pellet.Reference}}" title="Remove checkpoint">×</button></form>{{end}}</article>
+  {{else}}<article id="task-{{.Pellet.Reference}}" class="task-row pellet-row status-{{.Pellet.Status}} {{if .Selected}}selected{{end}}" data-row-id="{{.Pellet.Reference}}" data-row-version="{{.Version}}" data-checkpoint-kind="{{.Pellet.Kind}}" data-checkpoint-priority="{{if .Pellet.Priority}}{{.Pellet.Priority}}{{end}}" data-checkpoint-external-set="{{if .Pellet.ExternalID}}true{{else}}false{{end}}" data-checkpoint-external="{{if .Pellet.ExternalID}}{{.Pellet.ExternalID}}{{end}}" data-checkpoint-group-set="{{if .Pellet.Group}}true{{else}}false{{end}}" data-checkpoint-group="{{if .Pellet.Group}}{{.Pellet.Group}}{{end}}">
+   <a class="row-link mono row-reference" tabindex="-1" href="{{.URL}}" title="{{.Pellet.Reference}}" data-on:click="@navigate('inspector-host')"><span class="row-reference-project">{{.Pellet.Reference.ProjectCode}}</span><span class="row-reference-number">-{{.Pellet.Reference.Number}}</span></a><span class="state-symbol {{.Pellet.Status}}" title="{{statusLabel .Pellet.Status}}" aria-label="{{statusLabel .Pellet.Status}}">{{statusSymbol .Pellet.Status}}</span><a class="task-title" href="{{.URL}}" data-on:click="@navigate('inspector-host')">{{.Pellet.Title}}</a><span class="group-name" title="{{.Group}}">{{.Group}}</span><span class="owner-label" title="{{.Owner}}">{{if .OwnerName}}{{.OwnerName}}{{else}}—{{end}}</span><details class="row-menu" id="row-menu-{{.Pellet.Reference}}"><summary aria-label="Actions for {{.Pellet.Reference}}">···</summary><div class="row-popover" role="menu"><button type="button" role="menuitem" data-insert-checkpoint="before" {{if not .Pellet.Priority}}disabled{{end}}>Insert checkpoint before</button><button type="button" role="menuitem" data-insert-checkpoint="after" {{if not .Pellet.Priority}}disabled{{end}}>Insert checkpoint after</button><button type="button" role="menuitem" data-move-row="before" {{if not .Pellet.Priority}}disabled{{end}}>Move pellet up</button><button type="button" role="menuitem" data-move-row="after" {{if not .Pellet.Priority}}disabled{{end}}>Move pellet down</button><label><input type="checkbox" data-checkpoint-select aria-label="Select {{.Pellet.Reference}} for review"> Select for review</label></div></details>
+  </article>{{end}}{{end}}</div></div>
+  {{else}}<div class="empty-state"><h3>No pellets match</h3><p>Clear a filter or add a pellet.</p></div>{{end}}
+  <template id="scope-order">{{range .QueueContext}}<span data-row-id="{{.Pellet.Reference}}" data-kind="{{.Pellet.Kind}}"></span>{{end}}</template>
+  <template id="scope-candidates">{{range .ScopeCandidates}}<label><input type="checkbox" value="{{.Pellet.Reference}}" data-version="{{.Version}}" data-priority="{{.Priority}}"> <code>{{.Pellet.Reference}}</code><span>{{.Pellet.Title}}</span></label>{{end}}</template>
 </div>{{end}}
 
 {{define "memories-area"}}<section class="area-content" aria-labelledby="memories-title">
@@ -198,19 +191,20 @@
 
 {{define "inspector"}}{{if .SelectedPellet}}{{template "pellet-inspector" .}}{{else if .SelectedMemory}}{{template "memory-inspector" .}}{{end}}{{end}}
 
-{{define "pellet-inspector"}}<aside id="inspector-task-{{.SelectedPellet.Pellet.Reference}}" class="inspector live-fragment" role="dialog" aria-modal="false" aria-labelledby="inspector-title" data-inspector data-protect-dirty data-refresh-url="{{.SelectedPellet.URL}}">
-  <header><div><span class="eyebrow">Task inspector</span><h2 id="inspector-title">{{.SelectedPellet.Pellet.Reference}}</h2></div>{{if .CloseURL}}<a class="icon-button" href="{{.CloseURL}}" data-on:click="@navigate('inspector-host')" aria-label="Close inspector">×</a>{{end}}</header>
+{{define "pellet-inspector"}}<aside id="inspector-task-{{.SelectedPellet.Pellet.Reference}}" class="inspector live-fragment" role="dialog" aria-modal="true" aria-labelledby="inspector-title" data-inspector data-protect-dirty data-refresh-url="{{.SelectedPellet.URL}}">
+  <header><div><span class="eyebrow">Pellet</span><h2 id="inspector-title">{{.SelectedPellet.Pellet.Reference}}</h2></div><div class="header-actions">{{if .CloseURL}}<a class="icon-button" href="{{.CloseURL}}" data-on:click="@navigate('inspector-host')" aria-label="Close inspector">×</a>{{end}}</div></header>
   <div class="inspector-scroll">
     <div class="inspector-title-row"><span class="badge status-badge {{.SelectedPellet.Pellet.Status}}">{{statusLabel .SelectedPellet.Pellet.Status}}</span>{{if .SelectedPellet.Owner}}<span class="owner-badge">{{.SelectedPellet.Owner}}</span>{{end}}</div>
-    {{with .SelectedPellet.Pellet.Checkpoint}}<section><h3>Review checkpoint</h3><p>{{if .Ready}}Ready: all selected targets have implementation evidence.{{else}}Waiting for the selected targets and implementation evidence.{{end}}</p>{{template "checkpoint-outcome" $.SelectedPellet.CheckpointOutcome}}<h4>Selected targets · current evidence</h4><ul>{{range .Targets}}<li><code>{{.Reference}}</code> · {{.Title}} · {{.Reason}}{{if .Evidence}}<br>Commit <code>{{.Evidence.ResultCommit}}</code> (run {{.Evidence.RunID}}, workspace {{.Evidence.WorkspaceID}}){{end}}</li>{{end}}</ul></section>{{end}}
-    <section class="lifecycle"><h3>Task actions</h3>{{template "lifecycle-controls" .}}</section>
-    <form id="edit-task-{{.SelectedPellet.Pellet.Reference}}" action="/projects/{{.SelectedPellet.Pellet.Reference.ProjectCode}}/pellets/{{.SelectedPellet.Pellet.Reference}}/edit" method="post" data-on:submit="@submit()" class="stack-form dirty-track">
+    <form id="edit-task-{{.SelectedPellet.Pellet.Reference}}" action="/projects/{{.SelectedPellet.Pellet.Reference.ProjectCode}}/pellets/{{.SelectedPellet.Pellet.Reference}}/edit" method="post" data-on:submit="@submit()" class="stack-form dirty-track record-edit">
       <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}">
       <label>Title <input name="title" value="{{.SelectedPellet.Pellet.Title}}" required></label>
       <label>Description <textarea class="task-description-editor" name="description" rows="4">{{.SelectedPellet.Pellet.Description}}</textarea></label>
       <div class="form-grid"><label>External ID <input name="external_id" value="{{text .SelectedPellet.Pellet.ExternalID}}"></label><label>Group <input name="group" value="{{text .SelectedPellet.Pellet.Group}}"></label></div>
       <button class="primary-button" type="submit">Save changes</button>
     </form>
+    {{with .SelectedPellet.Pellet.Checkpoint}}<section><h3>Review checkpoint</h3><p>{{if .Ready}}Ready: all selected targets have implementation evidence.{{else}}Waiting for the selected targets and implementation evidence.{{end}}</p>{{template "checkpoint-outcome" $.SelectedPellet.CheckpointOutcome}}<h4>Selected targets · current evidence</h4><ul>{{range .Targets}}<li><code>{{.Reference}}</code> · {{.Title}} · {{.Reason}}{{if .Evidence}}<br>Commit <code>{{.Evidence.ResultCommit}}</code> (run {{.Evidence.RunID}}, workspace {{.Evidence.WorkspaceID}}){{end}}</li>{{end}}</ul></section>{{end}}
+    {{template "checkpoint-management" .}}
+    <section class="lifecycle"><h3>Pellet actions</h3><a class="secondary-button" href="{{.SelectedPellet.ExecutionURL}}" data-on:click="@navigate('app-content')" data-open-execution>Open execution</a>{{template "lifecycle-controls" .}}</section>
 
     {{if .MoveTargets}}{{if or (eqStatus .SelectedPellet.Pellet.Status "open") (eqStatus .SelectedPellet.Pellet.Status "in_progress")}}<section><h3>Queue position</h3><form action="/projects/{{.SelectedPellet.Pellet.Reference.ProjectCode}}/pellets/{{.SelectedPellet.Pellet.Reference}}/move" method="post" data-on:submit="@submit()" class="inline-form"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}"><label>Move <select name="direction"><option value="before">Before</option><option value="after">After</option></select></label><label>Task <select name="target">{{range .MoveTargets}}<option value="{{.Pellet.Reference}}">{{.Pellet.Reference}} · {{.Pellet.Title}}</option>{{end}}</select></label><button type="submit">Reorder</button></form></section>{{end}}{{end}}
     <details class="metadata"><summary>Record details</summary><dl><div><dt>Project ID</dt><dd><code>{{.SelectedPellet.Pellet.ProjectID}}</code></dd></div><div><dt>Priority</dt><dd><code>{{.SelectedPellet.Priority}}</code></dd></div><div><dt>Created</dt><dd>{{formatTime .SelectedPellet.Pellet.CreatedAt}}</dd></div><div><dt>Updated</dt><dd>{{formatTime .SelectedPellet.Pellet.UpdatedAt}}</dd></div>{{if .SelectedPellet.Pellet.CompletedAt}}<div><dt>Completed</dt><dd>{{formatTime .SelectedPellet.Pellet.CompletedAt}}</dd></div>{{end}}</dl></details>
@@ -225,10 +219,10 @@
   {{if or (eqStatus .SelectedPellet.Pellet.Status "closed") (eqStatus .SelectedPellet.Pellet.Status "maybe_later")}}{{template "lifecycle-form" (lifecycle . "reopen")}}{{end}}
 </div>{{end}}
 
-{{define "memory-inspector"}}<aside id="inspector-memory-{{.SelectedMemory.Memory.ID}}" class="inspector live-fragment" role="dialog" aria-modal="false" aria-labelledby="inspector-title" data-inspector data-protect-dirty data-refresh-url="{{.SelectedMemory.URL}}">
-  <header><div><span class="eyebrow">Memory inspector</span><h2 id="inspector-title">Memory {{.SelectedMemory.Memory.ID}}</h2></div>{{if .CloseURL}}<a class="icon-button" href="{{.CloseURL}}" data-on:click="@navigate('inspector-host')" aria-label="Close inspector">×</a>{{end}}</header>
+{{define "memory-inspector"}}<aside id="inspector-memory-{{.SelectedMemory.Memory.ID}}" class="inspector live-fragment" role="dialog" aria-modal="true" aria-labelledby="inspector-title" data-inspector data-protect-dirty data-refresh-url="{{.SelectedMemory.URL}}">
+  <header><div><span class="eyebrow">Memory</span><h2 id="inspector-title">Memory {{.SelectedMemory.Memory.ID}}</h2></div><div class="header-actions">{{if .CloseURL}}<a class="icon-button" href="{{.CloseURL}}" data-on:click="@navigate('inspector-host')" aria-label="Close inspector">×</a>{{end}}</div></header>
   <div class="inspector-scroll"><div class="inspector-title-row"><span class="badge provenance">{{.SelectedMemory.Memory.CreatedBy}}</span>{{if .SelectedMemory.Memory.ApprovedAt}}<span class="badge approved">Human approved</span>{{else}}<span class="badge unapproved">Needs review</span>{{end}}</div>
-    <form id="edit-memory-{{.SelectedMemory.Memory.ID}}" action="/projects/{{.SelectedMemory.Memory.ProjectCode}}/memories/{{.SelectedMemory.Memory.ID}}/edit" method="post" data-on:submit="@submit()" class="stack-form dirty-track"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedMemory.Version}}"><label>Text <textarea name="text" rows="15" required>{{.SelectedMemory.Memory.Text}}</textarea></label><p class="form-help">Changing reviewed agent text clears its approval; save the updated text before requesting another review.</p><button class="primary-button" type="submit">Save text</button></form>
+    <form id="edit-memory-{{.SelectedMemory.Memory.ID}}" action="/projects/{{.SelectedMemory.Memory.ProjectCode}}/memories/{{.SelectedMemory.Memory.ID}}/edit" method="post" data-on:submit="@submit()" class="stack-form dirty-track record-edit"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedMemory.Version}}"><label>Text <textarea name="text" rows="15" required>{{.SelectedMemory.Memory.Text}}</textarea></label><p class="form-help">Changing reviewed agent text clears its approval; save the updated text before requesting another review.</p><button class="primary-button" type="submit">Save text</button></form>
     {{if not .SelectedMemory.Memory.ApprovedAt}}<form action="/projects/{{.SelectedMemory.Memory.ProjectCode}}/memories/{{.SelectedMemory.Memory.ID}}/approve" method="post" data-on:submit="@submit()" class="action-form"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedMemory.Version}}"><button type="submit">Approve current text</button></form>{{end}}
     <section class="metadata"><h3>Record</h3><dl><div><dt>Project ID</dt><dd><code>{{.SelectedMemory.Memory.ProjectID}}</code></dd></div><div><dt>Provenance</dt><dd>{{.SelectedMemory.Memory.CreatedBy}}</dd></div><div><dt>Created</dt><dd>{{formatTime .SelectedMemory.Memory.CreatedAt}}</dd></div><div><dt>Updated</dt><dd>{{formatTime .SelectedMemory.Memory.UpdatedAt}}</dd></div>{{if .SelectedMemory.Memory.ApprovedAt}}<div><dt>Approved</dt><dd>{{formatTime .SelectedMemory.Memory.ApprovedAt}}</dd></div>{{end}}</dl></section>
   </div>
@@ -238,12 +232,11 @@
 
 {{define "error"}}<section class="error-state" role="alert"><span class="badge error">{{.StatusCode}} error</span><h2>Request not applied</h2><p>{{.Error}}</p>{{if .Conflict.Draft}}<details><summary>Submitted draft</summary><dl>{{range $key, $value := .Conflict.Draft}}<div><dt>{{$key}}</dt><dd><pre>{{$value}}</pre></dd></div>{{end}}</dl></details>{{end}}</section>{{end}}
 
-{{define "area-tabs"}}<nav id="area-tabs" class="area-tabs" aria-label="Project areas">
-        <a href="{{.TasksURL}}" {{if eq .Area "tasks"}}aria-current="page"{{end}}>Queue <span>{{.ProjectSummary.Open}}</span></a>
-        <a href="{{.WorkspacesURL}}" {{if eq .Area "workspaces"}}aria-current="page"{{end}}>Workspaces <span>{{len .Project.Workspaces}}</span>{{if .ProjectSummary.InProgress}} · {{.ProjectSummary.InProgress}} active{{end}}{{if .WorkspaceAttention}} · {{.WorkspaceAttention}} need attention{{end}}</a>
-        <a href="{{.MemoriesURL}}" {{if eq .Area "memories"}}aria-current="page"{{end}}>Memory <span>{{.ProjectSummary.MemoryCount}}</span></a>
-      </nav>{{end}}
-{{define "project-counts"}}<span id="project-counts" class="compact-count">{{.ProjectSummary.Open}} open · {{.ProjectSummary.InProgress}} active · {{.ProjectSummary.MemoryCount}} memories</span>{{end}}
+{{define "area-tabs"}}<nav id="area-tabs" class="area-tabs" aria-label="Project views"><a href="{{.TasksURL}}" data-on:click="@navigate('app-content')" {{if and (eq .Area "tasks") (eq .SelectedWorkspace 0)}}aria-current="page"{{end}}><span>☷</span> Queue <small>{{.ProjectQueueCount}}</small></a><a href="{{.MemoriesURL}}" data-on:click="@navigate('app-content')" {{if eq .Area "memories"}}aria-current="page"{{end}}><span>▤</span> Memories <small>{{.ProjectSummary.MemoryCount}}</small></a></nav>{{end}}
 
-{{define "filter-summary"}}<summary id="filter-summary">Filters{{if filterCount .Filters}} <span class="badge">{{filterCount .Filters}}</span>{{end}}</summary>{{end}}
+{{define "project-counts"}}<span id="project-counts" class="footer-counts">{{.ProjectSummary.Open}} open</span>{{end}}
+
+{{define "filter-summary"}}<summary id="filter-summary">{{if eq .Filters.Status "active"}}Active{{else if eq .Filters.Status "all"}}All states{{else}}{{statusLabel .Filters.Status}}{{end}}{{if filterCount .Filters}} <span class="badge">{{filterCount .Filters}}</span>{{end}}</summary>{{end}}
 {{define "queue-order"}}<a id="queue-order" class="queue-order" href="{{.QueueOrderURL}}" data-on:click="@navigate('tasks-area')">Queue order</a>{{end}}
+
+{{define "queue-title"}}<h2 id="tasks-title">{{if .SelectedWorkspace}}{{.WorkspaceName}}{{else}}Queue{{end}} <small>{{queueCount .Pellets}}</small></h2>{{end}}

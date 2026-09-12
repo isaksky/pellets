@@ -309,6 +309,12 @@ func Run() bool {
 			if mode == "schedule_followup_live" {
 				continue
 			}
+			if mode == "schedule_activity" || mode == "schedule_activity_gate" {
+				writeActivityFixture(write)
+				if mode == "schedule_activity_gate" {
+					waitFile("fake-complete")
+				}
+			}
 			if mode == "schedule_gate" {
 				waitFile("fake-complete")
 			}
@@ -425,3 +431,18 @@ func must(err error) {
 }
 
 const runtimeFailureMessage = "GPT-6 Astra requires a newer Codex version. Upgrade Codex and retry. <script>window.codexErrorInjected=true</script>\nAuthorization: Bearer private-runtime-token\napi_key=sk-private123456789"
+
+// These deterministic protocol snapshots exercise the browser projection only;
+// production never fabricates activity or reconstructs unreported file contents.
+func writeActivityFixture(write func(any)) {
+	send := func(method string, item map[string]any) {
+		write(map[string]any{"method": method, "params": map[string]any{"threadId": "thread", "turnId": "turn", "item": item}})
+	}
+	send("item/started", map[string]any{"id": "read-code", "type": "commandExecution", "command": "cat code-1.txt", "commandActions": []any{map[string]any{"type": "read", "path": "code-1.txt", "name": "code-1.txt"}}})
+	send("item/completed", map[string]any{"id": "read-code", "type": "commandExecution", "command": "cat code-1.txt", "commandActions": []any{map[string]any{"type": "read", "path": "code-1.txt", "name": "code-1.txt"}}, "aggregatedOutput": "before\n", "exitCode": 0})
+	send("item/completed", map[string]any{"id": "edit-code", "type": "fileChange", "status": "completed", "changes": []any{map[string]any{"path": "code-1.txt", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-before\n+after\n"}}})
+	send("item/completed", map[string]any{"id": "read-source", "type": "commandExecution", "command": "cat example.go", "commandActions": []any{map[string]any{"type": "read", "path": "example.go", "name": "example.go"}}, "aggregatedOutput": "package example\n\nfunc Ready() bool {\n\treturn true\n}\n", "exitCode": 0})
+	send("item/completed", map[string]any{"id": "check", "type": "commandExecution", "command": "go test ./...", "aggregatedOutput": "ok fixture\ntoken=private-activity-value\n", "exitCode": 0})
+	send("item/completed", map[string]any{"id": "commentary", "type": "agentMessage", "phase": "commentary", "text": "The change is ready for verification."})
+	write(map[string]any{"method": "turn/plan/updated", "params": map[string]any{"threadId": "thread", "turnId": "turn", "plan": []any{map[string]any{"step": "Inspect the selected work", "status": "completed"}, map[string]any{"step": "Verify the change", "status": "inProgress"}}}})
+}

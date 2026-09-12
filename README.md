@@ -333,7 +333,8 @@ pl show foo-16
 ```
 
 A review checkpoint retains exactly the selected ordinary Pellets and their
-scope, and is inserted after their last active queue position. Completed
+scope. CLI creation inserts it after their last active queue position; the web
+queue also supports atomic insertion before or after an explicit record. Completed
 targets are allowed. Readiness requires every selected target to be closed
 with matching durable implementation-run and verified commit evidence, even
 when implementation happened in another worktree. Queue closure alone is
@@ -341,8 +342,8 @@ insufficient. Waiting checkpoints are skipped for unrelated eligible work.
 
 Checkpoint JSON adds `kind: "review_checkpoint"` and a versioned `checkpoint`
 object containing readiness, target identities, waiting reasons, and exact
-run/commit evidence. Ordinary command output is unchanged. The server's New
-task form accepts optional Review targets and its inspector shows this scope.
+run/commit evidence. Ordinary command output is unchanged. The web queue's
+pellet menu inserts checkpoints and the checkpoint dialog shows their scope.
 Execution requires the separate checkpoint review policy; an absent policy is
 reported before dispatch. See [the CLI contract](docs/cli-spec.md#pl-add).
 
@@ -352,7 +353,13 @@ partial or complete triage counts, created follow-up links, and non-creation
 dispositions. Reconnecting or running another Pellet in the same workspace
 preserves these results. Purged follow-ups retain their reference with a
 “no longer present” label; reopening the checkpoint starts a new generation.
-Reviewer transcripts, commands, full diffs, and assessment prose are not shown.
+The web dialog can edit an open, unowned checkpoint's scope, preserving earlier
+scope and review evidence under its original generation. Remove defers the
+checkpoint reversibly; Undo restores its queue position without implying a
+successful review. See [checkpoint management](docs/checkpoint-management.md).
+The durable checkpoint outcome summary omits reviewer transcripts, commands,
+full diffs, and assessment prose. Separately, the bounded execution activity
+view can show commands and diffs actually reported while the server is running.
 
 Checkpoint execution reviews the exact commits, then independently triages
 findings against current code, repository instructions, and existing active
@@ -474,14 +481,14 @@ registered project, workspace, pellet state, and memory; it supports routine
 queue and memory edits with optimistic conflict detection. Purge, memory
 removal, and other irreversible actions are intentionally absent.
 
-The browser keeps the database location and project navigation visible, even
-with one project. Each project has Queue, Workspaces, and Memory views. The
-queue is shared across worktrees; workspace cards open dedicated activity and
-run controls at `/projects/CODE/workspaces/ID`. Workspace attention counts stay
-visible in the Workspaces tab while browsing the queue or memory. Search stays visible,
-with optional filters in a disclosure. Task titles open the inspector; Queue
-order restores priority sorting while retaining filters. Project details holds
-the theme setting and repository metadata.
+The browser uses the [Workbench layout](docs/workbench-ui.md): project and view
+switchers in the breadcrumb, Queue, Memories, and workspaces in the left sidebar,
+and execution in the right sidebar. Selecting a workspace shows its queue and
+persistent group assignments. The shared project queue stays available. Browsing
+filters and sorting never change execution selection. Pellet and memory details
+open in dialogs; review checkpoints appear as interactive scoped queue dividers.
+Both sidebars collapse independently. Five themes, including Gruvbox and Icy, live
+beside the bottom-right toggle and apply without losing edits or execution state.
 
 `pl web` remains a deprecated compatibility alias with the same options and
 foreground behavior. New scripts and documentation must use `pl server`.
@@ -497,7 +504,10 @@ and workspace scheduler are wired to the foreground server lifetime. Internal
 HTTP interfaces expose Run one, Drain, Watch, explicit Resume, and both stop
 actions. The browser shows each registered workspace's durable latest activity,
 phase, terminal result, and current foreground receipt; controls refresh from the
-server after every action and never expose a command log or transcript. Preflight verifies the
+server after every action. A separate bounded, sanitized activity projection shows
+reported file operations, source/read output, diffs, commands, and progress. It is
+not a durable transcript and is explicitly unavailable after restart or eviction.
+Preflight verifies the
 managed or explicitly overridden runtime's version, protocol, local account, normal
 workspace configuration, managed requirements, and model capabilities without
 copying credentials or starting a model turn. Prepared runs use
@@ -535,8 +545,9 @@ unrelated Codex sessions. Crashes or unconfirmed cleanup leave an explicit
 recovery fence with the exact database/run receipt; restarting does not replay
 work. Do not delete `pellets-execution.lock` from Git's worktree metadata.
 
-Schedules require an explicitly chosen existing workspace and freeze exact
-group/external-ID filters. Run one completes one pellet; Drain advances until
+Schedules require an explicitly chosen existing workspace. Browser schedules use
+its current persisted assignments at each new claim; explicit exact group/external-ID
+filters remain frozen when supplied. Resume retains the captured selection policy. Run one completes one pellet; Drain advances until
 none are eligible; Watch waits for database changes with a 30-second recovery
 check and makes zero model calls while idle. Both repeating modes stop at a
 visible configurable limit (100 by default). Existing in-progress work needs
@@ -622,7 +633,7 @@ go test ./...
 ```
 
 The optional browser regression suite uses Playwright and a temporary database:
-`node scripts/test-web-browser.cjs`. Make `playwright` available on Node's module
+`node scripts/test-web-browser.cjs` and `node scripts/test-web-workbench-browser.cjs`. Make `playwright` available on Node's module
 path (or set `NODE_PATH`), and set `PLAYWRIGHT_CHANNEL=chrome` to use installed
 Chrome instead of Playwright's Chromium. It covers the Datastar navigation,
 forms, live refresh, conflict handling, and keyboard flows. Also run

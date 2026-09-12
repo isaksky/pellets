@@ -125,6 +125,7 @@ func (r *checkpointReviewer) consume(ctx context.Context, execution *WorkspaceEx
 			if !ok {
 				return codex.ErrClosed
 			}
+			execution.ProjectActivity(event, run.ThreadID, run.TurnID)
 			if len(event.ID) != 0 {
 				_ = execution.Respond(ctx, event.ID, nil, &codex.RPCError{Code: -32600, Message: "Pellets reviews are read-only and cannot authorize interactions"})
 				return scheduleError("review_interaction_forbidden", "the reviewer requested an interaction outside the read-only review boundary")
@@ -132,6 +133,7 @@ func (r *checkpointReviewer) consume(ctx context.Context, execution *WorkspaceEx
 			if resolved := resolvedRequestID(event); run.Interaction != nil && resolved == run.ThreadID+"\x00"+run.Interaction.RequestID {
 				progress := run.RunProgress
 				progress.State, progress.Interaction, progress.Summary = "running", nil, "The pending Codex request was resolved or withdrawn."
+				execution.recordActivityAction(run.Revision, "question", "Request resolved or withdrawn", "resolved")
 				run, err = execution.Save(ctx, progress, run.Revision)
 				if err != nil {
 					return err

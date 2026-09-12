@@ -29,6 +29,7 @@ type Owner struct {
 // These receipts are versioned; older database-only receipts cannot authorize
 // a fresh conversation. They remain evidence, never process cleanup proof.
 type Preflight struct {
+	WorkspaceSelection     string  `json:"workspace_selection,omitempty"`
 	Version                int     `json:"version"`
 	Platform               string  `json:"platform"`
 	DatabaseIdentity       string  `json:"database_identity"`
@@ -64,7 +65,7 @@ func decodeOwner(data []byte) (*Owner, error) {
 	// Reject duplicate fields (including nested fields), unknown fields, and
 	// trailing values; permissive JSON decoding could reinterpret a receipt.
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	allowed := map[string]bool{"database": true, "run_id": true, "preflight": true}
+	allowed := map[string]bool{"database": true, "run_id": true, "preflight": true, "workspace_selection": true}
 	for _, key := range preflightKeys {
 		allowed[key] = true
 	}

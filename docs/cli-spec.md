@@ -186,6 +186,13 @@ and `result_commit`; it identifies exact implementations, never a broad Git
 range inferred from queue positions. Purged targets retain their selected
 identity and scope and report `target_missing`.
 
+A checkpoint removed through the web UI remains a `maybe_later` record with
+optional `checkpoint.removed: true`. The web Restore action restores its saved
+relative queue position. CLI `reopen` also clears the removal marker while
+preserving its existing queue-tail semantics. Scope edits in the web UI start
+a new implementation generation; prior execution and review evidence remains
+under its captured generation. See [checkpoint management](checkpoint-management.md).
+
 Readiness requires every selected target to retain its selected scope and be
 closed with a successful completed implementation attempt, verified commit,
 finalization and Codex conversation evidence for its current implementation

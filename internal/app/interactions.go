@@ -60,6 +60,18 @@ func (supervisor *ExecutionSupervisor) SubmitInteraction(ctx context.Context, da
 	}
 	select {
 	case result := <-action.result:
+		if result.err == nil {
+			kind, title := "question", "Response delivered"
+			switch {
+			case submission.FollowUp != "":
+				kind, title = "steering", "Follow-up delivered"
+			case submission.Action == "accept":
+				kind, title = "approval", "Approval accepted"
+			case submission.Action == "decline":
+				kind, title = "approval", "Request declined"
+			}
+			execution.recordActivityAction(result.run.Revision, kind, title, "resolved")
+		}
 		return result.run, result.err
 	case <-ctx.Done():
 		return storage.ExecutionRun{}, ctx.Err()

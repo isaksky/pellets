@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"pellets/internal/domain"
@@ -43,6 +44,7 @@ func (application *WebApplication) StartSchedule(ctx context.Context, project st
 	for _, workspace := range summary.Project.Workspaces {
 		if workspace.ID == workspaceID {
 			request.Selected = storage.ResolvedProject{Project: summary.Project, Workspace: workspace}
+			request.UseWorkspaceAssignments, request.SavedWorkspaceSelection = true, nil
 			if request.PreflightReceipt != "" {
 				if application.Executions == nil || request.ResumePellet == nil || request.ResumeFrom != nil || request.Group != nil || request.ExternalID != nil {
 					return nil, preflightRecoveryRequired()
@@ -62,6 +64,12 @@ func (application *WebApplication) StartSchedule(ctx context.Context, project st
 				// cannot round-trip CR/LF in otherwise valid opaque filters.
 				// Admission checks the token again under the execution lock.
 				request.Group, request.ExternalID = copyScheduleFilter(receipt.Group), copyScheduleFilter(receipt.ExternalID)
+				request.UseWorkspaceAssignments = receipt.WorkspaceSelection != ""
+				if receipt.WorkspaceSelection != "" {
+					if err := json.Unmarshal([]byte(receipt.WorkspaceSelection), &request.SavedWorkspaceSelection); err != nil {
+						return nil, preflightRecoveryRequired()
+					}
+				}
 			}
 			if request.ResumeFrom != nil {
 				if application.Executions == nil || application.Database.Path == "" || request.ResumePellet == nil {
@@ -79,6 +87,7 @@ func (application *WebApplication) StartSchedule(ctx context.Context, project st
 				// a metadata change from widening a resumed selection.
 				request.ExternalID = copyScheduleFilter(previous.ExternalID)
 				request.Group = copyScheduleFilter(previous.Group)
+				request.UseWorkspaceAssignments, request.SavedWorkspaceSelection = previous.WorkspaceSelection != nil, previous.WorkspaceSelection
 			}
 			if request.InteractiveAdmission {
 				if err := application.Scheduler.CheckAdmission(ctx, request); err != nil {

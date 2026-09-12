@@ -97,6 +97,7 @@ func (s *Scheduler) CheckAdmission(ctx context.Context, request ScheduleRequest)
 			request.Overrides.ReasoningEffort = &prior.Settings.Codex.ReasoningEffort
 		}
 		request.ExternalID, request.Group = prior.ExternalID, prior.Group
+		request.UseWorkspaceAssignments, request.SavedWorkspaceSelection = prior.WorkspaceSelection != nil, prior.WorkspaceSelection
 	} else if request.FreshConversation {
 		return storage.InvalidExecutionRun("a fresh conversation requires an exact saved attempt")
 	}
@@ -120,7 +121,7 @@ func (s *Scheduler) CheckAdmission(ctx context.Context, request ScheduleRequest)
 	if previous != nil && previous.Finalization != nil && previous.ResultCommit != "" && (previous.Phase == "close" || previous.State == "completed") {
 		_, err = queue.ReadPellet(ctx, request.Selected, domain.PelletReference{ProjectCode: previous.ProjectCode, Number: previous.PelletNumber})
 	} else {
-		_, err = queue.SelectScheduledPellet(ctx, request.Selected, storage.ScheduleSelection{ResumePellet: request.ResumePellet, ExternalID: request.ExternalID, Group: request.Group, Ready: func(ctx context.Context, pellet storage.Pellet) (bool, error) {
+		_, err = queue.SelectScheduledPellet(ctx, request.Selected, storage.ScheduleSelection{ResumePellet: request.ResumePellet, ExternalID: request.ExternalID, Group: request.Group, UseWorkspaceAssignments: request.UseWorkspaceAssignments, SavedWorkspaceSelection: request.SavedWorkspaceSelection, Ready: func(ctx context.Context, pellet storage.Pellet) (bool, error) {
 			if pellet.Kind == domain.PelletReviewCheckpoint && (s.options.Checkpoints == nil || s.options.Checkpoints.Drive == nil) {
 				return false, scheduleError("checkpoint_policy_required", "Checkpoint execution is unavailable.")
 			}

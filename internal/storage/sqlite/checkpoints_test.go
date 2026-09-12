@@ -108,7 +108,7 @@ func TestReviewCheckpointRejectsInvalidSelectionsAtomically(t *testing.T) {
 		{Kind: domain.PelletReviewCheckpoint, ReviewTargets: []domain.PelletReference{cp.Reference}},
 		{Kind: domain.PelletReviewCheckpoint, ReviewTargets: []domain.PelletReference{{ProjectCode: "code", Number: 999}}},
 		{Kind: domain.PelletReviewCheckpoint, ReviewTargets: []domain.PelletReference{a.Reference}, Status: domain.PelletMaybeLater},
-		{Kind: domain.PelletReviewCheckpoint, ReviewTargets: []domain.PelletReference{a.Reference}, Placement: &storage.PelletPlacement{Target: a.Reference}},
+		{Kind: domain.PelletReviewCheckpoint, ReviewTargets: []domain.PelletReference{a.Reference}, Placement: &storage.PelletPlacement{Target: foreign.Reference}},
 		{ReviewTargets: []domain.PelletReference{a.Reference}},
 		{Kind: "dependency"},
 	} {

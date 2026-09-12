@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -99,13 +100,13 @@ func TestHandlerRendersAuthoritativeResponsiveProjectViewsAndEscapesHTML(t *test
 		t.Fatalf("GET status = %d; body=%s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	for _, required := range []string{"project1", "project-rail", "Database", "Workspaces", "Queue", "New task", "All states", "System", "Dark", "Light", "app.js"} {
+	for _, required := range []string{"project1", "project-drawer", "pellets.db", "Workspaces", "Queue", "New pellet", "All states", "Gruvbox Light", "Gruvbox Dark", "Icy", "app.js"} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("page missing %q", required)
 		}
 	}
-	if strings.Contains(body, "run-dashboard") {
-		t.Fatal("queue page rendered workspace execution controls")
+	if !strings.Contains(body, `id="execution"`) || strings.Count(body, `id="run-dashboard"`) != 1 {
+		t.Fatal("queue page must retain one separate execution sidebar")
 	}
 	if strings.Contains(body, `<script>"unsafe"</script>`) || !strings.Contains(body, `&lt;script&gt;&#34;unsafe&#34;&lt;/script&gt;`) {
 		t.Fatalf("task title was not safely escaped: %s", body)
@@ -122,12 +123,12 @@ func TestHandlerRendersAuthoritativeResponsiveProjectViewsAndEscapesHTML(t *test
 		"status": {"open"}, "group": {encodeGroup(&group)}, "external_id": {externalID}, "q": {"needle"},
 	}
 	response = performRequest(fixture.handler, http.MethodGet, "/projects/project1/tasks?"+filters.Encode(), "", nil)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), created.Reference.String()) || strings.Contains(response.Body.String(), "ungrouped needle") {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), created.Reference.String()) || strings.Contains(visibleQueueMarkup(response.Body.String()), "ungrouped needle") {
 		t.Fatalf("combined filter response = %d %s", response.Code, response.Body.String())
 	}
 
 	response = performRequest(fixture.handler, http.MethodGet, "/projects/project1/tasks/"+created.Reference.String(), "", nil)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `&lt;img src=x onerror=alert(1)&gt;`) || !strings.Contains(response.Body.String(), "Task inspector") || !strings.Contains(response.Body.String(), `task-row status-open selected`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `&lt;img src=x onerror=alert(1)&gt;`) || !strings.Contains(response.Body.String(), `id="inspector-task-`+created.Reference.String()+`"`) || !strings.Contains(response.Body.String(), `task-row pellet-row status-open selected`) {
 		t.Fatalf("deep-link response = %d %s", response.Code, response.Body.String())
 	}
 	response = performRequest(fixture.handler, http.MethodGet, "/projects/project1/memories", "", nil)
@@ -135,22 +136,29 @@ func TestHandlerRendersAuthoritativeResponsiveProjectViewsAndEscapesHTML(t *test
 		t.Fatalf("memory response = %d %s", response.Code, response.Body.String())
 	}
 	response = performRequest(fixture.handler, http.MethodGet, "/projects/project1/memories/"+strconv.FormatInt(memory.ID, 10), "", nil)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Memory inspector") || !strings.Contains(response.Body.String(), `memory-card selected`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `id="inspector-memory-`+strconv.FormatInt(memory.ID, 10)+`"`) || !strings.Contains(response.Body.String(), `memory-card selected`) {
 		t.Fatalf("memory deep-link response = %d %s", response.Code, response.Body.String())
 	}
 }
 
-func TestHandlerRefusesDisplayedUngroupedScheduleFilter(t *testing.T) {
+func TestHandlerUngroupedBrowsingNeverRetargetsExecution(t *testing.T) {
 	fixture := newHandlerFixture(t, 1)
 	response := performRequest(fixture.handler, http.MethodGet, "/projects/project1/workspaces/1?group=n", "", nil)
 	if response.Code != http.StatusOK {
 		t.Fatalf("page status = %d", response.Code)
 	}
 	body := response.Body.String()
-	for _, required := range []string{`name="group_scope" value="ungrouped"`, "displayed exact Ungrouped filter cannot be scheduled", `value="run_one" disabled`} {
-		if !strings.Contains(body, required) {
-			t.Fatalf("ungrouped schedule guard missing %q: %s", required, body)
+	if !strings.Contains(body, `data-filter-group-ungrouped="true"`) || !strings.Contains(body, `id="workspace-groups"`) {
+		t.Fatal("workspace queue lost its exact ungrouped browsing state")
+	}
+	form := scheduleFormMarkup(t, body, `action="/projects/project1/schedules" method="post" data-schedule`)
+	for _, forbidden := range []string{`name="group_scope"`, `name="group"`, `name="external_id"`, `disabled`} {
+		if strings.Contains(form, forbidden) {
+			t.Fatalf("browsing filter retargeted/disabled execution: %s", form)
 		}
+	}
+	if !strings.Contains(form, `name="workspace_id" value="1"`) || !strings.Contains(form, "Workspace group assignments") {
+		t.Fatal("execution lost explicit workspace assignment selection")
 	}
 }
 
@@ -173,97 +181,96 @@ func TestRunViewPreservesFrozenFiltersAndInteractionCategories(t *testing.T) {
 	}
 }
 
-func TestHandlerTaskSortHeadersPreserveFiltersDeepLinksAndDirection(t *testing.T) {
+func TestHandlerTaskSortControlsPreserveFiltersDeepLinksAndDirection(t *testing.T) {
 	t.Parallel()
 	fixture := newHandlerFixture(t, 1)
 	group, externalID := "Sort/Group", "Issue:Sort"
 	titles := []string{"Zulu needle", "Alpha needle", "Middle needle"}
-	created := make([]storage.Pellet, 0, len(titles))
+	var created []storage.Pellet
 	for _, title := range titles {
-		pellet, err := fixture.application.CreatePellet(context.Background(), fixture.projects[0], storage.NewPellet{
-			Title: title, Group: &group, ExternalID: &externalID,
-		})
+		pellet, err := fixture.application.CreatePellet(context.Background(), fixture.projects[0], storage.NewPellet{Title: title, Group: &group, ExternalID: &externalID})
 		if err != nil {
 			t.Fatal(err)
 		}
 		created = append(created, pellet)
 	}
-	filters := url.Values{
-		"status": {"open"}, "group": {encodeGroup(&group)}, "external_id": {externalID}, "q": {"needle"},
-		"sort": {"title"}, "direction": {"asc"},
-	}
+	filters := url.Values{"status": {"open"}, "group": {encodeGroup(&group)}, "external_id": {externalID}, "q": {"needle"}, "sort": {"title"}, "direction": {"asc"}}
 	path := "/projects/project1/tasks/" + created[0].Reference.String() + "?" + filters.Encode()
 	response := performRequest(fixture.handler, http.MethodGet, path, "", nil)
 	if response.Code != http.StatusOK {
-		t.Fatalf("sorted fragment response = %d %s", response.Code, response.Body.String())
+		t.Fatalf("sorted response = %d %s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	assertTextOrder(t, body, "Alpha needle", "Middle needle", "Zulu needle")
-	if !strings.Contains(body, "Task inspector") || !strings.Contains(body, `task-row status-open selected`) {
-		t.Fatalf("sorted selected-task deep link lost its inspector or row selection: %s", body)
+	assertTextOrder(t, visibleQueueMarkup(body), "Alpha needle", "Middle needle", "Zulu needle")
+	if !strings.Contains(body, `id="inspector-task-`+created[0].Reference.String()+`"`) || !strings.Contains(body, `task-row pellet-row status-open selected`) {
+		t.Fatal("sorted deep link lost its selected record dialog or row")
 	}
-	if strings.Count(body, `aria-sort="ascending"`) != 1 || !strings.Contains(body, `aria-label="Sort by Title descending"`) {
-		t.Fatalf("active ascending title semantics missing: %s", body)
-	}
-	if strings.Count(body, `scope="col"`) != 7 || strings.Count(body, `class="task-sort `) != 7 {
-		t.Fatalf("sortable header controls = scopes %d links %d, want 7 each", strings.Count(body, `scope="col"`), strings.Count(body, `class="task-sort `))
-	}
-	for _, required := range []string{
-		`name="sort" value="title"`, `name="direction" value="asc"`,
-		`class="sort-indicator" aria-hidden="true">↑</span>`,
-	} {
-		if !strings.Contains(body, required) {
-			t.Fatalf("sorted fragment missing %q: %s", required, body)
+	assertSelectedOption(t, body, "sort", "title")
+	assertSelectedOption(t, body, "direction", "asc")
+	sortControl := selectMarkup(t, body, "sort")
+	for _, column := range []string{"reference", "title", "group", "status", "priority", "external_id", "updated"} {
+		if !strings.Contains(sortControl, `value="`+column+`"`) {
+			t.Fatalf("sorting capability missing %s", column)
 		}
 	}
 	currentURL := taskURL("project1", filters, created[0].Reference.String(), storage.WebPelletSort{Column: storage.WebPelletSortTitle, Direction: storage.WebPelletSortAscending})
 	if !strings.Contains(body, `data-fragment-kind="tasks" data-refresh-url="`+html.EscapeString(currentURL)+`"`) {
-		t.Fatalf("live task fragment did not retain normalized sort/filter/deep-link URL: %s", body)
+		t.Fatal("live fragment lost its sorted filtered deep link")
 	}
-	clearURL := taskURL("project1", nil, "", storage.WebPelletSort{Column: storage.WebPelletSortTitle, Direction: storage.WebPelletSortAscending})
+	clearURL := taskURL("project1", url.Values{"execution": {"1"}}, "", storage.WebPelletSort{Column: storage.WebPelletSortTitle, Direction: storage.WebPelletSortAscending})
 	if !strings.Contains(body, `class="quiet-button" href="`+html.EscapeString(clearURL)+`"`) {
-		t.Fatalf("clear-filter link did not retain sort state: %s", body)
-	}
-	titleDescending := taskURL("project1", filters, created[0].Reference.String(), storage.WebPelletSort{Column: storage.WebPelletSortTitle, Direction: storage.WebPelletSortDescending})
-	groupAscending := taskURL("project1", filters, created[0].Reference.String(), storage.WebPelletSort{Column: storage.WebPelletSortGroup, Direction: storage.WebPelletSortAscending})
-	for _, preserved := range []string{titleDescending, groupAscending} {
-		escaped := html.EscapeString(preserved)
-		if !strings.Contains(body, `href="`+escaped+`" data-on:click="@navigate('tasks-area')"`) {
-			t.Fatalf("sort link did not preserve selected task and filters: want %q in %s", escaped, body)
-		}
+		t.Fatal("clear-filter link lost sort state")
 	}
 	for _, pellet := range created {
 		rowURL := taskURL("project1", filters, pellet.Reference.String(), storage.WebPelletSort{Column: storage.WebPelletSortTitle, Direction: storage.WebPelletSortAscending})
 		if !strings.Contains(body, `href="`+html.EscapeString(rowURL)+`"`) {
-			t.Fatalf("row link did not preserve sort/filter state: %s", body)
+			t.Fatal("row link lost sort/filter state")
 		}
 	}
-
 	filters.Set("direction", "desc")
-	response = performRequest(fixture.handler, http.MethodGet, "/projects/project1/tasks?"+filters.Encode(), "", http.Header{
-		"Datastar-Request": {"true"}, "Pellets-Target": {"tasks-area"},
-	})
-	if response.Code != http.StatusOK {
-		t.Fatalf("descending response = %d %s", response.Code, response.Body.String())
-	}
+	response = performRequest(fixture.handler, http.MethodGet, "/projects/project1/tasks?"+filters.Encode(), "", http.Header{"Datastar-Request": {"true"}, "Pellets-Target": {"tasks-area"}})
 	body = response.Body.String()
-	assertTextOrder(t, body, "Zulu needle", "Middle needle", "Alpha needle")
-	if strings.Contains(body, "<html") || !strings.Contains(body, `id="tasks-area"`) ||
-		strings.Count(body, `aria-sort="descending"`) != 1 || !strings.Contains(body, `aria-label="Sort by Title ascending"`) ||
-		!strings.Contains(body, `name="sort" value="title"`) || !strings.Contains(body, `name="direction" value="desc"`) {
-		t.Fatalf("active descending title semantics missing: %s", body)
+	if response.Code != http.StatusOK || strings.Contains(body, "<html") || !strings.Contains(body, `id="tasks-area"`) {
+		t.Fatalf("descending fragment = %d %s", response.Code, body)
 	}
-
+	assertTextOrder(t, visibleQueueMarkup(body), "Zulu needle", "Middle needle", "Alpha needle")
+	assertSelectedOption(t, body, "sort", "title")
+	assertSelectedOption(t, body, "direction", "desc")
 	response = performRequest(fixture.handler, http.MethodGet, "/projects/project1/tasks?sort=not-a-column&direction=sideways", "", nil)
 	if response.Code != http.StatusOK {
-		t.Fatalf("invalid sort response = %d %s", response.Code, response.Body.String())
+		t.Fatalf("invalid sort status = %d", response.Code)
 	}
 	body = response.Body.String()
-	assertTextOrder(t, body, "Zulu needle", "Alpha needle", "Middle needle")
-	if strings.Count(body, `aria-sort="ascending"`) != 1 || !strings.Contains(body, `aria-label="Sort by Priority descending"`) ||
-		!strings.Contains(body, `name="sort" value="priority"`) || !strings.Contains(body, `name="direction" value="asc"`) {
-		t.Fatalf("invalid sort did not fall back to normalized priority ordering: %s", body)
+	assertTextOrder(t, visibleQueueMarkup(body), "Zulu needle", "Alpha needle", "Middle needle")
+	assertSelectedOption(t, body, "sort", "priority")
+	assertSelectedOption(t, body, "direction", "asc")
+}
+
+func selectMarkup(t *testing.T, body, name string) string {
+	t.Helper()
+	match := regexp.MustCompile(`(?s)<select\b[^>]*name="` + regexp.QuoteMeta(name) + `"[^>]*>(.*?)</select>`).FindStringSubmatch(body)
+	if len(match) != 2 {
+		t.Fatalf("missing %s selection control", name)
 	}
+	return match[1]
+}
+func assertSelectedOption(t *testing.T, body, name, value string) {
+	t.Helper()
+	if !regexp.MustCompile(`<option\b[^>]*value="` + regexp.QuoteMeta(value) + `"[^>]*\bselected\b`).MatchString(selectMarkup(t, body, name)) {
+		t.Fatalf("%s control lost selected %s", name, value)
+	}
+}
+
+// Scope candidates remain available across filters for explicit checkpoint
+// management; assertions about displayed rows exclude that inert template.
+func visibleQueueMarkup(body string) string {
+	if start := strings.Index(body, `id="task-list"`); start >= 0 {
+		body = body[start:]
+	}
+	if end := strings.Index(body, `<template `); end >= 0 {
+		body = body[:end]
+	}
+	return body
 }
 
 func assertTextOrder(t *testing.T, text string, values ...string) {
@@ -366,7 +373,7 @@ func TestHandlerEmptyNoResultsAndManyOpaqueGroups(t *testing.T) {
 		t.Fatalf("many-group response = %d %s", response.Code, body)
 	}
 	response = performRequest(fixture.handler, http.MethodGet, "/projects/project1/tasks?status=closed&q=no-such-result", "", nil)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "No tasks match") || strings.Contains(response.Body.String(), "group fixture") {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "No pellets match") || strings.Contains(visibleQueueMarkup(response.Body.String()), "group fixture") {
 		t.Fatalf("no-results response = %d %s", response.Code, response.Body.String())
 	}
 }
@@ -635,28 +642,30 @@ func TestProjectHierarchyAndWorkspaceRoutes(t *testing.T) {
 	for _, area := range []string{"tasks", "memories", "workspaces"} {
 		response := performRequest(f.handler, http.MethodGet, "/projects/project1/"+area, "", nil)
 		body := response.Body.String()
-		if response.Code != http.StatusOK || !strings.Contains(body, `aria-label="Projects"`) || !strings.Contains(body, `class="database-context"`) {
-			t.Fatalf("missing project shell on %s: %d", area, response.Code)
+		if response.Code != http.StatusOK || !strings.Contains(body, `id="project-switcher"`) || !strings.Contains(body, `id="view-switcher"`) || !strings.Contains(body, `id="project-drawer"`) || !strings.Contains(body, `class="statusbar"`) {
+			t.Fatalf("missing Workbench shell on %s: %d", area, response.Code)
 		}
-		if strings.Contains(body, `data-schedule`) || strings.Contains(body, `id="workspace-strip"`) {
-			t.Fatalf("execution controls or duplicate strip leaked into %s", area)
+		if strings.Count(body, `id="execution"`) != 1 || strings.Count(body, `id="run-dashboard"`) != 1 || strings.Contains(body, `id="workspace-strip"`) {
+			t.Fatalf("missing or duplicate execution area on %s", area)
 		}
 	}
 	for _, path := range []string{"/projects/project1/workspaces/0", "/projects/project1/workspaces/bad", "/projects/project1/workspaces/2"} {
-		response := performRequest(f.handler, http.MethodGet, path, "", nil)
-		if response.Code != http.StatusNotFound {
+		if response := performRequest(f.handler, http.MethodGet, path, "", nil); response.Code != http.StatusNotFound {
 			t.Errorf("%s = %d", path, response.Code)
 		}
 	}
 	path := "/projects/project1/workspaces/1"
 	response := performRequest(f.handler, http.MethodGet, path, "", nil)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `data-schedule`) || strings.Contains(response.Body.String(), `id="tasks-area"`) {
-		t.Fatalf("workspace detail missing controls: %d %s", response.Code, response.Body.String())
+	body := response.Body.String()
+	for _, required := range []string{`data-schedule`, `id="tasks-area"`, `id="workspace-groups"`, `data-workspace="1"`} {
+		if response.Code != http.StatusOK || !strings.Contains(body, required) {
+			t.Fatalf("workspace queue missing %s: %d", required, response.Code)
+		}
 	}
 	response = performRequest(f.handler, http.MethodGet, path, "", http.Header{"Datastar-Request": {"true"}, "Pellets-Target": {"live"}})
-	body := response.Body.String()
-	if strings.Count(body, "data: selector #run-dashboard\n") != 1 || !strings.Contains(body, `data-schedule`) || strings.Contains(body, "data: selector #task-list\n") {
-		t.Fatalf("workspace refresh lost selected detail: %s", body)
+	body = response.Body.String()
+	if strings.Count(body, "data: selector #run-dashboard\n") != 1 || !strings.Contains(body, `data-schedule`) || strings.Count(body, "data: selector #task-list\n") != 1 {
+		t.Fatal("workspace live refresh must include authoritative queue and execution exactly once")
 	}
 }
 
@@ -668,11 +677,16 @@ func TestQueuePolishPreservesFilteringAndOrder(t *testing.T) {
 	}
 	response := performRequest(f.handler, http.MethodGet, "/projects/project1/tasks?status=open&sort=title", "", http.Header{"Datastar-Request": {"true"}, "Pellets-Target": {"task-list"}})
 	body := response.Body.String()
-	for _, want := range []string{`data: selector #filter-summary`, `Filters <span class="badge">1</span>`, `data: selector #queue-order`, `sort=priority&amp;status=open`, `class="task-title" href="/projects/project1/tasks/` + p.Reference.String(), `title="` + formatTime(p.UpdatedAt) + `"`} {
+	for _, want := range []string{`data: selector #filter-summary`, `Open <span class="badge">1</span>`, `data: selector #queue-order`, `sort=priority&amp;status=open`, `class="task-title" href="/projects/project1/tasks/` + p.Reference.String(), `data-row-version="` + storage.PelletVersion(p) + `"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("filtered queue missing %q", want)
 		}
 	}
+	response = performRequest(f.handler, http.MethodGet, "/projects/project1/tasks/"+p.Reference.String(), "", nil)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), formatTime(p.UpdatedAt)) {
+		t.Fatal("record dialog lost exact update metadata")
+	}
+
 }
 
 func TestDatabaseScopedLifecycleIgnoresLaunchWorkspace(t *testing.T) {

@@ -20,7 +20,7 @@ import (
 
 const (
 	// LatestSchemaVersion is the newest schema understood by this executable.
-	LatestSchemaVersion     = 15
+	LatestSchemaVersion     = 17
 	driverName              = "sqlite"
 	busyTimeoutMilliseconds = 5000
 )
@@ -70,6 +70,12 @@ var migration14SQL string
 //go:embed migrations/0015_no_change_completion.sql
 var migration15SQL string
 
+//go:embed migrations/0016_workspace_group_assignments.sql
+var migration16SQL string
+
+//go:embed migrations/0017_checkpoint_management.sql
+var migration17SQL string
+
 type migration struct {
 	version    int
 	name       string
@@ -101,6 +107,8 @@ var migrations = []migration{
 	{version: 13, name: "review-execution", sql: migration13SQL, assert: assertMigration13, preflight: assertMigration13, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
 	{version: 14, name: "checkpoint-triage", sql: migration14SQL, assert: assertMigration14, preflight: assertMigration14, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
 	{version: 15, name: "no-change-completion", sql: migration15SQL, assert: assertMigration15, preflight: assertMigration15, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
+	{version: 16, name: "workspace-group-assignments", sql: migration16SQL, assert: assertMigration16, preflight: assertMigration16, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
+	{version: 17, name: "checkpoint-management", sql: migration17SQL, assert: assertMigration17, preflight: assertMigration17, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
 }
 
 // Open opens path with the required hardened runtime settings and applies all
@@ -740,4 +748,11 @@ func assertMigration14(ctx context.Context, conn *sql.Conn) error {
 
 func assertMigration15(ctx context.Context, conn *sql.Conn) error {
 	return verifyProductionSchemaContract(ctx, conn, 15)
+}
+
+func assertMigration16(ctx context.Context, conn *sql.Conn) error {
+	return verifyProductionSchemaContract(ctx, conn, 16)
+}
+func assertMigration17(ctx context.Context, conn *sql.Conn) error {
+	return verifyProductionSchemaContract(ctx, conn, 17)
 }

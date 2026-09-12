@@ -1,0 +1,32 @@
+{{define "checkpoint-management"}}{{if .SelectedPellet.Pellet.Checkpoint}}
+<section class="checkpoint-management" aria-label="Manage review scope">
+  {{if .SelectedPellet.Pellet.Checkpoint.Removed}}
+  <p>This checkpoint is removed from the queue and deferred. No review was completed.</p>
+  <form action="/projects/{{.Project.Code}}/checkpoints/{{.SelectedPellet.Pellet.Reference}}/restore" method="post" data-on:submit="@submit()" data-checkpoint-restore>
+    <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}">
+    <button type="submit">Undo removal · Restore checkpoint</button>
+  </form>
+  {{else if eqStatus .SelectedPellet.Pellet.Status "open"}}
+    {{with .SelectedPellet.CheckpointManagement}}<details data-checkpoint-scope-editor>
+      <summary>Edit scope</summary>
+      <p class="form-help">Choose the exact pellets to review. Saving captures their current versions in a new review generation; earlier evidence and review results remain in history.</p>
+      <form id="checkpoint-scope-{{$.SelectedPellet.Pellet.Reference}}" action="/projects/{{$.Project.Code}}/checkpoints/{{$.SelectedPellet.Pellet.Reference}}/scope" method="post" data-on:submit="@submit()" class="stack-form dirty-track" data-checkpoint-scope-form>
+        <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{$.SelectedPellet.Version}}">
+        <fieldset class="checkpoint-scope-options"><legend>Explicit review scope</legend>
+        {{range .Choices}}<label class="check"><input type="checkbox" name="target" value="{{.Pellet.Reference}}:{{.Version}}"{{if .Selected}} checked{{end}}><span><code>{{.Pellet.Reference}}</code> · {{.Pellet.Title}} <small>{{statusLabel .Pellet.Status}}</small></span></label>{{end}}
+        </fieldset>
+        <button type="submit">Save scope</button>
+      </form>
+    </details>{{end}}
+    <form action="/projects/{{.Project.Code}}/checkpoints/{{.SelectedPellet.Pellet.Reference}}/remove" method="post" data-on:submit="@submit()" data-checkpoint-remove class="action-form">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}">
+      <button type="submit">Remove checkpoint</button>
+    </form>
+  {{else if eqStatus .SelectedPellet.Pellet.Status "in_progress"}}<p class="form-help">Release this checkpoint before editing its scope or removing it.</p>{{end}}
+  {{with .SelectedPellet.CheckpointManagement}}{{if .History}}<details class="checkpoint-history"><summary>Earlier scope and review history · {{len .History}} generations</summary>
+    {{range .History}}<section><h4>Generation {{.ImplementationRevision}}</h4><p class="form-help">Captured {{formatTime .CapturedAt}}</p>
+      {{template "checkpoint-outcome" .Outcome}}
+      <ul>{{range .Scope.Targets}}<li><code>{{.Reference}}</code> · {{.Title}} · {{.Reason}}{{if .Evidence}}<br>Commit <code>{{.Evidence.ResultCommit}}</code> · run {{.Evidence.RunID}}{{end}}</li>{{end}}</ul>
+    </section>{{end}}
+  </details>{{end}}{{end}}
+</section>{{end}}{{end}}

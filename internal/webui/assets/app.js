@@ -1,3 +1,4 @@
+import "./workbench.js";
 import { action, actions } from "./datastar-1.0.3.js";
 
 (function () {
@@ -6,13 +7,7 @@ import { action, actions } from "./datastar-1.0.3.js";
   var root = document.documentElement;
   var media = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
 
-  function applyTheme(choice) {
-    if (choice !== "light" && choice !== "dark") choice = "system";
-    root.dataset.themeChoice = choice;
-    root.dataset.theme = choice === "system" ? (media && media.matches ? "dark" : "light") : choice;
-    var selector = document.getElementById("theme-select");
-    if (selector) selector.value = choice;
-  }
+  function applyTheme(choice) { window.Workbench.applyTheme(choice); }
 
   function rememberTheme(choice) {
     try { localStorage.setItem("pellets-theme", choice); } catch (_) {}
@@ -41,7 +36,7 @@ import { action, actions } from "./datastar-1.0.3.js";
     if (fields.has("group_scope") && fields.get("group_scope") !== "ungrouped") {
       fields.set("group_scope", fields.get("group") ? "value" : "any");
     }
-    if (form.matches("form[data-schedule]")) fields.set("admission", "interactive");
+    if (form.matches("form[data-schedule]") && fields.has("workspace_id")) fields.set("admission", "interactive");
     var body = new URLSearchParams();
     fields.forEach(function (value, key) {
       // Empty filter controls mean "unfiltered". Omit them so the server can
@@ -59,7 +54,9 @@ import { action, actions } from "./datastar-1.0.3.js";
     feedback.classList.remove("request-failed");
     feedback.textContent = form.matches("form[data-schedule]") ? "Checking the runtime, sign-in, workspace, and saved run…" : "Updating run controls…";
     try {
-      var response = await fetch(form.action, {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: body.toString()});
+      // Named action submitters are part of the run receipt and shadow the
+      // HTMLFormElement.action property. Read the actual endpoint attribute.
+      var response = await fetch(form.getAttribute("action"), {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: body.toString()});
       if (!response.ok) {
         var problem;
         if ((response.headers.get("Content-Type") || "").includes("application/json")) problem = await response.json();
@@ -95,6 +92,7 @@ import { action, actions } from "./datastar-1.0.3.js";
         throw new Error("run action rejected");
       }
       confirmed = true;
+      window.Workbench.saved(form);
       delete form.dataset.schedulePending;
       delete form.dataset.dirty;
       feedback.hidden = true;
@@ -123,11 +121,11 @@ import { action, actions } from "./datastar-1.0.3.js";
     if (protectedRegion) protectedRegion.classList.add("is-dirty");
   }
   document.addEventListener("input", function (event) {
-    var form = event.target && event.target.closest("form.dirty-track");
+    var form = event.target && event.target.closest("form.dirty-track, .create-popover form, form[data-schedule], form[data-run-action]");
     if (form) markDirty(form);
   });
   document.addEventListener("change", function (event) {
-    var form = event.target && event.target.closest("form.dirty-track");
+    var form = event.target && event.target.closest("form.dirty-track, .create-popover form, form[data-schedule], form[data-run-action]");
     if (form) markDirty(form);
   });
 
@@ -202,7 +200,7 @@ import { action, actions } from "./datastar-1.0.3.js";
   }
 
   function protectedTarget(target) {
-    return target && ((target.id === "project-drawer" && target.classList.contains("open")) ||
+    return target && (target.querySelector(".select-trigger[aria-expanded=true], .row-menu[open], .switcher[open], .assignment-popover[open]") || (target.id === "project-drawer" && target.classList.contains("open")) ||
       (target.id === "run-dashboard" && target.querySelector("form[data-no-run-resume][data-dirty='true'], form[data-schedule-pending='true'], form[data-admission-choice='true']")) ||
       (target.id === "project-record" && target.open));
   }
@@ -222,7 +220,7 @@ import { action, actions } from "./datastar-1.0.3.js";
     if (automatic && targetID === "inspector-host" && target.querySelector(".conflict-state, .error-state")) return;
     var editing = dirtyInspector();
     var discard = false;
-    if (targetID === "inspector-host" && editing) {
+    if ((targetID === "inspector-host" || targetID === "app-content") && editing) {
       if (automatic) return;
       if (!el.matches("form.dirty-track")) {
         if (!confirmDiscard()) return;
@@ -299,6 +297,7 @@ import { action, actions } from "./datastar-1.0.3.js";
   }
 
   action({name: "navigate", apply: function (ctx, target) { return request(ctx, target, "navigate"); }});
+  action({name: "saveLayout", apply: function (ctx) { return request(ctx, "app-content", "submit"); }});
   action({name: "submit", apply: function (ctx) { return request(ctx, "inspector-host", "submit"); }});
   action({name: "filter", apply: function (ctx) { return request(ctx, "task-list", "filter"); }});
   action({name: "refresh", apply: function (ctx, target) { return request(ctx, target || ctx.el.id, "refresh"); }});
@@ -330,6 +329,7 @@ import { action, actions } from "./datastar-1.0.3.js";
         target.querySelectorAll("form.dirty-track").forEach(function (form) { form.reset(); });
         state.discard = false;
       }
+      window.Workbench.beforePatch(target);
       state.applied = true;
       if (patchID === state.targetID) state.primaryApplied = true;
       if (patchID === "app-content") state.bootstrapApplied = true;
@@ -342,6 +342,11 @@ import { action, actions } from "./datastar-1.0.3.js";
       state.completed = true;
       var result = JSON.parse(detail.argsRaw.signals)._webResult;
       if (!result) return;
+      if (result.status < 400) {
+        window.Workbench.saved(state.el);
+        var projectShell = document.querySelector(".app-shell[data-project]");
+        document.title = projectShell ? projectShell.dataset.project + " · Pellets" : "Pellets";
+      }
       if (state.el.matches && state.el.matches("form[data-checkpoint-form]") && result.status < 400) {
         // The add receipt intentionally retains this value after uncertain
         // failures, but a confirmed creation must not make the next distinct
@@ -354,8 +359,6 @@ import { action, actions } from "./datastar-1.0.3.js";
         var destination = new URL(result.url, location.href);
         if (destination.origin === location.origin) {
           history.replaceState(history.state, "", destination.pathname + destination.search);
-          var heading = document.querySelector(".project-heading h1");
-          document.title = heading ? heading.textContent + " · Pellets" : "Pellets";
         }
       }
       // Related regions can refresh even when newer edits reject the inspector.
@@ -556,12 +559,13 @@ import { action, actions } from "./datastar-1.0.3.js";
     var hasInspector = !!document.querySelector("#inspector-host [data-inspector], #inspector-host .error-state");
     if (host) host.classList.toggle("has-inspector", hasInspector);
     if (shell) shell.classList.toggle("has-inspector", hasInspector);
+    window.Workbench.syncDialog();
     if (!inspector) return;
     if (!inspectorOpener) {
       inspectorOpener = document.querySelector(".task-row.selected .row-link, .memory-card.selected > a");
       inspectorOpenerHref = inspectorOpener ? inspectorOpener.getAttribute("href") || "" : "";
     }
-    var narrow = window.matchMedia && window.matchMedia("(max-width: 760px)").matches;
+    var narrow = true;
     inspector.setAttribute("aria-modal", narrow ? "true" : "false");
     if (narrow && !inspector.contains(document.activeElement)) {
       var focusable = inspector.querySelector("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])");
@@ -573,14 +577,16 @@ import { action, actions } from "./datastar-1.0.3.js";
   if (inspectorMedia) inspectorMedia.addEventListener("change", function () { configureInspector(document); });
 
   function initialize(scope) {
-    applyTheme(root.dataset.themeChoice || "system");
+    applyTheme(root.dataset.themeChoice || "gruvbox-light");
     rememberAndMarkRows(scope);
     synchronizeCheckpointSelection();
     configureInspector(scope);
+    window.Workbench.initialize();
   }
   initialize(document);
   function afterPatch(scope) {
     initialize(scope);
+    window.Workbench.afterPatch();
     if (sortOpenerID) {
       var sorter = document.getElementById(sortOpenerID);
       if (sorter) sorter.focus({preventScroll: true});
@@ -640,6 +646,7 @@ import { action, actions } from "./datastar-1.0.3.js";
       return;
     }
     if (!inspector) return;
+    if (event.defaultPrevented) return;
     if (event.key === "Escape") {
       var close = inspector.querySelector("[aria-label='Close inspector']");
       if (close) { event.preventDefault(); close.click(); }

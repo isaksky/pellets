@@ -65,7 +65,7 @@ func TestWebCheckpointComposerPreservesExactIntentAndAddReceipt(t *testing.T) {
 		t.Fatalf("composer page %d: %s", page.Code, page.Body.String())
 	}
 	for _, required := range []string{
-		"data-checkpoint-composer", "data-checkpoint-select", "data-checkpoint-select-all", "Insert review checkpoint",
+		"data-checkpoint-composer", "data-checkpoint-select", "data-insert-checkpoint=\"before\"", "Insert review checkpoint",
 		`data-filter-external-set="true"`, `data-filter-group-set="true"`, `data-checkpoint-kind="ordinary"`,
 	} {
 		if !strings.Contains(page.Body.String(), required) {

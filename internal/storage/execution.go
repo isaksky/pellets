@@ -64,7 +64,8 @@ type EffectiveRunSettings struct {
 // RunCapture is immutable for an attempt. Nil filters mean unfiltered; supplied
 // values retain exact bytes. An explicit resume creates a new numbered attempt.
 type RunCapture struct {
-	FreshConversation bool `json:"fresh_conversation,omitempty"`
+	WorkspaceSelection *WorkspaceSelection `json:"workspace_selection,omitempty"`
+	FreshConversation  bool                `json:"fresh_conversation,omitempty"`
 	// Admission-only guards, checked in the creation transaction. Zero/nil
 	// preserve callers without a preflight snapshot. Neither is persisted.
 	ExpectedImplementationRevision int64                `json:"expected_implementation_revision,omitempty"`
@@ -293,6 +294,9 @@ var (
 func IsFullCommitID(value string) bool { return fullCommitID.MatchString(value) }
 
 func ValidateRunCapture(c RunCapture) error {
+	if err := ValidateWorkspaceSelection(c.WorkspaceSelection); err != nil {
+		return InvalidExecutionRun("invalid captured workspace selection")
+	}
 	if len(c.StartingRef) > 4096 || strings.ContainsAny(c.StartingRef, "\x00\r\n") || !utf8.ValidString(c.StartingRef) {
 		return InvalidExecutionRun("invalid starting Git reference")
 	}
@@ -599,7 +603,7 @@ func SameReviewReconciliationEvidence(child, parent ExecutionRun) bool {
 		child.ImplementationRevision == parent.ImplementationRevision && child.StartingHead == parent.StartingHead && child.StartingRef == parent.StartingRef &&
 		child.PelletTitle == parent.PelletTitle && child.PelletDescription == parent.PelletDescription && child.ThreadID == parent.ThreadID && child.TurnID == parent.TurnID &&
 		child.Mode == parent.Mode && child.ScheduleMode == parent.ScheduleMode && child.ScheduleRemaining == parent.ScheduleRemaining && child.PelletPresent == parent.PelletPresent &&
-		reflect.DeepEqual(child.ExternalID, parent.ExternalID) && reflect.DeepEqual(child.Group, parent.Group) && reflect.DeepEqual(child.PromptPrefix, parent.PromptPrefix) &&
+		reflect.DeepEqual(child.WorkspaceSelection, parent.WorkspaceSelection) && reflect.DeepEqual(child.ExternalID, parent.ExternalID) && reflect.DeepEqual(child.Group, parent.Group) && reflect.DeepEqual(child.PromptPrefix, parent.PromptPrefix) &&
 		SameReviewScope(child.CheckpointScope, parent.CheckpointScope) && reflect.DeepEqual(child.ReviewSnapshot, parent.ReviewSnapshot) && reflect.DeepEqual(child.ReviewResult, parent.ReviewResult) &&
 		child.ResultCommit == "" && child.CommitVerifiedAt == nil && child.Finalization == nil
 }

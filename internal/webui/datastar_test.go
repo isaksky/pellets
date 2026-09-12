@@ -145,12 +145,12 @@ func TestDatastarLiveResponseBundlesRelatedRegions(t *testing.T) {
 		"Datastar-Request": {"true"}, "Pellets-Target": {"live"},
 	})
 	body := response.Body.String()
-	for _, target := range []string{"project-counts", "area-tabs", "project-record", "project-drawer", "task-list", "inspector-host"} {
+	for _, target := range []string{"project-counts", "area-tabs", "project-record", "project-drawer", "breadcrumbs", "run-dashboard", "workspace-groups", "task-list", "inspector-host"} {
 		if strings.Count(body, "data: selector #"+target+"\n") != 1 {
 			t.Errorf("expected one patch for %s", target)
 		}
 	}
-	if strings.Contains(body, "data: mode replace") || !strings.Contains(body, `1 open · 0 active · 0 memories`) {
+	if strings.Contains(body, "data: mode replace") || !strings.Contains(body, `class="footer-counts">1 open</span>`) || !strings.Contains(body, `Queue <small>1</small>`) || !strings.Contains(body, `Memories <small>0</small>`) || !strings.Contains(body, `1 open · 0 active`) {
 		t.Fatalf("live response lacks morphed authoritative counts: %s", body)
 	}
 	if strings.Count(body, "event: datastar-patch-signals") != 1 {

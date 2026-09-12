@@ -416,8 +416,11 @@ the running server; project checks prevent retargeting a receipt. The local
 browser renders one card per registered workspace, combining the current
 in-memory receipt with the latest durable run so reconnects remain authoritative.
 Its Run one, Drain, Watch, Stop after, Stop now, and eligible Resume controls use
-these form endpoints and refresh from the server; cards contain only bounded
-application-authored activity, never Codex transcripts, command text, or output.
+these form endpoints and refresh from the server. The execution sidebar also
+shows a bounded, sanitized in-memory projection of explicitly reported Codex
+activity, including complete commands/output and file diffs where available.
+This independent [activity stream](execution-activity.md) does not enter durable
+run snapshots or compete with the execution driver's notification consumer.
 An owned pellet with no latest attempt also has an explicit Resume form, even
 after server restart or a CLI `start-next`. Selection can commit ownership
 before settings/authentication preflight creates the first run. In that gap,

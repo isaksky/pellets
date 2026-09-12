@@ -168,6 +168,7 @@ func assessCheckpointFinding(ctx context.Context, execution *WorkspaceExecution,
 			if !ok {
 				return a, codex.ErrClosed
 			}
+			execution.ProjectActivity(event, thread.Thread.ID, turn.Turn.ID)
 			if len(event.ID) != 0 {
 				_ = execution.Respond(ctx, event.ID, nil, &codex.RPCError{Code: -32600, Message: "Checkpoint triage cannot authorize interactions"})
 				return a, scheduleError("triage_interaction_forbidden", "triage requested an interaction outside its read-only boundary")

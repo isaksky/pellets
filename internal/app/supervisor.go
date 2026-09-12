@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,6 +33,7 @@ type SupervisorOptions struct {
 // ExecutionSupervisor is created once per foreground server. Accepted work is
 // independent of HTTP contexts; every exit path must call Close before exit.
 type ExecutionSupervisor struct {
+	activity      *activityProjection
 	admissions    map[uint64]context.CancelFunc
 	nextAdmission uint64
 	options       SupervisorOptions
@@ -113,7 +115,7 @@ func NewExecutionSupervisor(ctx context.Context, options SupervisorOptions) *Exe
 	if options.InterruptTimeout <= 0 {
 		options.InterruptTimeout = 3 * time.Second
 	}
-	supervisor := &ExecutionSupervisor{options: options, runs: make(map[*ExecutionHandle]struct{}), active: make(map[activeExecutionKey]*WorkspaceExecution), closed: make(chan struct{})}
+	supervisor := &ExecutionSupervisor{activity: newActivityProjection(), options: options, runs: make(map[*ExecutionHandle]struct{}), active: make(map[activeExecutionKey]*WorkspaceExecution), closed: make(chan struct{})}
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -287,6 +289,7 @@ func (supervisor *ExecutionSupervisor) Close() error {
 // WorkspaceExecution exposes the prepared protocol and evidence boundaries,
 // without handing process ownership or its lifetime context to the driver.
 type WorkspaceExecution struct {
+	activity     *activityProjection
 	recorder     ExecutionRecorder
 	database     Database
 	id           int64
@@ -532,17 +535,23 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 		return run, err
 	}
 	workCtx, cancelWork := codex.WithExecutionLock(handle.ctx, lock.File()), handle.cancel
-	execution := &WorkspaceExecution{recorder: supervisor.options.Recorder, database: request.Database, id: run.ID, prepared: prepared, ctx: workCtx,
+	execution := &WorkspaceExecution{activity: supervisor.activity, recorder: supervisor.options.Recorder, database: request.Database, id: run.ID, prepared: prepared, ctx: workCtx,
 		operations: make(chan struct{}, 1), events: make(chan codex.Event, prepared.Settings.Limits.EventBuffer), completion: make(chan struct{}, 1), eventDone: make(chan struct{}), eventFailure: make(chan error, 1), actions: make(chan interactionAction)}
 	supervisor.mu.Lock()
 	key := activeExecutionKey{databasePath: request.Database.Path, runID: run.ID}
 	supervisor.active[key] = execution
+	supervisor.activity.begin(key)
 	supervisor.mu.Unlock()
 	defer func() {
 		supervisor.mu.Lock()
 		delete(supervisor.active, key)
 		supervisor.mu.Unlock()
 	}()
+	if request.Capture.ResumeFrom != nil {
+		execution.recordActivityAction(run.Revision, "progress", "Execution explicitly resumed", "running")
+	} else {
+		execution.recordActivityAction(run.Revision, "progress", "Execution started", "running")
+	}
 	go execution.relayEvents()
 	driverDone := make(chan error, 1)
 	go func() {
@@ -650,6 +659,9 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 	}
 	if closeErr == nil && readErr == nil && driverStopErr == nil && run.PendingOperation == "" && !errors.Is(err, codex.ErrCleanup) {
 		readErr = lock.Clean()
+	}
+	if readErr == nil {
+		execution.recordActivityAction(run.Revision, "progress", "Execution "+strings.ReplaceAll(run.State, "_", " "), run.State)
 	}
 	return run, errors.Join(err, closeErr, readErr, driverStopErr)
 }

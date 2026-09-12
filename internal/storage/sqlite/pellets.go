@@ -127,6 +127,18 @@ func createPelletInTransaction(ctx context.Context, connection *sql.Conn, projec
 			if err := ensureReferenceProject(ctx, connection, project.Project, normalized.Placement.Target); err != nil {
 				return storage.Pellet{}, err
 			}
+			if normalized.PlacementTargetVersion != "" {
+				anchor, err := loadPellet(ctx, connection, project.Project.ID, normalized.Placement.Target.Number)
+				if errors.Is(err, sql.ErrNoRows) {
+					return storage.Pellet{}, pelletNotFound(normalized.Placement.Target)
+				}
+				if err != nil {
+					return storage.Pellet{}, pelletStorageError("read insertion anchor", err)
+				}
+				if normalized.PlacementTargetVersion != storage.PelletVersion(anchor) {
+					return storage.Pellet{}, &storage.OptimisticConflict{Pellet: &anchor}
+				}
+			}
 			allocated, err = allocatePlacedPriority(ctx, connection, project, *normalized.Placement, 0)
 		}
 		if err != nil {
@@ -727,6 +739,18 @@ func (repository *PelletRepository) startNextPellet(ctx context.Context, project
 	if err := ensureStoredProjectWorkspace(ctx, connection, project); err != nil {
 		return storage.NextSelection{}, err
 	}
+	var routing *storage.WorkspaceSelection
+	if scheduled != nil && scheduled.UseWorkspaceAssignments {
+		if scheduled.ResumePellet != nil && scheduled.SavedWorkspaceSelection != nil {
+			routing = scheduled.SavedWorkspaceSelection
+		} else {
+			config, err := readProjectRouting(ctx, connection, project.Project)
+			if err != nil {
+				return storage.NextSelection{}, err
+			}
+			routing = config.Selection(project.Workspace.ID)
+		}
+	}
 	attempts := startNextMaxAttempts
 	if scheduled != nil {
 		attempts = 1
@@ -754,7 +778,7 @@ func (repository *PelletRepository) startNextPellet(ctx context.Context, project
 					}
 				}
 			}
-			selection := storage.NextSelection{Reason: storage.NextResumeInProgress, Pellet: &owned}
+			selection := storage.NextSelection{Reason: storage.NextResumeInProgress, Pellet: &owned, WorkspaceSelection: routing}
 			if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
 				return storage.NextSelection{}, pelletStorageError("commit start-next resume", err)
 			}
@@ -768,7 +792,7 @@ func (repository *PelletRepository) startNextPellet(ctx context.Context, project
 			return storage.NextSelection{}, domain.NewError(domain.Conflict, "schedule_resume_changed", "the exact pellet is no longer in progress in this workspace", nil)
 		}
 
-		candidate, err := loadNextOpenPellet(ctx, connection, project, externalID, group)
+		candidate, err := loadNextRoutedOpenPellet(ctx, connection, project, externalID, group, routing)
 		if errors.Is(err, sql.ErrNoRows) {
 			if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
 				return storage.NextSelection{}, pelletStorageError("commit empty start-next", err)
@@ -820,7 +844,7 @@ func (repository *PelletRepository) startNextPellet(ctx context.Context, project
 			return storage.NextSelection{}, pelletStorageError("commit start-next assignment", err)
 		}
 		committed = true
-		return storage.NextSelection{Reason: storage.NextOpen, Pellet: &started}, nil
+		return storage.NextSelection{Reason: storage.NextOpen, Pellet: &started, WorkspaceSelection: routing}, nil
 	}
 
 	if scheduled != nil {
@@ -1611,7 +1635,7 @@ func scanPellet(scanner pelletScanner) (storage.Pellet, error) {
 	pellet.Reference.ProjectCode = projectCode
 	if pellet.Kind == domain.PelletReviewCheckpoint {
 		pellet.Checkpoint = &storage.ReviewCheckpoint{Version: 1, Ready: true}
-		if err := json.Unmarshal([]byte(checkpointJSON), &pellet.Checkpoint.Targets); err != nil {
+		if err := json.Unmarshal([]byte(checkpointJSON), pellet.Checkpoint); err != nil {
 			return storage.Pellet{}, err
 		}
 		if len(pellet.Checkpoint.Targets) == 0 {
@@ -1730,6 +1754,14 @@ func resolveProjectCodeID(ctx context.Context, query projectQuery, code string) 
 }
 
 func validateNewPellet(input storage.NewPellet) (storage.NewPellet, error) {
+	if input.PlacementTargetVersion != "" {
+		if input.Placement == nil {
+			return storage.NewPellet{}, invalidCheckpoint("an insertion anchor version requires explicit placement")
+		}
+		if err := validateWebVersion(input.PlacementTargetVersion); err != nil {
+			return storage.NewPellet{}, err
+		}
+	}
 	if err := validateNullablePelletText("request_id", input.RequestID); err != nil {
 		return storage.NewPellet{}, err
 	}

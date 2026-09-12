@@ -40,6 +40,9 @@ type NewPellet struct {
 	Group                *string
 	Status               domain.PelletStatus
 	Placement            *PelletPlacement
+	// PlacementTargetVersion optionally binds browser insertion to the exact
+	// anchor row observed before the atomic create transaction.
+	PlacementTargetVersion string `json:",omitempty"`
 }
 
 // ReviewTargetVersion binds one browser-selected target identity to the exact
@@ -52,11 +55,13 @@ type ReviewTargetVersion struct {
 }
 
 // ReviewCheckpoint is the versioned, materialized read contract. Targets are
-// immutable selections, never inferred from queue adjacency. Readiness is a
+// explicit selections, never inferred from queue adjacency. Scope edits create
+// a new implementation generation while historical snapshots stay immutable. Readiness is a
 // current observation; start and execution completion recheck it atomically.
 type ReviewCheckpoint struct {
 	Version int            `json:"version"`
 	Ready   bool           `json:"ready"`
+	Removed bool           `json:"removed,omitempty"`
 	Targets []ReviewTarget `json:"targets"`
 }
 
@@ -142,8 +147,9 @@ const (
 
 // NextSelection is the read-only queue choice for one resolved workspace.
 type NextSelection struct {
-	Reason NextSelectionReason
-	Pellet *Pellet
+	WorkspaceSelection *WorkspaceSelection
+	Reason             NextSelectionReason
+	Pellet             *Pellet
 }
 
 // PelletLifecycleOperation names one command-governed state transition. These

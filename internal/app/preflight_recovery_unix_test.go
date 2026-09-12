@@ -40,7 +40,7 @@ func TestSupervisorPreflightCrashHelper(t *testing.T) {
 	s := NewScheduler(context.Background(), SchedulerOptions{Database: request.Database, Supervisor: supervisor, OpenQueue: func(ctx context.Context, path string) (storage.SchedulerQueue, error) {
 		return sqlite.OpenPelletRepository(ctx, path)
 	}})
-	handle, err := s.Start(context.Background(), ScheduleRequest{Selected: request.Selected, Mode: "run_one", Limit: 1, Group: request.Capture.Group, ExternalID: request.Capture.ExternalID})
+	handle, err := s.Start(context.Background(), ScheduleRequest{UseWorkspaceAssignments: request.Capture.WorkspaceSelection != nil, Selected: request.Selected, Mode: "run_one", Limit: 1, Group: request.Capture.Group, ExternalID: request.Capture.ExternalID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,15 +54,25 @@ func TestSupervisorPreflightCrashHelper(t *testing.T) {
 // before Recorder.Begin, and the paused custodian retains exclusion afterwards.
 func crashedPreflight(t *testing.T) (*Scheduler, ScheduleRequest, *sqlite.PelletRepository, []byte) {
 	t.Helper()
+	return crashedPreflightWithRouting(t, false)
+}
+
+func crashedPreflightWithRouting(t *testing.T, routed bool) (*Scheduler, ScheduleRequest, *sqlite.PelletRepository, []byte) {
+	t.Helper()
 	executable := installSupervisorPeer(t)
 	s, request, q := schedulerFixture(t, executable, "preflight_gate")
 	group, external := " Exact Group ", "Exact:ID"
 	request.Group, request.ExternalID, request.Limit = &group, &external, 1
+	request.UseWorkspaceAssignments = routed
+	var routing *storage.WorkspaceSelection
+	if routed {
+		routing = &storage.WorkspaceSelection{Enabled: true, Mode: "remaining", IncludeUngrouped: true}
+	}
 	ref := domain.PelletReference{ProjectCode: request.Selected.Project.Code, Number: 1}
 	if _, err := q.UpdatePellet(context.Background(), request.Selected, ref, storage.PelletChanges{Group: storage.NullableTextChange{Set: true, Value: &group}, ExternalID: storage.NullableTextChange{Set: true, Value: &external}}); err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := json.Marshal(ExecutionRequest{Database: s.options.Database, Selected: request.Selected, Capture: storage.RunCapture{Group: &group, ExternalID: &external}})
+	encoded, err := json.Marshal(ExecutionRequest{Database: s.options.Database, Selected: request.Selected, Capture: storage.RunCapture{WorkspaceSelection: routing, Group: &group, ExternalID: &external}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,5 +323,38 @@ func TestPreflightCrashRecoveryRevalidatesGenerationAfterRepair(t *testing.T) {
 	runs, err := s.options.Supervisor.ListWorkspaceRuns(context.Background(), s.options.Database, request.Selected.Workspace.ID, 10)
 	if err != nil || len(runs) != 0 {
 		t.Fatalf("generation race created runs: %+v %v", runs, err)
+	}
+}
+
+func TestRoutedPreflightCrashRecoveryRetainsPolicyAfterAssignmentChanges(t *testing.T) {
+	s, request, _, original := crashedPreflightWithRouting(t, true)
+	ctx := context.Background()
+	reader, writer, routing := schedulerRouting(t, s, request)
+	var owner executionlock.Owner
+	if err := json.Unmarshal(original, &owner); err != nil || owner.Preflight.WorkspaceSelection == "" {
+		t.Fatalf("missing captured routing: %s %v", original, err)
+	}
+	if _, err := writer.SaveWorkspaceAssignment(ctx, request.Selected.Project, request.Selected.Workspace.ID, routing.Version, storage.WorkspaceAssignment{Mode: "explicit", Groups: []string{"different"}}); err != nil {
+		t.Fatal(err)
+	}
+	application := WebApplication{Reader: reader, Writer: writer, Database: s.options.Database, Scheduler: s, Executions: s.options.Supervisor}
+	if err := os.WriteFile(filepath.Join(s.options.Database.Root, "fake-mode"), []byte("schedule_success"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	h, err := application.StartSchedule(ctx, request.Selected.Project, request.Selected.Workspace.ID, ScheduleRequest{Mode: request.Mode, Limit: request.Limit, ResumePellet: request.ResumePellet, PreflightReceipt: owner.Preflight.Token(), InteractiveAdmission: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := awaitSchedule(t, h)
+	if result.Completed != 1 {
+		t.Fatalf("routed preflight Resume failed: %+v", result)
+	}
+	run, err := s.options.Supervisor.options.Recorder.Read(ctx, s.options.Database, result.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(run.WorkspaceSelection)
+	if err != nil || string(encoded) != owner.Preflight.WorkspaceSelection {
+		t.Fatalf("retargeted preflight: %s %v", encoded, err)
 	}
 }

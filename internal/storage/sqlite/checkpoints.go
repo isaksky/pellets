@@ -18,7 +18,9 @@ const checkpointEligibleSQL = `(p.kind = 'ordinary' OR (
  AND NOT EXISTS (SELECT 1 FROM review_checkpoint_readiness t WHERE t.project_id=p.project_id AND t.checkpoint_number=p.number AND t.reason<>'ready')
 ))`
 
-const checkpointJSONSQL = `(SELECT json_group_array(json_object(
+const checkpointJSONSQL = `json_object('removed', CASE WHEN p.status='maybe_later' AND EXISTS (
+ SELECT 1 FROM review_checkpoint_removals r WHERE r.project_id=p.project_id AND r.checkpoint_number=p.number
+) THEN json('true') ELSE json('false') END, 'targets', json((SELECT json_group_array(json_object(
  'project_id', t.project_id, 'number', t.target_number,
  'reference', project.code || '-' || t.target_number,
  'selected_reference', t.selected_reference,
@@ -27,7 +29,7 @@ const checkpointJSONSQL = `(SELECT json_group_array(json_object(
  'evidence', CASE WHEN t.run_id IS NULL THEN NULL ELSE json_object(
    'run_id',t.run_id,'workspace_id',t.workspace_id,'starting_head',t.starting_head,'result_commit',t.result_commit) END
  )) FROM (SELECT * FROM review_checkpoint_readiness
- WHERE project_id=p.project_id AND checkpoint_number=p.number ORDER BY ordinal) t)`
+ WHERE project_id=p.project_id AND checkpoint_number=p.number ORDER BY ordinal) t)))`
 
 func invalidCheckpoint(message string) error {
 	return domain.NewError(domain.Usage, "invalid_review_checkpoint", message, nil)
@@ -111,7 +113,7 @@ func prepareCheckpoint(ctx context.Context, q projectQuery, project storage.Reso
 			last = &copy
 		}
 	}
-	if last != nil {
+	if last != nil && input.Placement == nil {
 		input.Placement = &storage.PelletPlacement{Target: last.Reference}
 	}
 	return targets, nil
@@ -133,8 +135,8 @@ func validateCheckpointInput(input *storage.NewPellet) error {
 	if len(input.ReviewTargets) == 0 || len(input.ReviewTargets) > 1000 {
 		return invalidCheckpoint("select between 1 and 1000 explicit review targets")
 	}
-	if input.Placement != nil || input.Status != domain.PelletOpen {
-		return invalidCheckpoint("review checkpoints are created open with automatic placement")
+	if input.Status != domain.PelletOpen {
+		return invalidCheckpoint("review checkpoints are created open")
 	}
 	input.ReviewTargets = append([]domain.PelletReference(nil), input.ReviewTargets...)
 	input.ReviewTargetVersions = append([]storage.ReviewTargetVersion(nil), input.ReviewTargetVersions...)

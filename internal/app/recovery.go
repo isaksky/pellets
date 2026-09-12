@@ -42,7 +42,15 @@ func capturePreflight(ctx context.Context, request ExecutionRequest, root string
 		return nil, err
 	}
 	c := request.Capture
-	return &executionlock.Preflight{Version: 1, Platform: runtime.GOOS, DatabaseIdentity: databaseIdentity, GitIdentity: gitIdentity,
+	workspaceSelection := ""
+	if c.WorkspaceSelection != nil {
+		encoded, err := json.Marshal(c.WorkspaceSelection)
+		if err != nil {
+			return nil, err
+		}
+		workspaceSelection = string(encoded)
+	}
+	return &executionlock.Preflight{WorkspaceSelection: workspaceSelection, Version: 1, Platform: runtime.GOOS, DatabaseIdentity: databaseIdentity, GitIdentity: gitIdentity,
 		ProjectID: c.ProjectID, WorkspaceID: c.WorkspaceID, PelletNumber: c.PelletNumber, ImplementationRevision: c.ExpectedImplementationRevision,
 		Root: root, GitDir: identity.GitDir, GitCommonDir: identity.GitCommonDir, StartingHead: head, StartingRef: ref,
 		Mode: c.Mode, ScheduleMode: c.ScheduleMode, ScheduleRemaining: c.ScheduleRemaining, ExternalID: c.ExternalID, Group: c.Group}, nil
@@ -97,7 +105,13 @@ func (supervisor *ExecutionSupervisor) PreflightRecovery(ctx context.Context, da
 	if pellet.Kind == domain.PelletReviewCheckpoint {
 		mode = "review_checkpoint"
 	}
-	current, err := capturePreflight(ctx, ExecutionRequest{Database: database, Selected: selected, Capture: storage.RunCapture{ProjectID: selected.Project.ID, WorkspaceID: selected.Workspace.ID, PelletNumber: pellet.Reference.Number, ExpectedImplementationRevision: pellet.ImplementationRevision, Mode: mode, ScheduleMode: p.ScheduleMode, ScheduleRemaining: p.ScheduleRemaining, ExternalID: p.ExternalID, Group: p.Group}}, root)
+	var routing *storage.WorkspaceSelection
+	if p.WorkspaceSelection != "" {
+		if err := json.Unmarshal([]byte(p.WorkspaceSelection), &routing); err != nil {
+			return nil, preflightRecoveryRequired()
+		}
+	}
+	current, err := capturePreflight(ctx, ExecutionRequest{Database: database, Selected: selected, Capture: storage.RunCapture{WorkspaceSelection: routing, ProjectID: selected.Project.ID, WorkspaceID: selected.Workspace.ID, PelletNumber: pellet.Reference.Number, ExpectedImplementationRevision: pellet.ImplementationRevision, Mode: mode, ScheduleMode: p.ScheduleMode, ScheduleRemaining: p.ScheduleRemaining, ExternalID: p.ExternalID, Group: p.Group}}, root)
 	if err != nil {
 		return nil, err
 	}

@@ -89,16 +89,16 @@ async function startServer(root) {
       }, 'Schedule did not finish');
       return state;
     }
-    assert.equal((await schedule(controls.getByRole('button', {name: 'Run one', exact: true}))).completed, 1);
+    assert.equal((await schedule(controls.locator('form[data-schedule]:has(select[name=mode]) button[type=submit]').first())).completed, 1);
     const checkpoint = cli('add', 'Review selected implementation', '--review-targets', target.id);
     const inspectorPath = `/projects/${target.project}/tasks/${checkpoint.id}`;
     await page.goto(origin + inspectorPath);
     await page.waitForFunction(() => !document.documentElement.hasAttribute('data-nonce'));
-    const outcome = page.locator('[data-checkpoint-outcome]');
+    const outcome = page.locator('[data-checkpoint-outcome]').first();
     assert.match(await outcome.textContent(), /Pending separate review/);
     await page.evaluate(() => { window.checkpointInspector = document.querySelector('[data-inspector]'); });
     setMode(mode);
-    const reviewed = await schedule(controls.getByRole('button', {name: 'Run one', exact: true}));
+    const reviewed = await schedule(controls.locator('form[data-schedule]:has(select[name=mode]) button[type=submit]').first());
     await until(async () => /Review outcome: (Clean|Findings)/.test(await outcome.textContent()), 'Live review completion retained a placeholder');
     assert.equal(await page.evaluate(() => window.checkpointInspector === document.querySelector('[data-inspector]')), true, 'Live outcome replaced the inspector instead of morphing it');
     // Review findings can reach the live inspector before the final triage
@@ -139,7 +139,7 @@ async function startServer(root) {
     // A later ordinary run changes the workspace dashboard, not this receipt.
     cli('add', 'later ordinary task');
     setMode('schedule_success');
-    assert.equal((await schedule(controls.getByRole('button', {name: 'Run one', exact: true}))).completed, 1);
+    assert.equal((await schedule(controls.locator('form[data-schedule]:has(select[name=mode]) button[type=submit]').first())).completed, 1);
     await page.evaluate(() => document.dispatchEvent(new CustomEvent('pellets-refresh')));
     await page.waitForTimeout(500);
     assert.equal(await outcome.textContent(), text, 'Later workspace run replaced checkpoint evidence');
@@ -151,6 +151,9 @@ async function startServer(root) {
     assert.equal(await outcome.getAttribute('data-checkpoint-generation'), '2');
     assert.match(await outcome.textContent(), /Pending separate review/);
     assert.equal(await outcome.locator('a').count(), 0, 'New generation inherited old follow-ups');
+    const history = page.locator('.checkpoint-history');
+    assert.equal(await history.count(), 1, 'Earlier review generation is no longer inspectable');
+    assert.match(await history.textContent(), mode === 'review_clean' ? /Clean/ : /Findings/);
     assert.deepEqual(errors, []);
     await controls.close();
     await page.close(); await stopServer();

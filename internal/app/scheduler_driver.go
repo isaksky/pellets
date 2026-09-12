@@ -145,6 +145,7 @@ func (s *Scheduler) drive(ctx context.Context, execution *WorkspaceExecution) er
 			if !ok {
 				return codex.ErrClosed
 			}
+			execution.ProjectActivity(event, run.ThreadID, run.TurnID)
 			if len(event.ID) != 0 {
 				if run.Interaction != nil {
 					_ = execution.Respond(ctx, event.ID, nil, &codex.RPCError{Code: -32600, Message: "Pellets already has a pending interaction for this run"})
@@ -168,6 +169,7 @@ func (s *Scheduler) drive(ctx context.Context, execution *WorkspaceExecution) er
 				progress := run.RunProgress
 				progress.State, progress.Interaction = "running", nil
 				progress.Summary = "The pending Codex request was resolved or withdrawn."
+				execution.recordActivityAction(run.Revision, "question", "Request resolved or withdrawn", "resolved")
 				run, err = execution.Save(ctx, progress, run.Revision)
 				if err != nil {
 					return err

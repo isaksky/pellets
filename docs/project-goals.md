@@ -40,6 +40,7 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 - Make `pl start-next` atomically resume or claim eligible work so concurrent worktrees cannot both act on one read-only selection.
 - Preserve closed pellets by default and make destructive cleanup explicit.
 - Support exact filtering by project, optional external ID, and optional group.
+- Let humans route foreground web execution by workspace group assignments while retaining the shared project queue and unchanged CLI exact-group selection.
 - Bind each logical repository to one database through Git’s common directory, using ancestor and linked-worktree discovery before first binding.
 - Let an ordinary current-project command automatically create/register local Pellets metadata on first use, without a prerequisite project-initialization command or interactive code prompt.
 - Support one database containing several logical Git projects and several worktree workspaces per project, with short project codes and project-local pellet numbers.
@@ -60,7 +61,7 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 - A separate persistent worker, automatic worktree creation, automatic restart, or automatic resume of Codex work. The foreground server owns only the execution it starts.
 - A general dependency graph, plugin framework, full Git UI, push/PR workflow, or Claude execution integration.
 - Tags, separate task notes, or an automatic task event/history log.
-- Multiple groups per pellet, a group table, or behavior attached to a group.
+- Multiple groups per pellet, group identities or hierarchy, or group-specific workflows. Workspace assignments are an explicit foreground scheduling preference over existing opaque group values.
 - Custom workflows or custom statuses in the first release.
 - Semantic/vector retrieval, embedding models, or embedding providers.
 - Plugins or a general extension framework.
@@ -161,3 +162,37 @@ These do not block the initial design:
 - Should release binaries be code-signed in the first release?
 - Is a database backup/export command needed after the first release, despite there being no synchronization feature?
 - What database-size and response-time thresholds should become release gates after realistic agent workloads are measured?
+
+## Workspace routing in the web workbench
+
+Queue and Memories remain shared project views. Selecting a registered workspace
+shows its assigned work and its existing owned pellet. The execution target is
+that explicit workspace; search, status, group-chip, and external-ID browsing
+filters do not choose execution work.
+
+A workspace may accept explicit groups or **All other groups**, with an
+independent option for ungrouped work. All other groups excludes exact group
+values explicitly assigned to other workspaces in the same project. Explicit
+assignments may overlap. Disabling **Use group assignments** makes each
+workspace eligible for the whole queue and retains its saved assignments.
+Existing and newly registered workspaces default to All other groups plus
+ungrouped work, preserving their earlier whole-queue eligibility until a human
+configures routing. Production does not infer prototype roles from directory
+names or assign invented groups to a workspace.
+
+Assignment changes affect the next web-scheduled claim, including a waiting
+Watch or a subsequent Drain pickup. They never transfer or release owned work,
+stop a process, or replace an exact Resume target. A resumed attempt retains its
+captured routing policy and exact filters. After that pellet completes, a
+resumed multi-pellet schedule reads the current project assignments for its next
+claim. This policy is part of saved schedule intent: an older schedule captured
+without workspace routing continues to use its original exact-filter contract.
+Restart recreates no schedule and resumes no execution automatically.
+
+Review checkpoints belong to a workspace view when an explicitly scoped target's current group matches that workspace; a missing target retains its saved group
+for diagnosis. Scheduling uses captured target groups and requires fresh evidence
+for the entire explicit scope, so metadata drift cannot silently retarget a ready
+review. Queue position and visual adjacency never define review membership.
+The queue defaults to active work; All states and individual lifecycle filters
+remain available. Removed checkpoints are discoverable under Maybe later for
+explicit restoration.

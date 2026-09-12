@@ -50,6 +50,12 @@ func (h *handler) serveMutation(response http.ResponseWriter, request *http.Requ
 	project := projectSummary.Project
 
 	switch {
+	case len(segments) == 5 && segments[2] == "checkpoints":
+		h.serveCheckpointMutation(response, request, project, segments[3], segments[4])
+	case len(segments) == 3 && segments[2] == "routing":
+		h.saveRouting(response, request, project, "")
+	case len(segments) == 5 && segments[2] == "workspaces" && segments[4] == "assignments":
+		h.saveRouting(response, request, project, segments[3])
 	case len(segments) == 5 && segments[2] == "runs" && (segments[4] == "interaction" || segments[4] == "follow-up"):
 		h.submitRunAction(response, request, project, segments[3], segments[4])
 	case len(segments) == 3 && segments[2] == "schedules":
@@ -151,6 +157,11 @@ func (h *handler) submitRunAction(response http.ResponseWriter, request *http.Re
 }
 
 func (h *handler) createPellet(response http.ResponseWriter, request *http.Request, project storage.Project) {
+	for _, field := range []string{"placement_target", "placement_direction", "placement_target_version"} {
+		if _, present := request.PostForm[field]; !present {
+			request.PostForm.Set(field, "")
+		}
+	}
 	if _, present := request.PostForm["review_targets"]; !present {
 		request.PostForm.Set("review_targets", "")
 	}
@@ -163,7 +174,7 @@ func (h *handler) createPellet(response http.ResponseWriter, request *http.Reque
 	if _, present := request.PostForm["request_id"]; !present {
 		request.PostForm.Set("request_id", "")
 	}
-	if err := requireFields(request.PostForm, []string{"_csrf", "request_id", "title", "description", "external_id", "group", "status", "review_targets", "review_target_versions"}); err != nil {
+	if err := requireFields(request.PostForm, []string{"_csrf", "request_id", "title", "description", "external_id", "group", "status", "review_targets", "review_target_versions", "placement_target", "placement_direction", "placement_target_version"}); err != nil {
 		h.renderError(response, http.StatusUnprocessableEntity, err, submittedDraft(request.PostForm))
 		return
 	}
@@ -176,6 +187,17 @@ func (h *handler) createPellet(response http.ResponseWriter, request *http.Reque
 		Title: request.PostForm.Get("title"), Description: request.PostForm.Get("description"),
 		ExternalID: nullableInput(request.PostForm.Get("external_id")), Group: nullableInput(request.PostForm.Get("group")),
 		Status: status, RequestID: nullableInput(request.PostForm.Get("request_id")),
+	}
+	if request.PostForm.Get("placement_target") != "" || request.PostForm.Get("placement_direction") != "" || request.PostForm.Get("placement_target_version") != "" {
+		anchor, err := domain.ParsePelletReference(request.PostForm.Get("placement_target"))
+		direction, version := request.PostForm.Get("placement_direction"), request.PostForm.Get("placement_target_version")
+		if err != nil || !projectAcceptsCode(project, anchor.ProjectCode) || (direction != "before" && direction != "after") || !validVersion(version) {
+			h.renderMutationError(response, requestError("explicit insertion requires an active project record, before or after, and its exact row version"), submittedDraft(request.PostForm))
+			return
+		}
+		anchor.ProjectCode = project.Code
+		input.Placement = &storage.PelletPlacement{Target: anchor, Before: direction == "before"}
+		input.PlacementTargetVersion = version
 	}
 	if selected := strings.TrimSpace(request.PostForm.Get("review_targets")); selected != "" {
 		if input.RequestID == nil {
@@ -412,6 +434,7 @@ func (h *handler) renderMutationError(response http.ResponseWriter, err error, d
 			}
 			views := makePelletViews([]storage.Pellet{*conflict.Pellet}, conflict.Pellet.Reference.ProjectCode, nil, conflict.Pellet.Reference.String(), storage.WebPelletSort{})
 			data.SelectedPellet = &views[0]
+			data.CloseURL = taskURL(conflict.Pellet.Reference.ProjectCode, nil, "", storage.WebPelletSort{})
 			if conflict.Pellet.Checkpoint != nil {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				outcome, readErr := h.application.CheckpointOutcome(ctx, *conflict.Pellet)
@@ -427,6 +450,7 @@ func (h *handler) renderMutationError(response http.ResponseWriter, err error, d
 		} else if conflict.Memory != nil {
 			views := makeMemoryViews([]storage.Memory{*conflict.Memory}, conflict.Memory.ProjectCode, conflict.Memory.ID)
 			data.SelectedMemory = &views[0]
+			data.CloseURL = "/projects/" + url.PathEscape(conflict.Memory.ProjectCode) + "/memories"
 			data.Conflict.Kind = "memory"
 			data.Conflict.Current = fmt.Sprintf("Memory %d · updated %s", conflict.Memory.ID, formatTime(conflict.Memory.UpdatedAt))
 		}

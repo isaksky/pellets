@@ -45,13 +45,23 @@ type handler struct {
 
 func newHandler(application *app.WebApplication, hub *eventHub, config handlerConfig) (http.Handler, error) {
 	functions := template.FuncMap{
+		"queueCount": func(rows []pelletView) int {
+			n := 0
+			for _, p := range rows {
+				if p.Pellet.Kind == domain.PelletOrdinary {
+					n++
+				}
+			}
+			return n
+		},
 		"statusLabel":   statusLabel,
+		"statusSymbol":  statusSymbol,
 		"runStateLabel": runStateLabel,
 		"formatTime":    formatTime,
 		"relativeTime":  relativeTime,
 		"filterCount": func(f filterView) int {
 			n := 0
-			if f.Status != "" {
+			if f.Status != "" && f.Status != "active" {
 				n++
 			}
 			if f.Group != "" {
@@ -82,6 +92,8 @@ func (h *handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	switch {
 	case request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/assets/"):
 		h.serveAsset(response, request)
+	case request.Method == http.MethodGet && len(pathSegments(request.URL.Path)) == 5 && pathSegments(request.URL.Path)[2] == "runs" && pathSegments(request.URL.Path)[4] == "activity":
+		h.serveActivity(response, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/events":
 		h.serveEvents(response, request)
 	case request.Method == http.MethodGet && len(pathSegments(request.URL.Path)) == 4 && pathSegments(request.URL.Path)[2] == "schedules":
@@ -189,6 +201,16 @@ func (h *handler) serveEvents(response http.ResponseWriter, request *http.Reques
 }
 
 type pageData struct {
+	ExecutionWorkspace int64
+	WorkspaceName      string
+	WorkspaceRoot      string
+	Routing            storage.ProjectRouting
+	Assignment         storage.WorkspaceAssignment
+	AssignmentGroups   []assignmentGroupView
+	ScopeCandidates    []pelletView
+	QueueContext       []pelletView
+	ProjectQueueCount  int
+
 	QueueOrderURL      string
 	DatabaseLabel      string
 	DatabasePath       string
@@ -245,6 +267,8 @@ type workspaceView struct {
 // durable attempt. The receipt is useful while this server is alive; the run
 // remains authoritative after a browser reconnect or server restart.
 type runWorkspaceView struct {
+	ActiveTitle string
+
 	Name              string
 	URL               string
 	ID                int64
@@ -310,15 +334,22 @@ type scheduleView struct {
 }
 
 type pelletView struct {
-	CheckpointOutcome *checkpointOutcomeView
-	Pellet            storage.Pellet
-	Version           string
-	URL               string
-	Selected          bool
-	Group             string
-	ExternalID        string
-	Priority          string
-	Owner             string
+	ExecutionURL string
+	ScopeRefs    string
+	ScopeVisible int
+	ScopeTotal   int
+	OwnerName    string
+
+	CheckpointOutcome    *checkpointOutcomeView
+	CheckpointManagement *checkpointManagementView
+	Pellet               storage.Pellet
+	Version              string
+	URL                  string
+	Selected             bool
+	Group                string
+	ExternalID           string
+	Priority             string
+	Owner                string
 }
 
 type memoryView struct {
@@ -405,6 +436,8 @@ func (h *handler) servePage(response http.ResponseWriter, request *http.Request)
 	templateName := "page"
 	if request.Header.Get("Datastar-Request") == "true" {
 		switch request.Header.Get("Pellets-Target") {
+		case "app-content":
+			templateName = "app-content"
 		case "live":
 			templateName = "live"
 		case "tasks-area":
@@ -521,15 +554,16 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 		}
 	}
 	if area == "workspaces" {
-		_, filters, filterErr := parseFilters(request.URL.Query())
-		if filterErr != nil {
-			return pageData{}, filterErr
+		area, data.Area = "tasks", "tasks"
+		if len(segments) == 4 {
+			query.Set("workspace", segments[3])
 		}
-		for i := range data.RunWorkspaces {
-			data.RunWorkspaces[i].ExternalID = filters.ExternalID
-			data.RunWorkspaces[i].Group = filters.GroupText
-			data.RunWorkspaces[i].UngroupedFilter = filters.GroupUngrouped
-		}
+		data.CurrentURL = taskURL(code, query, "", storage.WebPelletSort{})
+		pageURL.Path = "/projects/" + url.PathEscape(code) + "/tasks"
+		pageURL.RawQuery = query.Encode()
+		request = request.Clone(request.Context())
+		request.URL = &pageURL
+		segments = pathSegments(pageURL.Path)
 	}
 	if area == "tasks" {
 		var selectedReference domain.PelletReference
@@ -547,11 +581,6 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 			return pageData{}, err
 		}
 		data.Filters = view
-		for index := range data.RunWorkspaces {
-			data.RunWorkspaces[index].ExternalID = view.ExternalID
-			data.RunWorkspaces[index].Group = view.GroupText
-			data.RunWorkspaces[index].UngroupedFilter = view.GroupUngrouped
-		}
 		data.TasksURL = taskURL(code, nil, "", filters.Sort)
 		data.QueueOrderURL = taskURL(code, request.URL.Query(), selectedReferenceText, storage.WebPelletSort{})
 		data.CurrentURL = taskURL(code, request.URL.Query(), selectedReferenceText, filters.Sort)
@@ -579,6 +608,10 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 					return pageData{}, err
 				}
 				data.SelectedPellet.CheckpointOutcome = makeCheckpointOutcomeView(outcome, code, request.URL.Query(), filters.Sort)
+				data.SelectedPellet.CheckpointManagement, err = h.loadCheckpointManagement(request.Context(), selected.Project, pellet)
+				if err != nil {
+					return pageData{}, err
+				}
 			}
 			data.CloseURL = taskURL(code, request.URL.Query(), "", filters.Sort)
 			active, err := h.application.Pellets(request.Context(), selected.Project, storage.WebPelletFilters{})
@@ -614,12 +647,8 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 			data.CloseURL = data.MemoriesURL
 		}
 	}
-	if area == "workspaces" && len(segments) == 4 {
-		id, parseErr := strconv.ParseInt(segments[3], 10, 64)
-		if parseErr != nil || !slices.ContainsFunc(data.RunWorkspaces, func(w runWorkspaceView) bool { return w.ID == id }) {
-			return pageData{}, domain.NewError(domain.NotFound, "workspace_not_registered", "the workspace does not belong to this project", nil)
-		}
-		data.SelectedWorkspace = id
+	if err := h.prepareWorkbench(request, &data); err != nil {
+		return pageData{}, err
 	}
 	return data, nil
 }
@@ -648,6 +677,7 @@ func (h *handler) runWorkspaceViews(request *http.Request, project storage.Proje
 		owned, hasOwned := owners[workspace.ID]
 		if hasOwned {
 			view.ActivePellet = owned.Reference.String()
+			view.ActiveTitle = owned.Title
 		}
 		runs, err := h.application.WorkspaceRuns(request.Context(), workspace.ID)
 		if err != nil {
@@ -734,7 +764,7 @@ func makeRunView(run storage.ExecutionRun) runView {
 		activity = run.Activity[0].Summary
 	}
 	if activity == "" {
-		activity = "No activity reported yet."
+		activity = runStateLabel(run.State) + "."
 	}
 	activity = publicRunActivity(activity)
 	view := runView{ID: run.ID, Revision: run.Revision, Pellet: run.ProjectCode + "-" + strconv.FormatInt(run.PelletNumber, 10), PelletNumber: run.PelletNumber, Mode: run.Mode, Model: model, Effort: effort, Phase: run.Phase, State: run.State, Activity: activity, Commit: run.ResultCommit, Error: run.ErrorCode, ExternalID: textOrDash(run.ExternalID), Group: textOrDash(run.Group), Active: storage.RunActive(run.State), Interaction: run.Interaction}
@@ -873,7 +903,10 @@ func parseFilters(values url.Values) (storage.WebPelletFilters, filterView, erro
 	if len(view.Query) > 1024 || len(view.ExternalID) > 4096 || len(view.Group) > 8192 {
 		return filters, view, domain.NewError(domain.Usage, "invalid_filter", "a web filter is too long", nil)
 	}
-	if view.Status != "" {
+	if view.Status == "" {
+		view.Status = "active"
+	}
+	if view.Status != "active" && view.Status != "all" {
 		status := domain.PelletStatus(view.Status)
 		if err := domain.ValidatePelletStatus(status); err != nil {
 			return filters, view, err
@@ -979,7 +1012,7 @@ func taskURL(code string, values url.Values, reference string, requested storage
 		path += "/" + url.PathEscape(reference)
 	}
 	copy := url.Values{}
-	for _, key := range []string{"status", "group", "external_id", "q"} {
+	for _, key := range []string{"status", "group", "external_id", "q", "workspace", "execution"} {
 		if value := values.Get(key); value != "" {
 			copy.Set(key, value)
 		}
@@ -1138,12 +1171,12 @@ func (h *handler) renderUpdates(response *datastarResponse, status int, primary 
 	if primary != "live" {
 		names = append(names, primary)
 	}
-	names = append(names, "project-counts", "area-tabs", "project-record", "project-rail")
+	names = append(names, "project-counts", "area-tabs", "project-record", "project-rail", "breadcrumbs", "run-dashboard", "workspace-groups")
 	if data.Area == "workspaces" {
 		names = append(names, "run-dashboard")
 	}
 	if data.Area == "tasks" {
-		names = append(names, "filter-summary", "queue-order")
+		names = append(names, "filter-summary", "queue-order", "queue-title")
 	}
 	if data.Area == "tasks" && primary != "tasks-area" && primary != "task-list" {
 		names = append(names, "task-list")
@@ -1173,6 +1206,12 @@ func (h *handler) renderUpdates(response *datastarResponse, status int, primary 
 		selector, mode := "#"+name, "outer"
 		if name == "project-rail" {
 			selector = "#project-drawer"
+		}
+		if name == "queue-title" {
+			selector = "#tasks-title"
+		}
+		if name == "breadcrumbs" {
+			selector = "#breadcrumbs"
 		}
 		if name == "inspector" {
 			selector, mode = "#inspector-host", "inner"
