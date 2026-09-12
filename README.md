@@ -563,6 +563,12 @@ runtime applies to this schedule; choosing a fresh conversation preserves the
 previous attempt and existing edits. Check again retries after an external fix,
 and Cancel leaves the queue alone. Ordinary existing edits need no confirmation.
 
+Editing a pellet during implementation starts a separate Terra/max comparison
+of its old and new requirements. Substantive changes are delivered to the
+executing agent in the same conversation and verified before completion;
+cosmetic edits require no implementation restart. See
+[live edits and recovery boundaries](docs/workbench-ui.md#live-execution).
+
 Startup marks abandoned active attempts interrupted or needing attention and
 waits for explicit Resume. Resume shows the saved pellet, phase, mode, remaining
 limit, and exact filters. For ordinary implementation before finalization, Resume adopts the current HEAD

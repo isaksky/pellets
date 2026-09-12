@@ -82,6 +82,29 @@ review outcomes. See [checkpoint management](checkpoint-management.md).
 
 ## Live execution
 
+Editing an ordinary pellet during implementation updates its running
+conversation. A fresh, separate `gpt-5.6-terra` agent at `max` reasoning compares
+the exact old and new title, description, group, and external ID. It is read-only
+and instructed to compare only, without tools or implementation work. Cosmetic
+or organizational edits need no additional implementation turn. Substantive
+changes are sent to the executing agent as a follow-up with the current task.
+The implementation model and workspace remain unchanged.
+
+The server waits for assessment before finalizing. If the original turn finishes
+while the assessment is pending, it continues the same conversation with the
+updated requirements. After steering a running turn, it also obtains a fresh
+verification result in a continuation turn, so a final answer already in flight
+cannot close changed work. Multiple edits are assessed and delivered in order.
+Pending human questions remain answerable; edit delivery waits for their resolution.
+
+The execution activity shows assessment and delivery. Exact edit snapshots and
+assessment receipts survive restart; detailed activity remains temporary.
+Release/reclaim, reopening, checkpoint scope changes, and changes after durable
+finalization begins retain the existing recovery checks. Assessment failure,
+unavailable Terra/max, or unconfirmed delivery stops visibly for attention and
+preserves the issue and work. Restart never resumes or replays a delivery
+automatically. This handling also covers CLI edits to the same running pellet.
+
 The execution sidebar uses durable run and schedule state for controls, with a
 separate bounded activity stream for reported events. File operations expand to
 reported source/read output or diffs; source and diffs receive local syntax

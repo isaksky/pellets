@@ -104,6 +104,7 @@ func buildProductionSchemaContracts() {
 		{version: 15, name: "no-change-completion", sql: migration15SQL},
 		{version: 16, name: "workspace-group-assignments", sql: migration16SQL},
 		{version: 17, name: "checkpoint-management", sql: migration17SQL},
+		{version: 18, name: "live-implementation-changes", sql: migration18SQL},
 	}
 	productionSchemaContracts.byVersion = make(map[int][]schemaObjectDefinition, len(endpoints))
 	for _, endpoint := range endpoints {

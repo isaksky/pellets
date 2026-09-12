@@ -738,3 +738,25 @@ creation of an execution run. Legacy preflight receipts remain readable without
 inventing assignment intent. Assignment edits and scheduler claims share the
 normal SQLite writer lock, while all one-owner-per-workspace and project
 isolation constraints remain unchanged.
+
+## Live implementation edits
+
+Migration 18 adds `execution_changes`, keyed by run and source implementation
+revision. The pellet revision trigger records exact old/new metadata only for
+ordinary, in-progress pellets with an active execution and no finalization
+receipt. Lifecycle transitions deliberately do not create delivery records.
+This is execution evidence, not an edit log for the general queue.
+
+A separate Terra/max assessment retains its reason, follow-up, and thread/turn
+IDs. After successful assessment and confirmed delivery (or a cosmetic-only
+assessment), one transaction marks the edit delivered, advances the run's
+implementation revision and title/description snapshot, and appends concise run
+activity. The original task remains in the edit receipt. Schedule filters are
+unchanged; an owned implementation can finish after its group metadata changes.
+
+Adoption requires an unbroken sequence of captured edits from the run's current
+revision to the pellet's current revision, with the same active workspace owner.
+A release/reclaim or other lifecycle replacement leaves a gap and cannot be
+adopted. Every finalization check still requires the exact current revision.
+Assessment and delivery do not replay automatically after interruption; pending
+or uncertain work remains explicit recovery state.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"pellets/internal/codex"
 	"pellets/internal/storage"
@@ -92,6 +93,7 @@ func (s *Scheduler) drive(ctx context.Context, execution *WorkspaceExecution) er
 	if err != nil {
 		return err
 	}
+	execution.primaryThread.Store(run.ThreadID)
 	target, err := json.Marshal(struct{ Reference, Title, Description, StartingHead string }{runReference(run), run.PelletTitle, run.PelletDescription, run.StartingHead})
 	if err != nil {
 		return err
@@ -128,15 +130,21 @@ func (s *Scheduler) drive(ctx context.Context, execution *WorkspaceExecution) er
 		return err
 	}
 	var result *implementationResult
+	changes := &liveChanges{}
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	terminal := ""
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-ticker.C:
 		case action := <-execution.actions:
 			updated, resetResult, actionErr := execution.applyInteraction(ctx, action)
 			if actionErr == nil {
 				run = updated
 				if resetResult {
+					terminal = ""
 					result = nil
 				}
 			}
@@ -145,108 +153,183 @@ func (s *Scheduler) drive(ctx context.Context, execution *WorkspaceExecution) er
 			if !ok {
 				return codex.ErrClosed
 			}
-			execution.ProjectActivity(event, run.ThreadID, run.TurnID)
-			if len(event.ID) != 0 {
+			if handled, changeErr := changes.consume(ctx, execution, event); handled || changeErr != nil {
+				if changeErr != nil {
+					return changeErr
+				}
+				// Delivery happens below without consuming implementation events twice.
+			} else {
+				execution.ProjectActivity(event, run.ThreadID, run.TurnID)
+				if len(event.ID) != 0 {
+					if run.Interaction != nil {
+						_ = execution.Respond(ctx, event.ID, nil, &codex.RPCError{Code: -32600, Message: "Pellets already has a pending interaction for this run"})
+						return scheduleError("codex_interaction_overlap", "Codex emitted overlapping interaction requests")
+					}
+					interaction, parseErr := parseServerInteraction(event, run)
+					if parseErr != nil {
+						_ = execution.Respond(ctx, event.ID, nil, &codex.RPCError{Code: -32602, Message: "Unsupported or invalid interaction request"})
+						return parseErr
+					}
+					progress := run.RunProgress
+					progress.State, progress.Interaction = "awaiting_input", interaction
+					progress.Summary = conciseCodexActivity(event.Method)
+					run, err = execution.Save(ctx, progress, run.Revision)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+				if resolved := resolvedRequestID(event); run.Interaction != nil && resolved == run.ThreadID+"\x00"+run.Interaction.RequestID {
+					progress := run.RunProgress
+					progress.State, progress.Interaction = "running", nil
+					progress.Summary = "The pending Codex request was resolved or withdrawn."
+					execution.recordActivityAction(run.Revision, "question", "Request resolved or withdrawn", "resolved")
+					run, err = execution.Save(ctx, progress, run.Revision)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+				if cached, reported := codex.CachedInputTokensForTurn(&event, run.ThreadID, run.TurnID); reported {
+					progress := run.RunProgress
+					progress.CachedInputTokens = &cached
+					run, err = execution.Save(ctx, progress, run.Revision)
+					if err != nil {
+						return err
+					}
+				}
+				if event.Method == "item/completed" {
+					var item struct {
+						ThreadID string                             `json:"threadId"`
+						TurnID   string                             `json:"turnId"`
+						Item     struct{ Type, Text, Phase string } `json:"item"`
+					}
+					if json.Unmarshal(event.Params, &item) == nil && item.ThreadID == run.ThreadID && item.TurnID == run.TurnID && item.Item.Type == "agentMessage" && item.Item.Phase == "final_answer" {
+						if result != nil {
+							return scheduleError("implementation_report_invalid", "multiple final implementation reports")
+						}
+						var report implementationResult
+						decoder := json.NewDecoder(strings.NewReader(item.Item.Text))
+						decoder.DisallowUnknownFields()
+						if len(item.Item.Text) > storage.MaxRunSnapshotBytes || decoder.Decode(&report) != nil || decoder.Decode(new(any)) != io.EOF {
+							return scheduleError("implementation_report_invalid", "invalid structured implementation report")
+						}
+						result = &report
+					}
+				}
+				if summary := conciseCodexEvent(event, run.ThreadID, run.TurnID); summary != "" && summary != run.Summary {
+					progress := run.RunProgress
+					progress.Summary = summary
+					run, err = execution.Save(ctx, progress, run.Revision)
+					if err != nil {
+						return err
+					}
+				}
+				status := completedTurnStatus(&event, run.ThreadID, run.TurnID)
+				if status == "" {
+					continue
+				}
 				if run.Interaction != nil {
-					_ = execution.Respond(ctx, event.ID, nil, &codex.RPCError{Code: -32600, Message: "Pellets already has a pending interaction for this run"})
-					return scheduleError("codex_interaction_overlap", "Codex emitted overlapping interaction requests")
-				}
-				interaction, parseErr := parseServerInteraction(event, run)
-				if parseErr != nil {
-					_ = execution.Respond(ctx, event.ID, nil, &codex.RPCError{Code: -32602, Message: "Unsupported or invalid interaction request"})
-					return parseErr
-				}
-				progress := run.RunProgress
-				progress.State, progress.Interaction = "awaiting_input", interaction
-				progress.Summary = conciseCodexActivity(event.Method)
-				run, err = execution.Save(ctx, progress, run.Revision)
-				if err != nil {
-					return err
-				}
-				continue
-			}
-			if resolved := resolvedRequestID(event); run.Interaction != nil && resolved == run.ThreadID+"\x00"+run.Interaction.RequestID {
-				progress := run.RunProgress
-				progress.State, progress.Interaction = "running", nil
-				progress.Summary = "The pending Codex request was resolved or withdrawn."
-				execution.recordActivityAction(run.Revision, "question", "Request resolved or withdrawn", "resolved")
-				run, err = execution.Save(ctx, progress, run.Revision)
-				if err != nil {
-					return err
-				}
-				continue
-			}
-			if cached, reported := codex.CachedInputTokensForTurn(&event, run.ThreadID, run.TurnID); reported {
-				progress := run.RunProgress
-				progress.CachedInputTokens = &cached
-				run, err = execution.Save(ctx, progress, run.Revision)
-				if err != nil {
-					return err
-				}
-			}
-			if event.Method == "item/completed" {
-				var item struct {
-					ThreadID string                             `json:"threadId"`
-					TurnID   string                             `json:"turnId"`
-					Item     struct{ Type, Text, Phase string } `json:"item"`
-				}
-				if json.Unmarshal(event.Params, &item) == nil && item.ThreadID == run.ThreadID && item.TurnID == run.TurnID && item.Item.Type == "agentMessage" && item.Item.Phase == "final_answer" {
-					if result != nil {
-						return scheduleError("implementation_report_invalid", "multiple final implementation reports")
+					progress := run.RunProgress
+					progress.State, progress.Interaction = "running", nil
+					run, err = execution.Save(ctx, progress, run.Revision)
+					if err != nil {
+						return err
 					}
-					var report implementationResult
-					decoder := json.NewDecoder(strings.NewReader(item.Item.Text))
-					decoder.DisallowUnknownFields()
-					if len(item.Item.Text) > storage.MaxRunSnapshotBytes || decoder.Decode(&report) != nil || decoder.Decode(new(any)) != io.EOF {
-						return scheduleError("implementation_report_invalid", "invalid structured implementation report")
+				}
+				if status != "completed" {
+					message := codexTurnDiagnostic(&event, run.ThreadID, run.TurnID)
+					if message == "" {
+						message = "The exact Codex turn did not complete successfully (" + status + "). Inspect its saved conversation."
 					}
-					result = &report
+					return scheduleError("codex_turn_unsuccessful", message)
 				}
+				terminal = status
 			}
-			if summary := conciseCodexEvent(event, run.ThreadID, run.TurnID); summary != "" && summary != run.Summary {
-				progress := run.RunProgress
-				progress.Summary = summary
-				run, err = execution.Save(ctx, progress, run.Revision)
-				if err != nil {
-					return err
-				}
-			}
-			status := completedTurnStatus(&event, run.ThreadID, run.TurnID)
-			if status == "" {
-				continue
-			}
-			if run.Interaction != nil {
-				progress := run.RunProgress
-				progress.State, progress.Interaction = "running", nil
-				run, err = execution.Save(ctx, progress, run.Revision)
-				if err != nil {
-					return err
-				}
-			}
-			if status != "completed" {
-				message := codexTurnDiagnostic(&event, run.ThreadID, run.TurnID)
-				if message == "" {
-					message = "The exact Codex turn did not complete successfully (" + status + "). Inspect its saved conversation."
-				}
-				return scheduleError("codex_turn_unsuccessful", message)
-			}
-			if result == nil || result.Reference != runReference(run) || result.StartingHead != run.StartingHead || strings.TrimSpace(result.Verification) == "" {
-				return scheduleError("implementation_report_invalid", "the exact turn lacks a bound structured implementation result")
-			}
-			if result.Outcome != "ready" && result.Outcome != "already_satisfied" {
-				progress := run.RunProgress
-				progress.State, progress.Outcome, progress.ErrorCode, progress.Summary = "needs_attention", "unknown", "implementation_needs_attention", sanitizeExecutionDiagnostic("Codex", result.Verification)
-				_, err := execution.Save(ctx, progress, run.Revision)
-				if err != nil {
-					return err
-				}
-				return scheduleError("implementation_needs_attention", progress.Summary)
-			}
-			if (result.Outcome == "already_satisfied") != (len(result.Files) == 0) {
-				return scheduleError("implementation_report_invalid", "ready requires changed files; already_satisfied requires no changed files")
-			}
-			return s.prepareFinalization(ctx, execution, run, result.Files)
 		}
+		if err := changes.check(ctx, execution, run); err != nil {
+			return err
+		}
+		oldTurn := run.TurnID
+		updated, reset, changeErr := changes.deliver(ctx, execution, run)
+		if changeErr != nil {
+			return changeErr
+		}
+		run = updated
+		if reset {
+			result = nil
+		}
+		if oldTurn != run.TurnID {
+			terminal = ""
+		}
+		if changes.change != nil {
+			continue
+		}
+		// Recheck after delivery: rapid edits must all be assessed before closure.
+		if err := changes.check(ctx, execution, run); err != nil {
+			return err
+		}
+		if changes.change != nil || terminal == "" {
+			continue
+		}
+		if changes.confirm {
+			params, err := execution.TurnStartParams(run.ThreadID, []any{map[string]any{"type": "text", "text": implementationRefreshPrompt(run)}})
+			if err != nil {
+				return err
+			}
+			params["outputSchema"] = implementationSchema()
+			if _, err = execution.Call(ctx, codex.TurnStart, params); err != nil {
+				return err
+			}
+			run, err = execution.Read(ctx)
+			if err != nil {
+				return err
+			}
+			progress := run.RunProgress
+			progress.Phase = "implementation"
+			run, err = execution.Save(ctx, progress, run.Revision)
+			if err != nil {
+				return err
+			}
+			changes.confirm, terminal, result = false, "", nil
+			continue
+		}
+		if result == nil || result.Reference != runReference(run) || result.StartingHead != run.StartingHead || strings.TrimSpace(result.Verification) == "" {
+			return scheduleError("implementation_report_invalid", "the exact turn lacks a bound structured implementation result")
+		}
+		if result.Outcome != "ready" && result.Outcome != "already_satisfied" {
+			progress := run.RunProgress
+			progress.State, progress.Outcome, progress.ErrorCode, progress.Summary = "needs_attention", "unknown", "implementation_needs_attention", sanitizeExecutionDiagnostic("Codex", result.Verification)
+			_, err := execution.Save(ctx, progress, run.Revision)
+			if err != nil {
+				return err
+			}
+			return scheduleError("implementation_needs_attention", progress.Summary)
+		}
+		if (result.Outcome == "already_satisfied") != (len(result.Files) == 0) {
+			return scheduleError("implementation_report_invalid", "ready requires changed files; already_satisfied requires no changed files")
+		}
+		err = s.prepareFinalization(ctx, execution, run, result.Files)
+		if err != nil && ctx.Err() == nil {
+			// An edit can land between the last poll and the atomic save of
+			// finalization evidence. Before that save, all verification is
+			// read-only with respect to the real Git index and commit history.
+			// Re-enter assessment only for a captured edit, never after a
+			// finalization receipt or a lifecycle replacement.
+			current, readErr := execution.Read(ctx)
+			if readErr == nil && current.Finalization == nil && storage.RunActive(current.State) {
+				db, changesDB, openErr := changeDatabase(ctx, execution)
+				if openErr == nil {
+					pending, changeErr := changesDB.PendingExecutionChange(ctx, current.ID)
+					closeErr := db.Close()
+					if changeErr == nil && closeErr == nil && pending != nil {
+						run = current
+						continue
+					}
+				}
+			}
+		}
+		return err
 	}
 }
 

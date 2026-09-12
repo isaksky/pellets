@@ -76,6 +76,7 @@ func Run() bool {
 	var scheduledTurn json.RawMessage
 	reviewStarted := false
 	triageCount := 0
+	change := &changePeer{mode: mode}
 	for scanner.Scan() {
 		var message struct {
 			ID     json.RawMessage `json:"id"`
@@ -92,6 +93,9 @@ func Run() bool {
 			continue
 		}
 		record(message.Method, message.Params)
+		if change.handle(message.Method, message.ID, message.Params, write) {
+			continue
+		}
 		var result any = map[string]any{}
 		switch message.Method {
 		case "initialize":

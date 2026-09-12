@@ -261,6 +261,7 @@ type UpdateExecutionRun struct {
 }
 
 type ExecutionRunDatabase interface {
+	ExecutionChangeDatabase
 	CheckpointTriageDatabase
 	CreateExecutionRun(context.Context, RunCapture) (ExecutionRun, error)
 	ReadExecutionRun(context.Context, int64) (ExecutionRun, error)

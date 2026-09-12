@@ -513,7 +513,13 @@ func (db *ProjectDatabase) BeginExecutionOperation(ctx context.Context, id, revi
 			// Recheck at dispatch too, since a lifecycle change can happen after
 			// capture. Cancellation must remain available for an existing turn.
 			if err := requireRunImplementationRevision(ctx, conn, current); err != nil {
-				return err
+				// A reviewed live edit can be delivered in a new implementation
+				// turn before its revision is adopted. The contiguous edit chain
+				// still excludes any release/reclaim or lifecycle replacement.
+				pending, changeErr := pendingExecutionChange(ctx, conn, id)
+				if operation != "turn/start" || changeErr != nil || pending == nil || pending.Assessment == nil {
+					return err
+				}
 			}
 		}
 		stamp := runUpdateTime(current).Format(runTimeFormat)

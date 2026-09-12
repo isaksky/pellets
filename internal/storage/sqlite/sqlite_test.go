@@ -1537,6 +1537,7 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 		"application_metadata",
 		"checkpoint_finding_assessments",
 		"checkpoint_triage",
+		"execution_changes",
 		"execution_run_activity",
 		"execution_runs",
 		"memories",

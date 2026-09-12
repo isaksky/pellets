@@ -396,8 +396,12 @@ func allowedAnswer(question storage.InteractionQuestion, value string) bool {
 }
 
 func (execution *WorkspaceExecution) applyFollowUp(ctx context.Context, run storage.ExecutionRun, text string) (storage.ExecutionRun, bool, error) {
+	return execution.applyFollowUpWithLimit(ctx, run, text, 16384)
+}
+
+func (execution *WorkspaceExecution) applyFollowUpWithLimit(ctx context.Context, run storage.ExecutionRun, text string, limit int) (storage.ExecutionRun, bool, error) {
 	text = strings.TrimSpace(text)
-	if text == "" || len(text) > 16384 || !utf8.ValidString(text) || strings.ContainsRune(text, 0) {
+	if text == "" || len(text) > limit || !utf8.ValidString(text) || strings.ContainsRune(text, 0) {
 		return run, false, storage.InvalidExecutionRun("follow-up instructions must be concise UTF-8 text")
 	}
 	if run.Interaction != nil {

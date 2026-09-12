@@ -289,20 +289,22 @@ func (supervisor *ExecutionSupervisor) Close() error {
 // WorkspaceExecution exposes the prepared protocol and evidence boundaries,
 // without handing process ownership or its lifetime context to the driver.
 type WorkspaceExecution struct {
-	activity     *activityProjection
-	recorder     ExecutionRecorder
-	database     Database
-	id           int64
-	prepared     *codex.PreparedRun
-	ctx          context.Context
-	closing      atomic.Bool
-	turnStarted  atomic.Bool
-	operations   chan struct{}
-	events       chan codex.Event
-	completion   chan struct{}
-	eventDone    chan struct{}
-	eventFailure chan error
-	actions      chan interactionAction
+	primaryThread     atomic.Value // ordinary implementation thread, excluding change assessors
+	primaryCompletion atomic.Pointer[codex.Event]
+	activity          *activityProjection
+	recorder          ExecutionRecorder
+	database          Database
+	id                int64
+	prepared          *codex.PreparedRun
+	ctx               context.Context
+	closing           atomic.Bool
+	turnStarted       atomic.Bool
+	operations        chan struct{}
+	events            chan codex.Event
+	completion        chan struct{}
+	eventDone         chan struct{}
+	eventFailure      chan error
+	actions           chan interactionAction
 }
 
 func (execution *WorkspaceExecution) ThreadStartParams() map[string]any {
@@ -316,7 +318,14 @@ func (execution *WorkspaceExecution) TurnStartParams(thread string, input []any)
 }
 func (execution *WorkspaceExecution) Events() <-chan codex.Event { return execution.events }
 func (execution *WorkspaceExecution) LatestCompletion() *codex.Event {
-	return execution.prepared.Client.LatestCompletion()
+	latest := execution.prepared.Client.LatestCompletion()
+	if thread, _ := execution.primaryThread.Load().(string); thread != "" {
+		var p struct{ ThreadID string }
+		if latest == nil || json.Unmarshal(latest.Params, &p) != nil || p.ThreadID != thread {
+			return execution.primaryCompletion.Load()
+		}
+	}
+	return latest
 }
 func (execution *WorkspaceExecution) Read(ctx context.Context) (storage.ExecutionRun, error) {
 	return execution.recorder.Read(ctx, execution.database, execution.id)
@@ -425,6 +434,11 @@ func (execution *WorkspaceExecution) relayEvents() {
 	defer close(execution.eventDone)
 	for event := range execution.prepared.Client.Events() {
 		if event.Method == "turn/completed" {
+			var p struct{ ThreadID string }
+			if thread, _ := execution.primaryThread.Load().(string); thread != "" && json.Unmarshal(event.Params, &p) == nil && p.ThreadID == thread {
+				copy := event
+				execution.primaryCompletion.Store(&copy)
+			}
 			select {
 			case execution.completion <- struct{}{}:
 			default:
