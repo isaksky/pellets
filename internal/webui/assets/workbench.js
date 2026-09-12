@@ -1,4 +1,6 @@
 import "./dropdowns.js";
+import { syncQueueFilters } from "./filters.js";
+import * as uiVersion from "./ui-version.js";
 // Presentation state is ephemeral and never supplies queue/execution authority.
 const root = document.documentElement;
 const drafts = new Map(),
@@ -79,7 +81,9 @@ function remember() {
       if (form.dataset.dirty !== "true") return;
       const fields = [];
       form
-        .querySelectorAll('input:not([type="hidden"]),textarea,select')
+        .querySelectorAll(
+          'input:not([type="hidden"]),textarea,select,input[type="hidden"][name="version"]',
+        )
         .forEach((el) => {
           if (el.type === "password") return;
           fields.push({ name: el.name, value: el.value, checked: el.checked });
@@ -141,7 +145,7 @@ function restore() {
     if (!fields) continue;
     form.dataset.dirty = "true";
     for (const el of form.querySelectorAll(
-      'input:not([type="hidden"]),textarea,select',
+      'input:not([type="hidden"]),textarea,select,input[type="hidden"][name="version"]',
     )) {
       const field = fields.find(
         (x) =>
@@ -255,6 +259,7 @@ function initialize() {
   brackets();
   connectActivity();
   assignmentMode();
+  syncQueueFilters();
 }
 window.Workbench = {
   applyTheme,
@@ -376,7 +381,7 @@ document.addEventListener("click", (event) => {
   if (move) moveRow(move.closest(".task-row"), move.dataset.moveRow);
   document
     .querySelectorAll(
-      ".switcher[open],.row-menu[open],.assignment-popover[open]",
+      ".switcher[open],.row-menu[open],.assignment-popover[open],.record-actions[open]",
     )
     .forEach((el) => {
       if (!el.contains(event.target)) el.open = false;
@@ -399,7 +404,7 @@ document.addEventListener(
   "keydown",
   (event) => {
     const menu = event.target.closest(
-      ".switcher,.row-menu,.assignment-popover",
+      ".switcher,.row-menu,.assignment-popover,.record-actions",
     );
     if (!menu) return;
     if (event.key === "Escape" && menu.open) {
@@ -472,6 +477,7 @@ function insertCheckpoint(row, direction) {
   if (!row || !source || !row.dataset.checkpointPriority) return;
   row.querySelector("details").open = false;
   const form = document.createElement("form");
+  form.id = "insert-checkpoint-form";
   form.className = "insert-form";
   form.action = source.action;
   form.method = "post";
@@ -486,7 +492,9 @@ function insertCheckpoint(row, direction) {
   close.setAttribute("aria-label", "Cancel insertion");
   close.onclick = () => dialog.close();
   header.append(title, close);
-  form.append(header);
+  const body = document.createElement("div");
+  body.className = "dialog-body";
+  form.append(header, body);
   const where = document.createElement("p");
   where.textContent =
     "Insert " +
@@ -494,7 +502,7 @@ function insertCheckpoint(row, direction) {
     " " +
     row.dataset.rowId +
     ". Review scope is explicit and does not follow later reordering.";
-  form.append(where);
+  body.append(where);
   for (const [name, value] of Object.entries({
     _csrf: source.querySelector('[name="_csrf"]').value,
     request_id: crypto.randomUUID(),
@@ -516,7 +524,7 @@ function insertCheckpoint(row, direction) {
   name.value = "Review selected changes";
   name.required = true;
   label.append(name);
-  form.append(label);
+  body.append(label);
   const options = document.createElement("div");
   options.className = "scope-options";
   options.append(
@@ -537,12 +545,23 @@ function insertCheckpoint(row, direction) {
   options.querySelectorAll("input").forEach((el) => {
     el.checked = selected.has(el.value);
   });
-  form.append(options);
+  body.append(options);
+  const footer = document.createElement("footer"),
+    actions = document.createElement("div"),
+    cancel = document.createElement("button");
+  footer.className = "dialog-footer";
+  actions.className = "dialog-footer-actions";
+  cancel.type = "button";
+  cancel.className = "dialog-cancel";
+  cancel.textContent = "Cancel";
+  cancel.onclick = () => dialog.close();
   const submit = document.createElement("button");
   submit.type = "submit";
   submit.className = "primary-button";
   submit.textContent = "Insert review checkpoint";
-  form.append(submit);
+  actions.append(cancel, submit);
+  footer.append(actions);
+  form.append(footer);
   const sync = () => {
     const checked = Array.from(options.querySelectorAll("input:checked"));
     form.elements.review_targets.value = checked.map((x) => x.value).join(",");
@@ -824,6 +843,7 @@ function renderActivity(panel, snapshot) {
   else panel.scrollTop = top;
 }
 function connectActivity() {
+  if (uiVersion.isOutdated()) return;
   const panel = document.querySelector(".activity-panel"),
     url = panel?.dataset.activityUrl || "";
   if (url === streamURL) return;
@@ -845,9 +865,16 @@ function connectActivity() {
     const saved = scrolls.get(panel.id);
     if (saved) panel.scrollTop = saved.top;
   }
-  stream = new EventSource(url + "?stream=1&after=" + (cache?.cursor || 0));
+  stream = new EventSource(
+    url +
+      "?stream=1&after=" +
+      (cache?.cursor || 0) +
+      "&ui_revision=" +
+      encodeURIComponent(uiVersion.revision),
+  );
+  uiVersion.watchSource(stream);
   stream.addEventListener("pellets-activity", (event) => {
-    if (currentActivityURL !== url) return;
+    if (uiVersion.isOutdated() || currentActivityURL !== url) return;
     const current = document.querySelector(".activity-panel");
     if (current?.dataset.activityUrl !== url) return;
     try {
@@ -864,6 +891,9 @@ function connectActivity() {
         "Activity connection interrupted. Reconnecting…";
   });
 }
+document.addEventListener("pellets-ui-outdated", () => {
+  stream?.close();
+});
 // Inline removal is a reversible domain mutation with a versioned Undo receipt.
 // It keeps browsing in place and does not manufacture a completed review.
 document.addEventListener(
@@ -876,17 +906,22 @@ document.addEventListener(
       return;
     event.preventDefault();
     event.stopImmediatePropagation();
+    if (uiVersion.isOutdated()) return;
     if (form.dataset.pending) return;
     form.dataset.pending = "true";
     const button = form.querySelector("button");
     button.disabled = true;
+    uiVersion.beginRequest();
     try {
       const response = await fetch(form.action, {
         method: "POST",
         credentials: "same-origin",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        headers: uiVersion.headers({
+          "Content-Type": "application/x-www-form-urlencoded",
+        }),
         body: new URLSearchParams(new FormData(form)),
       });
+      if (!uiVersion.inspectResponse(response)) return;
       if (!response.ok)
         throw Error(
           "Checkpoint changed; refresh its details before trying again.",
@@ -931,7 +966,8 @@ document.addEventListener(
       feedback.classList.add("request-failed");
       document.dispatchEvent(new CustomEvent("pellets-refresh"));
     } finally {
-      button.disabled = false;
+      uiVersion.endRequest();
+      button.disabled = uiVersion.isOutdated();
       delete form.dataset.pending;
     }
   },

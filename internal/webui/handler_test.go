@@ -619,6 +619,9 @@ func performRequest(handler http.Handler, method, path, body string, headers htt
 	for name, values := range headers {
 		request.Header[name] = values
 	}
+	if request.Header.Get("Datastar-Request") == "true" && request.Header.Get(uiRevisionHeader) == "" {
+		request.Header.Set(uiRevisionHeader, uiRevision)
+	}
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	return response
@@ -677,7 +680,7 @@ func TestQueuePolishPreservesFilteringAndOrder(t *testing.T) {
 	}
 	response := performRequest(f.handler, http.MethodGet, "/projects/project1/tasks?status=open&sort=title", "", http.Header{"Datastar-Request": {"true"}, "Pellets-Target": {"task-list"}})
 	body := response.Body.String()
-	for _, want := range []string{`data: selector #filter-summary`, `Open <span class="badge">1</span>`, `data: selector #queue-order`, `sort=priority&amp;status=open`, `class="task-title" href="/projects/project1/tasks/` + p.Reference.String(), `data-row-version="` + storage.PelletVersion(p) + `"`} {
+	for _, want := range []string{`data: selector #filter-summary`, `<span>Filters</span>`, `class="filter-state">Open</span> <span class="badge">1</span>`, `data: selector #queue-order`, `sort=priority&amp;status=open`, `class="task-title" href="/projects/project1/tasks/` + p.Reference.String(), `data-row-version="` + storage.PelletVersion(p) + `"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("filtered queue missing %q", want)
 		}

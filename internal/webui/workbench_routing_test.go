@@ -3,6 +3,7 @@ package webui
 import (
 	"context"
 	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -113,6 +114,54 @@ func TestWorkbenchWorkspaceQueuesDefaultActiveRoutingAndOwnership(t *testing.T) 
 		t.Fatalf("foreign workspace view: %d", response.Code)
 	}
 }
+
+func TestWorkbenchClearFiltersPreservesQueueContext(t *testing.T) {
+	f, project, main, linked := workbenchFixture(t)
+	web, other := "web-ui", "other"
+	webPellet := addWorkbenchPellet(t, f, project, "Zulu web", &web, domain.PelletOpen)
+	otherPellet := addWorkbenchPellet(t, f, project, "Alpha other", &other, domain.PelletOpen)
+	assignWorkbench(t, f, project, linked, "explicit", []string{web}, false)
+	clearLink := regexp.MustCompile(`href="([^"]+)"[^>]*>Clear filters</a>`)
+	for _, tc := range []struct {
+		name      string
+		workspace int64
+		execution int64
+		rows      []string
+	}{
+		{"workspace queue", linked, linked, []string{webPellet.Reference.String()}},
+		{"shared project queue", 0, main, []string{webPellet.Reference.String(), otherPellet.Reference.String()}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			query := url.Values{"execution": {strconv.FormatInt(tc.execution, 10)}, "sort": {"title"}, "direction": {"desc"}, "q": {"no match"}, "status": {"closed"}, "group": {encodeGroup(&other)}, "external_id": {"exact-filter"}}
+			if tc.workspace != 0 {
+				query.Set("workspace", strconv.FormatInt(tc.workspace, 10))
+			}
+			response := performRequest(f.handler, http.MethodGet, "/projects/project1/tasks?"+query.Encode(), "", nil)
+			if response.Code != http.StatusOK {
+				t.Fatalf("filtered page: %d %s", response.Code, response.Body.String())
+			}
+			match := clearLink.FindStringSubmatch(response.Body.String())
+			if len(match) != 2 {
+				t.Fatal("clear filters link missing")
+			}
+			clearURL, err := url.Parse(html.UnescapeString(match[1]))
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantQuery := url.Values{"execution": {strconv.FormatInt(tc.execution, 10)}, "sort": {"title"}, "direction": {"desc"}}
+			if tc.workspace != 0 {
+				wantQuery.Set("workspace", strconv.FormatInt(tc.workspace, 10))
+			}
+			if clearURL.Path != "/projects/project1/tasks" || clearURL.Query().Encode() != wantQuery.Encode() {
+				t.Fatalf("clear filters destination: %s; want queue context %s", clearURL, wantQuery.Encode())
+			}
+			if rows := workbenchRows(t, f, clearURL.String()); !slices.Equal(rows, tc.rows) {
+				t.Fatalf("cleared queue rows: %v; want %v", rows, tc.rows)
+			}
+		})
+	}
+}
+
 func TestWorkbenchCheckpointScopesSurviveFiltersAndUseCurrentTargetRouting(t *testing.T) {
 	f, p, main, linked := workbenchFixture(t)
 	web, other := "web-ui", "other"

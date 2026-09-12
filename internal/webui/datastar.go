@@ -51,6 +51,7 @@ func (response *datastarResponse) render(status int, name, path, elements string
 // The SDK flushes headers immediately. Keep our no-store policy by applying it
 // after its defaults, and pass the underlying writer so flushing is supported.
 func (response *datastarResponse) start() {
+	response.Header().Set(uiRevisionHeader, uiRevision)
 	response.Header().Set("X-Accel-Buffering", "no")
 	response.stream = datastar.NewSSE(response.ResponseWriter, response.request, func(*datastar.ServerSentEventGenerator) {
 		response.Header().Set("Cache-Control", "no-store")
@@ -72,7 +73,7 @@ func (response *datastarResponse) result(status int, path string) {
 		return
 	}
 	result, err := json.Marshal(map[string]any{"_webResult": map[string]any{
-		"status": status, "url": path,
+		"status": status, "url": path, "revision": uiRevision,
 	}})
 	if err != nil {
 		response.recordError(err)

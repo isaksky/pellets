@@ -14,6 +14,10 @@ import (
 // The ordinary invalidation stream deliberately carries no transcript. Activity
 // has an independent cursor and bounded fan-out so it never rebuilds draft forms.
 func (h *handler) serveActivity(response http.ResponseWriter, request *http.Request) {
+	if request.URL.Query().Get("stream") == "1" && hasStaleUIQuery(request) {
+		writeUIRevisionEvent(response)
+		return
+	}
 	parts := pathSegments(request.URL.Path)
 	if len(parts) != 5 || parts[0] != "projects" || parts[2] != "runs" || parts[4] != "activity" {
 		http.NotFound(response, request)
@@ -75,6 +79,9 @@ func (h *handler) serveActivity(response http.ResponseWriter, request *http.Requ
 	response.Header().Set("Content-Type", "text/event-stream")
 	response.Header().Set("X-Accel-Buffering", "no")
 	response.Header().Set("Connection", "keep-alive")
+	if !writeUIRevisionEvent(response) {
+		return
+	}
 	controller := http.NewResponseController(response)
 	send := func(snapshot app.ActivitySnapshot) bool {
 		body, err := json.Marshal(snapshot)

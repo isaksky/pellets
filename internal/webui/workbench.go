@@ -67,6 +67,14 @@ func (h *handler) prepareWorkbench(request *http.Request, data *pageData) error 
 			data.ExecutionWorkspace = h.application.Current.Workspace.ID
 		}
 	}
+	clearQuery := url.Values{}
+	if data.SelectedWorkspace != 0 {
+		clearQuery.Set("workspace", strconv.FormatInt(data.SelectedWorkspace, 10))
+	}
+	if data.ExecutionWorkspace != 0 {
+		clearQuery.Set("execution", strconv.FormatInt(data.ExecutionWorkspace, 10))
+	}
+	data.ClearFiltersURL = taskURL(data.Project.Code, clearQuery, "", storage.WebPelletSort{Column: storage.WebPelletSortColumn(data.Filters.Sort), Direction: storage.WebPelletSortDirection(data.Filters.Direction)})
 	if data.ExecutionWorkspace != 0 {
 		executionQuery := url.Values{"execution": {strconv.FormatInt(data.ExecutionWorkspace, 10)}}
 		data.TasksURL = taskURL(data.Project.Code, executionQuery, "", storage.WebPelletSort{Column: storage.WebPelletSortColumn(data.Filters.Sort), Direction: storage.WebPelletSortDirection(data.Filters.Direction)})

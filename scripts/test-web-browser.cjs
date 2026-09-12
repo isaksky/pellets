@@ -54,6 +54,21 @@ const until = async (predicate, message) => {
     await form.waitFor({state: 'visible'});
     assert.equal(await page.locator('[data-edit-record]').count(), 0, 'Records must open directly in their editor');
   }
+  async function moreActions() {
+    const menu = page.locator('[data-inspector] details.record-actions');
+    if (!(await menu.evaluate(el => el.open))) await menu.locator('summary').click();
+  }
+  async function lifecycle(name, status = 200) {
+    await moreActions();
+    const receipt = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/transition'));
+    await page.getByRole('button', {name, exact: true}).click();
+    assert.equal((await receipt).status(), status, name + ' must receive its actual transition result');
+  }
+  async function waitForClaim() {
+    await page.locator('[data-inspector] input[name=operation][value=start]').waitFor({state: 'attached'});
+    await moreActions();
+    await page.getByRole('button', {name: 'Claim pellet', exact: true}).waitFor();
+  }
   // Normal row navigation uses physical clicks. Programmatic navigation while
   // a native modal is open exercises the existing incoming-route/draft guards;
   // the modal intentionally prevents a user clicking the background queue.
@@ -67,10 +82,11 @@ const until = async (predicate, message) => {
     } else await page.locator('#search').fill(value);
   }
 
-  const errors = [], external = [];
+  const errors = [], external = [], failedRequests = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error' && !message.text().includes('404')) errors.push(message.text()); });
   page.on('request', request => { if (!request.url().startsWith(origin)) external.push(request.url()); });
+  page.on('requestfailed', request => failedRequests.push({url: request.url(), error: request.failure()?.errorText || ''}));
   await page.addInitScript(() => {
     window.results = [];
     document.addEventListener('datastar-signal-patch', event => {
@@ -289,13 +305,24 @@ const until = async (predicate, message) => {
   await page.locator('#inspector-host form.dirty-track input[name=title]').fill('Resolved browser task');
   await page.getByRole('button', {name: 'Save changes', exact: true}).click();
   await page.locator('.conflict-state').waitFor({state: 'detached'});
-  await page.getByRole('button', {name: 'Start', exact: true}).click();
+  await lifecycle('Claim pellet');
   const recovery = page.locator('.recovery form');
+  await recovery.waitFor({state: 'attached'});
+  await moreActions();
   await recovery.waitFor();
   await choose(recovery.locator('select[name=operation]'),'release');
   await recovery.locator('input[name=confirm_recovery]').check();
-  await recovery.getByRole('button', {name: 'Apply confirmed recovery', exact: true}).click();
-  await page.getByRole('button', {name: 'Start', exact: true}).waitFor();
+  await recovery.locator('input[name=confirm_recovery]').focus();
+  cli('add', 'Live update during recovery');
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('pellets-refresh')));
+  // The protected menu may defer the request itself or its incoming patch.
+  // Let the database monitor deliver the actual external invalidation.
+  await page.waitForTimeout(700);
+  assert.equal(await recovery.locator('select[name=operation]').inputValue(), 'release');
+  assert.equal(await recovery.locator('input[name=confirm_recovery]').isChecked(), true, 'Live refresh reset unfinished recovery confirmation');
+  assert.equal(await recovery.locator('input[name=confirm_recovery]').evaluate(el => el === document.activeElement), true, 'Live refresh lost focus in More actions');
+  await lifecycle('Apply confirmed recovery');
+  await waitForClaim();
 
   await page.goto(origin + base);
   await page.locator('#tasks-area .create-popover > summary').click();
@@ -396,7 +423,7 @@ const until = async (predicate, message) => {
   await description.fill('Keep this draft on failure');
   await page.route('**/pellets/**/transition*', route => route.fulfill({status: 503, contentType: 'text/plain', body: 'Service Unavailable'}));
   page.once('dialog', dialog => dialog.accept());
-  await page.getByRole('button', {name: 'Start', exact: true}).click();
+  await lifecycle('Claim pellet', 503);
   await until(async () => (await page.locator('#request-feedback').textContent()).includes('Save could not be confirmed'), 'Failed lifecycle had no feedback');
   assert.equal(await description.inputValue(), 'Keep this draft on failure');
   assert.equal(await page.locator('[data-inspector].is-dirty').count(), 1);
@@ -404,14 +431,16 @@ const until = async (predicate, message) => {
   // The same record keeps its identity during a lifecycle patch, so discard also
   // needs an explicit reset after the patch guards accept the response.
   page.once('dialog', dialog => dialog.accept());
-  await page.getByRole('button', {name: 'Start', exact: true}).click();
+  await lifecycle('Claim pellet');
+  await recovery.waitFor({state: 'attached'});
+  await moreActions();
   await recovery.waitFor();
   assert.equal(await description.inputValue(), '');
   assert.equal(await page.locator('[data-inspector].is-dirty').count(), 0);
   await choose(recovery.locator('select[name=operation]'),'release');
   await recovery.locator('input[name=confirm_recovery]').check();
-  await recovery.getByRole('button', {name: 'Apply confirmed recovery', exact: true}).click();
-  await page.getByRole('button', {name: 'Start', exact: true}).waitFor();
+  await lifecycle('Apply confirmed recovery');
+  await waitForClaim();
 
   // Edits made after discard confirmation supersede that confirmation. Delay the
   // navigation response and verify neither reset nor morph consumes newer text.
@@ -465,7 +494,7 @@ const until = async (predicate, message) => {
   assert.equal(await page.locator('#inspector-host form.dirty-track textarea').inputValue(), 'Shared memory baseline');
   assert.equal(await page.locator('[data-inspector].is-dirty').count(), 0);
   // Chromium reports the intentionally injected HTTP 503 on its console.
-  assert.deepEqual(errors.filter(message => !message.includes('503 (Service Unavailable)')), [], 'Browser errors');
+  assert.deepEqual(errors.filter(message => !message.includes('503 (Service Unavailable)')), [], 'Browser errors; failed requests: ' + JSON.stringify(failedRequests));
   assert.deepEqual(external, [], 'Unexpected external requests');
   console.log('Browser checks passed: navigation, sort/filter/history, mutations, bundled refresh/counts, DOM/focus preservation, queued filters, loading/failure/retry, dirty/in-flight guards, confirmed discard across tasks/memories/lifecycle, conflicts, validation, CSP, and narrow-screen focus.');
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {

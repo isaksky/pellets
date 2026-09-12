@@ -1,3 +1,4 @@
+import * as uiVersion from "./ui-version.js";
 import "./workbench.js";
 import { action, actions } from "./datastar-1.0.3.js";
 
@@ -25,6 +26,7 @@ import { action, actions } from "./datastar-1.0.3.js";
     var form = event.target;
     if (!form || !form.matches("form[data-schedule], form[data-run-action]")) return;
     event.preventDefault();
+    if (uiVersion.isOutdated()) return;
     if (form.dataset.schedulePending === "true") return;
     var submitter = event.submitter;
     if (submitter && submitter.disabled) return;
@@ -53,10 +55,12 @@ import { action, actions } from "./datastar-1.0.3.js";
     feedback.hidden = false;
     feedback.classList.remove("request-failed");
     feedback.textContent = form.matches("form[data-schedule]") ? "Checking the runtime, sign-in, workspace, and saved run…" : "Updating run controls…";
+    uiVersion.beginRequest();
     try {
       // Named action submitters are part of the run receipt and shadow the
       // HTMLFormElement.action property. Read the actual endpoint attribute.
-      var response = await fetch(form.getAttribute("action"), {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: body.toString()});
+      var response = await fetch(form.getAttribute("action"), {method: "POST", credentials: "same-origin", headers: uiVersion.headers({"Content-Type": "application/x-www-form-urlencoded"}), body: body.toString()});
+      if (!uiVersion.inspectResponse(response)) return;
       if (!response.ok) {
         var problem;
         if ((response.headers.get("Content-Type") || "").includes("application/json")) problem = await response.json();
@@ -101,12 +105,13 @@ import { action, actions } from "./datastar-1.0.3.js";
       feedback.classList.add("request-failed");
       feedback.textContent = "Run control could not be confirmed. Reload to view authoritative status.";
     } finally {
+      uiVersion.endRequest();
       // Success remains locked until the authoritative dashboard patch replaces
       // this form. This closes the window where an old receipt could admit a
       // duplicate click before the refreshed state arrives.
       if (!confirmed) {
         delete form.dataset.schedulePending;
-        buttons.forEach(function (button) { button.disabled = false; });
+        buttons.forEach(function (button) { button.disabled = uiVersion.isOutdated(); });
       }
     }
   });
@@ -194,13 +199,15 @@ import { action, actions } from "./datastar-1.0.3.js";
 
   function refreshRegions() {
     clearTimeout(refreshTimer);
+    if (uiVersion.isOutdated()) return;
     refreshTimer = setTimeout(function () {
       document.dispatchEvent(new CustomEvent("pellets-refresh"));
     }, 120);
   }
 
   function protectedTarget(target) {
-    return target && (target.querySelector(".select-trigger[aria-expanded=true], .row-menu[open], .switcher[open], .assignment-popover[open]") || (target.id === "project-drawer" && target.classList.contains("open")) ||
+    return target && (target.querySelector(".select-trigger[aria-expanded=true], .row-menu[open], .switcher[open], .assignment-popover[open], .record-actions[open]") || (target.id === "project-drawer" && target.classList.contains("open")) ||
+      (target.id === "workspace-groups" && target.querySelector(".assignment-form[data-dirty='true']")) ||
       (target.id === "run-dashboard" && target.querySelector("form[data-no-run-resume][data-dirty='true'], form[data-schedule-pending='true'], form[data-admission-choice='true']")) ||
       (target.id === "project-record" && target.open));
   }
@@ -214,6 +221,7 @@ import { action, actions } from "./datastar-1.0.3.js";
       if (evt && (evt.button !== 0 || evt.metaKey || evt.ctrlKey || evt.shiftKey || evt.altKey)) return;
       if (evt) evt.preventDefault();
     }
+    if (uiVersion.isOutdated()) return;
     var target = targetID === "live" ? document.body : document.getElementById(targetID);
     if (automatic && Array.from(pending.values()).some(function (state) { return !state.automatic; })) return;
     if (!target || (automatic && (document.hidden || protectedTarget(target)))) return;
@@ -260,17 +268,19 @@ import { action, actions } from "./datastar-1.0.3.js";
       url = new URL(url, location.href).pathname + location.search;
     }
     if (mutation) url += location.search;
-    var options = {headers: {"Pellets-Target": targetID}, requestCancellation: state.controller,
+    var options = {headers: uiVersion.headers({"Pellets-Target": targetID}), requestCancellation: state.controller,
       openWhenHidden: true, retry: "never", retryMaxCount: 0, filterSignals: {include: /^$/}};
     if (mutation || kind === "filter") options.contentType = "form";
     var feedback = document.getElementById("request-feedback");
-    var buttons = mutation ? Array.from(el.querySelectorAll("button[type=submit], button:not([type])")).filter(function (button) { return !button.disabled; }) : [];
+    // Form-associated footer buttons live outside the editing form.
+    var buttons = mutation ? Array.from(el.elements).filter(function (button) { return button.matches("button[type=submit], button:not([type])") && !button.disabled; }) : [];
     if (!automatic) {
       feedback.hidden = false;
       feedback.textContent = mutation ? "Saving…" : "Loading…";
       feedback.classList.remove("request-failed");
       el.setAttribute("aria-busy", "true");
     }
+    uiVersion.beginRequest();
     try {
       // Datastar serializes successful controls before disabling the submitter.
       var work = actions[mutation ? "post" : "get"](ctx, url, options);
@@ -279,7 +289,9 @@ import { action, actions } from "./datastar-1.0.3.js";
     } catch (_) {
       // Missing completion is reported below; drafts remain in the DOM.
     } finally {
-      buttons.forEach(function (button) { button.disabled = false; });
+      if (!state.completed && !state.controller.signal.aborted) await uiVersion.checkVersion();
+      uiVersion.endRequest();
+      buttons.forEach(function (button) { button.disabled = uiVersion.isOutdated(); });
       if (requests.get(el) === state) el.removeAttribute("aria-busy");
       if (!automatic && pending.get(slot) === state && state.route === routeRevision && !state.controller.signal.aborted) {
         feedback.hidden = !!state.completed;
@@ -374,7 +386,7 @@ import { action, actions } from "./datastar-1.0.3.js";
   }, true);
 
   window.addEventListener("beforeunload", function (event) {
-    if (!dirtyInspector()) return;
+    if (uiVersion.isReloading() || !dirtyInspector()) return;
     event.preventDefault();
     event.returnValue = "";
   });
@@ -584,6 +596,7 @@ import { action, actions } from "./datastar-1.0.3.js";
     window.Workbench.initialize();
   }
   initialize(document);
+  uiVersion.restoreDrafts();
   function afterPatch(scope) {
     initialize(scope);
     window.Workbench.afterPatch();
@@ -688,11 +701,13 @@ import { action, actions } from "./datastar-1.0.3.js";
   });
 
   if (window.EventSource) {
-    var source = new EventSource("/events");
-    source.addEventListener("open", refreshRegions);
+    var source = new EventSource("/events?ui_revision=" + encodeURIComponent(uiVersion.revision));
+    uiVersion.watchSource(source);
+    source.addEventListener("open", function () { uiVersion.checkVersion().then(function (current) { if (current) refreshRegions(); }); });
     source.addEventListener("pellets-invalidate", function () {
       refreshRegions();
     });
+    document.addEventListener("pellets-ui-outdated", function () { source.close(); });
   }
   document.addEventListener("visibilitychange", function () {
     if (!document.hidden) refreshRegions();

@@ -115,7 +115,7 @@ func TestDataVersionLoopIdlesWithoutClientsCoalescesAndDoesNotBlock(t *testing.T
 	}
 }
 
-func TestSSEContainsOnlyInvalidationAndStopsOnDisconnect(t *testing.T) {
+func TestSSEContainsOnlyRevisionAndInvalidationAndStopsOnDisconnect(t *testing.T) {
 	t.Parallel()
 	hub := newEventHub()
 	handler, err := newHandler(nil, hub, handlerConfig{Host: testHost, Origin: testOrigin, CSRF: testCSRF})
@@ -141,6 +141,9 @@ func TestSSEContainsOnlyInvalidationAndStopsOnDisconnect(t *testing.T) {
 		t.Fatal("SSE handler did not stop after disconnect")
 	}
 	body := response.Body.String()
+	if revision := strings.Index(body, "event: pellets-ui-revision\n"); revision < 0 || revision > strings.Index(body, "event: pellets-invalidate\n") {
+		t.Fatalf("revision did not precede invalidation: %q", body)
+	}
 	if !strings.Contains(body, "event: pellets-invalidate\ndata: refresh") {
 		t.Fatalf("SSE body = %q", body)
 	}

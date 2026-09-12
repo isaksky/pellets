@@ -1,13 +1,15 @@
 // Workbench v2 integration against an embedded production build and deterministic
 // Codex protocol peer. Repositories and database are disposable; no network AI.
 // NODE_PATH=/path/to/node_modules PLAYWRIGHT_CHANNEL=chrome node scripts/test-web-workbench-browser.cjs
+// Use PLAYWRIGHT_BROWSER=webkit for Safari's browser engine.
 // Set PELLETS_WORKBENCH_BROWSER_CASE=dialogs to run only the modal regressions.
+// Set PELLETS_WORKBENCH_BROWSER_CASE=filters to run only the filter regressions.
 const assert = require("node:assert/strict");
 const fs = require("node:fs"),
   os = require("node:os"),
   path = require("node:path");
 const { execFileSync, spawn } = require("node:child_process");
-const { chromium } = require("playwright");
+const { chromium, webkit } = require("playwright");
 const repository = path.resolve(__dirname, ".."),
   temporary = fs.mkdtempSync(
     path.join(os.tmpdir(), "pellets-workbench-browser-"),
@@ -55,6 +57,178 @@ async function dragToBackdrop(page, selector, field) {
   await page.mouse.up();
   assert.equal(await page.locator(selector).evaluate(x => x.open), true, "Dragging out of the dialog must not dismiss it");
 }
+async function moreActions(page) {
+  const menu = page.locator("[data-inspector] details.record-actions");
+  if (!(await menu.evaluate(x => x.open))) await menu.locator("summary").click();
+}
+async function chooseFilter(page, name, value) {
+  const select = page.locator('.filters select[name="' + name + '"]');
+  const id = await select.getAttribute("id");
+  await page.locator("#" + id + "-trigger").click();
+  await page.locator('.select-popover [role=option][data-value="' + value + '"]').click();
+}
+async function filterGeometry(page) {
+  return page.evaluate(() => Object.fromEntries(["#search", "#filter-summary", ".filters"].map(selector => {
+    const rect = document.querySelector(selector).getBoundingClientRect();
+    return [selector, [rect.x, rect.y, rect.width, rect.height]];
+  })));
+}
+function assertStableFilters(before, after) {
+  for (const selector of Object.keys(before))
+    before[selector].forEach((value, index) => assert.ok(Math.abs(value - after[selector][index]) <= 1, "Opening/changing Filters moved toolbar geometry: " + selector + " before=" + JSON.stringify(before[selector]) + " after=" + JSON.stringify(after[selector])));
+}
+async function checkFilters(page, project, changedPellet) {
+  const trigger = page.locator("#filter-summary"), outer = page.locator("#queue-filters"), panel = page.locator(".filter-fields");
+  await page.setViewportSize({width: 1280, height: 900});
+  await trigger.click();
+  await page.locator(".filter-fields:popover-open").waitFor();
+  const naturalSize = await panel.evaluate(node => ({height: node.getBoundingClientRect().height, rows: getComputedStyle(node).gridTemplateRows, children: Array.from(node.children, child => child.getBoundingClientRect().height)}));
+  assert.ok(naturalSize.height <= 420, "Filter panel must fit its compact contents instead of stretching to the viewport: " + JSON.stringify(naturalSize));
+  const fieldGaps = await panel.evaluate(node => Array.from(node.children).slice(1).map(child => child.getBoundingClientRect().top - child.previousElementSibling.getBoundingClientRect().bottom));
+  assert.ok(fieldGaps.every(gap => Math.abs(gap - 12) <= 1), "Filter fields must keep compact, even spacing: " + JSON.stringify(fieldGaps));
+  await page.setViewportSize({width: 1280, height: 360});
+  await until(() => panel.evaluate(node => node.scrollHeight > node.clientHeight), "Short viewport must scroll compact filter content");
+  const lastFilter = panel.getByRole("link", {name: "Clear filters", exact: true});
+  const scrollBox = await panel.boundingBox();
+  await page.mouse.move(scrollBox.x + scrollBox.width / 2, scrollBox.y + scrollBox.height / 2);
+  await page.mouse.wheel(0, 800);
+  await until(() => panel.evaluate(node => node.scrollTop + node.clientHeight >= node.scrollHeight - 2), "Filter panel did not scroll to its last control");
+  const lastControl = await lastFilter.evaluate(node => {
+    const box = node.getBoundingClientRect(), panel = node.closest(".filter-fields").getBoundingClientRect();
+    return {inside: box.top >= panel.top - 1 && box.bottom <= panel.bottom + 1, hit: node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)), box: box.toJSON(), panel: panel.toJSON()};
+  });
+  assert.ok(lastControl.inside && lastControl.hit, "Last filter control must remain reachable in the scrollable popover: " + JSON.stringify(lastControl));
+  await page.keyboard.press("Escape");
+  await panel.waitFor({state: "hidden"});
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({width, height: 600});
+    for (const execution of [true, false]) {
+      const toggle = page.locator("#toggle-execution");
+      if ((await toggle.getAttribute("aria-expanded") === "true") !== execution) await toggle.click();
+      const closed = await filterGeometry(page);
+      assert.match(await trigger.innerText(), /Filters/);
+      await trigger.click();
+      await page.locator(".filter-fields:popover-open").waitFor();
+      assert.equal(await panel.evaluate(node => node.matches(":popover-open")), true, "Filter panel must use the browser top layer");
+      assertStableFilters(closed, await filterGeometry(page));
+      const bounds = await panel.boundingBox();
+      assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= width + 1 && bounds.y + bounds.height <= 601, "Filter panel exceeds the viewport");
+      assert.equal(await panel.evaluate(node => {
+        const box = node.getBoundingClientRect();
+        return [
+          [box.left + 10, box.top + 10], [box.right - 10, box.top + 10],
+          [box.left + 10, box.bottom - 10], [box.right - 10, box.bottom - 10],
+          [box.left + box.width / 2, box.top + box.height / 2],
+        ].every(([x,y]) => node.contains(document.elementFromPoint(x,y)));
+      }), true, "Execution or queue clipping intercepts the visible filter panel");
+      if (width === 390 && execution) {
+        const executionBox = await page.locator("#execution").boundingBox();
+        assert.ok(bounds.y + bounds.height > executionBox.y, "Narrow case must exercise overlap with execution");
+      }
+      const statusID = await page.locator('.filters select[name="status"]').getAttribute("id");
+      const statusTrigger = page.locator("#" + statusID + "-trigger");
+      await statusTrigger.click();
+      await page.locator(".select-popover").waitFor();
+      await page.keyboard.press("Escape");
+      await page.locator(".select-popover").waitFor({state: "detached"});
+      assert.equal(await outer.evaluate(node => node.open), true, "Nested Escape closed the outer Filters panel");
+      assert.equal(await statusTrigger.evaluate(node => node === document.activeElement), true);
+      await chooseFilter(page, "status", "in_progress");
+      await until(() => new URL(page.url()).searchParams.get("status") === "in_progress", "Status did not apply immediately");
+      assert.equal(await outer.evaluate(node => node.open), true, "Selecting status closed Filters");
+      assert.equal(await panel.evaluate(node => node.matches(":popover-open")), true);
+      assert.equal(await page.locator(".task-row").count(), 0, "Status selection did not filter real records");
+      await chooseFilter(page, "status", "active");
+      await until(async () => (await page.locator(".task-row").count()) === 4, "Active status did not restore the queue");
+      await page.keyboard.press("Escape");
+      await panel.waitFor({state: "hidden"});
+      assert.equal(await outer.evaluate(node => node.open), false);
+      assert.equal(await trigger.evaluate(node => node === document.activeElement), true, "Outer Escape did not restore trigger focus");
+      assertStableFilters(closed, await filterGeometry(page));
+      await trigger.click();
+      await page.locator(".filter-fields:popover-open").waitFor();
+      await page.mouse.click(2, 2);
+      await panel.waitFor({state: "hidden"});
+      assert.equal(await outer.evaluate(node => node.open), false, "Outside click left Filters open");
+      await trigger.click();
+      await page.locator(".filter-fields:popover-open").waitFor();
+      await statusTrigger.click();
+      await page.locator(".select-popover").waitFor();
+      await page.mouse.click(2, 2);
+      await page.locator(".select-popover").waitFor({state: "detached"});
+      await panel.waitFor({state: "hidden"});
+      assert.equal(await outer.evaluate(node => node.open), false, "Outside both menus closed only the nested selector");
+    }
+  }
+  await page.setViewportSize({width: 1280, height: 800});
+  if (await page.locator("#toggle-execution").getAttribute("aria-expanded") === "false") await page.locator("#toggle-execution").click();
+  await trigger.click();
+  const exact = page.locator('.filters input[name="external_id"]');
+  await exact.fill("Unfinished exact filter");
+  await exact.press("ArrowLeft");
+  const caret = await exact.evaluate(node => node.selectionStart);
+  await until(() => new URL(page.url()).searchParams.get("external_id") === "Unfinished exact filter", "Exact filter did not apply");
+  cli("edit", changedPellet, "--title", "Updated while filter input is focused");
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent("pellets-refresh")));
+  await page.waitForTimeout(700);
+  assert.equal(await exact.inputValue(), "Unfinished exact filter");
+  assert.equal(await exact.evaluate(node => node.selectionStart), caret);
+  assert.equal(await exact.evaluate(node => node === document.activeElement), true, "Live invalidation lost filter input focus");
+  // Workspace browsing uses its associated execution panel. Shared Queue keeps
+  // its explicit execution selection; clearing filters must preserve both routes.
+  const groupValue = await page.locator('.filters select[name="group"]').evaluate(select => Array.from(select.options).find(option => option.label === "web-ui").value);
+  for (const context of [{workspace: "2", execution: "2"}, {execution: "1"}]) {
+    const retained = {...context, sort: "title", direction: "desc"};
+    const filteredContext = new URLSearchParams({...retained, q: "unmatched", status: "closed", group: groupValue});
+    const filteredPage = await page.goto(origin + "/projects/" + project + "/tasks?" + filteredContext);
+    assert.equal(filteredPage.status(), 200, "Workspace filter context must be a valid production route");
+    const executionMode = page.locator('#execution select[name="mode"]');
+    const executionModeID = await executionMode.getAttribute("id");
+    await page.locator("#" + executionModeID + "-trigger").click();
+    await page.locator('.select-popover [role=option][data-value="drain"]').click();
+    assert.equal(await executionMode.inputValue(), "drain");
+    await trigger.click();
+    const clear = panel.getByRole("link", {name: "Clear filters", exact: true});
+    const clearURL = new URL(await clear.getAttribute("href"), origin);
+    for (const [key,value] of Object.entries(retained)) assert.equal(clearURL.searchParams.get(key), value, "Clear filters loses " + key);
+    for (const key of ["q","status","group","external_id"]) assert.equal(clearURL.searchParams.has(key), false);
+    assert.equal(clearURL.searchParams.get("workspace"), context.workspace || null);
+    await clear.click();
+    await until(() => !new URL(page.url()).searchParams.has("q"), "Clear filters did not navigate to the preserved context");
+    assert.equal(new URL(page.url()).searchParams.get("workspace"), context.workspace || null);
+    if (context.workspace) assert.equal(await page.locator('.filters input[name="workspace"]').inputValue(), context.workspace);
+    else assert.equal(await page.locator('.filters input[name="workspace"]').count(), 0);
+    assert.equal(await page.locator('.filters input[name="execution"]').inputValue(), context.execution);
+    assert.equal(await page.locator("#execution .run-workspace").getAttribute("data-workspace-id"), context.execution);
+    assert.equal(await executionMode.inputValue(), "drain", "Clear filters erased unfinished execution selection");
+    assert.equal(await page.locator('.filters select[name="sort"]').inputValue(), "title");
+    assert.equal(await page.locator('.filters select[name="direction"]').inputValue(), "desc");
+    assert.equal(await page.locator('.filters select[name="status"]').inputValue(), "active");
+  }
+  await page.goto(origin);
+  await page.locator(".task-title").first().waitFor();
+  console.log("PASS stable top-layer Filters, nested Escape, immediate selection, outside dismissal, live input focus and preserved workspace/execution on Clear");
+}
+async function checkDialogFooter(page, saveLabel) {
+  const footer = page.locator("[data-inspector] .dialog-footer");
+  const save = footer.getByRole("button", {name: saveLabel, exact: true});
+  assert.equal(await save.evaluate(button => !!button.form && !button.closest("form") && button.form.matches("form.dirty-track")), true, "Footer Save must submit the record's separate versioned form");
+  const metadata = page.locator("[data-inspector] details.metadata");
+  if (await metadata.count()) await metadata.locator("summary").click();
+  const scroller = page.locator("[data-inspector] .inspector-scroll");
+  const before = await footer.boundingBox();
+  await scroller.evaluate(node => {node.scrollTop = node.scrollHeight;});
+  assert.ok(await scroller.evaluate(node => node.scrollTop) > 0, "Long record should exercise body scrolling");
+  const after = await footer.boundingBox(), cancel = await footer.getByRole("button", {name: "Cancel", exact: true}).boundingBox(), primary = await save.boundingBox(), more = await footer.locator("summary").boundingBox();
+  assert.ok(Math.abs(after.y - before.y) <= 1, "Scrolling the body moved the footer");
+  assert.ok(after.y >= 0 && after.y + after.height <= page.viewportSize().height, "Footer is outside the viewport");
+  assert.ok(more.x < cancel.x && cancel.x + cancel.width <= primary.x, "Footer must place More actions left, then Cancel and Save right");
+  assert.equal(await footer.evaluate(node => {
+    const box = node.getBoundingClientRect(), inspector = node.closest("[data-inspector]").getBoundingClientRect();
+    return Math.abs(box.bottom - inspector.bottom) <= 2;
+  }), true, "Footer must stay at the bottom of the record dialog");
+  await scroller.evaluate(node => {node.scrollTop = 0;});
+}
 async function start() {
   server = spawn(binary, ["server", "--port", "0", "--no-open"], {
     cwd: repo,
@@ -96,6 +270,8 @@ async function stop() {
   const a = cli(
       "add",
       "Preserve drafts during queue refresh",
+      "--description",
+      Array(50).fill("Long record content exercises the scrollable body while actions remain available.").join("\n"),
       "--group",
       "web-ui",
     ),
@@ -118,7 +294,7 @@ async function stop() {
     "memory",
     "add",
     "--text",
-    "Runtime ownership survives stopped processes.",
+    Array(50).fill("Runtime ownership survives stopped processes.").join("\n"),
     "--created-by",
     "agent",
   );
@@ -128,9 +304,10 @@ async function stop() {
   cli("skill", "install", "--scope", "repo", "--agent", "codex", "--yes");
   fs.writeFileSync(path.join(repo, "fake-mode"), "schedule_activity_gate");
   await start();
-  browser = await chromium.launch({
+  const engine = process.env.PLAYWRIGHT_BROWSER === "webkit" ? webkit : chromium;
+  browser = await engine.launch({
     headless: true,
-    ...(process.env.PLAYWRIGHT_CHANNEL
+    ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL
       ? { channel: process.env.PLAYWRIGHT_CHANNEL }
       : {}),
   });
@@ -163,6 +340,11 @@ async function stop() {
     heights.every((n) => n === 37),
     "37px rows",
   );
+  if (process.env.PELLETS_WORKBENCH_BROWSER_CASE !== "dialogs") {
+    await checkFilters(page, a.project, d.id);
+    assert.deepEqual(errors, []);
+    if (process.env.PELLETS_WORKBENCH_BROWSER_CASE === "filters") return;
+  }
   // Record dialogs open directly in edit mode. Only a click on the backdrop
   // closes them; unsaved edits use the same discard guard as explicit Close.
   for (const record of [
@@ -175,12 +357,13 @@ async function stop() {
     }
     const field = page.locator("#inspector-host form.dirty-track " + record.field);
     for (const width of [1280, 390]) {
-      await page.setViewportSize({width, height: 844});
+      await page.setViewportSize({width, height: 600});
       await record.open();
       await page.locator("#record-dialog[open]").waitFor();
       assert.equal(await field.isVisible(), true, record.name + " editor is visible on opening");
       assert.equal(await field.isEditable(), true);
       assert.equal(await page.locator("[data-edit-record]").count(), 0);
+      await checkDialogFooter(page, record.save);
       await field.click();
       assert.equal(await page.locator("#record-dialog").evaluate(x => x.open), true, "Inside click closed " + record.name);
       await dragToBackdrop(page, "#record-dialog", field);
@@ -221,6 +404,23 @@ async function stop() {
     await page.locator("#record-dialog").waitFor({state: "hidden"});
     await record.open();
     assert.equal(await field.inputValue(), savedText, "Discarded backdrop draft leaked into reopened record");
+    await field.fill("Unfinished Cancel draft for " + record.name);
+    page.once("dialog", d => d.dismiss());
+    await page.locator("[data-inspector] .dialog-footer").getByRole("button", {name: "Cancel", exact: true}).click();
+    assert.equal(await page.locator("#record-dialog").evaluate(x => x.open), true, "Dismissed Cancel lost the dialog");
+    assert.equal(await field.inputValue(), "Unfinished Cancel draft for " + record.name);
+    page.once("dialog", d => d.accept());
+    await page.locator("[data-inspector] .dialog-footer").getByRole("button", {name: "Cancel", exact: true}).click();
+    await page.locator("#record-dialog").waitFor({state: "hidden"});
+    await record.open();
+    assert.equal(await field.inputValue(), savedText, "Cancel saved an unfinished draft");
+    if (record.name === "memory") {
+      await moreActions(page);
+      const approval = page.waitForResponse(r => r.request().method() === "POST" && r.url().includes("/approve"));
+      await page.getByRole("button", {name: "Approve current text", exact: true}).click();
+      assert.equal((await approval).status(), 200, "More actions approval must receive its actual mutation receipt");
+      await page.getByText("Human approved", {exact: true}).waitFor();
+    }
     await closeDialog(page);
   }
   await page.locator(".area-tabs a").first().click();
@@ -238,7 +438,7 @@ async function stop() {
   }
   await page.setViewportSize({width: 1280, height: 800});
   assert.deepEqual(errors, []);
-  console.log("PASS direct record editing, save/live editability, clean/dirty backdrop guards, insertion backdrop, desktop and narrow");
+  console.log("PASS direct editing, fixed action footer, Save/live editability, Cancel/backdrop guards, approval receipt, insertion backdrop, desktop and narrow");
   if (process.env.PELLETS_WORKBENCH_BROWSER_CASE === "dialogs") return;
   // Exact/noncontiguous/overlapping bracket ticks derive from explicit records.
   await page.locator("#task-" + cp.id + " .checkpoint-open").focus();
@@ -418,6 +618,14 @@ async function stop() {
   await page.locator("#insert-dialog").waitFor({ state: "hidden" });
   await page.locator("#record-dialog[open]").waitFor();
   const inserted = (await page.locator("#inspector-title").innerText()).trim();
+  await moreActions(page);
+  const recordMenu = page.locator("[data-inspector] details.record-actions");
+  const removeCheckpoint = recordMenu.getByRole("button", {name: "Remove checkpoint", exact: true});
+  await removeCheckpoint.focus();
+  await page.keyboard.press("Escape");
+  assert.equal(await recordMenu.evaluate(x => x.open), false, "Escape must close More actions");
+  assert.equal(await page.locator("#record-dialog").evaluate(x => x.open), true, "Menu Escape must keep the record open");
+  assert.equal(await recordMenu.locator("summary").evaluate(x => x === document.activeElement), true);
   await closeDialog(page);
   const order = await page
     .locator(".queue-rows>[data-row-id]")
@@ -430,12 +638,25 @@ async function stop() {
   assert.equal(cli("show", inserted).status, "maybe_later");
   await page.locator("[data-checkpoint-undo] button").click();
   await until(() => cli("show", inserted).status === "open", "restore");
-  // Agent memory approval remains an explicit human act.
+  // The record menu uses the same reversible operations as inline removal.
+  await page.locator("#task-" + inserted + " .checkpoint-open").click();
+  await moreActions(page);
+  const removedReceipt = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname.endsWith("/remove"));
+  await removeCheckpoint.click();
+  assert.equal((await removedReceipt).status(), 200);
+  await page.locator("[data-inspector] [data-checkpoint-restore]").waitFor({state: "attached"});
+  assert.equal(cli("show", inserted).status, "maybe_later");
+  assert.match(await page.locator(".checkpoint-management").innerText(), /No review was completed/);
+  await moreActions(page);
+  const restoredReceipt = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname.endsWith("/restore"));
+  await recordMenu.getByRole("button", {name: "Undo removal · Restore checkpoint", exact: true}).click();
+  assert.equal((await restoredReceipt).status(), 200);
+  await page.locator("[data-inspector] [data-checkpoint-remove]").waitFor({state: "attached"});
+  assert.equal(cli("show", inserted).status, "open");
+  await closeDialog(page);
+  // The explicit approval made through More actions remains on reopening.
   await page.locator(".area-tabs a").nth(1).click();
   await page.locator(".memory-card>a").click();
-  await page
-    .getByRole("button", { name: "Approve current text", exact: true })
-    .click();
   await page.getByText("Human approved", { exact: true }).waitFor();
   await closeDialog(page);
   // Actual deterministic notifications: highlighted source/diff, stream keeps
@@ -616,16 +837,22 @@ async function stop() {
       const answered = await answerResponse;
       assert.equal(answered.status(), 202, "exact answers accepted");
     } else if (mode === "schedule_approval_live") {
+      const approvalResponse = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname.endsWith("/interaction"));
       await page
         .getByRole("button", { name: "Approve once", exact: true })
         .click();
+      const approved = await approvalResponse;
+      assert.equal(approved.status(), 202, "Approval must receive an accepted receipt: " + (approved.status() === 202 ? "" : await approved.text()));
     } else {
       await page
         .locator(".run-follow-up textarea")
         .fill("Keep the change focused.");
+      const followUpResponse = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname.endsWith("/follow-up"));
       await page
         .getByRole("button", { name: "Send follow-up", exact: true })
         .click();
+      const followed = await followUpResponse;
+      assert.equal(followed.status(), 202, "Follow-up must receive an accepted receipt: " + (followed.status() === 202 ? "" : await followed.text()));
     }
     try {
       await until(

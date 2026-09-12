@@ -1,13 +1,14 @@
 {{define "page"}}<!doctype html>
-<html lang="en" data-nonce="{{.Nonce}}">
+<html lang="en" data-nonce="{{.Nonce}}" data-ui-revision="{{.UIRevision}}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <script src="/assets/theme-preflight.js"></script>
-  <link rel="stylesheet" href="/assets/app.css">
-  <link rel="stylesheet" href="/assets/workbench.css">
-  <script type="module" src="/assets/app.js?v=datastar-1.0.3"></script>
+  <meta name="pellets-ui-revision" content="{{.UIRevision}}">
+  <script src="/assets/{{.UIRevision}}/theme-preflight.js"></script>
+  <link rel="stylesheet" href="/assets/{{.UIRevision}}/app.css">
+  <link rel="stylesheet" href="/assets/{{.UIRevision}}/workbench.css">
+  <script type="module" src="/assets/{{.UIRevision}}/app.js"></script>
   <title>{{if .HasProject}}{{.Project.Code}} · Pellets{{else}}Pellets{{end}}</title>
 </head>
 <body data-on:pellets-refresh__document="@refresh('live')" data-on-interval__duration.35s="@refresh('live')">
@@ -134,12 +135,12 @@
   <form class="filters" action="{{.TasksURL}}" method="get" data-on:submit="@filter()" data-on:change="evt.target.matches('select') &amp;&amp; @filter()" data-on:input__debounce.300ms="evt.target.matches('input') &amp;&amp; @filter()">
     {{if .SelectedWorkspace}}<input type="hidden" name="workspace" value="{{.SelectedWorkspace}}">{{end}}<input type="hidden" name="execution" value="{{.ExecutionWorkspace}}">
     <label class="search-label"><span class="visually-hidden">Search</span><input aria-label="Find a pellet" id="search" name="q" type="search" value="{{.Filters.Query}}" placeholder="Search…" autocomplete="off"></label>
-    <details class="filter-options" id="queue-filters">{{template "filter-summary" .}}<div class="filter-fields">
+    <details class="filter-options" id="queue-filters">{{template "filter-summary" .}}<div class="filter-fields" id="queue-filter-panel" role="group" aria-label="Queue filters and sorting">
     <label>Status <select name="status"><option value="active" {{if eq .Filters.Status "active"}}selected{{end}}>Active</option><option value="all" {{if eq .Filters.Status "all"}}selected{{end}}>All states</option><option value="open" {{if eq .Filters.Status "open"}}selected{{end}}>Open</option><option value="in_progress" {{if eq .Filters.Status "in_progress"}}selected{{end}}>In progress</option><option value="maybe_later" {{if eq .Filters.Status "maybe_later"}}selected{{end}}>Maybe later</option><option value="closed" {{if eq .Filters.Status "closed"}}selected{{end}}>Closed</option></select></label>
     <label>Sort <select name="sort">{{range .SortHeaders}}<option value="{{.Key}}" {{if .Active}}selected{{end}}>{{.Label}}</option>{{end}}</select></label><label>Direction <select name="direction"><option value="asc" {{if eq .Filters.Direction "asc"}}selected{{end}}>Ascending</option><option value="desc" {{if eq .Filters.Direction "desc"}}selected{{end}}>Descending</option></select></label>
     <label>Group <select name="group">{{range .Groups}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
     <label>External ID <input name="external_id" value="{{.Filters.ExternalID}}" placeholder="Exact value"></label>
-    <a class="quiet-button" href="{{.TasksURL}}">Clear filters</a>
+    <a class="quiet-button" href="{{.ClearFiltersURL}}" data-on:click="@navigate('app-content')">Clear filters</a>
     </div></details>
     {{template "queue-order" .}}
   </form>
@@ -194,41 +195,52 @@
 {{define "pellet-inspector"}}<aside id="inspector-task-{{.SelectedPellet.Pellet.Reference}}" class="inspector live-fragment" role="dialog" aria-modal="true" aria-labelledby="inspector-title" data-inspector data-protect-dirty data-refresh-url="{{.SelectedPellet.URL}}">
   <header><div><span class="eyebrow">Pellet</span><h2 id="inspector-title">{{.SelectedPellet.Pellet.Reference}}</h2></div><div class="header-actions">{{if .CloseURL}}<a class="icon-button" href="{{.CloseURL}}" data-on:click="@navigate('inspector-host')" aria-label="Close inspector">×</a>{{end}}</div></header>
   <div class="inspector-scroll">
+    {{template "record-conflict" .}}
     <div class="inspector-title-row"><span class="badge status-badge {{.SelectedPellet.Pellet.Status}}">{{statusLabel .SelectedPellet.Pellet.Status}}</span>{{if .SelectedPellet.Owner}}<span class="owner-badge">{{.SelectedPellet.Owner}}</span>{{end}}</div>
     <form id="edit-task-{{.SelectedPellet.Pellet.Reference}}" action="/projects/{{.SelectedPellet.Pellet.Reference.ProjectCode}}/pellets/{{.SelectedPellet.Pellet.Reference}}/edit" method="post" data-on:submit="@submit()" class="stack-form dirty-track record-edit">
       <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}">
       <label>Title <input name="title" value="{{.SelectedPellet.Pellet.Title}}" required></label>
       <label>Description <textarea class="task-description-editor" name="description" rows="4">{{.SelectedPellet.Pellet.Description}}</textarea></label>
       <div class="form-grid"><label>External ID <input name="external_id" value="{{text .SelectedPellet.Pellet.ExternalID}}"></label><label>Group <input name="group" value="{{text .SelectedPellet.Pellet.Group}}"></label></div>
-      <button class="primary-button" type="submit">Save changes</button>
     </form>
     {{with .SelectedPellet.Pellet.Checkpoint}}<section><h3>Review checkpoint</h3><p>{{if .Ready}}Ready: all selected targets have implementation evidence.{{else}}Waiting for the selected targets and implementation evidence.{{end}}</p>{{template "checkpoint-outcome" $.SelectedPellet.CheckpointOutcome}}<h4>Selected targets · current evidence</h4><ul>{{range .Targets}}<li><code>{{.Reference}}</code> · {{.Title}} · {{.Reason}}{{if .Evidence}}<br>Commit <code>{{.Evidence.ResultCommit}}</code> (run {{.Evidence.RunID}}, workspace {{.Evidence.WorkspaceID}}){{end}}</li>{{end}}</ul></section>{{end}}
     {{template "checkpoint-management" .}}
-    <section class="lifecycle"><h3>Pellet actions</h3><a class="secondary-button" href="{{.SelectedPellet.ExecutionURL}}" data-on:click="@navigate('app-content')" data-open-execution>Open execution</a>{{template "lifecycle-controls" .}}</section>
-
     {{if .MoveTargets}}{{if or (eqStatus .SelectedPellet.Pellet.Status "open") (eqStatus .SelectedPellet.Pellet.Status "in_progress")}}<section><h3>Queue position</h3><form action="/projects/{{.SelectedPellet.Pellet.Reference.ProjectCode}}/pellets/{{.SelectedPellet.Pellet.Reference}}/move" method="post" data-on:submit="@submit()" class="inline-form"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}"><label>Move <select name="direction"><option value="before">Before</option><option value="after">After</option></select></label><label>Task <select name="target">{{range .MoveTargets}}<option value="{{.Pellet.Reference}}">{{.Pellet.Reference}} · {{.Pellet.Title}}</option>{{end}}</select></label><button type="submit">Reorder</button></form></section>{{end}}{{end}}
     <details class="metadata"><summary>Record details</summary><dl><div><dt>Project ID</dt><dd><code>{{.SelectedPellet.Pellet.ProjectID}}</code></dd></div><div><dt>Priority</dt><dd><code>{{.SelectedPellet.Priority}}</code></dd></div><div><dt>Created</dt><dd>{{formatTime .SelectedPellet.Pellet.CreatedAt}}</dd></div><div><dt>Updated</dt><dd>{{formatTime .SelectedPellet.Pellet.UpdatedAt}}</dd></div>{{if .SelectedPellet.Pellet.CompletedAt}}<div><dt>Completed</dt><dd>{{formatTime .SelectedPellet.Pellet.CompletedAt}}</dd></div>{{end}}</dl></details>
   </div>
+  <footer class="dialog-footer">
+    <details class="record-actions" id="record-actions-{{.SelectedPellet.Pellet.Reference}}"><summary>More actions <span aria-hidden="true">⌃</span></summary><div class="record-actions-panel">
+      {{if .SelectedPellet.ExecutionURL}}<a href="{{.SelectedPellet.ExecutionURL}}" data-on:click="@navigate('app-content')" data-open-execution>Open execution</a>{{end}}
+      {{template "lifecycle-controls" .}}
+      {{template "checkpoint-queue-actions" .}}
+    </div></details>
+    <div class="dialog-footer-actions"><button type="button" class="dialog-cancel" data-dialog-close>Cancel</button><button type="submit" class="primary-button" form="edit-task-{{.SelectedPellet.Pellet.Reference}}">Save changes</button></div>
+  </footer>
 </aside>{{end}}
 
 {{define "lifecycle-form"}}<form action="/projects/{{.Page.SelectedPellet.Pellet.Reference.ProjectCode}}/pellets/{{.Page.SelectedPellet.Pellet.Reference}}/transition" method="post" data-on:submit="@submit()" class="action-form"><input type="hidden" name="_csrf" value="{{.Page.CSRF}}"><input type="hidden" name="version" value="{{.Page.SelectedPellet.Version}}"><input type="hidden" name="operation" value="{{.Operation}}"><input type="hidden" name="recover_workspace_id" value=""><input type="hidden" name="confirm_recovery" value="">{{if eq .Operation "start"}}<label>Workspace <select name="workspace_id" required>{{range .Page.Project.Workspaces}}<option value="{{.ID}}">{{.RootPath.Value}}</option>{{end}}</select></label>{{end}}<button type="submit">{{.Label}}</button></form>{{end}}
 
 {{define "lifecycle-controls"}}<div class="action-row">
   {{if eqStatus .SelectedPellet.Pellet.Status "open"}}{{template "lifecycle-form" (lifecycle . "start")}}{{template "lifecycle-form" (lifecycle . "close")}}{{template "lifecycle-form" (lifecycle . "defer")}}{{end}}
-  {{if eqStatus .SelectedPellet.Pellet.Status "in_progress"}}<div class="recovery"><p><strong>Owned by {{.SelectedPellet.Owner}}</strong></p><p>This tool does not authenticate an agent. Confirm only when recovering this registered worktree.</p><form action="/projects/{{.SelectedPellet.Pellet.Reference.ProjectCode}}/pellets/{{.SelectedPellet.Pellet.Reference}}/transition" method="post" data-on:submit="@submit()" class="stack-form"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}"><input type="hidden" name="recover_workspace_id" value="{{.SelectedPellet.Pellet.Workspace.ID}}"><label>Recovery action <select name="operation"><option value="release">Release</option><option value="close">Close</option><option value="defer">Defer</option></select></label><label class="check"><input type="checkbox" name="confirm_recovery" value="yes" required> I confirm recovery of workspace {{.SelectedPellet.Pellet.Workspace.ID}}</label><button type="submit">Apply confirmed recovery</button></form></div>{{end}}
+  {{if eqStatus .SelectedPellet.Pellet.Status "in_progress"}}<div class="recovery"><p><strong>Owned by {{.SelectedPellet.Owner}}</strong></p><p>This tool does not authenticate an agent. Confirm only when recovering this registered worktree.</p><form action="/projects/{{.SelectedPellet.Pellet.Reference.ProjectCode}}/pellets/{{.SelectedPellet.Pellet.Reference}}/transition" method="post" data-on:submit="@submit()" class="stack-form"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}"><input type="hidden" name="recover_workspace_id" value="{{.SelectedPellet.Pellet.Workspace.ID}}"><label>Recovery action <select name="operation"><option value="release">Release pellet</option><option value="close">Close pellet</option><option value="defer">Defer pellet</option></select></label><label class="check"><input type="checkbox" name="confirm_recovery" value="yes" required> I confirm recovery of workspace {{.SelectedPellet.Pellet.Workspace.ID}}</label><button type="submit">Apply confirmed recovery</button></form></div>{{end}}
   {{if or (eqStatus .SelectedPellet.Pellet.Status "closed") (eqStatus .SelectedPellet.Pellet.Status "maybe_later")}}{{template "lifecycle-form" (lifecycle . "reopen")}}{{end}}
 </div>{{end}}
 
 {{define "memory-inspector"}}<aside id="inspector-memory-{{.SelectedMemory.Memory.ID}}" class="inspector live-fragment" role="dialog" aria-modal="true" aria-labelledby="inspector-title" data-inspector data-protect-dirty data-refresh-url="{{.SelectedMemory.URL}}">
   <header><div><span class="eyebrow">Memory</span><h2 id="inspector-title">Memory {{.SelectedMemory.Memory.ID}}</h2></div><div class="header-actions">{{if .CloseURL}}<a class="icon-button" href="{{.CloseURL}}" data-on:click="@navigate('inspector-host')" aria-label="Close inspector">×</a>{{end}}</div></header>
-  <div class="inspector-scroll"><div class="inspector-title-row"><span class="badge provenance">{{.SelectedMemory.Memory.CreatedBy}}</span>{{if .SelectedMemory.Memory.ApprovedAt}}<span class="badge approved">Human approved</span>{{else}}<span class="badge unapproved">Needs review</span>{{end}}</div>
-    <form id="edit-memory-{{.SelectedMemory.Memory.ID}}" action="/projects/{{.SelectedMemory.Memory.ProjectCode}}/memories/{{.SelectedMemory.Memory.ID}}/edit" method="post" data-on:submit="@submit()" class="stack-form dirty-track record-edit"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedMemory.Version}}"><label>Text <textarea name="text" rows="15" required>{{.SelectedMemory.Memory.Text}}</textarea></label><p class="form-help">Changing reviewed agent text clears its approval; save the updated text before requesting another review.</p><button class="primary-button" type="submit">Save text</button></form>
-    {{if not .SelectedMemory.Memory.ApprovedAt}}<form action="/projects/{{.SelectedMemory.Memory.ProjectCode}}/memories/{{.SelectedMemory.Memory.ID}}/approve" method="post" data-on:submit="@submit()" class="action-form"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedMemory.Version}}"><button type="submit">Approve current text</button></form>{{end}}
+  <div class="inspector-scroll">{{template "record-conflict" .}}<div class="inspector-title-row"><span class="badge provenance">{{.SelectedMemory.Memory.CreatedBy}}</span>{{if .SelectedMemory.Memory.ApprovedAt}}<span class="badge approved">Human approved</span>{{else}}<span class="badge unapproved">Needs review</span>{{end}}</div>
+    <form id="edit-memory-{{.SelectedMemory.Memory.ID}}" action="/projects/{{.SelectedMemory.Memory.ProjectCode}}/memories/{{.SelectedMemory.Memory.ID}}/edit" method="post" data-on:submit="@submit()" class="stack-form dirty-track record-edit"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedMemory.Version}}"><label>Text <textarea name="text" rows="15" required>{{.SelectedMemory.Memory.Text}}</textarea></label><p class="form-help">Changing reviewed agent text clears its approval; save the updated text before requesting another review.</p></form>
+
     <section class="metadata"><h3>Record</h3><dl><div><dt>Project ID</dt><dd><code>{{.SelectedMemory.Memory.ProjectID}}</code></dd></div><div><dt>Provenance</dt><dd>{{.SelectedMemory.Memory.CreatedBy}}</dd></div><div><dt>Created</dt><dd>{{formatTime .SelectedMemory.Memory.CreatedAt}}</dd></div><div><dt>Updated</dt><dd>{{formatTime .SelectedMemory.Memory.UpdatedAt}}</dd></div>{{if .SelectedMemory.Memory.ApprovedAt}}<div><dt>Approved</dt><dd>{{formatTime .SelectedMemory.Memory.ApprovedAt}}</dd></div>{{end}}</dl></section>
   </div>
+  <footer class="dialog-footer">
+    {{if not .SelectedMemory.Memory.ApprovedAt}}<details class="record-actions" id="record-actions-memory-{{.SelectedMemory.Memory.ID}}"><summary>More actions <span aria-hidden="true">⌃</span></summary><div class="record-actions-panel">{{if not .SelectedMemory.Memory.ApprovedAt}}<form action="/projects/{{.SelectedMemory.Memory.ProjectCode}}/memories/{{.SelectedMemory.Memory.ID}}/approve" method="post" data-on:submit="@submit()" class="action-form"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedMemory.Version}}"><button type="submit">Approve current text</button></form>{{end}}</div></details>{{end}}
+    <div class="dialog-footer-actions"><button type="button" class="dialog-cancel" data-dialog-close>Cancel</button><button type="submit" class="primary-button" form="edit-memory-{{.SelectedMemory.Memory.ID}}">Save text</button></div>
+  </footer>
 </aside>{{end}}
 
-{{define "conflict"}}<section class="conflict-state" role="alert" aria-labelledby="conflict-title"><span class="badge conflict">409 conflict</span><h2 id="conflict-title">This record changed elsewhere</h2><p>No write was performed. The current authoritative row is shown below; your submitted draft is preserved for comparison.</p><p class="current-row">{{.Conflict.Current}}</p><details open><summary>Submitted draft</summary><dl>{{range $key, $value := .Conflict.Draft}}<div><dt>{{$key}}</dt><dd><pre>{{$value}}</pre></dd></div>{{end}}</dl></details>{{if .SelectedPellet}}{{template "pellet-inspector" .}}{{else if .SelectedMemory}}{{template "memory-inspector" .}}{{end}}</section>{{end}}
+{{define "record-conflict"}}{{if .Conflict}}<section class="conflict-state" role="alert" aria-labelledby="conflict-title"><span class="badge conflict">409 conflict</span><h2 id="conflict-title">This record changed elsewhere</h2><p>No write was performed. The current authoritative row is shown below; your submitted draft is preserved for comparison.</p><p class="current-row">{{.Conflict.Current}}</p><details open><summary>Submitted draft</summary><dl>{{range $key, $value := .Conflict.Draft}}<div><dt>{{$key}}</dt><dd><pre>{{$value}}</pre></dd></div>{{end}}</dl></details></section>{{end}}{{end}}
+{{define "conflict"}}{{if .SelectedPellet}}{{template "pellet-inspector" .}}{{else if .SelectedMemory}}{{template "memory-inspector" .}}{{else}}{{template "record-conflict" .}}{{end}}{{end}}
 
 {{define "error"}}<section class="error-state" role="alert"><span class="badge error">{{.StatusCode}} error</span><h2>Request not applied</h2><p>{{.Error}}</p>{{if .Conflict.Draft}}<details><summary>Submitted draft</summary><dl>{{range $key, $value := .Conflict.Draft}}<div><dt>{{$key}}</dt><dd><pre>{{$value}}</pre></dd></div>{{end}}</dl></details>{{end}}</section>{{end}}
 
@@ -236,7 +248,7 @@
 
 {{define "project-counts"}}<span id="project-counts" class="footer-counts">{{.ProjectSummary.Open}} open</span>{{end}}
 
-{{define "filter-summary"}}<summary id="filter-summary">{{if eq .Filters.Status "active"}}Active{{else if eq .Filters.Status "all"}}All states{{else}}{{statusLabel .Filters.Status}}{{end}}{{if filterCount .Filters}} <span class="badge">{{filterCount .Filters}}</span>{{end}}</summary>{{end}}
+{{define "filter-summary"}}<summary id="filter-summary" aria-controls="queue-filter-panel"><span>Filters</span><span class="filter-state">{{if eq .Filters.Status "active"}}Active{{else if eq .Filters.Status "all"}}All states{{else}}{{statusLabel .Filters.Status}}{{end}}</span>{{if filterCount .Filters}} <span class="badge">{{filterCount .Filters}}</span>{{end}}<svg class="filter-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></summary>{{end}}
 {{define "queue-order"}}<a id="queue-order" class="queue-order" href="{{.QueueOrderURL}}" data-on:click="@navigate('tasks-area')">Queue order</a>{{end}}
 
 {{define "queue-title"}}<h2 id="tasks-title">{{if .SelectedWorkspace}}{{.WorkspaceName}}{{else}}Queue{{end}} <small>{{queueCount .Pellets}}</small></h2>{{end}}

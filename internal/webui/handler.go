@@ -77,7 +77,11 @@ func newHandler(application *app.WebApplication, hub *eventHub, config handlerCo
 		"eqStatus": func(left domain.PelletStatus, right string) bool { return string(left) == right },
 		"sameID":   func(left, right int64) bool { return left == right },
 		"lifecycle": func(page pageData, operation string) lifecycleFormView {
-			return lifecycleFormView{Page: page, Operation: operation, Label: statusLabel(operation)}
+			label := statusLabel(operation) + " pellet"
+			if operation == "start" {
+				label = "Claim pellet"
+			}
+			return lifecycleFormView{Page: page, Operation: operation, Label: label}
 		},
 	}
 	templates, err := template.New("pellets").Funcs(functions).ParseFS(embeddedFiles, "templates/*.html")
@@ -89,6 +93,14 @@ func newHandler(application *app.WebApplication, hub *eventHub, config handlerCo
 }
 
 func (h *handler) ServeHTTP(response http.ResponseWriter, request *http.Request) {
+	response.Header().Set(uiRevisionHeader, uiRevision)
+	if request.Method == http.MethodGet && request.URL.Path == "/ui-version" {
+		serveUIVersion(response)
+		return
+	}
+	if !acceptUIRevision(response, request) {
+		return
+	}
 	switch {
 	case request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/assets/"):
 		h.serveAsset(response, request)
@@ -136,6 +148,14 @@ func (h *handler) securityHeaders(next http.Handler) http.Handler {
 
 func (h *handler) serveAsset(response http.ResponseWriter, request *http.Request) {
 	name := strings.TrimPrefix(request.URL.Path, "/assets/")
+	versioned := false
+	if parts := strings.Split(name, "/"); len(parts) == 2 {
+		if parts[0] != uiRevision {
+			writeUIRevisionChanged(response)
+			return
+		}
+		name, versioned = parts[1], true
+	}
 	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "..") {
 		http.NotFound(response, request)
 		return
@@ -154,7 +174,7 @@ func (h *handler) serveAsset(response http.ResponseWriter, request *http.Request
 		response.Header().Set("Content-Type", "application/octet-stream")
 	}
 	response.Header().Set("Cache-Control", "no-cache")
-	if name == "datastar-1.0.3.js" {
+	if versioned || name == "datastar-1.0.3.js" {
 		response.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
 	_, _ = response.Write(content)
@@ -166,12 +186,19 @@ func (h *handler) serveEvents(response http.ResponseWriter, request *http.Reques
 		http.Error(response, "event streaming unavailable", http.StatusInternalServerError)
 		return
 	}
+	if hasStaleUIQuery(request) {
+		writeUIRevisionEvent(response)
+		return
+	}
 	response.Header().Set("Content-Type", "text/event-stream")
 	response.Header().Set("Cache-Control", "no-store")
 	response.Header().Set("Connection", "keep-alive")
 	response.Header().Set("X-Accel-Buffering", "no")
 	events, unsubscribe := h.hub.subscribe()
 	defer unsubscribe()
+	if !writeUIRevisionEvent(response) {
+		return
+	}
 	controller := http.NewResponseController(response)
 	_ = controller.SetWriteDeadline(time.Now().Add(2 * time.Second))
 	_, _ = io.WriteString(response, "retry: 1500\n: connected\n\n")
@@ -212,12 +239,14 @@ type pageData struct {
 	ProjectQueueCount  int
 
 	QueueOrderURL      string
+	ClearFiltersURL    string
 	DatabaseLabel      string
 	DatabasePath       string
 	WorkspacesURL      string
 	SelectedWorkspace  int64
 	WorkspaceAttention int
 	Nonce              string
+	UIRevision         string
 	CSRF               string
 	Projects           []projectView
 	Project            storage.Project
@@ -1043,6 +1072,7 @@ func (h *handler) setCSRFCookie(response http.ResponseWriter) {
 
 func (h *handler) render(response http.ResponseWriter, status int, name string, data pageData) {
 	if name == "page" {
+		data.UIRevision = uiRevision
 		var nonce [24]byte
 		if _, err := rand.Read(nonce[:]); err != nil {
 			http.Error(response, "could not secure local interface", http.StatusInternalServerError)

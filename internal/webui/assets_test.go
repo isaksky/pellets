@@ -19,11 +19,12 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 	css := embeddedText(t, "assets/app.css") + embeddedText(t, "assets/workbench.css")
 	javascript := embeddedText(t, "assets/app.js")
 	workbench := embeddedText(t, "assets/workbench.js")
+	revision := embeddedText(t, "assets/ui-version.js")
 	preflight := embeddedText(t, "assets/theme-preflight.js")
 	templates := embeddedText(t, "templates/main.html") + embeddedText(t, "templates/workbench.html")
 	datastar := embeddedText(t, "assets/datastar-1.0.3.js")
 	license := embeddedText(t, "assets/DATASTAR-LICENSE.txt")
-	for name, content := range map[string]string{"CSS": css, "application JavaScript": javascript, "Workbench JavaScript": workbench, "theme preflight": preflight, "templates": templates} {
+	for name, content := range map[string]string{"CSS": css, "application JavaScript": javascript, "Workbench JavaScript": workbench, "revision JavaScript": revision, "theme preflight": preflight, "templates": templates} {
 		// SVG's namespace identifies its vocabulary; it never loads a resource.
 		content = strings.ReplaceAll(content, "http://www.w3.org/2000/svg", "")
 		for _, forbidden := range []string{"https://", "http://", "@import", "fonts.googleapis", "cdn."} {
@@ -37,7 +38,7 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 			t.Fatalf("CSS missing %q", required)
 		}
 	}
-	for _, required := range []string{`new EventSource("/events")`, `pellets-invalidate`, `data-on-interval__duration.35s`, `id="project-drawer"`, `id="project-record"`, `data-protect-dirty`, `datastar-fetch`, `state.automatic && (dirtyInspector()`, `beforeunload`, `Discard unsaved inspector changes?`, `form.dataset.schedulePending === "true"`, `form.dataset.schedulePending = "true"`, `if (!confirmed)`, `inspectorOpener = null`} {
+	for _, required := range []string{`new EventSource("/events?ui_revision="`, `pellets-invalidate`, `data-on-interval__duration.35s`, `id="project-drawer"`, `id="project-record"`, `data-protect-dirty`, `datastar-fetch`, `state.automatic && (dirtyInspector()`, `beforeunload`, `Discard unsaved inspector changes?`, `form.dataset.schedulePending === "true"`, `form.dataset.schedulePending = "true"`, `if (!confirmed)`, `inspectorOpener = null`} {
 		if !strings.Contains(javascript+templates, required) {
 			t.Fatalf("authoritative update/input protection missing %q", required)
 		}

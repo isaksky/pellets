@@ -22,9 +22,18 @@ remain independent from scheduler selection.
 Queue rows are 37 pixels high with reference, lifecycle status, title, group, and
 owner. Narrow layouts prioritize reference, status, and title; full metadata stays
 in the dialog. Pellet and memory dialogs open directly in edit mode and close on a backdrop
-click or Escape. Unsaved edits retain the discard guard. They support optimistic conflicts,
+click or Escape. Unsaved edits retain the discard guard. A fixed dialog footer places Cancel and
+the primary save action on the right. More actions on the left contains lifecycle
+operations and memory approval; queue and scope controls stay beside their fields. They support optimistic conflicts,
 lifecycle operations, recovery, provenance, and explicit human memory approval.
 An owned pellet and a running process remain distinct.
+
+The Filters control shows the selected status and opens a panel for queue filters
+and sorting. It stays anchored beside search without moving the toolbar. The panel
+fits the viewport above the scrolling panes and dismisses on Escape, outside
+click, or keyboard focus leaving it. A nested selector consumes the first Escape.
+Changes apply immediately; Clear filters preserves the browsing workspace,
+execution sidebar selection, and sort order.
 
 Both sidebars collapse independently using the bottom corner buttons. The theme
 selector immediately precedes the execution toggle and offers Gruvbox Light,
@@ -94,6 +103,37 @@ retention eviction explicitly makes these details unavailable. Durable state,
 review evidence, and recovery controls survive. No server restart resumes work.
 See [execution activity](execution-activity.md) for protocol and resource bounds.
 
+## UI build compatibility
+
+Each embedded UI build has a deterministic revision derived from its templates,
+assets, and protocol version. Full pages declare that revision and load assets
+under `/assets/REVISION/`; relative JavaScript imports stay within the same build.
+The server never serves current asset content under an older revision path.
+
+Datastar requests must carry the matching `Pellets-UI-Revision` header. Missing or
+stale revisions receive `412 ui_revision_changed` before application reads or
+mutations, with no HTML fragments. Explicitly stale revisions on other browser
+requests are also rejected; ordinary non-Datastar API clients without this header
+retain their existing behavior. `/ui-version` exposes the current revision, and
+invalidation and activity streams announce it before sending updates.
+
+A loaded browser pauses updates when the server revision changes and offers an
+explicit reload. Reloading does not save restored edits, claim pellets, or
+resume execution. Tabs loaded before this revision protocol was introduced need
+one ordinary manual reload: the new server prevents their old Datastar client
+from consuming incompatible markup, but cannot replace JavaScript already running
+in that document.
+
+The reload button temporarily stores at most 256 KiB of unfinished form values
+in this tab's session storage and consumes that handoff once on reload. Record
+and assignment versions remain the original optimistic tokens; CSRF comes from
+the new page. Passwords and file inputs block the handoff until cleared and are
+never included. Forms are matched to their original action and execution/request
+identity. Input whose controls no longer exist is shown for copying, rather than
+submitted to another action. Drafts, caret/focus, and open disclosures are restored;
+no mutation is submitted by this handoff. A pending browsing filter is applied
+through its read-only queue request. Oversized drafts stay in the current page.
+
 ## Verification
 
 `test-web-workbench-browser.cjs` runs an embedded production build in disposable
@@ -103,3 +143,8 @@ combinations, narrow layouts, activity, input preservation, stopping, and restar
 The separate runtime, recovery, and checkpoint browser suites preserve their
 execution and evidence scenarios. Go storage/application tests cover atomic claims,
 concurrency, project isolation, captured intent, and checkpoint generations.
+`test-web-upgrade-browser.cjs` builds two distinct embedded UIs and restarts them
+on the same origin and disposable database, testing existing tabs, asset graphs,
+draft reloads, stale conflicts, and the absence of automatic execution. The core
+and Workbench browser runners also support `PLAYWRIGHT_BROWSER=webkit`; filter
+checks cover intrinsic panel height, nested controls, and short-screen scrolling.

@@ -752,33 +752,115 @@ input[type="checkbox"] {
   width: 100%;
   padding: 5px 0;
 }
-.filter-options {
-  margin-left: auto;
+.filter-options,
+.filter-options[open] {
+  flex: 0 0 auto;
+  margin: 0 0 0 auto;
+  order: 0;
   position: relative;
 }
-.filter-options summary {
+.filter-options > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   border: 0;
+  border-radius: 3px;
+  background: transparent;
   color: var(--muted);
-  padding: 5px 0;
+  padding: 5px 3px;
   font-size: 11px;
   cursor: pointer;
+  white-space: nowrap;
+}
+.filter-options > summary::-webkit-details-marker {
+  display: none;
+}
+.filter-options > summary:hover,
+.filter-options[open] > summary {
+  background: var(--theme-quiet-hover);
+}
+.filter-state {
+  color: var(--dim);
+}
+.filter-chevron {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+.filter-options[open] .filter-chevron {
+  transform: rotate(180deg);
 }
 .filter-fields {
-  position: absolute;
-  right: 0;
-  top: 100%;
+  position: fixed;
+  inset: auto;
+  margin: 0;
   width: 245px;
-  display: grid;
-  gap: 12px;
+  /* Intrinsic block sizing avoids WebKit stretching a top-layer grid. */
+  display: block;
+  height: auto;
   padding: 14px;
   background: var(--theme-menu-bg);
-  box-shadow: var(--shadow);
-  border: 1px solid var(--line);
+  color: var(--ink);
+  box-shadow: var(--theme-dialog-shadow);
+  border: 1px solid var(--theme-menu-border);
+  border-radius: 5px;
+  overflow: auto;
+  overscroll-behavior: contain;
   z-index: 25;
+}
+.filters .filter-fields > * + * {
+  margin-top: 12px;
+}
+.filter-fields[popover]:not(:popover-open) {
+  display: none;
 }
 .filter-fields label {
   display: grid;
   gap: 4px;
+}
+.filter-fields > .quiet-button {
+  display: flex;
+  width: fit-content;
+  justify-self: start;
+  background: transparent;
+  border: 0;
+  padding: 4px 0;
+  font-size: 11px;
+}
+.ui-update-notice {
+  position: fixed;
+  inset: auto 16px 38px auto;
+  margin: 0;
+  width: min(440px, calc(100vw - 32px));
+  height: auto;
+  max-height: calc(100dvh - 76px);
+  overflow: auto;
+  padding: 14px 16px;
+  display: block;
+  border: 1px solid var(--theme-menu-border);
+  border-radius: 5px;
+  background: var(--theme-menu-bg);
+  color: var(--ink);
+  box-shadow: var(--theme-dialog-shadow);
+  font-size: 12px;
+  line-height: 1.5;
+  z-index: 120;
+}
+.ui-update-notice[popover]:not(:popover-open) {
+  display: none;
+}
+.ui-update-notice p {
+  margin: 6px 0 12px;
+}
+.ui-update-notice button {
+  width: auto;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.ui-update-notice label {
+  display: block;
+  margin-top: 10px;
 }
 .queue-order {
   font-size: 10px;
@@ -1361,14 +1443,18 @@ input[type="checkbox"] {
 }
 #record-dialog,
 #insert-dialog {
+  --dialog-max-height: calc(100dvh - 60px);
   width: min(690px, calc(100vw - 32px));
-  max-height: calc(100dvh - 60px);
+  max-height: var(--dialog-max-height);
   border: 1px solid var(--theme-menu-border);
   border-radius: 7px;
   background: var(--bg);
   color: var(--ink);
   box-shadow: var(--theme-dialog-shadow);
   padding: 0;
+  overflow: hidden;
+}
+#record-dialog:not(:has([data-inspector])) {
   overflow: auto;
 }
 dialog::backdrop {
@@ -1397,11 +1483,12 @@ dialog::backdrop {
   border: 0;
 }
 .inspector {
-  display: block;
+  display: flex;
+  flex-direction: column;
   position: static;
   width: 100%;
   height: auto;
-  max-height: none;
+  max-height: calc(var(--dialog-max-height) - 2px);
   min-width: 0;
   background: transparent;
   border: 0;
@@ -1409,6 +1496,7 @@ dialog::backdrop {
   padding: 0;
 }
 .inspector > header {
+  flex: 0 0 auto;
   padding: 22px 26px 16px;
   border-bottom: 1px solid var(--line);
 }
@@ -1416,8 +1504,127 @@ dialog::backdrop {
   font-size: 15px;
 }
 .inspector-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 18px 26px 26px;
-  overflow: visible;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.dialog-footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 26px;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  position: relative;
+  z-index: 2;
+}
+.dialog-footer-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.dialog-footer-actions > button {
+  width: auto;
+  margin: 0;
+  padding: 7px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.dialog-cancel {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+  box-shadow: none;
+}
+.dialog-cancel:hover,
+.record-actions > summary:hover {
+  background: var(--theme-quiet-hover);
+}
+.record-actions {
+  position: relative;
+  min-width: 0;
+}
+.record-actions > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 0;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.record-actions > summary::-webkit-details-marker {
+  display: none;
+}
+.record-actions-panel {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  width: min(330px, calc(100vw - 66px));
+  max-height: min(45dvh, 360px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 8px;
+  border: 1px solid var(--theme-menu-border);
+  border-radius: 5px;
+  background: var(--theme-menu-bg);
+  box-shadow: var(--theme-dialog-shadow);
+  color: var(--ink);
+}
+.record-actions-panel .action-row,
+.record-actions-panel .action-form {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+  margin: 0;
+}
+.record-actions-panel form > label {
+  padding: 8px;
+  font-size: 11px;
+}
+.record-actions-panel button,
+.record-actions-panel > a {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  margin: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  text-align: left;
+  text-decoration: none;
+}
+.record-actions-panel button:hover,
+.record-actions-panel > a:hover {
+  background: var(--theme-quiet-hover);
+}
+.record-actions-panel .action-row > form:has(select) {
+  border-block: 1px solid var(--line);
+  margin-block: 5px;
+  padding-block: 5px;
+}
+.record-actions-panel .recovery {
+  max-width: 100%;
+  padding: 8px;
+  border: 0;
+}
+.record-actions-panel .recovery p {
+  margin: 0 0 10px;
+  font-size: 11px;
+  line-height: 1.5;
 }
 .inspector-scroll > section {
   margin-bottom: 18px;
@@ -1486,11 +1693,15 @@ dialog::backdrop {
   white-space: nowrap;
 }
 .insert-form {
-  padding: 24px;
-  display: grid;
-  gap: 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(var(--dialog-max-height) - 2px);
 }
 .insert-form > header {
+  flex: 0 0 auto;
+  padding: 22px 26px 16px;
+  border-bottom: 1px solid var(--line);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1499,7 +1710,15 @@ dialog::backdrop {
   font-size: 18px;
   margin: 0;
 }
-.insert-form > label {
+.insert-form .dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 26px 26px;
+  display: grid;
+  gap: 12px;
+}
+.insert-form .dialog-body > label {
   display: grid;
   gap: 4px;
 }
@@ -1813,13 +2032,27 @@ dialog::backdrop {
   }
   #record-dialog,
   #insert-dialog {
+    --dialog-max-height: calc(100dvh - 24px);
     width: calc(100vw - 16px);
-    max-height: calc(100dvh - 24px);
   }
   .inspector > header {
     padding: 17px;
   }
   .inspector-scroll {
+    padding: 15px 17px;
+  }
+  .dialog-footer {
+    padding: 12px 17px;
+    gap: 8px;
+  }
+  .dialog-footer-actions {
+    gap: 4px;
+  }
+  .dialog-footer-actions > button {
+    padding: 7px 9px;
+  }
+  .insert-form > header,
+  .insert-form .dialog-body {
     padding: 15px 17px;
   }
   .inspector .form-grid {

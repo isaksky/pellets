@@ -2,10 +2,7 @@
 <section class="checkpoint-management" aria-label="Manage review scope">
   {{if .SelectedPellet.Pellet.Checkpoint.Removed}}
   <p>This checkpoint is removed from the queue and deferred. No review was completed.</p>
-  <form action="/projects/{{.Project.Code}}/checkpoints/{{.SelectedPellet.Pellet.Reference}}/restore" method="post" data-on:submit="@submit()" data-checkpoint-restore>
-    <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}">
-    <button type="submit">Undo removal · Restore checkpoint</button>
-  </form>
+
   {{else if eqStatus .SelectedPellet.Pellet.Status "open"}}
     {{with .SelectedPellet.CheckpointManagement}}<details data-checkpoint-scope-editor>
       <summary>Edit scope</summary>
@@ -18,10 +15,7 @@
         <button type="submit">Save scope</button>
       </form>
     </details>{{end}}
-    <form action="/projects/{{.Project.Code}}/checkpoints/{{.SelectedPellet.Pellet.Reference}}/remove" method="post" data-on:submit="@submit()" data-checkpoint-remove class="action-form">
-      <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}">
-      <button type="submit">Remove checkpoint</button>
-    </form>
+
   {{else if eqStatus .SelectedPellet.Pellet.Status "in_progress"}}<p class="form-help">Release this checkpoint before editing its scope or removing it.</p>{{end}}
   {{with .SelectedPellet.CheckpointManagement}}{{if .History}}<details class="checkpoint-history"><summary>Earlier scope and review history · {{len .History}} generations</summary>
     {{range .History}}<section><h4>Generation {{.ImplementationRevision}}</h4><p class="form-help">Captured {{formatTime .CapturedAt}}</p>
@@ -30,3 +24,17 @@
     </section>{{end}}
   </details>{{end}}{{end}}
 </section>{{end}}{{end}}
+
+{{define "checkpoint-queue-actions"}}{{if .SelectedPellet.Pellet.Checkpoint}}
+  {{if .SelectedPellet.Pellet.Checkpoint.Removed}}
+  <form action="/projects/{{.Project.Code}}/checkpoints/{{.SelectedPellet.Pellet.Reference}}/restore" method="post" data-on:submit="@submit()" data-checkpoint-restore>
+    <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}">
+    <button type="submit">Undo removal · Restore checkpoint</button>
+  </form>
+  {{else if eqStatus .SelectedPellet.Pellet.Status "open"}}
+    <form action="/projects/{{.Project.Code}}/checkpoints/{{.SelectedPellet.Pellet.Reference}}/remove" method="post" data-on:submit="@submit()" data-checkpoint-remove class="action-form">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.SelectedPellet.Version}}">
+      <button type="submit">Remove checkpoint</button>
+    </form>
+  {{end}}
+{{end}}{{end}}

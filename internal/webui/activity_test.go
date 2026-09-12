@@ -92,9 +92,13 @@ func TestActivityHTTPDurableProjectIsolationCursorSSEAndRestart(t *testing.T) {
 	}
 	scanner := bufio.NewScanner(response.Body)
 	found := false
+	eventType := ""
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "data: ") {
+		if strings.HasPrefix(line, "event: ") {
+			eventType = strings.TrimPrefix(line, "event: ")
+		}
+		if eventType == "pellets-activity" && strings.HasPrefix(line, "data: ") {
 			var resumed app.ActivitySnapshot
 			if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &resumed); err != nil {
 				t.Fatal(err)
