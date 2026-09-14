@@ -72,6 +72,7 @@ func Run() bool {
 	mode := string(modeBytes)
 	record("process", nil)
 	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 4096), 2<<20)
 	write := func(value any) { must(json.NewEncoder(os.Stdout).Encode(value)) }
 	var scheduledTurn json.RawMessage
 	reviewStarted := false
@@ -93,6 +94,9 @@ func Run() bool {
 			continue
 		}
 		record(message.Method, message.Params)
+		if handlePlanning(mode, message.Method, message.ID, message.Params, write) {
+			continue
+		}
 		if change.handle(message.Method, message.ID, message.Params, write) {
 			continue
 		}

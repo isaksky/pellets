@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"pellets/internal/codex"
 
 	"pellets/internal/domain"
 	"pellets/internal/storage"
@@ -13,12 +14,14 @@ import (
 // tool. Reader and writer lifetimes are server-scoped, but every returned row
 // is fully materialized before this layer hands it to HTTP rendering.
 type WebApplication struct {
-	Reader     storage.WebReader
-	Writer     storage.WebWriter
-	Current    *storage.ResolvedProject
-	Executions *ExecutionSupervisor
-	Scheduler  *Scheduler
-	Database   Database
+	Reader           storage.WebReader
+	Writer           storage.WebWriter
+	Current          *storage.ResolvedProject
+	Executions       *ExecutionSupervisor
+	Scheduler        *Scheduler
+	Database         Database
+	PlanningGenerate func(context.Context, codex.PlanningOptions) (codex.PlanningReply, error)
+	PlanningCatalog  func(context.Context, codex.PlanningOptions) (codex.PlanningCatalog, error)
 }
 
 // WorkspaceRuns is a durable read used by the server-rendered activity view.

@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"pellets/internal/app"
@@ -37,10 +38,13 @@ type handlerConfig struct {
 }
 
 type handler struct {
-	application *app.WebApplication
-	hub         *eventHub
-	config      handlerConfig
-	templates   *template.Template
+	application  *app.WebApplication
+	hub          *eventHub
+	config       handlerConfig
+	templates    *template.Template
+	planningMu   sync.Mutex
+	planningBusy map[int64]bool
+	planningJobs int
 }
 
 func newHandler(application *app.WebApplication, hub *eventHub, config handlerConfig) (http.Handler, error) {
@@ -102,6 +106,10 @@ func (h *handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	switch {
+	case request.URL.Path == "/settings":
+		h.serveSettings(response, request)
+	case isPlanningPath(request.URL.Path):
+		h.servePlanning(response, request)
 	case request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/assets/"):
 		h.serveAsset(response, request)
 	case request.Method == http.MethodGet && len(pathSegments(request.URL.Path)) == 5 && pathSegments(request.URL.Path)[2] == "runs" && pathSegments(request.URL.Path)[4] == "activity":
@@ -228,6 +236,7 @@ func (h *handler) serveEvents(response http.ResponseWriter, request *http.Reques
 }
 
 type pageData struct {
+	SettingsJSON       string
 	ExecutionWorkspace int64
 	WorkspaceName      string
 	WorkspaceRoot      string
@@ -1072,6 +1081,12 @@ func (h *handler) setCSRFCookie(response http.ResponseWriter) {
 
 func (h *handler) render(response http.ResponseWriter, status int, name string, data pageData) {
 	if name == "page" {
+		var err error
+		data.SettingsJSON, err = h.pageSettings()
+		if err != nil {
+			http.Error(response, "could not read settings", http.StatusInternalServerError)
+			return
+		}
 		data.UIRevision = uiRevision
 		var nonce [24]byte
 		if _, err := rand.Read(nonce[:]); err != nil {
@@ -1219,6 +1234,9 @@ func (h *handler) renderUpdates(response *datastarResponse, status int, primary 
 	}
 	if primary == "app-content" {
 		names = []string{"app-content"}
+		if data.SelectedPellet != nil || data.SelectedMemory != nil {
+			names = append(names, "inspector")
+		}
 	}
 	type patch struct{ selector, mode, html string }
 	patches := []patch{}

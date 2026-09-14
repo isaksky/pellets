@@ -283,8 +283,8 @@ func TestMemoryIDsAreNeverReusedAfterRemoval(t *testing.T) {
 		)`).Scan(&autoincrementTables); err != nil {
 		t.Fatal(err)
 	}
-	if autoincrementTables != "execution_runs,memories" {
-		t.Fatalf("tables declared AUTOINCREMENT = %q, want execution_runs,memories", autoincrementTables)
+	if autoincrementTables != "execution_runs,memories,planning_chats" {
+		t.Fatalf("tables declared AUTOINCREMENT = %q, want execution_runs,memories,planning_chats", autoincrementTables)
 	}
 }
 
@@ -1553,6 +1553,8 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 		"pellets_fts_data",
 		"pellets_fts_docsize",
 		"pellets_fts_idx",
+		"planning_chats",
+		"planning_draft_creations",
 		"project_code_redirects",
 		"project_group_routing",
 		"project_workspaces",
@@ -1560,6 +1562,7 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 		"review_checkpoint_removals",
 		"review_checkpoint_scope_history",
 		"review_checkpoint_targets",
+		"settings",
 		"workspace_group_assignments",
 		"workspace_run_settings",
 	}
@@ -1573,6 +1576,7 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 		"pellets_active_priority_idx",
 		"pellets_closed_completed_idx",
 		"pellets_workspace_in_progress_idx",
+		"planning_chats_project_recent_idx",
 		"project_code_redirects_project_idx",
 	}
 	assertObjectNames(t, db, "table", wantTables)
@@ -1580,6 +1584,7 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 	assertObjectNames(t, db, "trigger", []string{
 		"pellets_implementation_revision",
 		"pellets_kind_immutable",
+		"planning_draft_creation_immutable",
 		"project_code_redirects_canonical_namespace_insert",
 		"project_code_redirects_canonical_namespace_update",
 		"projects_code_redirect_namespace_insert",
@@ -1622,7 +1627,7 @@ func assertObjectNames(t *testing.T, db *sql.DB, objectType string, want []strin
 
 func assertStrictTables(t *testing.T, db *sql.DB) {
 	t.Helper()
-	want := []string{"application_metadata", "checkpoint_finding_assessments", "checkpoint_triage", "execution_run_activity", "execution_runs", "memories", "pellet_add_requests", "pellets", "project_code_redirects", "project_group_routing", "project_workspaces", "projects", "review_checkpoint_removals", "review_checkpoint_scope_history", "review_checkpoint_targets", "workspace_group_assignments", "workspace_run_settings"}
+	want := []string{"application_metadata", "checkpoint_finding_assessments", "checkpoint_triage", "execution_run_activity", "execution_runs", "memories", "pellet_add_requests", "pellets", "planning_chats", "planning_draft_creations", "project_code_redirects", "project_group_routing", "project_workspaces", "projects", "review_checkpoint_removals", "review_checkpoint_scope_history", "review_checkpoint_targets", "settings", "workspace_group_assignments", "workspace_run_settings"}
 	rows, err := db.Query("PRAGMA table_list")
 	if err != nil {
 		t.Fatal(err)

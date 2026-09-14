@@ -1,5 +1,5 @@
 {{define "page"}}<!doctype html>
-<html lang="en" data-nonce="{{.Nonce}}" data-ui-revision="{{.UIRevision}}">
+<html lang="en" data-settings="{{.SettingsJSON}}" data-csrf="{{.CSRF}}" data-nonce="{{.Nonce}}" data-ui-revision="{{.UIRevision}}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,6 +8,7 @@
   <script src="/assets/{{.UIRevision}}/theme-preflight.js"></script>
   <link rel="stylesheet" href="/assets/{{.UIRevision}}/app.css">
   <link rel="stylesheet" href="/assets/{{.UIRevision}}/workbench.css">
+  <link rel="stylesheet" href="/assets/{{.UIRevision}}/planner.css">
   <script type="module" src="/assets/{{.UIRevision}}/app.js"></script>
   <title>{{if .HasProject}}{{.Project.Code}} · Pellets{{else}}Pellets{{end}}</title>
 </head>
@@ -39,7 +40,7 @@
     <main id="main" class="workspace" tabindex="-1">
       {{if eq .Area "memories"}}{{template "memories-area" .}}{{else}}{{template "tasks-area" .}}{{end}}
     </main>
-    <aside id="execution" aria-label="Workspace execution">{{template "run-dashboard" .}}</aside>
+    <aside id="right-panel" aria-label="Planning and execution"><div class="plan-tabs"><div role="tablist" aria-label="Right panel"><button type="button" role="tab" id="plan-tab" aria-controls="planning-panel" aria-selected="false" tabindex="-1" data-plan="open">Plan</button><button type="button" role="tab" id="execution-tab" aria-controls="execution" aria-selected="true" data-plan="execution">Execution <span class="execution-tab-dot" hidden></span></button></div></div><section id="planning-panel" role="tabpanel" aria-labelledby="plan-tab" data-ignore-morph hidden></section><aside id="execution" role="tabpanel" aria-labelledby="execution-tab" aria-label="Workspace execution">{{template "run-dashboard" .}}</aside></aside>
   </div>
   {{template "statusbar" .}}
   {{end}}

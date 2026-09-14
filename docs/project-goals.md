@@ -196,3 +196,18 @@ review. Queue position and visual adjacency never define review membership.
 The queue defaults to active work; All states and individual lifecycle filters
 remain available. Removed checkpoints are discoverable under Maybe later for
 explicit restoration.
+
+## Planning in the workbench
+
+Plan and Execution share the right sidebar as independently retained tabs.
+Planning helps a user discuss scope, review editable draft pellets, and explicitly
+create selected work. Conversations stay bound to their original project across
+navigation. Draft rows support refinement, split/combine, selection, and group
+editing, with real routing hints and canonical created references.
+
+The production planner uses the installed Codex runtime with real model choices;
+it does not simulate responses. Planning is read-only with respect to repository
+and execution tools. Only the explicit Create action inserts ordinary open pellets
+in the authoritative database. It does not claim them, start a run, approve memory,
+or manufacture checkpoint evidence. Chat persistence and conflict handling retain
+unfinished input while execution and navigation continue independently.

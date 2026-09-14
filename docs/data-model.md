@@ -1,6 +1,6 @@
 # Data Model
 
-SQLite is authoritative for logical projects, their registered workspaces, credential-free run settings, durable execution evidence, pellets, and memories. FTS5 tables are derived indexes and can always be rebuilt.
+SQLite is authoritative for logical projects, their registered workspaces, credential-free run settings, durable execution evidence, pellets, memories, and planning chats. FTS5 tables are derived indexes and can always be rebuilt.
 
 This model intentionally contains no dependency, edge, epic, tag, group, task-note, task-event, agent, PID, session, claim, lease, heartbeat, expiry, assignment-history, or vector table. A workspace row is a Git worktree coordination identity, not an agent or security principal. Group is a nullable scalar on a pellet, not an entity. Memory is documented separately in [memory.md](memory.md); CLI behavior is in [cli-spec.md](cli-spec.md).
 
@@ -760,3 +760,46 @@ A release/reclaim or other lifecycle replacement leaves a gap and cannot be
 adopted. Every finalization check still requires the exact current revision.
 Assessment and delivery do not replay automatically after interruption; pending
 or uncertain work remains explicit recovery state.
+
+## Planning conversations and proposal creation
+
+Migration 19 adds `planning_chats`, with a stable chat ID, project foreign key,
+optimistic revision, timestamps, and bounded JSON state. State includes model and
+effort choices, the unfinished composer, an append-only user/assistant message
+history, editable proposals, selection, and the draft being refined. The current
+limits are 200 messages, 200 drafts, 64 KiB per message or description/acceptance
+field, 32 KiB for the composer, and 512 KiB for the complete encoded state. IDs
+must be unique within their message or draft list. New chat starts another
+record; reading or switching projects neither creates nor rebinds a chat.
+
+A project-scoped creation request ID and fingerprint make a repeated New chat
+request return its existing chat. A state save requires the exact current
+revision, except that an identical normalized state is a no-op replay after a
+lost response. Different stale state always conflicts. Already saved messages
+cannot be rewritten or removed, preserving conversation and send-retry identity.
+
+Explicit draft IDs select ordinary pellets to create. One immediate transaction
+checks the chat version, validates the entire batch, allocates project numbers
+and queue positions, writes pellets and their FTS rows, records creation receipts,
+and updates the chat. Description and acceptance become the ordinary pellet's
+description; group bytes remain exact. No workspace is claimed and no execution
+run is started. A failure rolls back the whole batch, including allocated numbers.
+
+`planning_draft_creations` records the immutable draft snapshot, stable pellet
+number, and original pellet response per chat/draft. The receipt has no pellet
+foreign key so it survives purge; references are projected with the current
+canonical project code after a rename. Created drafts must remain in their chat
+and cannot be edited into a different proposal. A save cannot forge or erase a
+created mapping. Repeating creation for already created draft IDs returns these
+receipts without allocating more work, even if the original response was lost,
+the chat was later edited, or the pellet was purged. A request containing any
+uncreated draft still requires the current revision. Each chat's receipt count
+is bounded by its draft limit. Planning records are separate from execution
+ownership, process state, resume intent, and checkpoint review evidence.
+
+Presentation preferences use the `settings` table (migration 20): a unique text
+`key` and bounded text `value`. Supported keys are `theme`, `navigation_visible`,
+`execution_visible`, and `right_panel_tab`. Preferences apply across projects in
+one database; they contain no execution selection or credentials. Each explicit
+change atomically upserts one key. First-visit browser migration inserts only
+missing keys, so stale browser preferences cannot overwrite saved values.

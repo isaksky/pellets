@@ -1,5 +1,6 @@
 import * as uiVersion from "./ui-version.js";
 import "./workbench.js";
+import { saveSetting } from "./settings.js";
 import { action, actions } from "./datastar-1.0.3.js";
 
 (function () {
@@ -13,6 +14,7 @@ import { action, actions } from "./datastar-1.0.3.js";
   function rememberTheme(choice) {
     try { localStorage.setItem("pellets-theme", choice); } catch (_) {}
     applyTheme(choice);
+    saveSetting("theme", choice);
   }
 
   document.addEventListener("change", function (event) {

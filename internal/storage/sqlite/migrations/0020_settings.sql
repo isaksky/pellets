@@ -1,0 +1,4 @@
+CREATE TABLE settings (
+ key TEXT PRIMARY KEY NOT NULL CHECK(length(key) BETWEEN 1 AND 128),
+ value TEXT NOT NULL CHECK(length(CAST(value AS BLOB)) <= 4096)
+) STRICT;

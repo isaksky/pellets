@@ -1,6 +1,8 @@
+import { saveSetting } from "./settings.js";
 import "./dropdowns.js";
 import { syncQueueFilters } from "./filters.js";
 import * as uiVersion from "./ui-version.js";
+import "./planner.js";
 // Presentation state is ephemeral and never supplies queue/execution authority.
 const root = document.documentElement;
 const drafts = new Map(),
@@ -32,7 +34,7 @@ function panels() {
   for (const key of ["navigation", "execution"]) {
     const hidden = root.classList.contains(key + "-collapsed"),
       el = document.getElementById(
-        key === "navigation" ? "project-drawer" : "execution",
+        key === "navigation" ? "project-drawer" : "right-panel",
       ),
       button = document.getElementById("toggle-" + key);
     if (el) {
@@ -45,6 +47,7 @@ function panels() {
     }
   }
   updateAttention();
+  window.Planner?.sync();
 }
 function updateAttention() {
   const button = document.getElementById("toggle-execution"),
@@ -66,6 +69,7 @@ function updateAttention() {
     " · " +
     state;
   button.setAttribute("aria-label", button.title);
+  window.Planner?.status(state, attention);
 }
 function formKey(form) {
   const req = form.querySelector('[name="request_id"]')?.value || "";
@@ -269,19 +273,6 @@ window.Workbench = {
   syncDialog,
   saved,
 };
-window.addEventListener("storage", (event) => {
-  if (event.key === "pellets-theme") applyTheme(event.newValue);
-  if (event.key === "pellets-panels") {
-    let prefs = {};
-    try {
-      prefs = JSON.parse(event.newValue || "{}");
-    } catch {}
-    for (const key of ["navigation", "execution"])
-      root.classList.toggle(key + "-collapsed", prefs[key] === false);
-    panels();
-    brackets();
-  }
-});
 // A backdrop click must begin and end outside the dialog. Selecting text or
 // dragging a control out of a dialog must not dismiss an unfinished edit.
 let backdropPress = null;
@@ -315,6 +306,7 @@ document.addEventListener("click", (event) => {
   if (toggle) {
     const key = toggle.dataset.togglePanel;
     root.classList.toggle(key + "-collapsed");
+    saveSetting(key + "_visible", String(!root.classList.contains(key + "-collapsed")));
     try {
       localStorage.setItem(
         "pellets-panels",
@@ -328,7 +320,9 @@ document.addEventListener("click", (event) => {
     requestAnimationFrame(brackets);
   }
   if (event.target.closest("[data-open-execution]")) {
+    window.Planner?.selectExecution();
     root.classList.remove("execution-collapsed");
+    saveSetting("execution_visible", "true");
     try {
       localStorage.setItem(
         "pellets-panels",

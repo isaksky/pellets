@@ -116,17 +116,43 @@ async function reloadWithDrafts(page, revision) {
       if (event.detail._webResult) window.upgradeResults.push(event.detail._webResult.status);
     });
   });
-  const errors = [], posts = [], assets = [];
-  context.on('page', page => page.on('pageerror', error => errors.push(error.message)));
-  context.on('request', request => {
-    if (request.method() === 'POST') posts.push(request.url());
-    if (new URL(request.url()).pathname.startsWith('/assets/')) assets.push(request.url());
-  });
+  const errors = [], posts = [], assets = [], planningRequests = [];
+  const observeContext = observed => {
+    observed.on('page', page => page.on('pageerror', error => errors.push(error.message)));
+    observed.on('request', request => {
+      if (request.method() === 'POST') {
+        posts.push(request.url());
+        if (new URL(request.url()).pathname.endsWith('/planning')) planningRequests.push(request.postDataJSON());
+      }
+      if (new URL(request.url()).pathname.startsWith('/assets/')) assets.push(request.url());
+    });
+  };
+  observeContext(context);
   const queuePath = `/projects/${pellet.project}/tasks`;
   const pelletPage = await openPage(context, origin + queuePath + '/' + pellet.id);
   const memoryPage = await openPage(context, origin + `/projects/${pellet.project}/memories/${memory.id}`);
   const cleanPage = await openPage(context, origin + queuePath);
   const assignmentPage = await openPage(context, origin + queuePath + '?workspace=1');
+  // A separate tab-storage context keeps planning preferences independent from
+  // the record cases, while sharing the same actual server and database.
+  const planningContext = await browser.newContext({viewport: {width: 1280, height: 850}});
+  observeContext(planningContext);
+  const planningPage = await openPage(planningContext, origin + queuePath);
+  await planningPage.locator('#plan-tab').click();
+  await planningPage.getByRole('heading', {name: 'What should we work on?'}).waitFor();
+  await planningPage.locator('.plan-welcome [data-plan=add-draft]').click();
+  const planningDraft = planningPage.locator('.plan-card').first();
+  const planningDraftID = await planningDraft.getAttribute('data-draft-id');
+  await planningDraft.locator('[name=title]').fill('Saved planning draft before upgrade');
+  await planningDraft.locator('[name=description]').fill('Saved planning context before upgrade.');
+  const planningEndpoint = origin + `/projects/${pellet.project}/planning`;
+  const readPlanning = async () => (await (await planningPage.request.get(planningEndpoint)).json()).chat;
+  await until(async () => {
+    const saved = await readPlanning();
+    return saved?.state.drafts[0]?.description === 'Saved planning context before upgrade.';
+  }, 'Manual planning fixture did not autosave to the real database');
+  const savedPlanningChat = await readPlanning();
+  const planningVersion = await planningDraft.locator('[name=version]').inputValue();
   const oldRevision = await cleanPage.locator('html').getAttribute('data-ui-revision');
   assert.match(oldRevision, /^[a-f0-9]{64}$/);
   assert.equal((await (await cleanPage.request.get(origin + '/ui-version')).json()).revision, oldRevision);
@@ -155,20 +181,48 @@ async function reloadWithDrafts(page, revision) {
   await memoryForm.locator('[name=text]').fill(memoryDraft);
   await cleanPage.evaluate(() => {window.preUpgradeQueue = document.getElementById('queue-rows'); window.preUpgradeQueueText = window.preUpgradeQueue.textContent;});
   const staleForm = await pelletForm.evaluate(form => Object.fromEntries(new FormData(form)));
-  const postCount = posts.length;
 
   await stopServer();
+  // Fail a real autosave against the stopped server. This retains an exact
+  // request, not a fabricated HTTP result, for explicit retry after the upgrade.
+  const planningTitle = 'Unfinished manual planning draft across upgrade';
+  const planningDescription = 'Planning description kept through restart.\n'.repeat(18);
+  const planningAcceptance = 'The original planning draft identity and fields survive.';
+  const planningInput = 'Unsent planning follow-up\nwith its caret kept in place.';
+  await planningDraft.locator('[name=title]').fill(planningTitle);
+  await planningDraft.locator('[name=description]').fill(planningDescription);
+  await planningDraft.locator('[name=acceptance]').fill(planningAcceptance);
+  await planningDraft.locator('[name=group]').fill('web-ui');
+  await planningDraft.locator('[data-field=selected]').uncheck();
+  await planningPage.locator('#plan-message').fill(planningInput);
+  await planningPage.locator('#plan-message').press('ArrowLeft');
+  await planningPage.locator('[data-plan=retry]').waitFor({state: 'visible'});
+  const failedPlanningRequest = planningRequests.at(-1);
+  assert.equal(failedPlanningRequest.action, 'save');
+  assert.equal(failedPlanningRequest.chat_id, savedPlanningChat.id);
+  assert.equal(failedPlanningRequest.state.input, planningInput);
+  assert.equal(failedPlanningRequest.state.drafts[0].title, planningTitle);
+  assert.match(failedPlanningRequest.request_id, /^[a-f0-9-]{36}$/i);
+  const planningCaret = await planningPage.locator('#plan-message').evaluate(element => element.selectionStart);
+  const planningScroll = await planningPage.locator('.plan-draft-list').evaluate(element => {
+    element.scrollTop = 47;
+    return element.scrollTop;
+  });
+  assert.ok(planningScroll > 0, 'Expanded planning draft did not exercise scroll restoration');
+  const postCount = posts.length;
   // Change the authoritative record while the tab retains the earlier CAS
   // version. Reload may recover draft text, but must not silently refresh CAS.
   cli('edit', pellet.id, '--title', 'Authoritative edit while old UI was open');
   assert.equal(await startServer(secondBinary, port), origin, 'Upgrade changed the origin');
   const newRevision = (await (await cleanPage.request.get(origin + '/ui-version')).json()).revision;
   assert.notEqual(newRevision, oldRevision, 'Separate embedded builds did not produce different revisions');
-  for (const page of [pelletPage, memoryPage, cleanPage, assignmentPage]) await page.locator('#ui-update-notice').waitFor({state: 'visible', timeout: 25000});
-  for (const page of [pelletPage, memoryPage, cleanPage, assignmentPage]) assert.equal(await page.locator('html').getAttribute('data-ui-revision'), oldRevision, 'An old tab automatically reloaded');
+  for (const page of [pelletPage, memoryPage, cleanPage, assignmentPage, planningPage]) await page.locator('#ui-update-notice').waitFor({state: 'visible', timeout: 25000});
+  for (const page of [pelletPage, memoryPage, cleanPage, assignmentPage, planningPage]) assert.equal(await page.locator('html').getAttribute('data-ui-revision'), oldRevision, 'An old tab automatically reloaded');
   assert.equal(await pelletForm.locator('[name=title]').inputValue(), titleDraft);
   assert.equal(await memoryForm.locator('[name=text]').inputValue(), memoryDraft);
   assert.equal(posts.length, postCount, 'Upgrade detection automatically submitted work');
+  assert.equal(await planningDraft.locator('[name=title]').inputValue(), planningTitle);
+  assert.equal(await planningPage.locator('#plan-message').inputValue(), planningInput);
   const pendingQuery = 'Owned';
   await cleanPage.locator('#search').fill(pendingQuery);
   assert.equal(new URL(cleanPage.url()).searchParams.has('q'), false, 'Outdated search sent a fragment request');
@@ -225,6 +279,41 @@ async function reloadWithDrafts(page, revision) {
   assert.equal(cli('memory', 'show', String(memory.id)).text, 'Original human memory', 'Restoring a draft automatically saved memory');
   for (const asset of assets.slice(assetMark)) assert.ok(new URL(asset).pathname.startsWith('/assets/' + newRevision + '/'), 'Reload mixed old/unversioned assets: ' + asset);
   assert.ok(assets.slice(assetMark).some(asset => asset.endsWith('/ui-version.js')), 'Reload omitted the revision client from the new graph');
+
+  const planningPostsBeforeReload = planningRequests.length;
+  await reloadWithDrafts(planningPage, newRevision);
+  await until(async () => await planningDraft.locator('[name=title]').inputValue() === planningTitle,
+    'Manual planning draft was not restored after the real server upgrade');
+  assert.equal(await planningDraft.getAttribute('data-draft-id'), planningDraftID, 'Reload replaced planning draft identity');
+  assert.equal(await planningDraft.locator('[name=description]').inputValue(), planningDescription);
+  assert.equal(await planningDraft.locator('[name=acceptance]').inputValue(), planningAcceptance);
+  assert.equal(await planningDraft.locator('[name=group]').inputValue(), 'web-ui');
+  assert.equal(await planningDraft.locator('[data-field=selected]').isChecked(), false);
+  assert.equal(await planningDraft.locator('[name=version]').inputValue(), planningVersion, 'Planning reload replaced the retained optimistic version');
+  assert.equal(await planningDraft.locator('details').evaluate(element => element.open), true, 'Planning reload lost expanded draft details');
+  assert.equal(await planningPage.locator('#plan-message').inputValue(), planningInput);
+  assert.equal(await planningPage.locator('#plan-message').evaluate(element => element.selectionStart), planningCaret, 'Planning reload lost composer caret');
+  assert.equal(await planningPage.locator('#plan-message').evaluate(element => document.activeElement === element), true, 'Planning reload lost composer focus');
+  assert.equal(await planningPage.locator('.plan-draft-list').evaluate(element => element.scrollTop), planningScroll, 'Planning reload lost draft list scroll');
+  await planningPage.locator('[data-plan=retry]').waitFor({state: 'visible'});
+  await planningPage.waitForTimeout(700);
+  assert.equal(planningRequests.length, planningPostsBeforeReload, 'Planning reload automatically replayed a failed request');
+  assert.deepEqual((await readPlanning()).state, savedPlanningChat.state, 'Planning reload changed saved chat before explicit retry');
+  assert.equal(await planningPage.locator('#ui-recovered-drafts').count(), 0, 'Planning forms leaked into the generic reload handoff');
+
+  await planningPage.locator('[data-plan=retry]').click();
+  await until(async () => (await readPlanning()).state.input === planningInput, 'Explicit planning retry did not save restored input');
+  const retriedPlanningRequest = planningRequests[planningPostsBeforeReload];
+  assert.equal(retriedPlanningRequest.request_id, failedPlanningRequest.request_id, 'Planning retry invented a new request ID');
+  assert.equal(retriedPlanningRequest.version, failedPlanningRequest.version, 'Planning retry changed the request CAS');
+  assert.deepEqual(retriedPlanningRequest.state, failedPlanningRequest.state, 'Planning retry changed the captured request payload');
+  assert.equal(retriedPlanningRequest._csrf, await planningPage.locator('input[name=_csrf]').first().inputValue(), 'Planning retry reused stale CSRF');
+  assert.notEqual(retriedPlanningRequest._csrf, failedPlanningRequest._csrf, 'Restart fixture did not exercise refreshed CSRF');
+  const persistedPlanningDraft = (await readPlanning()).state.drafts[0];
+  assert.equal(persistedPlanningDraft.id, planningDraftID);
+  assert.equal(persistedPlanningDraft.title, planningTitle);
+  assert.equal(persistedPlanningDraft.created_reference, undefined, 'Planning recovery implicitly created a pellet');
+  assert.equal(planningRequests.some(request => ['send', 'create'].includes(request.action)), false, 'Planning reload invoked the planner or created pellets');
 
   await reloadWithDrafts(assignmentPage, newRevision);
   assert.equal(await assignmentPage.locator('#assignment-popover').evaluate(element => element.open), true, 'Reload lost the assignment editor disclosure');
@@ -293,7 +382,7 @@ async function reloadWithDrafts(page, revision) {
   assert.equal(fs.existsSync(path.join(fixture, 'fake-events.jsonl')), false, 'Server restart contacted the execution peer');
   assert.equal(posts.some(url => /\/schedules(?:\/|$)/.test(url)), false, 'Upgrade or draft recovery automatically started a schedule');
   assert.deepEqual(errors, []);
-  console.log('PASS real same-origin UI upgrade: revision guard, unchanged old DOM, complete new asset graph, pellet/memory/assignment drafts and old CAS, closed-draft invalidation, explicit conflict/save, no automatic execution');
+  console.log('PASS real same-origin UI upgrade: revision guard, unchanged old DOM, complete new asset graph, pellet/memory/assignment/planning drafts and old CAS, retained planning request ID and fresh CSRF, composer focus/caret/disclosure/scroll, closed-draft invalidation, explicit conflict/save/retry, no automatic execution');
 })().catch(error => {console.error(error); process.exitCode = 1;}).finally(async () => {
   if (browser) await browser.close();
   await stopServer();

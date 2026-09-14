@@ -23,6 +23,9 @@ import (
 // TestMain makes this test binary a deterministic stdio peer. Normal tests never
 // launch an installed runtime, contact a model, or read credentials.
 func TestMain(m *testing.M) {
+	if testcodex.Run() {
+		os.Exit(0)
+	}
 	if mode := os.Getenv("PELLETS_CODEX_TEST_TOOL_MODE"); mode != "" {
 		name := strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe")
 		if name == "pl" {

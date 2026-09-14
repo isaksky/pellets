@@ -4,7 +4,7 @@
   if (window.Dropdowns) return;
 
   const selector =
-    "#theme-select, #execution select[name=mode], #inspector-host select, .assignment-form select, .filters select";
+    "#theme-select, #execution select[name=mode], #inspector-host select, .assignment-form select, .filters select, #planning-panel select";
   let identity = 0;
   const records = new WeakMap();
   const triggerRecords = new WeakMap();

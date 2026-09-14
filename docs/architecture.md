@@ -545,3 +545,42 @@ selection. Datastar remains responsible for HTTP mutations and authoritative HTM
 patches. Activity uses a distinct cursor stream and stable DOM items so it cannot
 replace editors or compete with the execution driver's event consumer. All CSS,
 selector controls and syntax highlighting are embedded and offline.
+
+### Project planning conversations
+
+The Workbench Plan tab is an intentional addition to the foreground server.
+`internal/storage/planning.go` defines an optional project-scoped storage boundary;
+SQLite migration 19 persists bounded conversation/draft state and a creation
+ledger. Versions protect full-state draft saves. Selective creation runs in an
+immediate transaction with queue insertion and ledger updates, so retries cannot
+duplicate pellets. Chat IDs and created pellet numbers are bound to a project;
+canonical project references are derived on reads. Planning state does not provide
+ownership, dependencies, execution selection, or review evidence.
+
+The JSON `/projects/CODE/planning` boundary uses the existing loopback Host,
+Origin, CSRF, and UI revision protections. GET never creates a conversation.
+Mutation requests serialize per chat without holding a database transaction while
+a model runs. The application assembles bounded project/conversation context and
+calls an isolated Codex planning adapter. A successful response is validated and
+saved with its user message and proposed drafts in one compare-and-swap. Stable
+message request IDs detect retries. The HTTP request and server shutdown own the
+planning process lifetime; server restart never resumes a planning call. The
+execution supervisor and its event consumer remain independent.
+
+The adapter discovers the runtime's actual model catalog and uses an ephemeral
+read-only thread. Repository inspection and external operations are disabled; the read-only
+sandbox rejects repository writes, and no writable database roots are granted. Queue titles and group samples are bounded context;
+planning does not claim to inspect repository files. Raw notifications and credentials are not stored in chat state;
+only bounded user text, validated assistant text, and editable draft fields are
+retained. The production behavior deliberately replaces the prototype's local
+response templates and simulated queue writes. See [Workbench UI](workbench-ui.md)
+for the browser interaction and persistence contract.
+
+The local UI reads presentation settings from SQLite before rendering the page,
+so the blocking theme preflight applies the saved palette before first paint.
+`GET /settings` reads preferences; `POST /settings` accepts bounded, validated
+JSON protected by the existing Host, Origin, CSRF and UI revision checks. Browser
+writes are serialized, with an explicit retry notice on failure. Settings are
+shared within the database and read on page load; other open browsers receive
+saved changes on their next reload. Preference changes do not rebuild active
+execution, dialogs, or planning drafts.

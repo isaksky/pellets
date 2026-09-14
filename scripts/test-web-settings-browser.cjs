@@ -1,0 +1,45 @@
+// Uses a disposable SQLite database and the real production server.
+const assert = require('node:assert/strict');
+const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const {execFileSync,spawn}=require('node:child_process');
+const {chromium,webkit}=require('playwright');
+const temp=fs.mkdtempSync(path.join(os.tmpdir(),'pellets-settings-browser-'));
+let browser,server;
+(async()=>{
+ const binary=path.join(temp,'pl'),repo=path.join(temp,'settings');fs.mkdirSync(repo);
+ execFileSync('go',['build','-o',binary,'./cmd/pl']);
+ execFileSync('git',['init','-q'],{cwd:repo});
+ const pellet=JSON.parse(execFileSync(binary,['add','Settings test'],{cwd:repo,encoding:'utf8'})).data;
+ server=spawn(binary,['server','--port','0','--no-open'],{cwd:repo});
+ const origin=await new Promise((resolve,reject)=>{let out='';server.stdout.on('data',d=>{out+=d;if(out.includes('\n'))resolve(out.split('\n')[0].trim())});server.once('error',reject);});
+ const engine=process.env.PLAYWRIGHT_BROWSER==='webkit'?webkit:chromium;
+ browser=await engine.launch({headless:true,...(engine===chromium?{channel:'chrome'}:{executablePath:process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE})});
+ const context=await browser.newContext();
+ await context.addInitScript(()=>localStorage.setItem('pellets-theme','icy'));
+ const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const url=origin+'/projects/'+pellet.project+'/tasks';await page.goto(url);
+ const settings=async()=> (await (await page.request.get(origin+'/settings')).json()).settings;
+ async function until(fn){for(let i=0;i<150;i++){if(await fn())return;await page.waitForTimeout(50)}throw Error('Settings not persisted');}
+ await until(async()=>(await settings()).theme==='icy');
+ await page.locator('#plan-tab').click();
+ await page.locator('#plan-message').fill('Keep this unfinished idea');
+ await page.locator('#plan-message').focus();
+ await page.evaluate(()=>{window.inputBefore=document.activeElement;for(const value of ['dark','light','gruvbox-dark']){const select=document.getElementById('theme-select');select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));}});
+ await until(async()=>(await settings()).theme==='gruvbox-dark');
+ assert.equal(await page.locator('#plan-message').inputValue(),'Keep this unfinished idea');
+ assert.equal(await page.evaluate(()=>document.activeElement===window.inputBefore),true);
+ await page.locator('[data-toggle-panel="navigation"]').click();
+ await until(async()=>(await settings()).navigation_visible==='false'&&(await settings()).right_panel_tab==='plan');
+ const clean=await browser.newContext();const fresh=await clean.newPage();await fresh.goto(url);
+ assert.equal(await fresh.locator('html').getAttribute('data-theme'),'gruvbox-dark');
+ assert.match(await fresh.locator('html').getAttribute('class'),/navigation-collapsed/);
+ assert.equal(await fresh.locator('#plan-tab').getAttribute('aria-selected'),'true');
+ await page.reload();assert.equal(await page.locator('html').getAttribute('data-theme'),'gruvbox-dark','stale local cache overrode DB');
+ await page.route('**/settings',route=>route.request().method()==='POST'?route.abort():route.continue());
+ await page.locator('#theme-select').selectOption('dark',{force:true});
+ await page.locator('.settings-save-notice').waitFor();
+ await page.unroute('**/settings');await page.locator('.settings-save-notice button').click();
+ await until(async()=>(await settings()).theme==='dark');
+ await page.locator('.settings-save-notice').waitFor({state:'detached'});
+ assert.deepEqual(errors,[]);console.log('PASS SQLite preferences: migration, fresh browser, rapid writes, draft/focus preservation, failed-save retry');
+})().catch(e=>{console.error(e);process.exitCode=1}).finally(async()=>{await browser?.close();server?.kill('SIGINT');});

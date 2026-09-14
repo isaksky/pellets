@@ -20,7 +20,7 @@ import (
 
 const (
 	// LatestSchemaVersion is the newest schema understood by this executable.
-	LatestSchemaVersion     = 18
+	LatestSchemaVersion     = 20
 	driverName              = "sqlite"
 	busyTimeoutMilliseconds = 5000
 )
@@ -79,6 +79,12 @@ var migration17SQL string
 //go:embed migrations/0018_live_implementation_changes.sql
 var migration18SQL string
 
+//go:embed migrations/0019_planning_chats.sql
+var migration19SQL string
+
+//go:embed migrations/0020_settings.sql
+var migration20SQL string
+
 type migration struct {
 	version    int
 	name       string
@@ -113,6 +119,8 @@ var migrations = []migration{
 	{version: 16, name: "workspace-group-assignments", sql: migration16SQL, assert: assertMigration16, preflight: assertMigration16, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
 	{version: 17, name: "checkpoint-management", sql: migration17SQL, assert: assertMigration17, preflight: assertMigration17, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
 	{version: 18, name: "live-implementation-changes", sql: migration18SQL, assert: assertMigration18, preflight: assertMigration18, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
+	{version: 19, name: "planning-chats", sql: migration19SQL, assert: assertMigration19, preflight: assertMigration19, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
+	{version: 20, name: "settings", sql: migration20SQL, assert: assertMigration20, preflight: assertMigration20, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
 }
 
 // Open opens path with the required hardened runtime settings and applies all
@@ -763,4 +771,12 @@ func assertMigration17(ctx context.Context, conn *sql.Conn) error {
 
 func assertMigration18(ctx context.Context, conn *sql.Conn) error {
 	return verifyProductionSchemaContract(ctx, conn, 18)
+}
+
+func assertMigration19(ctx context.Context, conn *sql.Conn) error {
+	return verifyProductionSchemaContract(ctx, conn, 19)
+}
+
+func assertMigration20(ctx context.Context, conn *sql.Conn) error {
+	return verifyProductionSchemaContract(ctx, conn, 20)
 }

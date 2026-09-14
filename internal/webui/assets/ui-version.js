@@ -191,6 +191,8 @@ function reloadWithDrafts() {
     return;
   }
   try {
+	const plannerError = window.Planner?.prepareReload?.();
+	if (plannerError) throw Error(plannerError);
     const focusedForm =
       lastFocus &&
       Array.from(document.forms).find(
@@ -199,7 +201,7 @@ function reloadWithDrafts() {
     const focusedField =
       focusedForm &&
       fields(focusedForm).find((field) => field.name === lastFocus.name);
-    const focus = focusedField
+    const focus = focusedForm?.closest("#planning-panel") ? null : focusedField
       ? focusSnapshot(
           lastFocus.trigger
             ? document.getElementById(focusedField.id + "-trigger")
@@ -207,6 +209,7 @@ function reloadWithDrafts() {
         )
       : lastFocus;
     const drafts = Array.from(document.forms)
+      .filter((form) => !form.closest("#planning-panel"))
       .filter(
         (form) =>
           form.dataset.dirty === "true" ||
