@@ -2435,3 +2435,11 @@ dialog::backdrop {
 .sidebar-resize-handle:hover, .sidebar-resize-handle:focus-visible { background:var(--accent); opacity:.5; }
 .sidebar-resizing, .sidebar-resizing * { cursor:col-resize!important; user-select:none!important; }
 @media(max-width:600px) { .sidebar-resize-handle { display:none; } }
+
+.switcher-chevron { display:block; width:14px; height:14px; flex:none; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; color:var(--muted); }
+
+.breadcrumbs .switcher summary { gap:4px; }
+
+.breadcrumbs .switcher summary { padding:3px 6px; border-radius:4px; }
+.breadcrumbs .switcher summary:hover,
+.breadcrumbs .switcher summary:focus-visible { background:var(--theme-quiet-hover); }
