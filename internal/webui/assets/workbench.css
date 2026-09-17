@@ -2426,3 +2426,6 @@ dialog::backdrop {
 .settings-save-notice { position: fixed; bottom: 3rem; right: 1rem; z-index: 10000; padding: .6rem .8rem; background: var(--surface, Canvas); color: var(--text, CanvasText); border: 1px solid currentColor; border-radius: 4px; }
 
 .execution-access { display:flex; align-items:center; gap:8px; margin:8px 0; font-size:12px; }
+
+/* Keep the queue heading closer to the application toolbar. */
+.workspace:has(#tasks-area) { padding-top:16px; }
