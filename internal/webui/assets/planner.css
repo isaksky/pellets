@@ -305,3 +305,7 @@
   .plan-draft-list .plan-card { grid-template-columns:18px minmax(0,1fr) 28px; }
   .plan-draft-list .plan-card > .plan-dismiss { display:block; }
 }
+
+.plan-card .plan-open-draft { display:flex; align-items:center; gap:10px; }
+.plan-card .plan-row-error { flex:none; margin-left:auto; padding-right:6px; color:var(--red); font-size:11px; text-align:right; white-space:nowrap; }
+.plan-card .plan-row-error[hidden] { display:none; }
