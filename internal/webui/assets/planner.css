@@ -163,3 +163,6 @@
   .plan-transcript { padding:12px 16px; }
   .plan-bottom { padding:9px 12px 7px; }
 }
+
+.plan-workspace-label { display: flex; align-items: center; gap: .5rem; margin-top: .4rem; font-size: .75rem; }
+.plan-workspace-label select { min-width: 0; max-width: 100%; }

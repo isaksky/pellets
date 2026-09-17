@@ -55,7 +55,13 @@ remains visible on the tab and on the collapsed panel toggle.
 
 Planning conversations and editable draft pellets are persisted in the project
 database, with optimistic versions. A conversation stays bound to its original
-project when the main view changes. New chat requires confirmation when replacing
+project and saved workspace when the main view changes. New chats use the
+workspace selected in the workbench; the panel displays its full path. A saved
+workspace binding cannot be changed: start a new chat to use another worktree.
+Legacy chats without a binding require a one-time workspace selection before
+sending. Missing or changed checkouts stop planning rather than selecting another
+workspace. Model discovery uses the same selected workspace and its settings.
+New chat requires confirmation when replacing
 visible content; existing stored conversations are not destructively deleted.
 Compact draft rows expand for title, description, acceptance criteria, and group
 editing. Add, remove, split, combine, select, and refinement controls operate on

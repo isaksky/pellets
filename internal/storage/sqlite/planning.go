@@ -195,6 +195,9 @@ func (writer *WebWriter) CreatePlanningChat(ctx context.Context, project storage
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
+		if err := validatePlanningWorkspace(ctx, conn, project, 0, state.WorkspaceID); err != nil {
+			return err
+		}
 		now, err := captureJulianTimestamp(ctx, conn)
 		if err != nil {
 			return err
@@ -211,6 +214,25 @@ func (writer *WebWriter) CreatePlanningChat(ctx context.Context, project storage
 		return err
 	})
 	return
+}
+
+// Zero is reserved for legacy chats that have not yet chosen a workspace.
+// Once bound, a chat cannot be retargeted, including by omitting the field.
+func validatePlanningWorkspace(ctx context.Context, conn *sql.Conn, project storage.Project, before, after int64) error {
+	if before != 0 && before != after {
+		return storage.InvalidPlanningState("this chat is bound to its workspace; start a new chat to use another workspace")
+	}
+	if after == 0 {
+		return nil
+	}
+	var found int
+	if err := conn.QueryRowContext(ctx, "SELECT 1 FROM project_workspaces WHERE project_id=? AND workspace_id=?", project.ID, after).Scan(&found); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return storage.InvalidPlanningState("the planning workspace does not belong to this project")
+		}
+		return err
+	}
+	return nil
 }
 
 // Created drafts are historical proposal receipts. A generic state save can
@@ -287,7 +309,10 @@ func (writer *WebWriter) SavePlanningChat(ctx context.Context, project storage.P
 		if err != nil {
 			return err
 		}
-		stateErr := validatePlanningReceipts(&state, receipts)
+		stateErr := validatePlanningWorkspace(ctx, conn, project, current.State.WorkspaceID, state.WorkspaceID)
+		if stateErr == nil {
+			stateErr = validatePlanningReceipts(&state, receipts)
+		}
 		if stateErr == nil && (len(state.Messages) < len(current.State.Messages) || !reflect.DeepEqual(state.Messages[:len(current.State.Messages)], current.State.Messages)) {
 			stateErr = storage.InvalidPlanningState("saved planning messages are immutable; start a new chat to begin another conversation")
 		}

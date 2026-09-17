@@ -9,6 +9,7 @@ const binary = path.join(temporary, 'pl'), peer = path.join(temporary, 'codex'),
 const env = {...process.env, PATH:temporary+path.delimiter+process.env.PATH, PELLETS_CODEX_EXECUTABLE:peer, PELLETS_SUPERVISOR_PEER:'1'};
 let browser, server;
 const cli = (...args) => JSON.parse(execFileSync(binary,args,{cwd:fixture,env,encoding:'utf8'})).data;
+const sameFolder = (a,b) => {const x=fs.statSync(a),y=fs.statSync(b);return x.dev===y.dev&&x.ino===y.ino;};
 const until = async (predicate,message) => {const end=Date.now()+25000;while(Date.now()<end){if(await predicate())return;await new Promise(r=>setTimeout(r,60));}throw Error(message);};
 async function stop(){if(server&&server.exitCode===null){const done=new Promise(r=>server.once('exit',r));server.kill('SIGINT');await done;}}
 (async()=>{
@@ -18,6 +19,10 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   const init=directory=>{fs.mkdirSync(directory,{recursive:true});execFileSync('git',['init','-q'],{cwd:directory});execFileSync('git',['config','user.name','Test'],{cwd:directory});execFileSync('git',['config','user.email','test@example.invalid'],{cwd:directory});execFileSync('git',['-c','commit.gpgSign=false','commit','--allow-empty','-qm','initial'],{cwd:directory});};
   init(fixture);
   const original=cli('add','Existing queue context','--group','web-ui');
+  const linkedRoot=path.join(temporary,'linked');
+  execFileSync('git',['worktree','add','--detach',linkedRoot,'HEAD'],{cwd:fixture});
+  const linkedRegistration=JSON.parse(execFileSync(binary,['project','show'],{cwd:linkedRoot,env,encoding:'utf8'})).data;
+  fs.writeFileSync(path.join(linkedRoot,'fake-mode'),'planning_chat');
   const otherRoot=path.join(fixture,'other');init(otherRoot);
   const other=JSON.parse(execFileSync(binary,['add','Other project work'],{cwd:otherRoot,env,encoding:'utf8'})).data;
   fs.appendFileSync(path.join(fixture,'.git/info/exclude'),'\n/fake-*\n/other/\n');
@@ -196,6 +201,31 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
     assert.equal(await page.locator('#main').evaluate(el=>el.inert),false,'Collapsing Plan left the queue inert');
     await page.locator('#toggle-execution').click();assert.equal(await page.locator('#planning-panel').isVisible(),true);
   }
+  const snapshot=await(await page.request.get(origin+'/projects/'+original.project+'/planning')).json();
+  const linked=snapshot.routing.find(w=>sameFolder(w.path,linkedRoot));
+  const main=snapshot.routing.find(w=>sameFolder(w.path,fixture));
+  assert.ok(linked&&main,'Both planning workspaces must be available: '+JSON.stringify({routing:snapshot.routing,linkedRegistration,linkedRoot,fixture}));
+  await page.goto(origin+'/projects/'+original.project+'/tasks?workspace='+linked.id);
+  await page.locator('#plan-workspace').waitFor({state:'attached'});
+  assert.equal(await page.locator('#plan-workspace').inputValue(),String(recoveredNew.state.workspace_id),'Navigation retargeted the pinned chat');
+  await page.getByRole('button',{name:'New chat',exact:true}).click();
+  await until(async()=>(await page.locator('#plan-workspace').inputValue())===String(linked.id),'New chat ignored the selected worktree');
+  assert.ok(sameFolder(await page.locator('.plan-path').innerText(),linkedRoot));
+  assert.equal(await page.locator('#plan-workspace').isDisabled(),true,'Saved workspace binding remained editable');
+  await page.locator('#plan-model-trigger').click();
+  await page.getByRole('option',{name:'Planning Test',exact:true}).click();
+  await page.locator('#plan-message').fill('Inspect this linked worktree');
+  await page.getByRole('button',{name:'Send message',exact:true}).click();
+  await until(async()=>await page.locator('.plan-card').count()===2,'Linked planning turn failed');
+  const calls=fs.readFileSync(path.join(linkedRoot,'fake-events.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+  for(const method of ['config/read','thread/start','turn/start']) {
+    const call=calls.find(c=>c.method===method);
+    assert.ok(call,'Missing linked-worktree '+method);
+    assert.ok(sameFolder(call.params.cwd,linkedRoot),'Wrong workspace passed to '+method);
+  }
+  await page.goto(origin+'/projects/'+original.project+'/tasks?workspace='+main.id);
+  await until(async()=>(await page.locator('#plan-workspace').inputValue())===String(linked.id),'Reload or navigation changed the chat workspace');
+  assert.ok(sameFolder(await page.locator('.plan-path').innerText(),linkedRoot));
   assert.deepEqual(errors,[]);
-  console.log('PASS real planning: lazy model catalog, gated reply, retained composer/DOM, explicit selected creation, immediate edit save, split/combine/refine, persistent project pin, created links, confirmed new chat, lost Send/New receipts with exact explicit retry, responsive tabs and keyboard');
+  console.log('PASS real planning: lazy model catalog, gated reply, retained composer/DOM, explicit selected creation, immediate edit save, split/combine/refine, persistent project pin, created links, confirmed new chat, lost Send/New receipts with exact explicit retry, responsive tabs and keyboard, immutable selected-worktree binding and exact model/turn cwd');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(browser)await browser.close();await stop();fs.rmSync(temporary,{recursive:true,force:true});});

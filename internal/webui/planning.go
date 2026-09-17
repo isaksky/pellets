@@ -66,16 +66,24 @@ func (h *handler) planningSnapshot(ctx context.Context, project storage.Project,
 		if absolute, resolveErr := discovery.ResolveLocalPath(h.application.Database.Root, workspace.RootPath); resolveErr == nil {
 			name = filepath.Base(absolute)
 		}
-		rows = append(rows, map[string]any{"id": workspace.ID, "name": name, "mode": a.Mode, "groups": a.Groups, "include_ungrouped": a.IncludeUngrouped})
+		rows = append(rows, map[string]any{"id": workspace.ID, "name": name, "path": planningWorkspacePath(h.application.Database.Root, workspace), "mode": a.Mode, "groups": a.Groups, "include_ungrouped": a.IncludeUngrouped})
 	}
-	path := project.GitCommonDir.Value
-	if len(project.Workspaces) > 0 {
-		path = project.Workspaces[0].RootPath.Value
-		if absolute, resolveErr := discovery.ResolveLocalPath(h.application.Database.Root, project.Workspaces[0].RootPath); resolveErr == nil {
-			path = absolute
+	var workspace any
+	if chat != nil {
+		for _, w := range project.Workspaces {
+			if w.ID == chat.State.WorkspaceID {
+				workspace = map[string]any{"id": w.ID, "path": planningWorkspacePath(h.application.Database.Root, w)}
+			}
 		}
 	}
-	return map[string]any{"chat": chat, "project": map[string]any{"id": project.ID, "code": project.Code, "path": path}, "groups": values, "routing": rows, "assignments_enabled": routing.Enabled}, nil
+	return map[string]any{"chat": chat, "workspace": workspace, "project": map[string]any{"id": project.ID, "code": project.Code}, "groups": values, "routing": rows, "assignments_enabled": routing.Enabled}, nil
+}
+
+func planningWorkspacePath(root string, workspace storage.Workspace) string {
+	if absolute, err := discovery.ResolveLocalPath(root, workspace.RootPath); err == nil {
+		return absolute
+	}
+	return workspace.RootPath.Value
 }
 
 func (h *handler) servePlanning(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +110,12 @@ func (h *handler) servePlanning(w http.ResponseWriter, r *http.Request) {
 		defer h.releasePlanningJob()
 		ctx, cancel := h.planningContext(r.Context())
 		defer cancel()
-		models, err := h.application.PlanningModels(ctx, project)
+		workspaceID, parseErr := strconv.ParseInt(r.URL.Query().Get("workspace"), 10, 64)
+		if parseErr != nil || workspaceID < 1 {
+			h.planningError(w, requestError("Choose a workspace before loading planning models."))
+			return
+		}
+		models, err := h.application.PlanningModels(ctx, project, workspaceID)
 		if err != nil {
 			h.planningError(w, err)
 			return
@@ -178,7 +191,9 @@ func (h *handler) servePlanning(w http.ResponseWriter, r *http.Request) {
 		var value storage.PlanningChat
 		switch input.Action {
 		case "new":
-			if len(input.State.Messages) != 0 {
+			if input.State.WorkspaceID < 1 {
+				err = requestError("Choose a workspace for the new planning chat.")
+			} else if len(input.State.Messages) != 0 {
 				err = requestError("New chats begin without assistant or user history.")
 			} else {
 				value, err = writer.CreatePlanningChat(r.Context(), project, input.RequestID, input.State)

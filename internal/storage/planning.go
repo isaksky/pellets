@@ -40,6 +40,7 @@ type PlanningDraft struct {
 	CreatedReference string `json:"created_reference,omitempty"`
 }
 type PlanningState struct {
+	WorkspaceID     int64             `json:"workspace_id"`
 	Model           string            `json:"model"`
 	Effort          string            `json:"effort"`
 	Composer        string            `json:"input"`
@@ -78,7 +79,7 @@ func planningText(value string, max int) bool {
 	return len(value) <= max && utf8.ValidString(value) && !strings.ContainsRune(value, '\x00')
 }
 func ValidatePlanningState(state PlanningState) error {
-	if !planningText(state.Model, 512) || !planningText(state.Effort, 128) || strings.ContainsAny(state.Model+state.Effort, "\r\n") || !planningText(state.Composer, MaxPlanningComposerBytes) || len(state.Messages) > MaxPlanningMessages || len(state.Drafts) > MaxPlanningDrafts {
+	if state.WorkspaceID < 0 || !planningText(state.Model, 512) || !planningText(state.Effort, 128) || strings.ContainsAny(state.Model+state.Effort, "\r\n") || !planningText(state.Composer, MaxPlanningComposerBytes) || len(state.Messages) > MaxPlanningMessages || len(state.Drafts) > MaxPlanningDrafts {
 		return InvalidPlanningState("planning state exceeds its text or item limits")
 	}
 	messages := map[string]bool{}

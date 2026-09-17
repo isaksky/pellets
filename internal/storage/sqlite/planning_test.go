@@ -425,3 +425,27 @@ func TestPlanningMigrationPreservesExistingQueue(t *testing.T) {
 	assertPelletQueryInt(t, writer.db, "SELECT next_pellet_number FROM projects WHERE project_id=?", 2, project.ID)
 	createPlanningTestChat(t, writer, project, "after-upgrade", samplePlanningState())
 }
+
+func TestPlanningWorkspaceBindingIsDurableAndImmutable(t *testing.T) {
+	f, reader, writer := planningFixture(t)
+	ctx := context.Background()
+	chat := createPlanningTestChat(t, writer, f.main.Project, "legacy-workspace", samplePlanningState())
+	state := chat.State
+	state.WorkspaceID = f.other.Workspace.ID
+	_, err := writer.SavePlanningChat(ctx, f.main.Project, chat.ID, chat.Version, state)
+	planningError(t, err, "invalid_planning_state")
+	state.WorkspaceID = f.linked.Workspace.ID
+	chat, err = writer.SavePlanningChat(ctx, f.main.Project, chat.ID, chat.Version, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int64{0, f.main.Workspace.ID, f.other.Workspace.ID} {
+		state.WorkspaceID = id
+		_, err = writer.SavePlanningChat(ctx, f.main.Project, chat.ID, chat.Version, state)
+		planningError(t, err, "invalid_planning_state")
+	}
+	stored, err := reader.ReadPlanningChat(ctx, f.main.Project, chat.ID)
+	if err != nil || stored.State.WorkspaceID != f.linked.Workspace.ID || stored.Version != chat.Version {
+		t.Fatalf("binding changed: %#v, %v", stored, err)
+	}
+}

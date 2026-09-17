@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -79,7 +80,7 @@ func TestPlanningHTTPPersistenceIsolationAndExplicitCreation(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"chat":null`) {
 		t.Fatal(w.Body.String())
 	}
-	initial := storage.PlanningState{Composer: "Clarify search", Drafts: []storage.PlanningDraft{}, Messages: []storage.PlanningMessage{}}
+	initial := storage.PlanningState{WorkspaceID: f.projects[0].Workspaces[0].ID, Composer: "Clarify search", Drafts: []storage.PlanningDraft{}, Messages: []storage.PlanningMessage{}}
 	create := planningRequest{CSRF: testCSRF, Action: "new", RequestID: "new-chat", State: initial}
 	chat := planningChatResponse(t, planningHTTP(t, f, p.Code, create))
 	replay := planningChatResponse(t, planningHTTP(t, f, p.Code, create))
@@ -131,7 +132,7 @@ func TestPlanningSendRejectsUnrelatedModelEditsAndCancellation(t *testing.T) {
 	f := newHandlerFixture(t, 1)
 	planningRepository(t, f)
 	p := f.projects[0]
-	state := storage.PlanningState{Composer: "Improve it", Drafts: []storage.PlanningDraft{{ID: "draft-one", Title: "One"}}}
+	state := storage.PlanningState{WorkspaceID: f.projects[0].Workspaces[0].ID, Composer: "Improve it", Drafts: []storage.PlanningDraft{{ID: "draft-one", Title: "One"}}}
 	chat := planningChatResponse(t, planningHTTP(t, f, p.Code, planningRequest{CSRF: testCSRF, Action: "new", RequestID: "new-one", State: state}))
 	send := planningRequest{CSRF: testCSRF, Action: "send", ChatID: chat.ID, Version: chat.Version, RequestID: "send-one", State: state}
 	f.application.PlanningGenerate = func(context.Context, codex.PlanningOptions) (codex.PlanningReply, error) {
@@ -175,7 +176,7 @@ func TestPlanningInFlightDoesNotLockQueueOrLoseOtherTabEdits(t *testing.T) {
 	f := newHandlerFixture(t, 1)
 	planningRepository(t, f)
 	p := f.projects[0]
-	state := storage.PlanningState{Composer: "Plan one issue"}
+	state := storage.PlanningState{WorkspaceID: f.projects[0].Workspaces[0].ID, Composer: "Plan one issue"}
 	chat := planningChatResponse(t, planningHTTP(t, f, p.Code, planningRequest{CSRF: testCSRF, Action: "new", RequestID: "new-race", State: state}))
 	entered, finish := make(chan struct{}), make(chan struct{})
 	f.application.PlanningGenerate = func(ctx context.Context, _ codex.PlanningOptions) (codex.PlanningReply, error) {
@@ -224,12 +225,12 @@ func TestPlanningInFlightDoesNotLockQueueOrLoseOtherTabEdits(t *testing.T) {
 func TestPlanningHTTPRejectsFabricatedHistory(t *testing.T) {
 	f := newHandlerFixture(t, 1)
 	p := f.projects[0]
-	fabricated := storage.PlanningState{Messages: []storage.PlanningMessage{{ID: "fake", Role: "assistant", Text: "I did work"}}}
+	fabricated := storage.PlanningState{WorkspaceID: f.projects[0].Workspaces[0].ID, Messages: []storage.PlanningMessage{{ID: "fake", Role: "assistant", Text: "I did work"}}}
 	w := planningHTTP(t, f, p.Code, planningRequest{CSRF: testCSRF, Action: "new", RequestID: "fake-chat", State: fabricated})
 	if w.Code != 422 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	chat := planningChatResponse(t, planningHTTP(t, f, p.Code, planningRequest{CSRF: testCSRF, Action: "new", RequestID: "real-chat", State: storage.PlanningState{}}))
+	chat := planningChatResponse(t, planningHTTP(t, f, p.Code, planningRequest{CSRF: testCSRF, Action: "new", RequestID: "real-chat", State: storage.PlanningState{WorkspaceID: f.projects[0].Workspaces[0].ID}}))
 	w = planningHTTP(t, f, p.Code, planningRequest{CSRF: testCSRF, Action: "save", ChatID: chat.ID, Version: chat.Version, State: fabricated})
 	if w.Code != 422 {
 		t.Fatal(w.Code, w.Body.String())
@@ -249,7 +250,7 @@ func TestPlanningMessageRetryIDsAreExact(t *testing.T) {
 		calls++
 		return codex.PlanningReply{Text: "Answer", Drafts: []codex.PlanningDraft{}}, nil
 	}
-	state := storage.PlanningState{Composer: "First question?"}
+	state := storage.PlanningState{WorkspaceID: f.projects[0].Workspaces[0].ID, Composer: "First question?"}
 	chat := planningChatResponse(t, planningHTTP(t, f, p.Code, planningRequest{CSRF: testCSRF, Action: "new", RequestID: "new-exact", State: state}))
 	first := planningRequest{CSRF: testCSRF, Action: "send", ChatID: chat.ID, Version: chat.Version, RequestID: "a:b", State: chat.State}
 	chat = planningChatResponse(t, planningHTTP(t, f, p.Code, first))
@@ -267,5 +268,104 @@ func TestPlanningMessageRetryIDsAreExact(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatal("mismatched retry called model")
+	}
+}
+
+func TestPlanningBindsSelectedWorktreeForTurnsModelsAndDisplay(t *testing.T) {
+	f, p, mainID, linkedID := workbenchFixture(t)
+	planningRepository(t, f)
+	mainRoot := filepath.Join(f.application.Database.Root, "project1")
+	linkedRoot := filepath.Join(f.application.Database.Root, "linked")
+	for _, args := range [][]string{
+		{"-C", mainRoot, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgSign=false", "commit", "--allow-empty", "-qm", "initial"},
+		{"-C", mainRoot, "worktree", "add", "--detach", linkedRoot, "HEAD"},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatal(err, string(out))
+		}
+	}
+	linkedRoot, err := filepath.EvalSymlinks(linkedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	checkRoot := func(options codex.PlanningOptions) {
+		t.Helper()
+		calls++
+		if options.WorkspaceDir != linkedRoot {
+			t.Fatalf("planner selected %q instead of linked worktree %q", options.WorkspaceDir, linkedRoot)
+		}
+	}
+	f.application.PlanningGenerate = func(_ context.Context, options codex.PlanningOptions) (codex.PlanningReply, error) {
+		checkRoot(options)
+		return codex.PlanningReply{Text: "Inspected linked workspace.", Drafts: []codex.PlanningDraft{}}, nil
+	}
+	f.application.PlanningCatalog = func(_ context.Context, options codex.PlanningOptions) (codex.PlanningCatalog, error) {
+		checkRoot(options)
+		return codex.PlanningCatalog{}, nil
+	}
+	state := storage.PlanningState{WorkspaceID: linkedID, Composer: "Inspect this worktree"}
+	chat := planningChatResponse(t, planningHTTP(t, f, p.Code, planningRequest{Action: "new", CSRF: testCSRF, RequestID: "linked-chat", State: state}))
+	chat = planningChatResponse(t, planningHTTP(t, f, p.Code, planningRequest{Action: "send", CSRF: testCSRF, ChatID: chat.ID, Version: chat.Version, RequestID: "linked-send", State: chat.State}))
+	response := planningHTTP(t, f, p.Code, nil)
+	var snapshot struct {
+		Workspace struct {
+			ID   int64
+			Path string
+		}
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil || snapshot.Workspace.ID != linkedID || snapshot.Workspace.Path != linkedRoot {
+		t.Fatalf("incorrect planning workspace display: %s", response.Body.String())
+	}
+	response = performRequest(f.handler, http.MethodGet, fmt.Sprintf("/projects/%s/planning/models?workspace=%d", p.Code, linkedID), "", nil)
+	if response.Code != 200 || calls != 2 {
+		t.Fatalf("linked model catalog: %d %s, calls=%d", response.Code, response.Body.String(), calls)
+	}
+	for _, id := range []int64{0, mainID, f.projects[1].Workspaces[0].ID} {
+		changed := chat.State
+		changed.WorkspaceID, changed.Composer = id, "Do not switch"
+		for _, action := range []string{"save", "send"} {
+			response = planningHTTP(t, f, p.Code, planningRequest{Action: action, CSRF: testCSRF, ChatID: chat.ID, Version: chat.Version, RequestID: "wrong-workspace", State: changed})
+			if response.Code == 200 || calls != 2 {
+				t.Fatalf("%s retargeted chat to %d: %s", action, id, response.Body.String())
+			}
+		}
+	}
+	// A missing bound checkout must never fall back to the first workspace.
+	if err := os.Rename(linkedRoot, linkedRoot+"-moved"); err != nil {
+		t.Fatal(err)
+	}
+	state = chat.State
+	state.Composer = "Inspect again"
+	response = planningHTTP(t, f, p.Code, planningRequest{Action: "send", CSRF: testCSRF, ChatID: chat.ID, Version: chat.Version, RequestID: "missing-workspace", State: state})
+	if response.Code != 409 || calls != 2 || !strings.Contains(response.Body.String(), "planning_workspace_unavailable") {
+		t.Fatalf("missing checkout fallback: %s", response.Body.String())
+	}
+}
+
+func TestPlanningLegacyChatRequiresExplicitWorkspaceBinding(t *testing.T) {
+	f := newHandlerFixture(t, 2)
+	planningRepository(t, f)
+	p := f.projects[0]
+	state := storage.PlanningState{Composer: "Old chat"}
+	chat, err := f.application.Writer.(storage.PlanningWriter).CreatePlanningChat(context.Background(), p, "legacy", state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := planningHTTP(t, f, p.Code, planningRequest{Action: "send", CSRF: testCSRF, ChatID: chat.ID, Version: chat.Version, RequestID: "unbound-send", State: chat.State})
+	if response.Code != 409 || !strings.Contains(response.Body.String(), "planning_workspace_unavailable") {
+		t.Fatal(response.Body.String())
+	}
+	for _, id := range []int64{0, f.projects[1].Workspaces[0].ID} {
+		state.WorkspaceID = id
+		response = planningHTTP(t, f, p.Code, planningRequest{Action: "new", CSRF: testCSRF, RequestID: "invalid-new", State: state})
+		if response.Code == 200 {
+			t.Fatal("created new chat with missing or foreign workspace")
+		}
+	}
+	state.WorkspaceID = p.Workspaces[0].ID
+	chat = planningChatResponse(t, planningHTTP(t, f, p.Code, planningRequest{Action: "save", CSRF: testCSRF, ChatID: chat.ID, Version: chat.Version, State: state}))
+	if chat.State.WorkspaceID != p.Workspaces[0].ID || chat.State.Composer != "Old chat" {
+		t.Fatalf("binding lost chat: %#v", chat)
 	}
 }

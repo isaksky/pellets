@@ -19,9 +19,14 @@ const clone = value => JSON.parse(JSON.stringify(value));
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function saved(key) { try { return localStorage.getItem(key); } catch { return null; } }
 function preference(key, value) { try { localStorage.setItem(key, value); } catch {} }
-function emptyState() { return {input:'', model:'', effort:'', messages:[], drafts:[], refining_draft_id:null}; }
+function emptyState() { return {workspace_id:0, input:'', model:'', effort:'', messages:[], drafts:[], refining_draft_id:null}; }
 function normalize(value) { return {...emptyState(), ...value, messages:value?.messages || [], drafts:value?.drafts || []}; }
 function projectCode() { return data?.project?.code || pinned?.project || document.querySelector('.app-shell')?.dataset.project; }
+function initialWorkspace(code) {
+  const shell = document.querySelector('.app-shell');
+  if (shell?.dataset.project === code && Number(shell.dataset.workspace) > 0) return Number(shell.dataset.workspace);
+  return data?.project?.code === code && data.routing?.length === 1 ? data.routing[0].id : 0;
+}
 function endpoint(code = projectCode()) { return '/projects/' + encodeURIComponent(code) + '/planning'; }
 function csrf() { return document.querySelector('input[name="_csrf"]')?.value || ''; }
 function created(draft) { return !!(draft.created_reference || draft.created_number); }
@@ -51,7 +56,7 @@ function storePending(force = false) {
     payload:{...operation.payload,_csrf:undefined}}:null;
   const code=operation?.replace?decodeURIComponent(operation.url.split('/')[2]):projectCode();
   const value = JSON.stringify({created_at:Date.now(),project:code, chat_id:operation?.replace?null:chat?.id, version:chat?.version,
-    state:(dirty||operation)?(operation?.replace?operation.payload.state:{input:state.input, model:state.model, effort:state.effort, refining_draft_id:state.refining_draft_id, drafts:state.drafts}):null,
+    state:(dirty||operation)?(operation?.replace?operation.payload.state:{workspace_id:state.workspace_id,input:state.input, model:state.model, effort:state.effort, refining_draft_id:state.refining_draft_id, drafts:state.drafts}):null,
     operation:storedOperation,presentation:capturePresentation()});
   try {
     if(new TextEncoder().encode(value).length>256*1024)throw Error('These planning edits are too large to keep through a reload. Save them or shorten them before reloading; they remain in this panel.');
@@ -89,7 +94,10 @@ function accept(value) {
   if (value.models?.length) modelsLoaded = true;
   data = {...data, ...value, models:value.models?.length ? value.models : data?.models || []};
   chat = value.chat;
+  const previousWorkspace = state.workspace_id;
   state = normalize(clone(chat?.state || {}));
+  if (!chat) state.workspace_id = initialWorkspace(value.project.code);
+  if (previousWorkspace !== state.workspace_id) {modelsLoaded=false;data.models=[];}
   pin();
 }
 async function ensureLoaded() {
@@ -121,7 +129,7 @@ async function ensureLoaded() {
 }
 function mergeEdits(server, before, current) {
   const result = normalize(clone(server));
-  for (const name of ['input','model','effort','refining_draft_id'])
+  for (const name of ['workspace_id','input','model','effort','refining_draft_id'])
     if (JSON.stringify(current[name]) !== JSON.stringify(before[name])) result[name] = current[name];
   const original = new Map(before.drafts.map(d => [d.id,d]));
   const local = new Map(current.drafts.map(d => [d.id,d]));
@@ -143,7 +151,7 @@ async function mutate(action, retry = false, replacement = null) {
   if (!data) await ensureLoaded();
   if (!data) return;
   if (action !== 'new' && !chat) { await mutate('new'); if (!chat || failed) return; }
-  if (action === 'create' && dirty && !retry) { await mutate('save'); if (failed || conflict) return; }
+  if ((action === 'create' || (action === 'send' && state.workspace_id !== chat?.state.workspace_id)) && dirty && !retry) { await mutate('save'); if (failed || conflict) return; }
   const before = clone(state);
   const operation = replacement || (retry ? failed : {url:endpoint(), before, action, payload:{_csrf:csrf(), action,
     chat_id:chat?.id, version:chat?.version, request_id:crypto.randomUUID(), state:before,
@@ -202,7 +210,7 @@ function routes(group) {
 }
 function scaffold() {
   if (panel.querySelector('#plan-content')) return;
-  panel.innerHTML = `<div id="plan-content"><div class="plan-context"><div><span class="plan-eyebrow">PLANNING FOR</span><strong data-plan-project></strong><span class="plan-path"></span></div><div data-plan-new><button type="button" class="quiet" data-plan="new">New chat</button></div></div>
+  panel.innerHTML = `<div id="plan-content"><div class="plan-context"><div><span class="plan-eyebrow">PLANNING FOR</span><strong data-plan-project></strong><span class="plan-path"></span><label class="plan-workspace-label">Workspace<select id="plan-workspace" aria-label="Planning workspace"></select></label></div><div data-plan-new><button type="button" class="quiet" data-plan="new">New chat</button></div></div>
     <div class="plan-transcript" aria-live="polite"></div><section class="plan-drafts" aria-label="Pellets in this conversation"><div class="plan-draft-heading"><strong>Pellets in this chat <span class="plan-total">0</span></strong><span data-plan-count></span></div><div class="plan-batch-tools"><button type="button" data-plan="select-all">Select all</button><button type="button" data-plan="combine">Combine selected</button><button type="button" data-plan="add-draft">+ Add draft</button></div><div class="plan-draft-list"></div></section>
     <datalist id="plan-groups"></datalist><div class="plan-bottom"><div class="plan-create-row"><span>Destination: <strong data-plan-destination></strong></span><button type="button" class="primary-button" data-plan="create">Create pellets</button></div><form id="plan-form" method="post"><input type="hidden" name="version"><div class="plan-refining" hidden></div><div class="plan-composer-hint">Shell access · Automatic review</div><label class="visually-hidden" for="plan-message">Message planner</label><textarea id="plan-message" name="input" rows="2" placeholder="What should we plan?" maxlength="65536"></textarea><div class="plan-composer-tools"><select id="plan-model" name="model" aria-label="Planning model"></select><span class="plan-tool-divider"></span><select id="plan-effort" name="effort" aria-label="Reasoning effort"></select><button type="submit" class="plan-send" aria-label="Send message">↑</button></div></form><button type="button" class="plan-select-models" data-plan="models">Choose a model…</button><div class="plan-status" role="status"></div></div></div>`;
 }
@@ -233,7 +241,13 @@ function render() {
   const p = data?.project;
   panel.querySelector('[data-plan-project]').textContent = p ? p.code + ' ⌑' : projectCode() || 'Select a project';
   panel.querySelector('[data-plan-project]').title = 'This conversation stays with this project';
-  panel.querySelector('.plan-path').textContent = p?.path || '';
+  const workspace = (data?.routing || []).find(w => w.id === state.workspace_id);
+  const path = workspace?.path || (state.workspace_id ? 'Workspace unavailable — start a new chat to choose another.' : 'Choose a workspace before sending.');
+  panel.querySelector('.plan-path').textContent = path;
+  panel.querySelector('.plan-path').title = path;
+  const workspaceChoices = (data?.routing || []).map(w => ({id:String(w.id),name:chat?.state.workspace_id ? w.name : w.path || w.name}));
+  if (!workspace) workspaceChoices.unshift({id:String(state.workspace_id || 0),name:state.workspace_id ? 'Unavailable workspace' : 'Choose workspace…'});
+  updateOptions(panel.querySelector('#plan-workspace'), workspaceChoices, String(state.workspace_id || 0));
   panel.querySelector('[data-plan-destination]').textContent = p?.code || '';
   const newHost = panel.querySelector('[data-plan-new]');
   const newHTML = confirming ? '<span class="plan-new-confirm">Replace chat?<button type="button" data-plan="confirm-new">Start new</button><button type="button" data-plan="cancel-new">Cancel</button></span>' : '<button type="button" class="quiet" data-plan="new">New chat</button>';
@@ -299,9 +313,12 @@ function render() {
   const effortOptions = efforts.map(value => ({id:value,name:value}));
   if (!effortOptions.some(e => e.id === (state.effort || ''))) effortOptions.unshift({id:state.effort || '',name:state.effort || 'Configured effort'});
   updateOptions(composer.elements.effort, effortOptions, state.effort || '');
-  composer.querySelector('[type=submit]').disabled = !state.input.trim() || !!flight || !!failed || conflict || uiVersion.isOutdated();
+  composer.querySelector('[type=submit]').disabled = !workspace || !state.input.trim() || !!flight || !!failed || conflict || uiVersion.isOutdated();
   for (const button of panel.querySelectorAll('[data-plan=new],[data-plan=confirm-new]')) button.disabled = !!flight;
   for(const field of panel.querySelectorAll('input,textarea,select'))field.disabled=!!activeOperation?.replace;
+  panel.querySelector('#plan-workspace').disabled = !!chat?.state.workspace_id || !!flight;
+  composer.elements.model.disabled = !workspace || !!activeOperation?.replace;
+  composer.elements.effort.disabled = !workspace || !!activeOperation?.replace;
   panel.querySelector('[data-plan=models]').hidden = true;
   const refining = state.drafts.find(d => d.id === state.refining_draft_id && !created(d));
   const refine = panel.querySelector('.plan-refining'); refine.hidden = !refining;
@@ -362,7 +379,9 @@ async function loadModels(openMenu = false) {
   if (!data) return;
   try {
     feedback='Loading available models…';render();
-    const result=await json(endpoint()+'/models');
+    const code=projectCode(), workspaceID=state.workspace_id;
+    const result=await json(endpoint(code)+'/models?workspace='+encodeURIComponent(workspaceID));
+    if (projectCode()!==code || state.workspace_id!==workspaceID) return;
     data.models=result.models || [];modelsLoaded=true;feedback='';render();
     const trigger=panel.querySelector('#plan-model-trigger');
     if(openMenu)trigger?.click();else trigger?.focus();
@@ -380,7 +399,7 @@ async function fresh() {
   clearTimeout(timer);
   confirming = false;
   const code = document.querySelector('.app-shell')?.dataset.project;
-  const initial={...emptyState(),model:state.model,effort:state.effort};
+  const initial={...emptyState(),workspace_id:initialWorkspace(code),model:state.model,effort:state.effort};
   failed=null;conflict=false;
   await mutate('new',false,{url:endpoint(code),action:'new',replace:true,before:clone(initial),payload:{_csrf:csrf(),action:'new',request_id:crypto.randomUUID(),state:initial}});
   if(!failed){splitting=null;panel.querySelector('#plan-message').focus();}
@@ -410,6 +429,11 @@ document.addEventListener('input', event => {
   else if (field.id === 'plan-message') {state.input=field.value;markDirty();render();}
 });
 document.addEventListener('change', event => {
+  if (event.target.id === 'plan-workspace') {
+    if (chat?.state.workspace_id || flight) return;
+    state.workspace_id=Number(event.target.value);modelsLoaded=false;data.models=[];
+    markDirty();render();return;
+  }
   if (!['plan-model','plan-effort'].includes(event.target.id)) return;
   if (event.target.id === 'plan-model') {state.model=event.target.value;const choices=(data?.models || []).find(m=>m.id===state.model)?.efforts || [];if(!choices.includes(state.effort))state.effort=choices.includes('medium')?'medium':choices[0] || '';}
   else state.effort=event.target.value;

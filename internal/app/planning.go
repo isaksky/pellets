@@ -16,11 +16,17 @@ import (
 // Planning uses its own request-owned process with automatic approval review.
 // It never enters the execution supervisor's ownership, scheduling, or resume
 // state machine.
-func (a *WebApplication) planningOptions(ctx context.Context, p storage.Project, model, effort string) (codex.PlanningOptions, error) {
-	if len(p.Workspaces) == 0 {
-		return codex.PlanningOptions{}, domain.NewError(domain.Conflict, "planning_workspace_unavailable", "This project has no registered workspace.", nil)
+func (a *WebApplication) planningOptions(ctx context.Context, p storage.Project, workspaceID int64, model, effort string) (codex.PlanningOptions, error) {
+	var w storage.Workspace
+	for _, candidate := range p.Workspaces {
+		if candidate.ID == workspaceID {
+			w = candidate
+			break
+		}
 	}
-	w := p.Workspaces[0]
+	if w.ID == 0 {
+		return codex.PlanningOptions{}, domain.NewError(domain.Conflict, "planning_workspace_unavailable", "Choose a registered workspace for this planning chat. Start a new chat if its workspace is no longer available.", nil)
+	}
 	root, err := executionRoot(ctx, a.Database, storage.ExecutionRun{WorkspaceRoot: w.RootPath, WorkspaceGitDir: w.GitDir, GitCommonDir: p.GitCommonDir})
 	if err != nil {
 		return codex.PlanningOptions{}, domain.NewError(domain.Conflict, "planning_workspace_unavailable", "The registered planning workspace is unavailable or its Git identity changed. Restore the workspace before planning.", nil)
@@ -42,8 +48,8 @@ type PlanningModel struct {
 	Efforts []string `json:"efforts"`
 }
 
-func (a *WebApplication) PlanningModels(ctx context.Context, p storage.Project) ([]PlanningModel, error) {
-	opts, err := a.planningOptions(ctx, p, "", "")
+func (a *WebApplication) PlanningModels(ctx context.Context, p storage.Project, workspaceID int64) ([]PlanningModel, error) {
+	opts, err := a.planningOptions(ctx, p, workspaceID, "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -74,6 +80,9 @@ func (a *WebApplication) SendPlanningMessage(ctx context.Context, p storage.Proj
 	}
 	if !storage.ValidPlanningID(requestID) || len(requestID) > 64 {
 		return current, domain.NewError(domain.Usage, "planning_request_id_required", "Send a stable planning request ID of at most 64 characters.", nil)
+	}
+	if current.State.WorkspaceID == 0 || state.WorkspaceID != current.State.WorkspaceID {
+		return current, domain.NewError(domain.Conflict, "planning_workspace_unavailable", "Save a workspace selection for this chat before sending. A bound chat cannot switch workspaces.", nil)
 	}
 	requestBytes, _ := json.Marshal(state)
 	digest := sha256.Sum256(requestBytes)
@@ -159,7 +168,7 @@ func (a *WebApplication) SendPlanningMessage(ctx context.Context, p storage.Proj
 	if len(encoded) > codex.MaxPlanningPromptBytes-4096 {
 		return current, domain.NewError(domain.Usage, "planning_chat_full", "This planning context is too large. Start a new chat or shorten uncreated drafts before sending.", nil)
 	}
-	opts, err := a.planningOptions(ctx, p, state.Model, state.Effort)
+	opts, err := a.planningOptions(ctx, p, current.State.WorkspaceID, state.Model, state.Effort)
 	if err != nil {
 		return current, err
 	}

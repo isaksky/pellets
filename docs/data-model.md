@@ -764,13 +764,19 @@ or uncertain work remains explicit recovery state.
 ## Planning conversations and proposal creation
 
 Migration 19 adds `planning_chats`, with a stable chat ID, project foreign key,
-optimistic revision, timestamps, and bounded JSON state. State includes model and
+optimistic revision, timestamps, and bounded JSON state. State includes the
+planning `workspace_id`, model and
 effort choices, the unfinished composer, an append-only user/assistant message
 history, editable proposals, selection, and the draft being refined. The current
 limits are 200 messages, 200 drafts, 64 KiB per message or description/acceptance
 field, 32 KiB for the composer, and 512 KiB for the complete encoded state. IDs
 must be unique within their message or draft list. New chat starts another
 record; reading or switching projects neither creates nor rebinds a chat.
+
+Workspace IDs are validated against the chat's project. Once nonzero, the binding
+is immutable on state saves and model sends. Legacy JSON without this field reads
+as zero and may bind once through an explicit saved selection; it cannot start a
+model turn while unbound. The JSON extension requires no schema migration.
 
 A project-scoped creation request ID and fingerprint make a repeated New chat
 request return its existing chat. A state save requires the exact current

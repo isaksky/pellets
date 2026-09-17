@@ -561,7 +561,10 @@ The JSON `/projects/CODE/planning` boundary uses the existing loopback Host,
 Origin, CSRF, and UI revision protections. GET never creates a conversation.
 Mutation requests serialize per chat without holding a database transaction while
 a model runs. The application assembles bounded project/conversation context and
-calls an isolated Codex planning adapter. A successful response is validated and
+calls an isolated Codex planning adapter. Chats persist an immutable workspace ID;
+model discovery and turns resolve that workspace and validate its Git identity,
+never fall back to the first registered worktree. Legacy unbound chats require an
+explicit selection before sending. A successful response is validated and
 saved with its user message and proposed drafts in one compare-and-swap. Stable
 message request IDs detect retries. The HTTP request and server shutdown own the
 planning process lifetime; server restart never resumes a planning call. The
