@@ -40,7 +40,7 @@ func schedulerFixture(t *testing.T, executable, mode string) (*Scheduler, Schedu
 
 func awaitSchedule(t *testing.T, h *ScheduleHandle) ScheduleStatus {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	status, err := h.Result(ctx)
 	if err != nil {

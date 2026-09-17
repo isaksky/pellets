@@ -8,10 +8,10 @@ class Pl < Formula
 
   if Hardware::CPU.arm?
     url "https://github.com/isaksky/pellets/releases/download/v0.3.0/pellets_0.3.0_darwin_arm64.tar.gz"
-    sha256 "5dfd4de21bb1d2902fbc38190f9220ecb620ad80602b8256d6813aeb71242a87"
+    sha256 "c1c66b94e667bc12b76b7471e471aec5287b13d1da99fce443081b64a09c908e"
   else
     url "https://github.com/isaksky/pellets/releases/download/v0.3.0/pellets_0.3.0_darwin_amd64.tar.gz"
-    sha256 "d68a5d507a2a563c322fee2ae393c990eed8da3ec566ac9db758e2858e1c9d7e"
+    sha256 "2970ca95650d2e094d6568883c9dfb0e4d5ec18599846367adc3506ee1e261d1"
   end
 
   def install

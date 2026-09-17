@@ -118,7 +118,10 @@ func installRuntime(ctx context.Context, cache, version string, asset runtimeAss
 		if err := verifyRuntimeArchive(f.Name(), asset.SHA256); err != nil {
 			return "", err
 		}
-		if err := os.Rename(f.Name(), archive); err != nil {
+		// Publish without replacing a concurrently verified archive. Replacement
+		// can race readers holding Windows file handles; a hard link atomically
+		// selects one complete download and leaves an existing winner intact.
+		if err := os.Link(f.Name(), archive); err != nil {
 			if existing := verifyRuntimeArchive(archive, asset.SHA256); existing != nil {
 				return "", err
 			}

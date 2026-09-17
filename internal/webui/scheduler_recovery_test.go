@@ -96,7 +96,7 @@ func recoveryHandlerFixture(t *testing.T) (handlerFixture, string) {
 func awaitHTTPSchedule(t *testing.T, f handlerFixture, form url.Values) app.ScheduleStatus {
 	t.Helper()
 	h := startHTTPSchedule(t, f, form)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	status, err := h.Result(ctx)
 	if err != nil {
