@@ -259,3 +259,12 @@ preferences disable the animation. Execution start and resume forms offer the sa
 Access dropdown; the browser remembers it per project/workspace. A schedule captures
 the selected mode for its runs, and Run details displays the policy used. Existing
 runs keep their captured policy. Internal checkpoint reviewers remain read-only.
+
+The panel is a continuous scrolling conversation with a proposal tray docked above
+the composer. Progress appears inside the conversation only while a request runs;
+there is no permanent idle status box. The tray shows only uncreated proposals,
+with wrapping titles, expandable details, selection, and a direct × Dismiss action.
+Its header reports the proposal count and can collapse the tray; new proposals
+expand it again. Dismiss all and Create selected controls stay with the tray.
+Dismissal autosaves without an Undo notice. Created pellets leave the tray and
+appear as linked confirmations in the conversation; empty trays disappear.

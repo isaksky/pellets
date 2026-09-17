@@ -185,3 +185,29 @@
 .plan-bottom > .plan-status { margin:0 0 10px; }
 .plan-chat-status { flex:none; }
 .plan-chat-status:empty { display:none; }
+
+/* One conversation, with a compact proposal tray docked above the composer. */
+.plan-context { padding:10px 16px; border-bottom:0; }
+.plan-transcript { padding:12px 16px; }
+.plan-chat-status .plan-status { margin:8px 0; padding:0; border:0; background:transparent; }
+.plan-status[hidden], .plan-pending[hidden] { display:none; }
+.plan-pending { padding:12px; margin:12px 0; border-radius:7px; background:var(--theme-soft-surface); white-space:pre-wrap; overflow-wrap:anywhere; }
+.plan-receipts .plan-created { margin:10px 0; padding:10px 12px; background:var(--accent-bg); border:0; }
+.plan-receipts .plan-created a { display:grid; grid-template-columns:auto 1fr auto; align-items:baseline; gap:5px 8px; padding:0; height:auto; }
+.plan-receipts .plan-row-title { grid-column:1 / -1; grid-row:2; white-space:normal; overflow:visible; }
+.plan-receipts a > span:last-child { grid-column:3; grid-row:1; }
+.plan-receipts .plan-row-check { width:auto; }
+.plan-receipts .plan-row-group { display:none; }
+.plan-drafts { flex:0 1 auto; max-height:min(38%,320px); padding:0 16px; margin:0; background:transparent; border-top:1px solid var(--line); }
+.plan-draft-heading { margin:0; }
+.plan-tray-toggle { display:flex; align-items:center; width:100%; gap:6px; padding:8px 0; border:0; background:transparent; text-align:left; font-size:12px; }
+.plan-tray-toggle [data-tray-toggle-label] { margin-left:auto; color:var(--muted); font-size:10px; }
+.plan-drafts .plan-total { margin:0; background:transparent; padding:0; min-width:0; color:inherit; }
+.plan-drafts .plan-create-row { flex:none; padding:8px 0; }
+.plan-drafts .plan-batch-tools[hidden], .plan-draft-list[hidden], .plan-create-row[hidden] { display:none; }
+.plan-card .plan-draft-details > summary { height:auto; min-height:40px; padding:8px 30px 8px 24px; align-items:flex-start; }
+.plan-card .plan-row-title { white-space:normal; overflow:visible; text-overflow:clip; overflow-wrap:anywhere; line-height:1.5; }
+.plan-card .plan-row-state, .plan-card .plan-row-group { display:none; }
+.plan-card .plan-row-select { top:12px; }
+.plan-dismiss { position:absolute; right:0; top:7px; width:25px; height:25px; padding:0; border:0; background:transparent; color:var(--muted); font-size:18px; }
+.plan-bottom { border-top:0; padding-top:8px; }

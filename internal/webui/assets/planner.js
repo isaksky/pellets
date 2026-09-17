@@ -9,6 +9,7 @@ const pendingKey = 'pellets-planner-pending';
 let panel, data = null, state = emptyState(), chat = null, load = null;
 let flight = null, timer, dirty = false, conflict = false, failed = null;
 let splitting = null, confirming = false, feedback = '';
+let trayCollapsed = false;
 let modelsLoaded = false, refreshedAt = 0;
 let activeOperation = null, handoffError = '', lastPlannerFocus = null, presentationToRestore = null;
 let selectedTab = (document.documentElement.dataset.rightPanelTab || saved('pellets-right-panel-tab')) === 'plan' ? 'plan' : 'execution';
@@ -97,6 +98,8 @@ function useOnlyWorkspace() {
   }
 }
 function accept(value) {
+  if (value.chat?.state?.drafts?.some(d=>!created(d)&&!state.drafts.some(existing=>existing.id===d.id))) trayCollapsed=false;
+  if ((chat && value.chat?.id !== chat.id) || (data && value.project?.code !== data.project?.code)) {trayCollapsed=false;}
   if (value.models?.length) modelsLoaded = true;
   data = {...data, ...value, models:value.models?.length ? value.models : data?.models || []};
   chat = value.chat;
@@ -177,7 +180,7 @@ async function mutate(action, retry = false, replacement = null) {
       if(!operation.replace)state = mergeEdits(state, operation.before, current);
       dirty = JSON.stringify(state) !== JSON.stringify(normalize(chat?.state));
       failed = null;
-      feedback = action === 'create' ? 'Selected pellets created.' : '';
+      feedback = '';
       if (!dirty) {clearPending();handoffError='';}
       if (action === 'create') document.dispatchEvent(new CustomEvent('pellets-refresh'));
     } catch (error) {
@@ -219,8 +222,8 @@ function routes(group) {
 function scaffold() {
   if (panel.querySelector('#plan-content')) return;
   panel.innerHTML = `<div id="plan-content"><div class="plan-context"><div><span class="plan-eyebrow">PLANNING FOR</span><strong data-plan-project></strong></div><div data-plan-new><button type="button" class="quiet" data-plan="new">New chat</button></div></div>
-    <div class="plan-transcript" aria-live="polite"></div><div class="plan-chat-status"><div class="plan-status" role="status" aria-live="polite" aria-atomic="true"></div></div><section class="plan-drafts" aria-label="Pellets in this conversation"><div class="plan-draft-heading"><strong>Pellets in this chat <span class="plan-total">0</span></strong><span data-plan-count></span></div><div class="plan-batch-tools"><button type="button" data-plan="select-all">Select all</button><button type="button" data-plan="combine">Combine selected</button><button type="button" data-plan="add-draft">+ Add draft</button></div><div class="plan-draft-list"></div></section>
-    <datalist id="plan-groups"></datalist><div class="plan-bottom"><div class="plan-create-row"><span>Destination: <strong data-plan-destination></strong></span><button type="button" class="primary-button" data-plan="create">Create pellets</button></div><form id="plan-form" method="post"><input type="hidden" name="version"><div class="plan-refining" hidden></div><div class="plan-composer-settings"><div class="plan-folder"><label class="plan-workspace-label">Working folder<select id="plan-workspace" aria-label="Working folder" aria-describedby="plan-folder-error plan-folder-path"></select></label><span class="plan-folder-context"></span><p id="plan-folder-error" class="plan-folder-error" role="alert" hidden></p></div><label class="plan-access">Access <select id="plan-access" name="access_mode" aria-label="Planning access"><option value="automatic">Automatic approval</option><option value="full">Full access</option></select></label></div><span id="plan-folder-path" class="plan-path"></span><label class="visually-hidden" for="plan-message">Message planner</label><textarea id="plan-message" name="input" rows="2" placeholder="What should we plan?" maxlength="65536"></textarea><div class="plan-composer-tools"><select id="plan-model" name="model" aria-label="Planning model"></select><span class="plan-tool-divider"></span><select id="plan-effort" name="effort" aria-label="Reasoning effort"></select><button type="submit" class="plan-send" aria-label="Send message">↑</button></div></form><button type="button" class="plan-select-models" data-plan="models">Choose a model…</button></div></div>`;
+    <div class="plan-transcript" aria-live="polite"><div class="plan-messages"></div><div class="plan-receipts" aria-label="Created pellets"></div><div class="plan-pending" hidden></div><div class="plan-chat-status"><div class="plan-status" role="status" aria-live="polite" aria-atomic="true" hidden></div></div></div><section class="plan-drafts" aria-label="Proposed pellets"><div class="plan-draft-heading"><button type="button" class="plan-tray-toggle" data-plan="toggle-tray" aria-expanded="true" aria-controls="plan-proposal-list"><span class="plan-total">0</span> <span data-proposal-label>proposed pellets</span> <span data-tray-toggle-label>Collapse</span></button></div><div class="plan-batch-tools"><button type="button" data-plan="select-all">Select all</button><button type="button" data-plan="combine">Combine selected</button><button type="button" data-plan="add-draft">+ Add draft</button></div><div class="plan-draft-list" id="plan-proposal-list"></div><div class="plan-create-row"><button type="button" data-plan="dismiss-all">Dismiss all</button><button type="button" class="primary-button" data-plan="create">Create pellets</button></div></section>
+    <datalist id="plan-groups"></datalist><div class="plan-bottom"><form id="plan-form" method="post"><input type="hidden" name="version"><div class="plan-refining" hidden></div><div class="plan-composer-settings"><div class="plan-folder"><label class="plan-workspace-label">Working folder<select id="plan-workspace" aria-label="Working folder" aria-describedby="plan-folder-error plan-folder-path"></select></label><span class="plan-folder-context"></span><p id="plan-folder-error" class="plan-folder-error" role="alert" hidden></p></div><label class="plan-access">Access <select id="plan-access" name="access_mode" aria-label="Planning access"><option value="automatic">Automatic approval</option><option value="full">Full access</option></select></label></div><span id="plan-folder-path" class="plan-path"></span><label class="visually-hidden" for="plan-message">Message planner</label><textarea id="plan-message" name="input" rows="2" placeholder="What should we plan?" maxlength="65536"></textarea><div class="plan-composer-tools"><select id="plan-model" name="model" aria-label="Planning model"></select><span class="plan-tool-divider"></span><select id="plan-effort" name="effort" aria-label="Reasoning effort"></select><button type="submit" class="plan-send" aria-label="Send message">↑</button></div></form><button type="button" class="plan-select-models" data-plan="models">Choose a model…</button></div></div>`;
 }
 function updateOptions(select, options, value) {
   const signature = JSON.stringify(options);
@@ -236,12 +239,23 @@ function draftNode(draft) {
   node.className = created(draft) ? 'plan-created' : 'plan-card';
   if (created(draft)) {
     const reference = draft.created_reference || `${projectCode()}-${draft.created_number}`;
-    node.innerHTML = `<a href="/projects/${encodeURIComponent(projectCode())}/tasks/${encodeURIComponent(reference)}" data-plan-reference><span class="plan-row-check" aria-label="Created">✓</span><span class="plan-row-ref">${esc(reference)}</span><span class="plan-row-title"></span><span class="plan-row-group"></span><span aria-hidden="true">↗</span></a>`;
+    node.innerHTML = `<a href="/projects/${encodeURIComponent(projectCode())}/tasks/${encodeURIComponent(reference)}" data-plan-reference><span class="plan-row-check" aria-label="Created">Created</span><span class="plan-row-ref">${esc(reference)}</span><span class="plan-row-title"></span><span class="plan-row-group"></span><span aria-hidden="true">↗</span></a>`;
   } else {
     const id = 'plan-draft-' + draft.id;
-    node.innerHTML = `<input class="plan-row-select" type="checkbox" name="selected" form="${esc(id)}" data-field="selected"><details class="plan-draft-details" id="plan-details-${esc(draft.id)}"><summary><span class="plan-row-title"></span><span class="plan-row-group"></span><span class="plan-row-state">Draft</span></summary><div class="plan-row-editor"><form id="${esc(id)}" method="post" class="plan-draft-form"><input type="hidden" name="version"><label class="visually-hidden" for="plan-title-${esc(draft.id)}">Pellet title</label><input class="plan-card-title" id="plan-title-${esc(draft.id)}" name="title" data-field="title" maxlength="4096"><label class="plan-field-label">Description<textarea name="description" data-field="description" rows="4" maxlength="65536"></textarea></label><label class="plan-field-label">Acceptance criteria<textarea class="plan-acceptance" name="acceptance" data-field="acceptance" rows="3" maxlength="65536"></textarea></label><div class="plan-group-row"><label>Group<input name="group" data-field="group" list="plan-groups" placeholder="Ungrouped" maxlength="4096"></label></div></form><p class="plan-route"></p><p class="plan-reason"></p><div class="plan-card-actions"><button type="button" data-plan="refine">Refine in chat</button><button type="button" data-plan="split">Split pellet</button><button type="button" data-plan="remove">Remove draft</button></div><div class="plan-split" hidden><label>One title per new pellet<textarea rows="3" data-split-titles></textarea></label><p>Each draft keeps the description and acceptance criteria for refinement.</p><button type="button" data-plan="apply-split">Split into drafts</button><button type="button" data-plan="cancel-split">Cancel</button><span data-split-error role="alert"></span></div></div></details>`;
+    node.innerHTML = `<input class="plan-row-select" type="checkbox" name="selected" form="${esc(id)}" data-field="selected"><details class="plan-draft-details" id="plan-details-${esc(draft.id)}"><summary><span class="plan-row-title"></span><span class="plan-row-group"></span><span class="plan-row-state">Draft</span></summary><div class="plan-row-editor"><form id="${esc(id)}" method="post" class="plan-draft-form"><input type="hidden" name="version"><label class="visually-hidden" for="plan-title-${esc(draft.id)}">Pellet title</label><input class="plan-card-title" id="plan-title-${esc(draft.id)}" name="title" data-field="title" maxlength="4096"><label class="plan-field-label">Description<textarea name="description" data-field="description" rows="4" maxlength="65536"></textarea></label><label class="plan-field-label">Acceptance criteria<textarea class="plan-acceptance" name="acceptance" data-field="acceptance" rows="3" maxlength="65536"></textarea></label><div class="plan-group-row"><label>Group<input name="group" data-field="group" list="plan-groups" placeholder="Ungrouped" maxlength="4096"></label></div></form><p class="plan-route"></p><p class="plan-reason"></p><div class="plan-card-actions"><button type="button" data-plan="refine">Refine in chat</button><button type="button" data-plan="split">Split pellet</button></div><div class="plan-split" hidden><label>One title per new pellet<textarea rows="3" data-split-titles></textarea></label><p>Each draft keeps the description and acceptance criteria for refinement.</p><button type="button" data-plan="apply-split">Split into drafts</button><button type="button" data-plan="cancel-split">Cancel</button><span data-split-error role="alert"></span></div></div></details>`;
   }
+  if (!created(draft)) node.insertAdjacentHTML('beforeend', '<button type="button" class="plan-dismiss" data-plan="remove" title="Dismiss proposal">×</button>');
   return node;
+}
+function deleteDrafts(drafts) {
+  if (!drafts.length || flight || failed || conflict) return;
+  const ids = new Set(drafts.filter(d=>!created(d)).map(d=>d.id));
+  if (!ids.size) return;
+  state.drafts = state.drafts.filter(d=>!ids.has(d.id));
+  if (ids.has(state.refining_draft_id)) state.refining_draft_id=null;
+  if (ids.has(splitting)) splitting=null;
+  markDirty();render();
+  panel.querySelector('#plan-message').focus();
 }
 function render() {
   if (!panel) return;
@@ -266,34 +280,38 @@ function render() {
   const workspaceChoices = (data?.routing || []).map(w => ({id:String(w.id),name:chat?.state.workspace_id ? w.name : w.path || w.name}));
   if (!workspace) workspaceChoices.unshift({id:String(state.workspace_id || 0),name:state.workspace_id ? 'Unavailable workspace' : 'Choose folder…'});
   updateOptions(panel.querySelector('#plan-workspace'), workspaceChoices, String(state.workspace_id || 0));
-  panel.querySelector('[data-plan-destination]').textContent = p?.code || '';
   const newHost = panel.querySelector('[data-plan-new]');
   const newHTML = confirming ? '<span class="plan-new-confirm">Replace chat?<button type="button" data-plan="confirm-new">Start new</button><button type="button" data-plan="cancel-new">Cancel</button></span>' : '<button type="button" class="quiet" data-plan="new">New chat</button>';
   if (newHost.dataset.confirming !== String(confirming)) {newHost.innerHTML = newHTML; newHost.dataset.confirming = String(confirming);}
   const transcript = panel.querySelector('.plan-transcript');
+  const messages=panel.querySelector('.plan-messages');
   const following = transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop < 32;
   if (!state.messages.length) {
-    if (!transcript.querySelector('.plan-welcome')) transcript.innerHTML = '<div class="plan-welcome"><span class="plan-mark" aria-hidden="true">✧</span><h2>What should we work on?</h2><p>Talk through an idea. Shape the scope.<br>Turn it into pellets when you’re ready.</p><button type="button" class="quiet" data-plan="add-draft">Add a draft</button></div>';
+    if (!messages.querySelector('.plan-welcome')) messages.innerHTML = '<div class="plan-welcome"><span class="plan-mark" aria-hidden="true">✧</span><h2>What should we work on?</h2><p>Talk through an idea. Shape the scope.<br>Turn it into pellets when you’re ready.</p><button type="button" class="quiet" data-plan="add-draft">Add a draft</button></div>';
   } else {
-    transcript.querySelector('.plan-welcome')?.remove();
+    messages.querySelector('.plan-welcome')?.remove();
     const ids = new Set();
     state.messages.forEach((message, index) => {
       const id = String(message.id || index); ids.add(id);
-      let node = Array.from(transcript.children).find(item => item.dataset.messageId === id);
-      if (!node) { node = document.createElement('div'); node.dataset.messageId = id; node.className = 'plan-message'; node.innerHTML = '<span class="plan-speaker"></span><p></p>'; transcript.append(node); }
+      let node = Array.from(messages.children).find(item => item.dataset.messageId === id);
+      if (!node) { node = document.createElement('div'); node.dataset.messageId = id; node.className = 'plan-message'; node.innerHTML = '<span class="plan-speaker"></span><p></p>'; messages.append(node); }
       node.className = 'plan-message ' + (message.role === 'user' ? 'user' : 'assistant');
       node.querySelector('.plan-speaker').textContent = (message.role === 'user' ? 'You' : 'Planner') + (message.model ? ' · ' + message.model + (message.effort ? ' / ' + message.effort : '') : '');
       if (node.querySelector('p').textContent !== message.text) node.querySelector('p').textContent = message.text;
     });
-    for (const node of Array.from(transcript.children)) if (!ids.has(node.dataset.messageId)) node.remove();
+    for (const node of Array.from(messages.children)) if (!ids.has(node.dataset.messageId)) node.remove();
   }
   if (following) transcript.scrollTop = transcript.scrollHeight;
-  const list = panel.querySelector('.plan-draft-list'), ids = new Set(state.drafts.map(d => String(d.id)));
-  for (const node of Array.from(list.children)) if (!ids.has(node.dataset.draftId)) node.remove();
+  const proposals=state.drafts.filter(d=>!created(d));
+  const list=panel.querySelector('.plan-draft-list'), receipts=panel.querySelector('.plan-receipts');
+  for (const host of [list,receipts]) for (const node of Array.from(host.children)) {
+    if (!state.drafts.some(d=>String(d.id)===node.dataset.draftId && created(d)===(host===receipts))) node.remove();
+  }
   state.drafts.forEach((draft,index) => {
-    let node = Array.from(list.children).find(item => item.dataset.draftId === String(draft.id));
+    const host=created(draft)?receipts:list;
+    let node = Array.from(host.children).find(item => item.dataset.draftId === String(draft.id));
     if (node && node.classList.contains('plan-created') !== created(draft)) { node.remove(); node = null; }
-    if (!node) { node = draftNode(draft); list.insertBefore(node, list.children[index] || null); }
+    if (!node) { node = draftNode(draft); host.append(node); }
     node.querySelector('.plan-row-title').textContent = draft.title || 'Untitled pellet';
     node.querySelector('.plan-row-group').textContent = draft.group || '—';
     if (created(draft)) {
@@ -301,6 +319,8 @@ function render() {
       node.querySelector('a').setAttribute('data-on:click', `@navigate('${target}')`);
       return;
     }
+    node.querySelector('[data-plan=remove]').setAttribute('aria-label','Dismiss proposal: '+(draft.title || 'Untitled pellet'));
+    node.querySelector('[data-plan=remove]').disabled=!!flight || !!failed || conflict;
     node.querySelector('[data-field=selected]').setAttribute('aria-label', 'Select draft ' + (index+1) + ': ' + (draft.title || 'Untitled pellet'));
     for (const field of node.querySelectorAll('[data-field]')) {
       const value = draft[field.dataset.field] ?? '';
@@ -313,14 +333,18 @@ function render() {
     node.querySelector('.plan-reason').textContent = draft.reason || '';
     node.querySelector('.plan-split').hidden = splitting !== draft.id;
   });
-  panel.querySelector('.plan-drafts').hidden = !state.drafts.length;
-  panel.querySelector('.plan-total').textContent = state.drafts.length;
-  panel.querySelector('[data-plan-count]').textContent = state.drafts.filter(d => !created(d)).length + ' drafts · ' + state.drafts.filter(created).length + ' created';
+  panel.querySelector('.plan-drafts').hidden = !proposals.length;
+  panel.querySelector('.plan-total').textContent = proposals.length;
+  panel.querySelector('[data-proposal-label]').textContent=proposals.length===1?'proposed pellet':'proposed pellets';
+  panel.querySelector('.plan-tray-toggle').setAttribute('aria-expanded',String(!trayCollapsed));
+  panel.querySelector('[data-tray-toggle-label]').textContent=trayCollapsed?'Expand':'Collapse';
+  for (const selector of ['.plan-batch-tools','.plan-draft-list','.plan-create-row']) panel.querySelector(selector).hidden=trayCollapsed;
   panel.querySelector('[data-plan=combine]').disabled = selected().length < 2 || !!flight;
+  panel.querySelector('[data-plan=dismiss-all]').disabled = !!flight || !!failed || conflict;
   const create = panel.querySelector('[data-plan=create]');
   create.textContent = `Create ${selected().length} pellet${selected().length === 1 ? '' : 's'}`;
   create.disabled = !selected().length || selected().some(d => !d.title.trim() || (!d.description.trim() && !(d.acceptance || '').trim())) || !!flight || !!failed || conflict || uiVersion.isOutdated();
-  panel.querySelector('.plan-create-row').hidden = !state.drafts.some(d => !created(d));
+  panel.querySelector('.plan-create-row').hidden = trayCollapsed || !proposals.length;
   const composer = panel.querySelector('#plan-form'); composer.action = endpoint();
   composer.elements.version.value = chat?.version || '';
   if (composer.elements.input.value !== state.input) composer.elements.input.value = state.input;
@@ -357,7 +381,13 @@ function render() {
     panel.querySelector('.plan-chat-status').append(status);
   }
   composer.querySelector('[type=submit]').title = workspaceProblem || '';
-  const text=handoffError||feedback||(dirty?'Unsaved changes':'Uses chat and queue context · Creates only when you choose');
+  const text=handoffError||(activeOperation?.action==='save'||activeOperation?.action==='new'?'':feedback);
+  status.hidden=!text;
+  const pending=panel.querySelector('.plan-pending');
+  pending.hidden=activeOperation?.action!=='send';
+  const pendingText=activeOperation?.action==='send'?activeOperation.before?.input || activeOperation.payload.state.input:'';
+  if(pending.textContent!==pendingText)pending.textContent=pendingText;
+  if(following)transcript.scrollTop=transcript.scrollHeight;
   const statusSignature=JSON.stringify([text,!!failed,conflict]);
   if(status.dataset.signature!==statusSignature){
     status.dataset.signature=statusSignature;status.replaceChildren(document.createTextNode(text));
@@ -367,6 +397,7 @@ function render() {
   window.Dropdowns?.enhance(panel);
   const folderTrigger = panel.querySelector('#plan-workspace-trigger');
   if (folderTrigger) {folderTrigger.setAttribute('aria-invalid', String(!!workspaceProblem));folderTrigger.setAttribute('aria-describedby', 'plan-folder-error plan-folder-path');}
+  if(following)transcript.scrollTop=transcript.scrollHeight;
 }
 function chooseTab(value, focus = false) {
   selectedTab = value; saveSetting('right_panel_tab', value); preference('pellets-right-panel-tab', value); sync();
@@ -476,11 +507,14 @@ document.addEventListener('submit', event => {
   if (event.target.id === 'plan-form') send();else if(!flight)mutate(chat?'save':'new');
 }, true);
 document.addEventListener('click', async event => {
-  const button=event.target.closest('[data-plan]');if(!button)return;
+  const button=event.target.closest('[data-plan]');if(!button || button.disabled)return;
   const action=button.dataset.plan, draft=state.drafts.find(d=>String(d.id)===button.closest('[data-draft-id]')?.dataset.draftId);
   if(action==='open'||action==='execution'){chooseTab(action==='open'?'plan':'execution',true);return;}
   if(uiVersion.isOutdated())return;
   if(activeOperation?.replace)return;
+  if(action==='toggle-tray'){trayCollapsed=!trayCollapsed;render();return;}
+  if(action==='remove'&&draft){deleteDrafts([draft]);return;}
+  if(action==='dismiss-all'){deleteDrafts(state.drafts.filter(d=>!created(d)));return;}
   if(action==='models') {loadModels(true);return;}
   if(action==='new'){if(state.messages.length||state.drafts.length||state.input){confirming=true;render();}else fresh();return;}
   if(action==='confirm-new'){fresh();return;}
@@ -494,9 +528,8 @@ document.addEventListener('click', async event => {
   if(action==='cancel-split'){splitting=null;render();return;}
   if(action==='apply-split'&&draft){const node=button.closest('[data-draft-id]'),titles=node.querySelector('[data-split-titles]').value.split('\n').map(x=>x.trim()).filter(Boolean);if(titles.length<2){node.querySelector('[data-split-error]').textContent='Enter at least two titles.';return;}state.drafts.splice(state.drafts.indexOf(draft),1,...titles.map(title=>makeDraft(title,draft.description,draft.acceptance,draft.group)));splitting=null;state.refining_draft_id=null;}
   else if(action==='combine'){const drafts=selected();if(drafts.length<2)return;const group=drafts.every(d=>d.group===drafts[0].group)?drafts[0].group:'';const combined=makeDraft(drafts.map(d=>d.title).join(' / '),drafts.map(d=>d.title+'\n'+d.description).join('\n\n'),drafts.map(d=>d.acceptance).filter(Boolean).join('\n\n'),group);const index=state.drafts.indexOf(drafts[0]);state.drafts=state.drafts.filter(d=>!drafts.includes(d));state.drafts.splice(index,0,combined);state.refining_draft_id=null;}
-  else if(action==='remove'&&draft&&!created(draft)){state.drafts=state.drafts.filter(d=>d!==draft);if(state.refining_draft_id===draft.id)state.refining_draft_id=null;}
   else if(action==='select-all'){state.drafts.forEach(d=>{if(!created(d))d.selected=true;});}
-  else if(action==='add-draft'){state.drafts.push(makeDraft());}
+  else if(action==='add-draft'){trayCollapsed=false;state.drafts.push(makeDraft());}
   else return;
   markDirty();render();
   if(action==='add-draft'){const last=panel.querySelector('.plan-draft-list').lastElementChild;last.querySelector('details').open=true;last.querySelector('[name=title]').focus();}

@@ -65,6 +65,20 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   await until(async()=>await page.locator('.plan-card').count()===2,'Reported planner drafts did not appear');
   assert.equal(await page.locator('#plan-message').inputValue(),'Next idea kept while planning','Reply discarded a newer composer draft');
   assert.equal(cli('list').length,1,'Planning reply created queue records automatically');
+  await page.locator('[data-plan=toggle-tray]').click();
+  assert.equal(await page.locator('.plan-draft-list').isVisible(),false,'Collapsed tray kept proposals visible');
+  assert.equal(await page.locator('[data-plan=toggle-tray]').getAttribute('aria-expanded'),'false');
+  await page.locator('[data-plan=toggle-tray]').click();
+  assert.equal(await page.locator('.plan-draft-list').isVisible(),true);
+  assert.equal(await page.locator('.plan-card .plan-row-title').first().evaluate(el=>getComputedStyle(el).whiteSpace),'normal','Proposal titles must wrap');
+  assert.equal(await page.getByRole('button',{name:'Undo',exact:true}).count(),0);
+  await page.setViewportSize({width:980,height:600});
+  const shortSend=await page.getByRole('button',{name:'Send message',exact:true}).boundingBox();
+  assert.ok(shortSend.y+shortSend.height<=600,'Pinned tray pushed Send below a short window');
+  await page.locator('[data-plan=toggle-tray]').click();
+  assert.equal(await page.locator('.plan-draft-list').isVisible(),false);
+  await page.locator('[data-plan=toggle-tray]').click();
+  await page.setViewportSize({width:1280,height:850});
   const cards=page.locator('.plan-card');
   await cards.nth(0).locator('summary').click();
   await cards.nth(0).locator('[name=title]').fill('Create only this reviewed draft');
@@ -76,6 +90,12 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   await until(async()=>await page.locator('.plan-created').count()===1,'Explicit selected creation failed');
   const created=cli('list').find(p=>p.title==='Create only this reviewed draft');
   assert.ok(created,'Immediate Create lost the latest title');
+  assert.equal(await page.locator('.plan-transcript .plan-created').count(),1,'Created pellet confirmation is missing from chat');
+  assert.equal(await page.locator('.plan-drafts .plan-created').count(),0,'Created pellet stayed in proposal tray');
+  assert.equal(await page.locator('.plan-total').innerText(),'1','Tray count includes created pellets');
+  const receiptFits=await page.locator('.plan-created').evaluate(el=>{const bounds=el.getBoundingClientRect();return [...el.querySelectorAll('span')].filter(span=>getComputedStyle(span).display!=='none').every(span=>span.getBoundingClientRect().bottom<=bounds.bottom);});
+  assert.equal(receiptFits,true,'Created confirmation content overflows its card');
+  assert.equal(await page.locator('.plan-created .plan-row-menu-button').count(),0,'Created pellets offered draft deletion');
   assert.match(created.description,/Acceptance-only scope/);
   assert.equal(cli('list').length,2,'Creation included an unselected draft');
   const remaining=page.locator('.plan-card').first();
@@ -83,17 +103,17 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   await remaining.getByRole('button',{name:'Split pellet',exact:true}).click();
   await remaining.locator('[data-split-titles]').fill('First split\nSecond split');
   await remaining.getByRole('button',{name:'Split into drafts',exact:true}).click();
-  assert.equal(await page.locator('.plan-card').count(),2);
+  await until(async()=>await page.locator('.plan-card').count()===2,'Split proposals did not render');
   await until(async()=>await page.getByRole('button',{name:'Combine selected',exact:true}).isEnabled(),'Split did not save');
   await page.getByRole('button',{name:'Combine selected',exact:true}).click();
-  assert.equal(await page.locator('.plan-card').count(),1);
+  await until(async()=>await page.locator('.plan-card').count()===1,'Combined proposal did not render');
   await page.locator('.plan-card summary').click();
   await page.getByRole('button',{name:'Refine in chat',exact:true}).click();
   await page.locator('#plan-message').fill('Include the important edge cases');
   await until(async()=>await page.getByRole('button',{name:'Send message',exact:true}).isEnabled(),'Refinement did not save');
   await page.getByRole('button',{name:'Send message',exact:true}).click();
   await until(async()=>await page.locator('.plan-card [name=description]').inputValue()==='Refined with the requested edge cases.','Refinement did not update the exact draft');
-  assert.equal(await page.locator('.plan-card').count(),1);
+  await until(async()=>await page.locator('.plan-card').count()===1,'Combined proposal did not render');
   assert.equal(await page.locator('.plan-created').count(),1);
   for(const width of [390,1280]){
     await page.setViewportSize({width,height:850});
@@ -283,6 +303,17 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   const disabledSend=legacyPage.getByRole('button',{name:'Send message',exact:true});
   await disabledSend.hover();
   assert.equal(await disabledSend.evaluate(el=>getComputedStyle(el).cursor),'not-allowed','Disabled send shows a waiting cursor');
+  const beforeDismiss=await legacyPage.locator('.plan-card').count();
+  await legacyPage.locator('.plan-dismiss').first().click();
+  await legacyPage.evaluate(()=>window.Planner.flush());
+  assert.equal(await legacyPage.locator('.plan-card').count(),beforeDismiss-1,'Individual dismissal failed');
+  assert.equal(await legacyPage.getByRole('button',{name:'Undo',exact:true}).count(),0,'Dismissal still offers Undo');
+  await legacyPage.getByRole('button',{name:'Dismiss all',exact:true}).click();
+  await legacyPage.evaluate(()=>window.Planner.flush());
+  assert.equal(await legacyPage.locator('.plan-drafts').isVisible(),false,'Empty tray stayed visible');
+  await legacyPage.reload();
+  await legacyPage.locator('#plan-message').waitFor();
+  assert.equal(await legacyPage.locator('.plan-card').count(),0,'Dismissed proposals returned after reload');
   await legacyPage.close();
   for (const noCheckout of [false,true]) {
     const choicePage=await browser.newPage({viewport:{width:1100,height:800}});
@@ -302,10 +333,9 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
     assert.equal(await choicePage.locator('#plan-workspace').getAttribute('aria-invalid'),'true');
     assert.equal(await choicePage.getByRole('button',{name:'Send message',exact:true}).isDisabled(),true);
     assert.match(await choicePage.locator('.plan-folder-error').innerText(),noCheckout?/no registered checkout/:/Choose a working folder/);
-    const transcriptBounds=await choicePage.locator('.plan-transcript').boundingBox(), statusBounds=await choicePage.locator('.plan-status').boundingBox();
-    assert.ok(transcriptBounds.y+transcriptBounds.height<=statusBounds.y+1,'Chat status overlaps the transcript');
+    assert.equal(await choicePage.locator('.plan-status').isVisible(),false,'Idle chat shows a permanent status box');
     await choicePage.close();
   }
   assert.deepEqual(errors,[]);
-  console.log('PASS real planning: lazy model catalog, gated reply, retained composer/DOM, explicit selected creation, immediate edit save, split/combine/refine, persistent project pin, created links, confirmed new chat, lost Send/New receipts with exact explicit retry, responsive tabs and keyboard, immutable selected-worktree binding and exact model/turn cwd, visible busy status, full-access planning, persistent execution access dropdown');
+  console.log('PASS real planning: lazy model catalog, gated reply, retained composer/DOM, explicit selected creation, immediate edit save, split/combine/refine, persistent project pin, created links, confirmed new chat, lost Send/New receipts with exact explicit retry, responsive tabs and keyboard, immutable selected-worktree binding and exact model/turn cwd, visible busy status, full-access planning, persistent execution access dropdown, unified chat, collapsible tray, wrapping titles, created links in chat, single/bulk dismissal without Undo');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(browser)await browser.close();await stop();fs.rmSync(temporary,{recursive:true,force:true});});
