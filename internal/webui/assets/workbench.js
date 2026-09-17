@@ -3,6 +3,7 @@ import "./dropdowns.js";
 import { syncQueueFilters } from "./filters.js";
 import * as uiVersion from "./ui-version.js";
 import "./planner.js";
+import "./sidebar-resize.js";
 // Presentation state is ephemeral and never supplies queue/execution authority.
 const root = document.documentElement;
 const drafts = new Map(),

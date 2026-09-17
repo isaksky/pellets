@@ -287,3 +287,21 @@
 .plan-draft-heading .plan-batch-tools button { display:flex; align-items:center; justify-content:center; width:24px; height:24px; padding:4px; border:0; border-radius:4px; }
 .plan-draft-heading .plan-batch-tools button:hover:not(:disabled) { background:var(--theme-quiet-hover); }
 .plan-batch-tools svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; }
+
+.plan-drafts .plan-draft-heading:hover { background:var(--theme-quiet-hover); border-radius:4px; }
+.plan-draft-heading .plan-tray-toggle:hover,
+.plan-draft-heading .plan-batch-tools button:hover:not(:disabled) { background:transparent; }
+
+.plan-draft-heading .plan-batch-tools button:hover:not(:disabled),
+.plan-draft-heading .plan-batch-tools button:focus-visible:not(:disabled) { color:var(--ink); }
+
+.plan-draft-list .plan-card { grid-template-columns:18px minmax(0,1fr); }
+.plan-draft-list .plan-card > .plan-dismiss { display:none; }
+.plan-draft-list .plan-card:hover,
+.plan-draft-list .plan-card:focus-within { grid-template-columns:18px minmax(0,1fr) 28px; }
+.plan-draft-list .plan-card:hover > .plan-dismiss,
+.plan-draft-list .plan-card:focus-within > .plan-dismiss { display:block; }
+@media (hover:none) {
+  .plan-draft-list .plan-card { grid-template-columns:18px minmax(0,1fr) 28px; }
+  .plan-draft-list .plan-card > .plan-dismiss { display:block; }
+}

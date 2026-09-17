@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"pellets/internal/domain"
+	"strconv"
 )
 
 // Settings are database-wide presentation preferences, separate from project
@@ -26,6 +27,13 @@ func ValidateSetting(key, value string) error {
 		}
 	case "navigation_visible", "execution_visible", "skip_new_chat_confirmation":
 		valid = value == "true" || value == "false"
+	case "navigation_width", "execution_width":
+		width, err := strconv.Atoi(value)
+		if key == "navigation_width" {
+			valid = err == nil && width >= 140 && width <= 360
+		} else {
+			valid = err == nil && width >= 280 && width <= 720
+		}
 	case "right_panel_tab":
 		valid = value == "plan" || value == "execution"
 	}

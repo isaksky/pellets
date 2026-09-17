@@ -35,6 +35,19 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   const posts=[];page.on('request',request=>{if(request.method()==='POST'&&/\/planning$/.test(request.url()))posts.push(request.postDataJSON());});
   await page.goto(origin+'/projects/'+original.project+'/tasks');
+  for(const [name, selector, direction] of [['navigation','#project-drawer',1],['execution','#right-panel',-1]]) {
+    const handle=page.locator('[data-sidebar='+name+']');
+    await handle.waitFor();
+    const before=await page.locator(selector).evaluate(el=>el.getBoundingClientRect().width);
+    const box=await handle.boundingBox();
+    await page.mouse.move(box.x+3,box.y+50);await page.mouse.down();
+    await page.mouse.move(box.x+3+direction*30,box.y+50);await page.mouse.up();
+    await until(async()=>Math.round(await page.locator(selector).evaluate(el=>el.getBoundingClientRect().width))===Math.round(before+30),'Sidebar drag did not resize '+name);
+    await until(async()=> (await (await page.request.get(origin+'/settings')).json()).settings[name+'_width']===String(Math.round(before+30)),'Sidebar width was not saved');
+    await page.reload();
+    assert.equal(Math.round(await page.locator(selector).evaluate(el=>el.getBoundingClientRect().width)),Math.round(before+30));
+    await page.locator('[data-sidebar='+name+']').dblclick();
+  }
   await page.locator('#plan-tab').click();
   await page.locator('#plan-message').waitFor();
   await until(async()=>!(await page.locator('.plan-drafts').isVisible()),'Empty proposal tray did not hide');
@@ -211,7 +224,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   });
   await page.locator('#plan-skip-new-confirmation').check();
   await page.getByRole('button',{name:'Start new chat',exact:true}).click();
-  assert.equal(await page.evaluate(async()=> (await (await fetch('/settings')).json()).settings.skip_new_chat_confirmation),'true');
+  await until(async()=>await page.evaluate(async()=> (await (await fetch('/settings')).json()).settings.skip_new_chat_confirmation)==='true','New chat preference did not save');
   await page.getByRole('button',{name:'Retry request',exact:true}).waitFor();
   assert.ok(committedNew,'Lost New chat scenario did not commit a real chat');
   const beforeNewReload=posts.length;
@@ -328,6 +341,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   await disabledSend.hover();
   assert.equal(await disabledSend.evaluate(el=>getComputedStyle(el).cursor),'not-allowed','Disabled send shows a waiting cursor');
   const beforeDismiss=await legacyPage.locator('.plan-card').count();
+  await legacyPage.locator('.plan-card').first().hover();
   await legacyPage.locator('.plan-dismiss').first().click();
   await until(async()=>await legacyPage.locator('.plan-card').count()===beforeDismiss-1,'Individual dismissal failed');
   await legacyPage.evaluate(()=>window.Planner.flush());

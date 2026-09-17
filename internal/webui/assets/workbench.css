@@ -2429,3 +2429,9 @@ dialog::backdrop {
 
 /* Keep the queue heading closer to the application toolbar. */
 .workspace:has(#tasks-area) { padding-top:16px; }
+
+.sidebar-resize-handle { position:fixed; z-index:34; width:6px; cursor:col-resize; touch-action:none; outline:none; }
+.sidebar-resize-handle[hidden] { display:none; }
+.sidebar-resize-handle:hover, .sidebar-resize-handle:focus-visible { background:var(--accent); opacity:.5; }
+.sidebar-resizing, .sidebar-resizing * { cursor:col-resize!important; user-select:none!important; }
+@media(max-width:600px) { .sidebar-resize-handle { display:none; } }

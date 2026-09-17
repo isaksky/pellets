@@ -275,3 +275,8 @@ appear as linked confirmations in the conversation; empty trays disappear.
 Starting a new chat confirms replacement in a centered dialog. “Don’t ask me again”
 is saved as the database-wide boolean setting `skip_new_chat_confirmation` when
 Start new chat is confirmed; Cancel and Escape do not save the checkbox choice.
+
+Both sidebar edges can be dragged to resize on desktop. Arrow keys adjust the
+focused divider; Shift uses larger steps, Home/End use the bounds, and double-click
+resets the width. Widths persist in navigation_width and execution_width settings.
+Resize handles are hidden in the mobile layout.
