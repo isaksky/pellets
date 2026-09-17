@@ -139,8 +139,9 @@ async function reloadWithDrafts(page, revision) {
   observeContext(planningContext);
   const planningPage = await openPage(planningContext, origin + queuePath);
   await planningPage.locator('#plan-tab').click();
-  await planningPage.getByRole('heading', {name: 'What should we work on?'}).waitFor();
-  await planningPage.locator('.plan-welcome [data-plan=add-draft]').click();
+  await planningPage.locator('#plan-message').waitFor();
+  // Seed the manual draft through the real planner action; the empty tray is hidden.
+  await planningPage.locator('[data-plan=add-draft]').evaluate(button => button.click());
   const planningDraft = planningPage.locator('.plan-card').first();
   const planningDraftID = await planningDraft.getAttribute('data-draft-id');
   await planningDraft.locator('[name=title]').fill('Saved planning draft before upgrade');
@@ -153,6 +154,7 @@ async function reloadWithDrafts(page, revision) {
   }, 'Manual planning fixture did not autosave to the real database');
   const savedPlanningChat = await readPlanning();
   const planningVersion = await planningDraft.locator('[name=version]').inputValue();
+  await planningDraft.getByRole('button', {name: 'Close draft editor', exact: true}).click();
   const oldRevision = await cleanPage.locator('html').getAttribute('data-ui-revision');
   assert.match(oldRevision, /^[a-f0-9]{64}$/);
   assert.equal((await (await cleanPage.request.get(origin + '/ui-version')).json()).revision, oldRevision);
@@ -189,14 +191,16 @@ async function reloadWithDrafts(page, revision) {
   const planningDescription = 'Planning description kept through restart.\n'.repeat(18);
   const planningAcceptance = 'The original planning draft identity and fields survive.';
   const planningInput = 'Unsent planning follow-up\nwith its caret kept in place.';
+  await planningDraft.locator('.plan-open-draft').click();
   await planningDraft.locator('[name=title]').fill(planningTitle);
   await planningDraft.locator('[name=description]').fill(planningDescription);
   await planningDraft.locator('[name=acceptance]').fill(planningAcceptance);
   await planningDraft.locator('[name=group]').fill('web-ui');
+  await planningDraft.getByRole('button', {name: 'Close draft editor', exact: true}).click();
   await planningDraft.locator('[data-field=selected]').uncheck();
   await planningPage.locator('#plan-message').fill(planningInput);
   await planningPage.locator('#plan-message').press('ArrowLeft');
-  await planningPage.locator('[data-plan=retry]').waitFor({state: 'visible'});
+  await planningPage.locator('[data-plan=retry]:visible').waitFor({state: 'visible'});
   const failedPlanningRequest = planningRequests.at(-1);
   assert.equal(failedPlanningRequest.action, 'save');
   assert.equal(failedPlanningRequest.chat_id, savedPlanningChat.id);
@@ -204,11 +208,11 @@ async function reloadWithDrafts(page, revision) {
   assert.equal(failedPlanningRequest.state.drafts[0].title, planningTitle);
   assert.match(failedPlanningRequest.request_id, /^[a-f0-9-]{36}$/i);
   const planningCaret = await planningPage.locator('#plan-message').evaluate(element => element.selectionStart);
-  const planningScroll = await planningPage.locator('.plan-draft-list').evaluate(element => {
+  const planningScroll = await planningPage.locator('.plan-transcript').evaluate(element => {
     element.scrollTop = 47;
     return element.scrollTop;
   });
-  assert.ok(planningScroll > 0, 'Expanded planning draft did not exercise scroll restoration');
+  // The conversation can be empty for a manual draft; preserve its exact scroll.
   const postCount = posts.length;
   // Change the authoritative record while the tab retains the earlier CAS
   // version. Reload may recover draft text, but must not silently refresh CAS.
@@ -290,18 +294,18 @@ async function reloadWithDrafts(page, revision) {
   assert.equal(await planningDraft.locator('[name=group]').inputValue(), 'web-ui');
   assert.equal(await planningDraft.locator('[data-field=selected]').isChecked(), false);
   assert.equal(await planningDraft.locator('[name=version]').inputValue(), planningVersion, 'Planning reload replaced the retained optimistic version');
-  assert.equal(await planningDraft.locator('details').evaluate(element => element.open), true, 'Planning reload lost expanded draft details');
+  assert.equal(await planningDraft.locator('dialog').evaluate(element => element.open), false, 'Planning reload reopened the closed draft editor');
   assert.equal(await planningPage.locator('#plan-message').inputValue(), planningInput);
   assert.equal(await planningPage.locator('#plan-message').evaluate(element => element.selectionStart), planningCaret, 'Planning reload lost composer caret');
   assert.equal(await planningPage.locator('#plan-message').evaluate(element => document.activeElement === element), true, 'Planning reload lost composer focus');
-  assert.equal(await planningPage.locator('.plan-draft-list').evaluate(element => element.scrollTop), planningScroll, 'Planning reload lost draft list scroll');
-  await planningPage.locator('[data-plan=retry]').waitFor({state: 'visible'});
+  assert.equal(await planningPage.locator('.plan-transcript').evaluate(element => element.scrollTop), planningScroll, 'Planning reload lost draft list scroll');
+  await planningPage.locator('[data-plan=retry]:visible').waitFor({state: 'visible'});
   await planningPage.waitForTimeout(700);
   assert.equal(planningRequests.length, planningPostsBeforeReload, 'Planning reload automatically replayed a failed request');
   assert.deepEqual((await readPlanning()).state, savedPlanningChat.state, 'Planning reload changed saved chat before explicit retry');
   assert.equal(await planningPage.locator('#ui-recovered-drafts').count(), 0, 'Planning forms leaked into the generic reload handoff');
 
-  await planningPage.locator('[data-plan=retry]').click();
+  await planningPage.locator('[data-plan=retry]:visible').click();
   await until(async () => (await readPlanning()).state.input === planningInput, 'Explicit planning retry did not save restored input');
   const retriedPlanningRequest = planningRequests[planningPostsBeforeReload];
   assert.equal(retriedPlanningRequest.request_id, failedPlanningRequest.request_id, 'Planning retry invented a new request ID');
