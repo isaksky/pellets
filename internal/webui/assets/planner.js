@@ -9,6 +9,8 @@ const pendingKey = 'pellets-planner-pending';
 let panel, data = null, state = emptyState(), chat = null, load = null;
 let flight = null, timer, dirty = false, conflict = false, failed = null;
 let splitting = null, confirming = false, feedback = '';
+let savingNewChatPreference = false;
+let skipNewChatConfirmation = JSON.parse(document.documentElement.dataset.settings || '{}').skip_new_chat_confirmation === 'true';
 let trayCollapsed = false;
 let modelsLoaded = false, refreshedAt = 0;
 let activeOperation = null, handoffError = '', lastPlannerFocus = null, presentationToRestore = null;
@@ -47,7 +49,7 @@ function capturePresentation() {
   let focus=lastPlannerFocus;
   if(focus){const field=presentationField(focus);if(field)focus={...focus,start:field.selectionStart,end:field.selectionEnd,direction:field.selectionDirection};}
   const split=splitting?{id:splitting,text:panel.querySelector('[data-draft-id="'+CSS.escape(splitting)+'"] [data-split-titles]')?.value||''}:null;
-  return {focus,split,open:Array.from(panel.querySelectorAll('details[id][open]'),el=>el.id),
+  return {focus,split,open:Array.from(panel.querySelectorAll('dialog[id][open]'),el=>el.id),
     scrolls:Array.from(panel.querySelectorAll('.plan-transcript,.plan-draft-list'),el=>({className:el.className,top:el.scrollTop,left:el.scrollLeft}))};
 }
 function storePending(force = false) {
@@ -221,9 +223,12 @@ function routes(group) {
 }
 function scaffold() {
   if (panel.querySelector('#plan-content')) return;
-  panel.innerHTML = `<div id="plan-content"><div class="plan-context"><div><span class="plan-eyebrow">PLANNING FOR</span><strong data-plan-project></strong></div><div data-plan-new><button type="button" class="quiet" data-plan="new">New chat</button></div></div>
+  panel.innerHTML = `<dialog id="plan-new-dialog" aria-labelledby="plan-new-heading" aria-describedby="plan-new-description"><h2 id="plan-new-heading">Start a new chat?</h2><p id="plan-new-description"></p><label class="plan-confirm-preference"><input type="checkbox" id="plan-skip-new-confirmation"> Don’t ask me again</label><p class="plan-new-error" role="alert" hidden></p><div class="plan-new-actions"><button type="button" data-plan="cancel-new" autofocus>Cancel</button><button type="button" class="primary-button" data-plan="confirm-new">Start new chat</button></div></dialog><div id="plan-content"><div class="plan-context"><div data-plan-new><button type="button" class="quiet" data-plan="new">New chat</button></div></div>
     <div class="plan-transcript" aria-live="polite"><div class="plan-messages"></div><div class="plan-receipts" aria-label="Created pellets"></div><div class="plan-pending" hidden></div><div class="plan-chat-status"><div class="plan-status" role="status" aria-live="polite" aria-atomic="true" hidden></div></div></div><section class="plan-drafts" aria-label="Proposed pellets"><div class="plan-draft-heading"><button type="button" class="plan-tray-toggle" data-plan="toggle-tray" aria-expanded="true" aria-controls="plan-proposal-list"><span class="plan-total">0</span> <span data-proposal-label>proposed pellets</span> <span data-tray-toggle-label>Collapse</span></button></div><div class="plan-batch-tools"><button type="button" data-plan="select-all">Select all</button><button type="button" data-plan="combine">Combine selected</button><button type="button" data-plan="add-draft">+ Add draft</button></div><div class="plan-draft-list" id="plan-proposal-list"></div><div class="plan-create-row"><button type="button" data-plan="dismiss-all">Dismiss all</button><button type="button" class="primary-button" data-plan="create">Create pellets</button></div></section>
-    <datalist id="plan-groups"></datalist><div class="plan-bottom"><form id="plan-form" method="post"><input type="hidden" name="version"><div class="plan-refining" hidden></div><div class="plan-composer-settings"><div class="plan-folder"><label class="plan-workspace-label">Working folder<select id="plan-workspace" aria-label="Working folder" aria-describedby="plan-folder-error plan-folder-path"></select></label><span class="plan-folder-context"></span><p id="plan-folder-error" class="plan-folder-error" role="alert" hidden></p></div><label class="plan-access">Access <select id="plan-access" name="access_mode" aria-label="Planning access"><option value="automatic">Automatic approval</option><option value="full">Full access</option></select></label></div><span id="plan-folder-path" class="plan-path"></span><label class="visually-hidden" for="plan-message">Message planner</label><textarea id="plan-message" name="input" rows="2" placeholder="What should we plan?" maxlength="65536"></textarea><div class="plan-composer-tools"><select id="plan-model" name="model" aria-label="Planning model"></select><span class="plan-tool-divider"></span><select id="plan-effort" name="effort" aria-label="Reasoning effort"></select><button type="submit" class="plan-send" aria-label="Send message">↑</button></div></form><button type="button" class="plan-select-models" data-plan="models">Choose a model…</button></div></div>`;
+    <datalist id="plan-groups"></datalist><div class="plan-bottom"><form id="plan-form" method="post"><input type="hidden" name="version"><div class="plan-refining" hidden></div><div class="plan-composer-settings"><div class="plan-folder"><label class="plan-workspace-label"><select data-value-prefix="Folder: " id="plan-workspace" aria-label="Working folder" aria-describedby="plan-folder-error plan-folder-path"></select></label><span class="plan-folder-context"></span><p id="plan-folder-error" class="plan-folder-error" role="alert" hidden></p></div><label class="plan-access"><select data-value-prefix="Approval: " id="plan-access" name="access_mode" aria-label="Planning access"><option value="automatic">Automatic</option><option value="full">None (full access)</option></select></label></div><span id="plan-folder-path" class="plan-path visually-hidden"></span><label class="visually-hidden" for="plan-message">Message planner</label><textarea id="plan-message" name="input" rows="2" placeholder="What should we plan?" maxlength="65536"></textarea><div class="plan-composer-tools"><select id="plan-model" name="model" aria-label="Planning model"></select><span class="plan-tool-divider"></span><select id="plan-effort" name="effort" aria-label="Reasoning effort"></select><button type="submit" class="plan-send" aria-label="Send message">↑</button></div></form><button type="button" class="plan-select-models" data-plan="models">Choose a model…</button></div></div>`;
+  const dialog=panel.querySelector('#plan-new-dialog');
+  dialog.addEventListener('cancel',event=>{if(savingNewChatPreference)event.preventDefault();});
+  dialog.addEventListener('close',()=>{confirming=false;panel.querySelector('[data-plan=new]').focus({preventScroll:true});});
 }
 function updateOptions(select, options, value) {
   const signature = JSON.stringify(options);
@@ -242,9 +247,13 @@ function draftNode(draft) {
     node.innerHTML = `<a href="/projects/${encodeURIComponent(projectCode())}/tasks/${encodeURIComponent(reference)}" data-plan-reference><span class="plan-row-check" aria-label="Created">Created</span><span class="plan-row-ref">${esc(reference)}</span><span class="plan-row-title"></span><span class="plan-row-group"></span><span aria-hidden="true">↗</span></a>`;
   } else {
     const id = 'plan-draft-' + draft.id;
-    node.innerHTML = `<input class="plan-row-select" type="checkbox" name="selected" form="${esc(id)}" data-field="selected"><details class="plan-draft-details" id="plan-details-${esc(draft.id)}"><summary><span class="plan-row-title"></span><span class="plan-row-group"></span><span class="plan-row-state">Draft</span></summary><div class="plan-row-editor"><form id="${esc(id)}" method="post" class="plan-draft-form"><input type="hidden" name="version"><label class="visually-hidden" for="plan-title-${esc(draft.id)}">Pellet title</label><input class="plan-card-title" id="plan-title-${esc(draft.id)}" name="title" data-field="title" maxlength="4096"><label class="plan-field-label">Description<textarea name="description" data-field="description" rows="4" maxlength="65536"></textarea></label><label class="plan-field-label">Acceptance criteria<textarea class="plan-acceptance" name="acceptance" data-field="acceptance" rows="3" maxlength="65536"></textarea></label><div class="plan-group-row"><label>Group<input name="group" data-field="group" list="plan-groups" placeholder="Ungrouped" maxlength="4096"></label></div></form><p class="plan-route"></p><p class="plan-reason"></p><div class="plan-card-actions"><button type="button" data-plan="refine">Refine in chat</button><button type="button" data-plan="split">Split pellet</button></div><div class="plan-split" hidden><label>One title per new pellet<textarea rows="3" data-split-titles></textarea></label><p>Each draft keeps the description and acceptance criteria for refinement.</p><button type="button" data-plan="apply-split">Split into drafts</button><button type="button" data-plan="cancel-split">Cancel</button><span data-split-error role="alert"></span></div></div></details>`;
+    node.innerHTML = `<input class="plan-row-select" type="checkbox" name="selected" form="${esc(id)}" data-field="selected"><button type="button" class="plan-open-draft" data-plan="edit-draft" aria-haspopup="dialog"><span class="plan-row-title"></span><span class="plan-row-group"></span></button><dialog class="plan-draft-dialog" id="plan-details-${esc(draft.id)}" aria-labelledby="plan-editor-heading-${esc(draft.id)}"><header><h2 id="plan-editor-heading-${esc(draft.id)}">Edit proposed pellet</h2><button type="button" data-plan="close-editor" aria-label="Close draft editor">×</button></header><div class="plan-row-editor"><form id="${esc(id)}" method="post" class="plan-draft-form"><input type="hidden" name="version"><label class="visually-hidden" for="plan-title-${esc(draft.id)}">Pellet title</label><input class="plan-card-title" id="plan-title-${esc(draft.id)}" name="title" data-field="title" maxlength="4096"><label class="plan-field-label">Description<textarea name="description" data-field="description" rows="4" maxlength="65536"></textarea></label><label class="plan-field-label">Acceptance criteria<textarea class="plan-acceptance" name="acceptance" data-field="acceptance" rows="3" maxlength="65536"></textarea></label><div class="plan-group-row"><label>Group<input name="group" data-field="group" list="plan-groups" placeholder="Ungrouped" maxlength="4096"></label></div></form><p class="plan-route"></p><p class="plan-reason"></p><div class="plan-card-actions"><button type="button" data-plan="refine">Refine in chat</button><button type="button" data-plan="split">Split pellet</button></div><div class="plan-split" hidden><label>One title per new pellet<textarea rows="3" data-split-titles></textarea></label><p>Each draft keeps the description and acceptance criteria for refinement.</p><button type="button" data-plan="apply-split">Split into drafts</button><button type="button" data-plan="cancel-split">Cancel</button><span data-split-error role="alert"></span></div></div><footer><span class="plan-editor-status" role="status"></span><button type="button" data-plan="close-editor">Done</button></footer></dialog>`;
   }
   if (!created(draft)) node.insertAdjacentHTML('beforeend', '<button type="button" class="plan-dismiss" data-plan="remove" title="Dismiss proposal">×</button>');
+  const dialog=node.querySelector('dialog');
+  if(dialog)dialog.addEventListener('close',()=>{
+    if(node.isConnected&&(document.activeElement===document.body||dialog.contains(document.activeElement)))node.querySelector('.plan-open-draft').focus({preventScroll:true});
+  });
   return node;
 }
 function deleteDrafts(drafts) {
@@ -261,8 +270,8 @@ function render() {
   if (!panel) return;
   scaffold();
   const p = data?.project;
-  panel.querySelector('[data-plan-project]').textContent = p ? p.code + ' ⌑' : projectCode() || 'Select a project';
-  panel.querySelector('[data-plan-project]').title = 'This conversation stays with this project';
+  panel.dataset.planningProject = p?.code || projectCode() || '';
+  panel.querySelector('.plan-context').hidden = !state.messages.length && !state.drafts.length && !state.input.trim();
   const workspace = (data?.routing || []).find(w => w.id === state.workspace_id);
   const workspaceProblem = !workspace ? (state.workspace_id ? 'The chat’s checkout is unavailable. Restore it or start a new chat.' : data?.routing?.length ? 'Choose a working folder to send this message.' : 'This project has no registered checkout available for planning.') : '';
   const path = workspace?.path || '';
@@ -273,23 +282,26 @@ function render() {
   panel.querySelector('#plan-workspace').setAttribute('aria-invalid', String(!!workspaceProblem));
   const folderContext = panel.querySelector('.plan-folder-context');
   folderContext.hidden = (data?.routing?.length || 0) > 1 || !workspace;
-  folderContext.textContent = workspace ? 'Working folder: ' + workspace.name : '';
+  folderContext.textContent = workspace ? 'Folder: ' + workspace.name : '';
+  folderContext.title = workspace ? workspace.path || workspace.name : '';
   panel.querySelector('.plan-workspace-label').hidden = (data?.routing?.length || 0) <= 1;
   panel.querySelector('.plan-path').textContent = path;
   panel.querySelector('.plan-path').title = path;
+  panel.querySelector('#plan-workspace').title = path;
   const workspaceChoices = (data?.routing || []).map(w => ({id:String(w.id),name:chat?.state.workspace_id ? w.name : w.path || w.name}));
   if (!workspace) workspaceChoices.unshift({id:String(state.workspace_id || 0),name:state.workspace_id ? 'Unavailable workspace' : 'Choose folder…'});
   updateOptions(panel.querySelector('#plan-workspace'), workspaceChoices, String(state.workspace_id || 0));
-  const newHost = panel.querySelector('[data-plan-new]');
-  const newHTML = confirming ? '<span class="plan-new-confirm">Replace chat?<button type="button" data-plan="confirm-new">Start new</button><button type="button" data-plan="cancel-new">Cancel</button></span>' : '<button type="button" class="quiet" data-plan="new">New chat</button>';
-  if (newHost.dataset.confirming !== String(confirming)) {newHost.innerHTML = newHTML; newHost.dataset.confirming = String(confirming);}
+  const newDialog=panel.querySelector('#plan-new-dialog');
+  const draftCount=state.drafts.filter(d=>!created(d)).length;
+  panel.querySelector('#plan-new-description').textContent='Your current conversation'+(draftCount?' and '+draftCount+' draft proposal'+(draftCount===1?'':'s'):'')+' will be replaced. Created pellets will remain.';
+  if(confirming&&!newDialog.open)newDialog.showModal();
+  if(!confirming&&newDialog.open)newDialog.close();
   const transcript = panel.querySelector('.plan-transcript');
   const messages=panel.querySelector('.plan-messages');
   const following = transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop < 32;
   if (!state.messages.length) {
-    if (!messages.querySelector('.plan-welcome')) messages.innerHTML = '<div class="plan-welcome"><span class="plan-mark" aria-hidden="true">✧</span><h2>What should we work on?</h2><p>Talk through an idea. Shape the scope.<br>Turn it into pellets when you’re ready.</p><button type="button" class="quiet" data-plan="add-draft">Add a draft</button></div>';
+    messages.replaceChildren();
   } else {
-    messages.querySelector('.plan-welcome')?.remove();
     const ids = new Set();
     state.messages.forEach((message, index) => {
       const id = String(message.id || index); ids.add(id);
@@ -313,6 +325,7 @@ function render() {
     if (node && node.classList.contains('plan-created') !== created(draft)) { node.remove(); node = null; }
     if (!node) { node = draftNode(draft); host.append(node); }
     node.querySelector('.plan-row-title').textContent = draft.title || 'Untitled pellet';
+    node.querySelector('.plan-row-title').title = draft.title || 'Untitled pellet';
     node.querySelector('.plan-row-group').textContent = draft.group || '—';
     if (created(draft)) {
       const target = document.querySelector('.app-shell')?.dataset.project === projectCode() ? 'inspector-host' : 'app-content';
@@ -394,6 +407,15 @@ function render() {
     if (failed && !conflict) {const retry = document.createElement('button');retry.type='button';retry.dataset.plan='retry';retry.textContent='Retry request';status.append(retry);}
     if (conflict) {const reload = document.createElement('button');reload.type='button';reload.dataset.plan='reload';reload.textContent='Reload saved chat';status.append(reload);}
   }
+  for(const editorStatus of panel.querySelectorAll('.plan-editor-status')){
+    const signature=JSON.stringify([submissionError,text,dirty,activeOperation?.action,!!failed,conflict]);
+    if(editorStatus.dataset.signature===signature)continue;
+    editorStatus.dataset.signature=signature;
+    editorStatus.classList.toggle('error',submissionError);
+    editorStatus.replaceChildren(document.createTextNode(submissionError ? text || 'Changes could not be saved.' : dirty || activeOperation?.action==='save' ? 'Saving changes…' : 'Changes saved automatically'));
+    if(failed&&!conflict){const retry=document.createElement('button');retry.type='button';retry.dataset.plan='retry';retry.textContent='Retry request';editorStatus.append(retry);}
+    if(conflict){const reload=document.createElement('button');reload.type='button';reload.dataset.plan='reload';reload.textContent='Reload saved chat';editorStatus.append(reload);}
+  }
   window.Dropdowns?.enhance(panel);
   const folderTrigger = panel.querySelector('#plan-workspace-trigger');
   if (folderTrigger) {folderTrigger.setAttribute('aria-invalid', String(!!workspaceProblem));folderTrigger.setAttribute('aria-describedby', 'plan-folder-error plan-folder-path');}
@@ -435,7 +457,7 @@ function status(value, attention) {
   const toggle = document.getElementById('toggle-execution');
   if (toggle) {toggle.setAttribute('aria-controls','right-panel');toggle.title = `${root.classList.contains('execution-collapsed') ? 'Show' : 'Hide'} right panel · Execution: ${value}`;toggle.setAttribute('aria-label',toggle.title);}
 }
-async function loadModels(openMenu = false) {
+async function loadModels(openMenu = false, triggerID = 'plan-model-trigger') {
   if (!data) await ensureLoaded();
   if (!data) return;
   try {
@@ -444,16 +466,17 @@ async function loadModels(openMenu = false) {
     const result=await json(endpoint(code)+'/models?workspace='+encodeURIComponent(workspaceID)+'&access_mode='+encodeURIComponent(accessMode));
     if (projectCode()!==code || state.workspace_id!==workspaceID || accessMode!==(state.access_mode || 'automatic')) return;
     data.models=result.models || [];modelsLoaded=true;feedback='';render();
-    const trigger=panel.querySelector('#plan-model-trigger');
+    const trigger=document.getElementById(triggerID);
     if(openMenu)trigger?.click();else trigger?.focus();
   }catch(error){feedback=error.message;render();}
 }
 // Window capture precedes the shared selector's document listener. Opening the
-// model menu is the explicit intent that loads the real runtime catalog.
+// model or effort menu loads the shared runtime catalog.
 for (const type of ['click','keydown']) window.addEventListener(type,event=>{
-  if(modelsLoaded || !event.target.closest?.('#plan-model-trigger'))return;
+  const trigger=event.target.closest?.('#plan-model-trigger, #plan-effort-trigger');
+  if(modelsLoaded || !trigger)return;
   if(type==='keydown'&&!['Enter',' ','ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
-  event.preventDefault();event.stopImmediatePropagation();loadModels(true);
+  event.preventDefault();event.stopImmediatePropagation();loadModels(true,trigger.id);
 },true);
 async function fresh() {
   if (flight) return;
@@ -468,7 +491,7 @@ async function fresh() {
 function applyPresentation(){
   if(!presentationToRestore||!panel||!data||selectedTab!=='plan'||panel.hidden)return;
   const value=presentationToRestore;presentationToRestore=null;
-  for(const id of value.open||[]){const details=document.getElementById(id);if(details?.tagName==='DETAILS')details.open=true;}
+  for(const id of value.open||[]){const details=document.getElementById(id);if(details?.tagName==='DIALOG'&&!details.open)details.showModal();}
   if(value.split){const field=presentationField({split:true,draft:value.split.id});if(field)field.value=value.split.text;}
   for(const scroll of value.scrolls||[]){const el=panel.querySelector('.'+scroll.className.split(' ').join('.'));if(el){el.scrollTop=scroll.top;el.scrollLeft=scroll.left;}}
   if(value.focus){lastPlannerFocus=value.focus;const field=presentationField(value.focus);const target=value.focus.trigger&&field?document.getElementById(field.id+'-trigger'):field;if(target?.getClientRects().length){target.focus({preventScroll:true});try{field.setSelectionRange(value.focus.start,value.focus.end,value.focus.direction);}catch{}}}
@@ -510,29 +533,44 @@ document.addEventListener('click', async event => {
   const button=event.target.closest('[data-plan]');if(!button || button.disabled)return;
   const action=button.dataset.plan, draft=state.drafts.find(d=>String(d.id)===button.closest('[data-draft-id]')?.dataset.draftId);
   if(action==='open'||action==='execution'){chooseTab(action==='open'?'plan':'execution',true);return;}
+  if(action==='close-editor'){button.closest('dialog').close();return;}
+  if(action==='edit-draft'){button.closest('[data-draft-id]').querySelector('dialog').showModal();return;}
   if(uiVersion.isOutdated())return;
   if(activeOperation?.replace)return;
   if(action==='toggle-tray'){trayCollapsed=!trayCollapsed;render();return;}
   if(action==='remove'&&draft){deleteDrafts([draft]);return;}
   if(action==='dismiss-all'){deleteDrafts(state.drafts.filter(d=>!created(d)));return;}
   if(action==='models') {loadModels(true);return;}
-  if(action==='new'){if(state.messages.length||state.drafts.length||state.input){confirming=true;render();}else fresh();return;}
-  if(action==='confirm-new'){fresh();return;}
-  if(action==='cancel-new'){confirming=false;render();return;}
+  if(action==='new'){if(!skipNewChatConfirmation&&(state.messages.length||state.drafts.length||state.input)){panel.querySelector('#plan-skip-new-confirmation').checked=false;panel.querySelector('.plan-new-error').hidden=true;confirming=true;render();}else fresh();return;}
+  if(action==='confirm-new'){
+    const dialog=panel.querySelector('#plan-new-dialog'),error=dialog.querySelector('.plan-new-error');
+    savingNewChatPreference=true;
+    dialog.querySelectorAll('button,input').forEach(control=>control.disabled=true);
+    try{
+      if(panel.querySelector('#plan-skip-new-confirmation').checked){
+        await json('/settings',{method:'POST',body:JSON.stringify({_csrf:csrf(),key:'skip_new_chat_confirmation',value:'true'})});
+        skipNewChatConfirmation=true;
+      }
+      confirming=false;dialog.close();await fresh();
+    }catch(problem){error.textContent='Could not save your preference. '+problem.message;error.hidden=false;}
+    finally{savingNewChatPreference=false;dialog.querySelectorAll('button,input').forEach(control=>control.disabled=false);}
+    return;
+  }
+  if(action==='cancel-new'){if(savingNewChatPreference)return;confirming=false;render();return;}
   if(action==='retry'){mutate(failed.action,true);return;}
   if(action==='reload'){if(!confirm('Reload the saved chat? Copy any unsaved planning edits you want to keep first.'))return;try{accept(await json(endpoint()+'?chat='+chat.id));failed=null;conflict=false;dirty=false;feedback='';clearPending();render();}catch(error){feedback=error.message;render();}return;}
   if(action==='create'){if(selected().length)await mutate('create');return;}
-  if(action==='refine'&&draft){state.refining_draft_id=draft.id;markDirty();render();panel.querySelector('#plan-message').focus();return;}
+  if(action==='refine'&&draft){button.closest('dialog').close();state.refining_draft_id=draft.id;markDirty();render();panel.querySelector('#plan-message').focus();return;}
   if(action==='end-refine'){state.refining_draft_id=null;markDirty();render();panel.querySelector('#plan-message').focus();return;}
-  if(action==='split'&&draft){splitting=draft.id;render();const node=button.closest('[data-draft-id]');node.querySelector('details').open=true;node.querySelector('[data-split-titles]').focus();return;}
+  if(action==='split'&&draft){splitting=draft.id;render();const node=button.closest('[data-draft-id]');node.querySelector('[data-split-titles]').focus();return;}
   if(action==='cancel-split'){splitting=null;render();return;}
-  if(action==='apply-split'&&draft){const node=button.closest('[data-draft-id]'),titles=node.querySelector('[data-split-titles]').value.split('\n').map(x=>x.trim()).filter(Boolean);if(titles.length<2){node.querySelector('[data-split-error]').textContent='Enter at least two titles.';return;}state.drafts.splice(state.drafts.indexOf(draft),1,...titles.map(title=>makeDraft(title,draft.description,draft.acceptance,draft.group)));splitting=null;state.refining_draft_id=null;}
+  if(action==='apply-split'&&draft){const node=button.closest('[data-draft-id]'),titles=node.querySelector('[data-split-titles]').value.split('\n').map(x=>x.trim()).filter(Boolean);if(titles.length<2){node.querySelector('[data-split-error]').textContent='Enter at least two titles.';return;}node.querySelector('dialog').close();state.drafts.splice(state.drafts.indexOf(draft),1,...titles.map(title=>makeDraft(title,draft.description,draft.acceptance,draft.group)));splitting=null;state.refining_draft_id=null;}
   else if(action==='combine'){const drafts=selected();if(drafts.length<2)return;const group=drafts.every(d=>d.group===drafts[0].group)?drafts[0].group:'';const combined=makeDraft(drafts.map(d=>d.title).join(' / '),drafts.map(d=>d.title+'\n'+d.description).join('\n\n'),drafts.map(d=>d.acceptance).filter(Boolean).join('\n\n'),group);const index=state.drafts.indexOf(drafts[0]);state.drafts=state.drafts.filter(d=>!drafts.includes(d));state.drafts.splice(index,0,combined);state.refining_draft_id=null;}
   else if(action==='select-all'){state.drafts.forEach(d=>{if(!created(d))d.selected=true;});}
   else if(action==='add-draft'){trayCollapsed=false;state.drafts.push(makeDraft());}
   else return;
   markDirty();render();
-  if(action==='add-draft'){const last=panel.querySelector('.plan-draft-list').lastElementChild;last.querySelector('details').open=true;last.querySelector('[name=title]').focus();}
+  if(action==='add-draft'){const last=panel.querySelector('.plan-draft-list').lastElementChild;last.querySelector('dialog').showModal();last.querySelector('[name=title]').focus();}
 });
 document.addEventListener('keydown', event => {
   if(event.target.id==='plan-message'&&event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();send();}

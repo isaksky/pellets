@@ -88,10 +88,10 @@
 
   function sync(record) {
     const { select, trigger, value } = record;
-    const text =
+    const text = (select.dataset.valuePrefix || "") + (
       optionLabel(select.selectedOptions[0]) ||
       select.getAttribute("data-placeholder") ||
-      "Select…";
+      "Select…");
     if (value.textContent !== text) value.textContent = text;
     if (trigger.disabled !== select.disabled)
       trigger.disabled = select.disabled;

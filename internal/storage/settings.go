@@ -24,7 +24,7 @@ func ValidateSetting(key, value string) error {
 		case "gruvbox-light", "gruvbox-dark", "light", "dark", "icy":
 			valid = true
 		}
-	case "navigation_visible", "execution_visible":
+	case "navigation_visible", "execution_visible", "skip_new_chat_confirmation":
 		valid = value == "true" || value == "false"
 	case "right_panel_tab":
 		valid = value == "plan" || value == "execution"

@@ -263,8 +263,15 @@ runs keep their captured policy. Internal checkpoint reviewers remain read-only.
 The panel is a continuous scrolling conversation with a proposal tray docked above
 the composer. Progress appears inside the conversation only while a request runs;
 there is no permanent idle status box. The tray shows only uncreated proposals,
-with wrapping titles, expandable details, selection, and a direct × Dismiss action.
+with aligned selection, single-line titles truncated with ellipses, and a direct × Dismiss action. Titles open
+a centered editor with autosaved fields, leaving tray rows unchanged. The editor
+supports Escape, restores focus, and preserves unfinished edits across reloads.
+Checkboxes use explicit styling for consistent Safari and Chromium rendering.
 Its header reports the proposal count and can collapse the tray; new proposals
 expand it again. Dismiss all and Create selected controls stay with the tray.
 Dismissal autosaves without an Undo notice. Created pellets leave the tray and
 appear as linked confirmations in the conversation; empty trays disappear.
+
+Starting a new chat confirms replacement in a centered dialog. “Don’t ask me again”
+is saved as the database-wide boolean setting `skip_new_chat_confirmation` when
+Start new chat is confirmed; Cancel and Escape do not save the checkbox choice.

@@ -36,13 +36,16 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   const posts=[];page.on('request',request=>{if(request.method()==='POST'&&/\/planning$/.test(request.url()))posts.push(request.postDataJSON());});
   await page.goto(origin+'/projects/'+original.project+'/tasks');
   await page.locator('#plan-tab').click();
-  await page.getByRole('heading',{name:'What should we work on?'}).waitFor();
-  assert.equal(await page.locator('.plan-drafts').isVisible(),false);
+  await page.locator('#plan-message').waitFor();
+  await until(async()=>!(await page.locator('.plan-drafts').isVisible()),'Empty proposal tray did not hide');
   assert.equal(await page.locator('.plan-create-row').isVisible(),false);
   assert.equal(fs.existsSync(path.join(fixture,'fake-events.jsonl')),false,'Opening Plan contacted Codex');
   await page.locator('#plan-model-trigger').click();
   await page.getByRole('option',{name:'Planning Test',exact:true}).click();
-  await page.locator('#plan-effort').selectOption('high',{force:true});
+  await page.evaluate(()=>window.Planner.flush());
+  await page.reload();
+  await page.locator('#plan-effort-trigger').click();
+  await page.getByRole('option',{name:'high',exact:true}).click();
   await page.locator('#plan-message').fill('Plan the input and persistence work');
   await until(async()=>await page.getByRole('button',{name:'Send message',exact:true}).isEnabled(),'Composer did not finish autosaving');
   await page.getByRole('button',{name:'Send message',exact:true}).click();
@@ -70,7 +73,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   assert.equal(await page.locator('[data-plan=toggle-tray]').getAttribute('aria-expanded'),'false');
   await page.locator('[data-plan=toggle-tray]').click();
   assert.equal(await page.locator('.plan-draft-list').isVisible(),true);
-  assert.equal(await page.locator('.plan-card .plan-row-title').first().evaluate(el=>getComputedStyle(el).whiteSpace),'normal','Proposal titles must wrap');
+  assert.equal(await page.locator('.plan-card .plan-row-title').first().evaluate(el=>getComputedStyle(el).whiteSpace),'nowrap','Proposal titles must stay on one line');
   assert.equal(await page.getByRole('button',{name:'Undo',exact:true}).count(),0);
   await page.setViewportSize({width:980,height:600});
   const shortSend=await page.getByRole('button',{name:'Send message',exact:true}).boundingBox();
@@ -80,11 +83,25 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   await page.locator('[data-plan=toggle-tray]').click();
   await page.setViewportSize({width:1280,height:850});
   const cards=page.locator('.plan-card');
-  await cards.nth(0).locator('summary').click();
+  const rowBefore=await cards.nth(0).boundingBox();
+  await cards.nth(0).locator('.plan-open-draft').click();
+  assert.deepEqual(await cards.nth(0).boundingBox(),rowBefore,'Opening editor changed tray geometry');
+  const editor=page.locator('dialog[open]');
+  const bounds=await editor.boundingBox();
+  assert.ok(bounds.width>500&&bounds.y>=0&&bounds.y+bounds.height<=850,'Editor is clipped or constrained to tray');
+  await editor.press('Escape');
+  await until(async()=>await cards.nth(0).locator('.plan-open-draft').evaluate(el=>el===document.activeElement),'Escape did not restore draft focus');
+  await cards.nth(0).locator('.plan-open-draft').click();
   await cards.nth(0).locator('[name=title]').fill('Create only this reviewed draft');
   await cards.nth(0).locator('[name=description]').fill('');
   await cards.nth(0).locator('[name=acceptance]').fill('Acceptance-only scope survives immediate creation.');
+  await page.getByRole('button',{name:'Done',exact:true}).click();
   await cards.nth(1).locator('[name=selected]').uncheck();
+  const checkbox=cards.nth(1).locator('[name=selected]');
+  assert.deepEqual(await checkbox.evaluate(el=>({appearance:getComputedStyle(el).appearance,width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height})),{appearance:'none',width:16,height:16});
+  await checkbox.press('Space');
+  assert.equal(await checkbox.isChecked(),true);
+  await checkbox.press('Space');
   // Click before autosave can run: Create must persist the latest edits first.
   await page.getByRole('button',{name:'Create 1 pellet',exact:true}).click();
   await until(async()=>await page.locator('.plan-created').count()===1,'Explicit selected creation failed');
@@ -99,7 +116,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   assert.match(created.description,/Acceptance-only scope/);
   assert.equal(cli('list').length,2,'Creation included an unselected draft');
   const remaining=page.locator('.plan-card').first();
-  await remaining.locator('summary').click();
+  await remaining.locator('.plan-open-draft').click();
   await remaining.getByRole('button',{name:'Split pellet',exact:true}).click();
   await remaining.locator('[data-split-titles]').fill('First split\nSecond split');
   await remaining.getByRole('button',{name:'Split into drafts',exact:true}).click();
@@ -107,7 +124,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   await until(async()=>await page.getByRole('button',{name:'Combine selected',exact:true}).isEnabled(),'Split did not save');
   await page.getByRole('button',{name:'Combine selected',exact:true}).click();
   await until(async()=>await page.locator('.plan-card').count()===1,'Combined proposal did not render');
-  await page.locator('.plan-card summary').click();
+  await page.locator('.plan-card .plan-open-draft').click();
   await page.getByRole('button',{name:'Refine in chat',exact:true}).click();
   await page.locator('#plan-message').fill('Include the important edge cases');
   await until(async()=>await page.getByRole('button',{name:'Send message',exact:true}).isEnabled(),'Refinement did not save');
@@ -121,6 +138,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
     assert.equal(await page.locator('[data-plan-new]').evaluate(el=>el.scrollWidth<=el.clientWidth),true,'New chat control is clipped');
   }
   // An unfinished split is local presentation input, not a changed proposal.
+  await page.locator('.plan-card .plan-open-draft').click();
   await page.getByRole('button',{name:'Split pellet',exact:true}).click();
   await page.locator('[data-split-titles]').fill('First unfinished split\nSecond unfinished split');
   await page.locator('[data-split-titles]').press('ArrowLeft');
@@ -130,6 +148,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   assert.equal(await page.locator('[data-split-titles]').inputValue(),'First unfinished split\nSecond unfinished split');
   assert.deepEqual(await page.locator('[data-split-titles]').evaluate(el=>({focused:el===document.activeElement,selection:el.selectionStart})),{focused:true,selection:splitSelection});
   await page.getByRole('button',{name:'Cancel',exact:true}).click();
+  await page.getByRole('button',{name:'Done',exact:true}).click();
   // The server commits a real Send, but its response is lost. A reload must
   // retain the original operation and explicitly confirm its receipt.
   let lostSend, committedSend;
@@ -151,7 +170,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   await page.waitForTimeout(750);
   assert.equal(posts.length,beforeSendReload,'Reload automatically retried a planning mutation');
   await page.getByRole('button',{name:'Retry request',exact:true}).focus();
-  await page.evaluate(()=>{window.retryNode=document.querySelector('[data-plan=retry]');window.Planner.sync();});
+  await page.evaluate(()=>{window.retryNode=document.activeElement;window.Planner.sync();});
   assert.equal(await page.evaluate(()=>window.retryNode===document.activeElement),true,'A live render replaced the focused Retry button');
   await page.getByRole('button',{name:'Retry request',exact:true}).click();
   await until(async()=>!(await page.getByRole('button',{name:'Retry request',exact:true}).count()),'Lost Send receipt did not recover');
@@ -170,7 +189,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   await page.locator('#project-switcher > summary').click();
   await page.locator('#project-switcher a').filter({hasText:other.project}).click();
   await until(()=>page.url().includes('/projects/'+other.project+'/'),'Project switch did not finish');
-  assert.match(await page.locator('[data-plan-project]').innerText(),new RegExp(original.project),'Main navigation repinned the conversation');
+  assert.match(await page.locator('#planning-panel').getAttribute('data-planning-project'),new RegExp(original.project),'Main navigation repinned the conversation');
   assert.equal(await page.locator('.plan-created').count(),1);
   await page.locator('.plan-created a').click();
   await page.locator('[data-inspector]').waitFor();
@@ -181,6 +200,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   await page.getByRole('button',{name:'New chat',exact:true}).click();
   await page.getByRole('button',{name:'Cancel',exact:true}).click();
   assert.equal(await page.locator('.plan-created').count(),1,'Cancel new chat lost the conversation');
+  assert.notEqual(await page.evaluate(async()=> (await (await fetch('/settings')).json()).settings.skip_new_chat_confirmation),'true');
   await page.getByRole('button',{name:'New chat',exact:true}).click();
   let lostNew,committedNew;
   await page.route('**/projects/'+other.project+'/planning',async route=>{
@@ -188,7 +208,9 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
     if(body?.action==='new'&&!lostNew){lostNew=body;committedNew=(await(await route.fetch()).json()).chat;await route.abort('failed');}
     else await route.continue();
   });
-  await page.getByRole('button',{name:'Start new',exact:true}).click();
+  await page.locator('#plan-skip-new-confirmation').check();
+  await page.getByRole('button',{name:'Start new chat',exact:true}).click();
+  assert.equal(await page.evaluate(async()=> (await (await fetch('/settings')).json()).settings.skip_new_chat_confirmation),'true');
   await page.getByRole('button',{name:'Retry request',exact:true}).waitFor();
   assert.ok(committedNew,'Lost New chat scenario did not commit a real chat');
   const beforeNewReload=posts.length;
@@ -204,7 +226,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   const recoveredNew=(await(await page.request.get(origin+'/projects/'+other.project+'/planning')).json()).chat;
   assert.equal(recoveredNew.id,committedNew.id,'Retry created a duplicate chat');
   await page.unroute('**/projects/'+other.project+'/planning');
-  await until(async()=>(await page.locator('[data-plan-project]').innerText()).includes(other.project),'New chat did not pin the selected project');
+  await until(async()=>(await page.locator('#planning-panel').getAttribute('data-planning-project')).includes(other.project),'New chat did not pin the selected project');
   assert.equal(await page.locator('.plan-created').count(),0);
   const retained=(await (await page.request.get(origin+'/projects/'+original.project+'/planning?chat='+originalChat.id)).json()).chat;
   assert.ok(retained.state.drafts.some(d=>d.created_reference===created.id),'New chat erased completed planning history');
@@ -232,6 +254,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   await page.goto(origin+'/projects/'+original.project+'/tasks?workspace='+linked.id);
   await page.locator('#plan-workspace').waitFor({state:'attached'});
   assert.equal(await page.locator('#plan-workspace').inputValue(),String(recoveredNew.state.workspace_id),'Navigation retargeted the pinned chat');
+  await page.locator('#plan-message').fill('Start over in the selected worktree');
   await page.getByRole('button',{name:'New chat',exact:true}).click();
   await until(async()=>(await page.locator('#plan-workspace').inputValue())===String(linked.id),'New chat ignored the selected worktree');
   assert.ok(sameFolder(await page.locator('.plan-path').innerText(),linkedRoot));
@@ -305,8 +328,8 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   assert.equal(await disabledSend.evaluate(el=>getComputedStyle(el).cursor),'not-allowed','Disabled send shows a waiting cursor');
   const beforeDismiss=await legacyPage.locator('.plan-card').count();
   await legacyPage.locator('.plan-dismiss').first().click();
+  await until(async()=>await legacyPage.locator('.plan-card').count()===beforeDismiss-1,'Individual dismissal failed');
   await legacyPage.evaluate(()=>window.Planner.flush());
-  assert.equal(await legacyPage.locator('.plan-card').count(),beforeDismiss-1,'Individual dismissal failed');
   assert.equal(await legacyPage.getByRole('button',{name:'Undo',exact:true}).count(),0,'Dismissal still offers Undo');
   await legacyPage.getByRole('button',{name:'Dismiss all',exact:true}).click();
   await legacyPage.evaluate(()=>window.Planner.flush());
@@ -337,5 +360,10 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
     await choicePage.close();
   }
   assert.deepEqual(errors,[]);
-  console.log('PASS real planning: lazy model catalog, gated reply, retained composer/DOM, explicit selected creation, immediate edit save, split/combine/refine, persistent project pin, created links, confirmed new chat, lost Send/New receipts with exact explicit retry, responsive tabs and keyboard, immutable selected-worktree binding and exact model/turn cwd, visible busy status, full-access planning, persistent execution access dropdown, unified chat, collapsible tray, wrapping titles, created links in chat, single/bulk dismissal without Undo');
+  await page.reload();
+  await page.locator('#plan-message').fill('New chat preference survives reload');
+  await page.getByRole('button',{name:'New chat',exact:true}).click();
+  await until(async()=>await page.locator('#plan-message').inputValue()==='', 'Saved preference did not skip confirmation');
+  assert.equal(await page.locator('#plan-new-dialog').isVisible(),false);
+  console.log('PASS real planning: lazy model catalog, gated reply, retained composer/DOM, explicit selected creation, immediate edit save, split/combine/refine, persistent project pin, created links, confirmed new chat, lost Send/New receipts with exact explicit retry, responsive tabs and keyboard, immutable selected-worktree binding and exact model/turn cwd, visible busy status, full-access planning, persistent execution access dropdown, unified chat, collapsible tray, ellipsis titles, created links in chat, single/bulk dismissal without Undo');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(browser)await browser.close();await stop();fs.rmSync(temporary,{recursive:true,force:true});});
