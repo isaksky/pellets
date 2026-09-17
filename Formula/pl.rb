@@ -1,17 +1,17 @@
 class Pl < Formula
   desc "Local SQLite task queue for coding agents"
   homepage "https://github.com/isaksky/pellets"
-  version "0.2.0"
+  version "0.3.0"
   license "Apache-2.0"
 
   depends_on :macos
 
   if Hardware::CPU.arm?
-    url "https://github.com/isaksky/pellets/releases/download/v0.2.0/pellets_0.2.0_darwin_arm64.tar.gz"
-    sha256 "efafed869ac2fd3f2f65754cfe1488fa53691ef9d6013d2ca2e779905b4d5e61"
+    url "https://github.com/isaksky/pellets/releases/download/v0.3.0/pellets_0.3.0_darwin_arm64.tar.gz"
+    sha256 "5dfd4de21bb1d2902fbc38190f9220ecb620ad80602b8256d6813aeb71242a87"
   else
-    url "https://github.com/isaksky/pellets/releases/download/v0.2.0/pellets_0.2.0_darwin_amd64.tar.gz"
-    sha256 "53dd01b4e73578cd4a5bd20cca964cfde96f175f08c755f1a5503ef2b0787021"
+    url "https://github.com/isaksky/pellets/releases/download/v0.3.0/pellets_0.3.0_darwin_amd64.tar.gz"
+    sha256 "d68a5d507a2a563c322fee2ae393c990eed8da3ec566ac9db758e2858e1c9d7e"
   end
 
   def install
