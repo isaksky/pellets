@@ -59,6 +59,7 @@ func installFakePelletsTool(t *testing.T) string {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	return path
 }
 

@@ -406,6 +406,7 @@ func TestCheckpointReviewerUsesExactCommitsFromDifferentWorktrees(t *testing.T) 
 	s, request, queue := schedulerFixture(t, executable, "schedule_success")
 	linkedRoot := filepath.Join(t.TempDir(), "linked")
 	gitForExecutionTest(t, s.options.Database.Root, "worktree", "add", "-b", "review-linked", linkedRoot)
+	installSupervisorSkill(t, linkedRoot)
 	identity, err := discovery.FindGitIdentity(context.Background(), linkedRoot)
 	if err != nil {
 		t.Fatal(err)

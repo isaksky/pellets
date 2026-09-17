@@ -130,6 +130,11 @@ func TestRecoveryAcquisitionRetainsExactReceiptAndExclusion(t *testing.T) {
 		}
 		t.Fatalf("parallel recovery admitted: %v", err)
 	}
+	// Windows byte-range locks prevent reads through a separate file handle.
+	// Verify exclusion above, then release the lock before checking the bytes.
+	if err := recovery.Close(); err != nil {
+		t.Fatal(err)
+	}
 	after, err := os.ReadFile(filepath.Join(dir, "pellets-execution.lock"))
 	if err != nil || string(before) != string(after) {
 		t.Fatalf("recovery erased receipt: %q %v", after, err)
