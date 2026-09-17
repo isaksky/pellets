@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -301,7 +302,11 @@ func TestFinalizationLiteralPathsAndMetadataBoundary(t *testing.T) {
 		}
 	}
 	_, database, _, _ := executionFixture(t)
-	files := []string{" leading space.txt", ":(glob)*.txt", "with\nnewline.txt"}
+	files := []string{" leading space.txt", "[literal].txt"}
+	if runtime.GOOS != "windows" {
+		// Windows forbids colons, asterisks, and control characters in names.
+		files = append(files, ":(glob)*.txt", "with\nnewline.txt")
+	}
 	for _, file := range files {
 		if err := os.WriteFile(filepath.Join(database.Root, file), []byte(file), 0600); err != nil {
 			t.Fatal(err)
@@ -322,7 +327,7 @@ func TestFinalizationLiteralPathsAndMetadataBoundary(t *testing.T) {
 		t.Fatalf("temporary index changed real index: %q", staged)
 	}
 	output := gitForExecutionTest(t, database.Root, "ls-tree", "-r", "--name-only", tree)
-	if !strings.Contains(output, ":(glob)*.txt") {
+	if !strings.Contains(output, "[literal].txt") {
 		t.Fatalf("literal path missing: %q", output)
 	}
 }
