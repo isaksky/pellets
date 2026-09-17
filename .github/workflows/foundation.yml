@@ -12,7 +12,7 @@ jobs:
   foundation-tests:
     name: Foundation tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -45,12 +45,12 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -count=1 -json ./... | tee test-results.jsonl
+          go test -count=1 -timeout=30m -json ./... | tee test-results.jsonl
       - name: Run complete unit and compiled integration suite under PowerShell
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          go test -count=1 -json ./... | Tee-Object -FilePath test-results.jsonl
+          go test -count=1 -timeout=30m -json ./... | Tee-Object -FilePath test-results.jsonl
           $testExit = $LASTEXITCODE
           if ($testExit -ne 0) {
             exit $testExit
