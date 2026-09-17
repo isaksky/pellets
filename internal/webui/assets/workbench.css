@@ -389,7 +389,7 @@ button,
   background: var(--lift);
   border: 1px solid var(--line);
 }
-button:hover {
+button:not(:disabled):hover {
   background: var(--theme-hover);
 }
 .primary-button {
@@ -397,7 +397,7 @@ button:hover {
   color: var(--theme-on-primary);
   border-color: var(--theme-primary);
 }
-.primary-button:hover {
+.primary-button:not(:disabled):hover {
   background: var(--theme-primary-hover);
   color: var(--theme-on-primary);
 }
@@ -981,7 +981,7 @@ input[type="checkbox"] {
   text-align: left;
   padding: 7px 8px;
 }
-.row-popover button:hover {
+.row-popover button:not(:disabled):hover {
   background: var(--theme-menu-hover);
 }
 .row-popover label {
@@ -2295,7 +2295,7 @@ dialog::backdrop {
   font-size: 13px;
   color: var(--dim);
 }
-.checkpoint-remove-inline button:hover {
+.checkpoint-remove-inline button:not(:disabled):hover {
   color: var(--red);
 }
 .activity-event pre {
@@ -2424,3 +2424,5 @@ dialog::backdrop {
 }
 
 .settings-save-notice { position: fixed; bottom: 3rem; right: 1rem; z-index: 10000; padding: .6rem .8rem; background: var(--surface, Canvas); color: var(--text, CanvasText); border: 1px solid currentColor; border-radius: 4px; }
+
+.execution-access { display:flex; align-items:center; gap:8px; margin:8px 0; font-size:12px; }

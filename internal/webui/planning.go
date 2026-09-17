@@ -115,7 +115,7 @@ func (h *handler) servePlanning(w http.ResponseWriter, r *http.Request) {
 			h.planningError(w, requestError("Choose a workspace before loading planning models."))
 			return
 		}
-		models, err := h.application.PlanningModels(ctx, project, workspaceID)
+		models, err := h.application.PlanningModels(ctx, project, workspaceID, r.URL.Query().Get("access_mode"))
 		if err != nil {
 			h.planningError(w, err)
 			return

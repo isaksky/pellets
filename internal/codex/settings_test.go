@@ -557,3 +557,43 @@ func TestRuntimeConfigurationLegacyAndOverridePrecedence(t *testing.T) {
 		t.Fatal("rewrote historical settings")
 	}
 }
+
+func TestPrepareFullAccess(t *testing.T) {
+	installFakePelletsTool(t)
+	t.Setenv("PELLETS_CODEX_TEST_PEER", "preflight-ready")
+	workspace := t.TempDir()
+	database := filepath.Join(workspace, "pellets.db")
+	if err := os.WriteFile(database, []byte("db"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := PrepareRun(context.Background(), PrepareOptions{WorkspaceDir: workspace, DatabasePath: database, Saved: WorkspaceRunSettings{Executable: executable}, Overrides: RunOverrides{AccessMode: stringPointer("full")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer prepared.Client.Close()
+	thread := prepared.ThreadStartParams()
+	turn, err := prepared.TurnStartParams("thread-1", []any{map[string]any{"type": "text", "text": "work"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := prepared.EvidenceSettings
+	if thread["sandbox"] != "danger-full-access" || thread["approvalPolicy"] != "never" || turn["sandboxPolicy"].(map[string]any)["type"] != "dangerFullAccess" || turn["approvalPolicy"] != "never" || evidence.AccessMode != "full" || evidence.SandboxMode != "danger-full-access" || evidence.ApprovalsReviewer != "user" || !evidence.NetworkAccess || len(evidence.WritableRoots) != 0 {
+		t.Fatalf("full-access execution mismatch: %#v %#v %#v", thread, turn, evidence)
+	}
+	if _, err := ResolveRunSettings(WorkspaceRunSettings{}, RunOverrides{AccessMode: stringPointer("unknown")}); !errors.Is(err, ErrInvalidSettings) {
+		t.Fatalf("invalid access mode accepted: %v", err)
+	}
+	for _, requirements := range []*managedRequirements{
+		{AllowedApprovalPolicies: []json.RawMessage{json.RawMessage(`"on-request"`)}},
+		{AllowedApprovalsReviewers: []string{"auto_review"}},
+		{AllowedSandboxModes: []string{"workspace-write"}},
+	} {
+		if err := checkManagedAccessPolicy(requirements, "full"); !errors.Is(err, ErrPolicyUnavailable) {
+			t.Fatalf("restriction accepted: %#v %v", requirements, err)
+		}
+	}
+}

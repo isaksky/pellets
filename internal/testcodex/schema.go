@@ -38,7 +38,7 @@ func WriteSchema(dir, mode string) {
 			"BooleanSchemaExample": map[string]any{"properties": map[string]any{"disabled": false}},
 			"AskForApproval":       map[string]any{"enum": []string{"on-request", "never"}},
 			"ApprovalsReviewer":    map[string]any{"enum": []string{"user", "auto_review"}},
-			"SandboxMode":          map[string]any{"enum": []string{"read-only", "workspace-write"}},
+			"SandboxMode":          map[string]any{"enum": []string{"read-only", "workspace-write", "danger-full-access"}},
 			"ReviewDelivery":       map[string]any{"enum": []string{"inline", "detached"}},
 			"ReviewTarget":         map[string]any{"oneOf": []any{map[string]any{"properties": map[string]any{"type": map[string]any{"enum": []string{"custom"}}}}}},
 		}

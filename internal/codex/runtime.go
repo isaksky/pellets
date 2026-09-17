@@ -33,9 +33,9 @@ var requiredOperationFields = map[Operation][]string{
 }
 
 var requiredSchemaValues = map[string][]string{
-	"AskForApproval":    {"on-request"},
-	"ApprovalsReviewer": {"auto_review"},
-	"SandboxMode":       {"workspace-write", "read-only"},
+	"AskForApproval":    {"on-request", "never"},
+	"ApprovalsReviewer": {"auto_review", "user"},
+	"SandboxMode":       {"workspace-write", "read-only", "danger-full-access"},
 	"ReviewDelivery":    {"detached"},
 	"ReviewTarget":      {"custom"},
 }

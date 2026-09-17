@@ -38,7 +38,7 @@ const (
 
 var (
 	ErrUnauthenticated   = errors.New("Codex is not signed in")
-	ErrPolicyUnavailable = errors.New("Codex automatic approval review is unavailable")
+	ErrPolicyUnavailable = errors.New("Codex access policy is unavailable")
 	ErrToolUnavailable   = errors.New("required Pellets tool is unavailable")
 	ErrInvalidSettings   = errors.New("invalid Codex run settings")
 )
@@ -55,6 +55,7 @@ type WorkspaceRunSettings = storage.CodexRunSettings
 // RunOverrides uses pointers so a single run can explicitly return a saved
 // value to the installed default by supplying an empty string or zero.
 type RunOverrides struct {
+	AccessMode      *string            `json:"access_mode,omitempty"`
 	Executable      *string            `json:"executable,omitempty"`
 	Model           *string            `json:"model,omitempty"`
 	ReasoningEffort *string            `json:"reasoning_effort,omitempty"`
@@ -70,6 +71,7 @@ type RunLimitOverrides struct {
 
 // RunSettings is the resolved value used for one app-server process.
 type RunSettings struct {
+	AccessMode      string    `json:"access_mode,omitempty"`
 	Executable      string    `json:"executable"`
 	Model           string    `json:"model,omitempty"`
 	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
@@ -97,6 +99,12 @@ func ResolveRunSettings(saved WorkspaceRunSettings, overrides RunOverrides) (Run
 		Model:           saved.Model,
 		ReasoningEffort: saved.ReasoningEffort,
 		Limits:          saved.Limits,
+	}
+	if overrides.AccessMode != nil {
+		resolved.AccessMode = *overrides.AccessMode
+	}
+	if !storage.ValidAccessMode(resolved.AccessMode) {
+		return RunSettings{}, fmt.Errorf("%w: unknown access mode", ErrInvalidSettings)
 	}
 	if overrides.Executable != nil {
 		resolved.Executable = *overrides.Executable
@@ -261,7 +269,7 @@ func PrepareRun(ctx context.Context, options PrepareOptions) (_ *PreparedRun, er
 	if err != nil {
 		return nil, err
 	}
-	if err := checkManagedPolicy(requirements); err != nil {
+	if err := checkManagedAccessPolicy(requirements, settings.AccessMode); err != nil {
 		return nil, err
 	}
 	effective, err := readEffectiveConfig(ctx, client, workspace)
@@ -305,11 +313,19 @@ func PrepareRun(ctx context.Context, options PrepareOptions) (_ *PreparedRun, er
 		turn["effort"] = settings.ReasoningEffort
 	}
 	evidenceSettings := storage.EffectiveRunSettings{
+		AccessMode:     settings.AccessMode,
 		Runtime:        storage.CodexRuntimeEvidence{Executable: client.Runtime().Executable, Version: client.Runtime().Version, Managed: settings.Executable == ""},
 		Codex:          storage.CodexRunSettings{Executable: settings.Executable, Model: settings.Model, ReasoningEffort: settings.ReasoningEffort, Limits: settings.Limits},
 		ApprovalPolicy: "on-request", ApprovalsReviewer: "auto_review", SandboxMode: "workspace-write",
 		WritableRoots: append([]string(nil), writableRoots...), NetworkAccess: effective.Sandbox.NetworkAccess,
 		ExcludeSlashTmp: effective.Sandbox.ExcludeSlashTmp, ExcludeTmpdirEnvVar: effective.Sandbox.ExcludeTmpdirEnvVar,
+	}
+	if settings.AccessMode == storage.AccessFull {
+		applyFullAccess(thread, turn)
+		evidenceSettings.ApprovalPolicy, evidenceSettings.ApprovalsReviewer, evidenceSettings.SandboxMode = "never", "user", "danger-full-access"
+		evidenceSettings.WritableRoots = nil
+		evidenceSettings.NetworkAccess = true
+		evidenceSettings.ExcludeSlashTmp, evidenceSettings.ExcludeTmpdirEnvVar = false, false
 	}
 	if evidenceSettings.Codex.Model == "" {
 		evidenceSettings.Codex.Model = effective.Model
@@ -460,7 +476,11 @@ func readRequirements(ctx context.Context, client Session) (*managedRequirements
 	return response.Requirements, nil
 }
 
-func checkManagedPolicy(requirements *managedRequirements) error {
+func checkManagedAccessPolicy(requirements *managedRequirements, mode string) error {
+	approval, reviewer, sandbox := "on-request", "auto_review", "workspace-write"
+	if mode == storage.AccessFull {
+		approval, reviewer, sandbox = "never", "user", "danger-full-access"
+	}
 	if requirements == nil {
 		return nil
 	}
@@ -468,19 +488,19 @@ func checkManagedPolicy(requirements *managedRequirements) error {
 		allowed := false
 		for _, policy := range requirements.AllowedApprovalPolicies {
 			var value string
-			if json.Unmarshal(policy, &value) == nil && value == "on-request" {
+			if json.Unmarshal(policy, &value) == nil && value == approval {
 				allowed = true
 			}
 		}
 		if !allowed {
-			return fmt.Errorf("%w: managed Codex requirements do not allow approval_policy=on-request", ErrPolicyUnavailable)
+			return fmt.Errorf("%w: managed Codex requirements do not allow approval_policy=%s", ErrPolicyUnavailable, approval)
 		}
 	}
-	if requirements.AllowedApprovalsReviewers != nil && !slices.Contains(requirements.AllowedApprovalsReviewers, "auto_review") {
-		return fmt.Errorf("%w: managed Codex requirements do not allow approvals_reviewer=auto_review", ErrPolicyUnavailable)
+	if requirements.AllowedApprovalsReviewers != nil && !slices.Contains(requirements.AllowedApprovalsReviewers, reviewer) {
+		return fmt.Errorf("%w: managed Codex requirements do not allow approvals_reviewer=%s", ErrPolicyUnavailable, reviewer)
 	}
-	if requirements.AllowedSandboxModes != nil && !slices.Contains(requirements.AllowedSandboxModes, "workspace-write") {
-		return fmt.Errorf("%w: managed Codex requirements do not allow sandbox_mode=workspace-write", ErrPolicyUnavailable)
+	if requirements.AllowedSandboxModes != nil && !slices.Contains(requirements.AllowedSandboxModes, sandbox) {
+		return fmt.Errorf("%w: managed Codex requirements do not allow sandbox_mode=%s", ErrPolicyUnavailable, sandbox)
 	}
 	return nil
 }
@@ -653,4 +673,12 @@ func writableRootsForDatabase(workspace, database string, configured []string) (
 func pathWithin(root, candidate string) bool {
 	relative, err := filepath.Rel(root, candidate)
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+}
+
+// Full access is only applied after validating the explicitly selected policy.
+func applyFullAccess(thread, turn map[string]any) {
+	thread["approvalPolicy"], thread["approvalsReviewer"], thread["sandbox"] = "never", "user", "danger-full-access"
+	if turn != nil {
+		turn["approvalPolicy"], turn["approvalsReviewer"], turn["sandboxPolicy"] = "never", "user", map[string]any{"type": "dangerFullAccess"}
+	}
 }

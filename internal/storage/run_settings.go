@@ -17,6 +17,13 @@ type CodexRunLimits struct {
 	StderrBytes     int `json:"stderr_bytes,omitempty"`
 }
 
+const AccessAutomatic = "automatic"
+const AccessFull = "full"
+
+func ValidAccessMode(mode string) bool {
+	return mode == "" || mode == AccessAutomatic || mode == AccessFull
+}
+
 // CodexRunSettings is deliberately credential-free. Empty model and effort
 // retain the installed runtime's normal defaults.
 type CodexRunSettings struct {

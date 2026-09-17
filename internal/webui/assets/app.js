@@ -590,7 +590,18 @@ import { action, actions } from "./datastar-1.0.3.js";
   var inspectorMedia = window.matchMedia ? window.matchMedia("(max-width: 760px)") : null;
   if (inspectorMedia) inspectorMedia.addEventListener("change", function () { configureInspector(document); });
 
+  function executionAccessKey(select) {
+    var form = select.closest('form');
+    return 'pellets-execution-access:' + new URL(form.action).pathname + ':' + form.elements.workspace_id.value;
+  }
+  document.addEventListener('change', function(event) {
+    if (!event.target.matches('select[aria-label="Execution access"]')) return;
+    try { localStorage.setItem(executionAccessKey(event.target), event.target.value); } catch {}
+  });
   function initialize(scope) {
+    document.querySelectorAll('select[aria-label="Execution access"]').forEach(function(select) {
+      try { var mode = localStorage.getItem(executionAccessKey(select)); if (mode === 'automatic' || mode === 'full') select.value = mode; } catch {}
+    });
     applyTheme(root.dataset.themeChoice || "gruvbox-light");
     rememberAndMarkRows(scope);
     synchronizeCheckpointSelection();

@@ -830,3 +830,44 @@ func TestSchedulerExplicitResumeAndIdleStop(t *testing.T) {
 		t.Fatalf("idle stop: %+v", status)
 	}
 }
+
+func TestSchedulerFullAccessCapturesPolicyAndDispatches(t *testing.T) {
+	executable := installSupervisorPeer(t)
+	s, request, _ := schedulerFixture(t, executable, "schedule_success")
+	mode := storage.AccessFull
+	request.Overrides.AccessMode = &mode
+	status := awaitSchedule(t, startSchedule(t, s, request))
+	if status.Completed != 1 || status.Reason != "run_one_complete" {
+		t.Fatalf("full execution failed: %+v", status)
+	}
+	run, err := s.options.Supervisor.options.Recorder.Read(context.Background(), s.options.Database, status.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Settings.AccessMode != storage.AccessFull || run.Settings.ApprovalPolicy != "never" || run.Settings.SandboxMode != "danger-full-access" {
+		t.Fatalf("policy not retained: %#v", run.Settings)
+	}
+	seen := 0
+	for _, event := range readPeerEvents(t, s.options.Database.Root) {
+		if event.Method != "thread/start" && event.Method != "turn/start" {
+			continue
+		}
+		seen++
+		var params map[string]any
+		if err := json.Unmarshal(event.Params, &params); err != nil {
+			t.Fatal(err)
+		}
+		if params["approvalPolicy"] != "never" || params["approvalsReviewer"] != "user" {
+			t.Fatalf("wrong policy at %s: %s", event.Method, event.Params)
+		}
+		if event.Method == "thread/start" && params["sandbox"] != "danger-full-access" {
+			t.Fatalf("wrong thread sandbox: %s", event.Params)
+		}
+		if event.Method == "turn/start" && params["sandboxPolicy"].(map[string]any)["type"] != "dangerFullAccess" {
+			t.Fatalf("wrong turn sandbox: %s", event.Params)
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("expected thread and turn, got %d", seen)
+	}
+}

@@ -301,12 +301,15 @@ model calls. See [the scheduler contract](codex-app-server.md#foreground-schedul
 for immutable filters, explicit Resume, limits, stop behavior, and the narrow
 checkpoint readiness hook.
 
-Concretely, prepared threads and turns use `workspace-write`, `on-request`, and
+By default, prepared threads and turns use `workspace-write`, `on-request`, and
 `approvals_reviewer=auto_review`. Managed restrictions still apply, and
 questions, denials, timeouts, and errors remain visible. When the bound database
 is outside the selected worktree, only its immediate directory is added to the
 effective workspace-write roots; Pellets never substitutes a broader grant or
-a replacement database.
+a replacement database. Explicit Full access instead uses `danger-full-access`,
+`never`, and the `user` reviewer, subject to managed requirements. The schedule
+captures that choice for subsequent runs; changing the dropdown does not alter
+an active schedule.
 
 One bounded pending interaction is durable per run so browser reconnects can
 render complete questions and explicit remaining decisions. Answers and
@@ -571,12 +574,15 @@ planning process lifetime; server restart never resumes a planning call. The
 execution supervisor and its event consumer remain independent.
 
 The adapter discovers the runtime's actual model catalog and uses an ephemeral
-thread with shell execution, `workspace-write`, `approvalPolicy=on-request`, and
+thread with shell execution. Automatic approval, the default, uses `workspace-write`, `approvalPolicy=on-request`, and
 `approvalsReviewer=auto_review`. Codex owns automatic approval decisions; Pellets
-never blanket-accepts client approval requests. Unsupported policies and human
+never blanket-accepts client approval requests. An explicit Full access selection uses
+`danger-full-access`, `approvalPolicy=never`, and `approvalsReviewer=user`, after
+checking managed requirements. Planning stores the choice in chat state; execution
+captures it in schedule overrides and immutable effective run settings. Unsupported policies and human
 interaction requests fail explicitly without changing permission modes. Shell
 commands can inspect repository context; apps, plugins, MCP tools, browsing, and
-delegation remain disabled. Network access and additional writable roots are not
+delegation remain disabled. In automatic mode, network access and additional writable roots are not
 pre-granted. The planning prompt prohibits implementation and queue mutation, but
 shell side effects are possible and cannot be rolled back with chat state. Queue
 titles and group samples remain bounded context. Raw notifications and credentials are not stored in chat state;

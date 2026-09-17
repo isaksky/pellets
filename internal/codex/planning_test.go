@@ -322,3 +322,51 @@ func TestPlanningNeverGrantsFallbackClientApprovals(t *testing.T) {
 		})
 	}
 }
+
+func TestPlanningFullAccessAndManagedRestriction(t *testing.T) {
+	for _, mode := range []string{"planning_full", "planning_chat"} {
+		t.Run(mode, func(t *testing.T) {
+			opts := planningTestOptions(t, mode)
+			opts.AccessMode = "full"
+			_, err := Plan(context.Background(), opts)
+			if mode == "planning_chat" {
+				if !errors.Is(err, ErrPolicyUnavailable) {
+					t.Fatalf("managed automatic-only policy accepted full access: %v", err)
+				}
+				for _, call := range planningRecordedCalls(t, opts.WorkspaceDir) {
+					if call.Method == "thread/start" || call.Method == "turn/start" {
+						t.Fatal("started work despite managed restriction")
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			seen := 0
+			for _, call := range planningRecordedCalls(t, opts.WorkspaceDir) {
+				if call.Method != "thread/start" && call.Method != "turn/start" {
+					continue
+				}
+				seen++
+				var params map[string]any
+				if err := json.Unmarshal(call.Params, &params); err != nil {
+					t.Fatal(err)
+				}
+				if params["approvalPolicy"] != "never" || params["approvalsReviewer"] != "user" {
+					t.Fatalf("full access params: %s", call.Params)
+				}
+				if call.Method == "thread/start" {
+					if params["sandbox"] != "danger-full-access" || strings.Contains(params["developerInstructions"].(string), planningAutomaticInstructions) {
+						t.Fatalf("full thread: %s", call.Params)
+					}
+				} else if params["sandboxPolicy"].(map[string]any)["type"] != "dangerFullAccess" {
+					t.Fatalf("full turn: %s", call.Params)
+				}
+			}
+			if seen != 2 {
+				t.Fatalf("wanted thread and turn, got %d", seen)
+			}
+		})
+	}
+}

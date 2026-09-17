@@ -659,7 +659,7 @@ advertises that exact effort through `model/list`. Unknown model IDs therefore
 remain usable with their normal effort default, while an unverifiable explicit
 model/effort pair stops before execution with a useful compatibility error.
 
-Prepared new-thread and turn parameters use the runtime-verified values
+By default, prepared new-thread and turn parameters use the runtime-verified values
 `approvalPolicy: "on-request"`, `approvalsReviewer: "auto_review"`, and the
 `workspace-write` sandbox. This is the current equivalent of
 `--approve-for-me`: eligible boundary crossings go to Codex automatic review,
@@ -668,6 +668,14 @@ reviewer restrictions when the runtime exposes them, are checked and never
 relaxed. Server questions and approval requests are still
 delivered through `Events`; denials, timeouts, and runtime errors remain real
 outcomes rather than permission fallbacks.
+
+Planning and execution also accept an explicit `access_mode: "full"` selection.
+Full access uses `approvalPolicy: "never"`, `approvalsReviewer: "user"`,
+`sandbox: "danger-full-access"`, and turn policy
+`{ "type": "dangerFullAccess" }`. Managed requirements must allow these values.
+The execution dropdown captures this as a schedule override and run evidence;
+the planning dropdown saves it in chat state. Empty or `automatic` keeps the
+automatic-review default. Full access is never an error fallback.
 
 The effective workspace-write settings, including network access, temporary
 directory exclusions, and user-configured writable roots, are retained in turn

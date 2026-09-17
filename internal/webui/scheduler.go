@@ -14,7 +14,7 @@ import (
 
 func (h *handler) startSchedule(w http.ResponseWriter, r *http.Request, project storage.Project) {
 	fields := []string{"_csrf", "workspace_id", "mode"}
-	for _, optional := range []string{"external_id", "group", "group_scope", "resume_pellet", "resume_from", "limit", "preflight_receipt", "admission", "fresh_conversation", "use_managed_runtime"} {
+	for _, optional := range []string{"external_id", "group", "group_scope", "resume_pellet", "resume_from", "limit", "preflight_receipt", "admission", "fresh_conversation", "use_managed_runtime", "access_mode"} {
 		if _, exists := r.PostForm[optional]; exists {
 			fields = append(fields, optional)
 		}
@@ -29,6 +29,13 @@ func (h *handler) startSchedule(w http.ResponseWriter, r *http.Request, project 
 		return
 	}
 	request := app.ScheduleRequest{Mode: r.PostForm.Get("mode")}
+	if values, present := r.PostForm["access_mode"]; present {
+		if !storage.ValidAccessMode(values[0]) {
+			h.renderError(w, http.StatusUnprocessableEntity, requestError("invalid access mode"), nil)
+			return
+		}
+		request.Overrides.AccessMode = &values[0]
+	}
 	if value := r.PostForm.Get("admission"); value != "" && value != "interactive" {
 		h.renderError(w, http.StatusUnprocessableEntity, requestError("invalid admission mode"), nil)
 		return

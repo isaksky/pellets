@@ -26,6 +26,10 @@ func handlePlanning(mode, method string, id, raw json.RawMessage, write func(any
 		}
 		respond(map[string]any{"account": account, "requiresOpenaiAuth": true})
 	case "configRequirements/read":
+		if mode == "planning_full" {
+			respond(map[string]any{"requirements": nil})
+			break
+		}
 		policy := "on-request"
 		if mode == "planning_policy_blocked" {
 			policy = "never"

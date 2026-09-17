@@ -50,6 +50,7 @@ type CodexRuntimeEvidence struct {
 // EffectiveRunSettings is an allowlist, never a copy of app-server config,
 // request payloads, environment, account data, or transcript content.
 type EffectiveRunSettings struct {
+	AccessMode          string               `json:"access_mode,omitempty"`
 	Runtime             CodexRuntimeEvidence `json:"runtime,omitempty"`
 	Codex               CodexRunSettings     `json:"codex"`
 	ApprovalPolicy      string               `json:"approval_policy"`
@@ -321,8 +322,10 @@ func ValidateRunCapture(c RunCapture) error {
 		return err
 	}
 	s := c.Settings
-	if s.ApprovalPolicy != "on-request" || s.ApprovalsReviewer != "auto_review" || s.SandboxMode != "workspace-write" {
-		return InvalidExecutionRun("run settings must preserve automatic approval review and workspace-write")
+	automatic := s.AccessMode != AccessFull && s.ApprovalPolicy == "on-request" && s.ApprovalsReviewer == "auto_review" && s.SandboxMode == "workspace-write"
+	full := s.AccessMode == AccessFull && s.ApprovalPolicy == "never" && s.ApprovalsReviewer == "user" && s.SandboxMode == "danger-full-access"
+	if !ValidAccessMode(s.AccessMode) || (!automatic && !full) {
+		return InvalidExecutionRun("run settings must match the selected access mode")
 	}
 	for _, field := range []struct {
 		value string

@@ -58,8 +58,9 @@ database, with optimistic versions. A conversation stays bound to its original
 project and saved workspace when the main view changes. New chats use the
 workspace selected in the workbench; the panel displays its full path. A saved
 workspace binding cannot be changed: start a new chat to use another worktree.
-Legacy chats without a binding require a one-time workspace selection before
-sending. Missing or changed checkouts stop planning rather than selecting another
+Legacy chats without a binding automatically use the project’s sole checkout.
+The workspace selector is hidden when there is no choice to make. Projects with
+multiple checkouts still require a one-time selection for unbound chats. Missing or changed checkouts stop planning rather than selecting another
 workspace. Model discovery uses the same selected workspace and its settings.
 New chat requires confirmation when replacing
 visible content; existing stored conversations are not destructively deleted.
@@ -74,12 +75,14 @@ Sending a message uses the configured Codex runtime in a separate ephemeral
 session with bounded conversation and draft context. Model choices come from
 that runtime; there are no local template replies or simulated model events.
 The planner can inspect repository files and Git state using shell commands.
-The panel labels this mode **Shell access · Automatic review**: commands use a
+The **Access** dropdown offers **Automatic approval** (the default) and **Full access**. Automatic approval uses a
 workspace-write sandbox with `on-request` approvals and the runtime's
 `auto_review` reviewer. Network access and additional writable roots are not
-pre-granted. Apps, plugins, MCP tools, browsing, and delegation remain disabled.
-Managed policy and runtime capability checks must permit automatic review; there
-is no fallback to full access or manual approval. An unresolved request for human
+pre-granted in automatic mode. Apps, plugins, MCP tools, browsing, and delegation remain disabled.
+Full access uses `danger-full-access`, `never` approvals, and the `user` reviewer.
+The choice is saved in the chat and captured for each request and retry. Managed
+policy and runtime capability checks must permit the selected mode; there is no
+automatic fallback to another mode. An unresolved request for human
 input or approval stops the call with an actionable error.
 
 The planner is instructed to investigate and propose work without implementing
@@ -245,3 +248,14 @@ access. It runs with Chrome or WebKit. Planning has its own bounded reload
 handoff; ordinary draft autosave can continue after restoration, but interrupted
 Send, Create, and other ambiguous requests require explicit retry with their
 original request identity. No restored planning conversation starts execution.
+
+The composer shows Working folder alongside Access, with the selected full path
+beneath. A missing folder selection has an inline error and error border; a project
+without an available checkout shows an explanation instead of an empty selector.
+Planning progress appears below the messages with an animated busy indicator.
+Submission errors remain immediately above the composer with retry/recovery controls
+and preserve the message. Reduced-motion
+preferences disable the animation. Execution start and resume forms offer the same
+Access dropdown; the browser remembers it per project/workspace. A schedule captures
+the selected mode for its runs, and Run details displays the policy used. Existing
+runs keep their captured policy. Internal checkpoint reviewers remain read-only.

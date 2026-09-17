@@ -67,10 +67,10 @@ code, pre { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; fo
 button, .primary-button, .quiet-button, .icon-button {
   border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface); padding: .48rem .72rem; cursor: pointer;
 }
-button:hover, .quiet-button:hover, .icon-button:hover { background: var(--surface-muted); color: var(--text); }
+button:not(:disabled):hover, .quiet-button:not(:disabled):hover, .icon-button:hover { background: var(--surface-muted); color: var(--text); }
 button:disabled { cursor: not-allowed; opacity: .48; }
 .primary-button { display: inline-flex; align-items: center; justify-content: center; background: var(--accent); border-color: var(--accent); color: var(--button-text); font-weight: 650; }
-.primary-button:hover { background: var(--accent-strong); color: var(--button-text); }
+.primary-button:not(:disabled):hover { background: var(--accent-strong); color: var(--button-text); }
 .skip-link { position: fixed; z-index: 100; top: .5rem; left: .5rem; transform: translateY(-160%); background: var(--surface); border: 2px solid var(--focus); border-radius: 6px; padding: .6rem; }
 .skip-link:focus { transform: none; }
 .brand-mark { color: var(--accent); }
@@ -304,7 +304,7 @@ dd { margin: 0; overflow-wrap: anywhere; font-size: .76rem; }
 }
 
 #request-feedback { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); z-index: 100; max-width: min(90vw, 40rem); padding: .75rem 1rem; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); }
-button:disabled { opacity: .65; cursor: wait; }
+button:disabled { opacity: .65; cursor: not-allowed; }
 
 #request-feedback.request-failed { border-color: var(--danger); background: var(--danger-soft); }
 

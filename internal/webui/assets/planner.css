@@ -140,7 +140,12 @@
 .plan-created > a { display:flex; align-items:center; gap:7px; height:36px; padding:0 2px; font-size:11px; }
 .plan-created > a:hover { background:var(--theme-quiet-hover); }
 .plan-created .plan-row-ref { font-size:9px; }
-.plan-status { padding:5px 2px 0; color:var(--dim); font-size:10px; line-height:1.45; overflow-wrap:anywhere; }
+.plan-status { flex:none; margin:0 16px 10px; padding:10px 12px; border:1px solid var(--line); border-radius:6px; background:var(--theme-soft-surface); color:var(--muted); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
+.plan-status.busy { color:var(--accent); border-color:var(--accent); }
+.plan-status.busy::before { content:""; display:inline-block; width:10px; height:10px; margin-right:8px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:plan-spin 1s linear infinite; }
+@keyframes plan-spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion:reduce) { .plan-status.busy::before { animation:none; } }
+.plan-access { display:flex; align-items:center; gap:8px; font-size:11px; margin-bottom:8px; }
 .plan-status.error { color:var(--red); }
 .plan-status button { font-size:10px; margin:4px 5px 0 0; }
 .plan-context-note { line-height:1.6; }
@@ -164,5 +169,19 @@
   .plan-bottom { padding:9px 12px 7px; }
 }
 
-.plan-workspace-label { display: flex; align-items: center; gap: .5rem; margin-top: .4rem; font-size: .75rem; }
+.plan-workspace-label { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin:0; font-size:11px; }
 .plan-workspace-label select { min-width: 0; max-width: 100%; }
+
+.plan-workspace-label[hidden] { display:none; }
+
+.plan-composer-settings { display:flex; align-items:flex-start; flex-wrap:wrap; gap:8px 16px; }
+.plan-folder { flex:1 1 180px; min-width:0; }
+.plan-folder .select-control { min-width:0; max-width:100%; }
+.plan-folder-context { color:var(--muted); font-size:11px; }
+.plan-folder-context[hidden], .plan-folder-error[hidden] { display:none; }
+.plan-folder-error { color:var(--red); font-size:11px; line-height:1.5; margin:6px 0 0; }
+.plan-folder.invalid select, .plan-folder.invalid .select-trigger { border:1px solid var(--red); border-radius:4px; }
+#plan-form .plan-path { margin:0 0 8px; }
+.plan-bottom > .plan-status { margin:0 0 10px; }
+.plan-chat-status { flex:none; }
+.plan-chat-status:empty { display:none; }

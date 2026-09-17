@@ -178,6 +178,9 @@ func (supervisor *ExecutionSupervisor) start(ctx context.Context, request Execut
 		if err != nil {
 			return nil, errors.Join(err, lock.Close())
 		}
+		if request.Overrides.AccessMode == nil {
+			request.Overrides.AccessMode = &previous.Settings.AccessMode
+		}
 		if previous.Mode == "review_checkpoint" {
 			// Recovery reuses the original reviewer output. Keep its model and
 			// effort for both the receipt and any unfinished finding assessments;
