@@ -51,6 +51,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   await page.getByRole('button',{name:'Send message',exact:true}).click();
   await until(()=>fs.existsSync(path.join(fixture,'fake-planning-started')),'Actual planner never reached turn/start');
   assert.equal(await page.locator('.plan-status.busy').isVisible(),true);
+  assert.deepEqual(await page.locator('.plan-status.busy').evaluate(el=>({display:getComputedStyle(el).display,align:getComputedStyle(el).alignItems})),{display:'flex',align:'center'},'Planning spinner and text must share vertical center');
   assert.equal(await page.locator('#plan-access').isDisabled(),true);
   const statusBox=await page.locator('.plan-status').boundingBox(), composerBox=await page.locator('#plan-form').boundingBox();
   assert.ok(statusBox.y+statusBox.height<=composerBox.y,'Planning status must appear above the composer');
@@ -98,7 +99,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   await page.getByRole('button',{name:'Done',exact:true}).click();
   await cards.nth(1).locator('[name=selected]').uncheck();
   const checkbox=cards.nth(1).locator('[name=selected]');
-  assert.deepEqual(await checkbox.evaluate(el=>({appearance:getComputedStyle(el).appearance,width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height})),{appearance:'none',width:16,height:16});
+  assert.deepEqual(await checkbox.evaluate(el=>({appearance:getComputedStyle(el).appearance,width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height})),{appearance:'none',width:14,height:14});
   await checkbox.press('Space');
   assert.equal(await checkbox.isChecked(),true);
   await checkbox.press('Space');

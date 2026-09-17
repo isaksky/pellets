@@ -45,7 +45,7 @@
 .plan-created p { margin:8px 0 0; }
 .plan-bottom { padding:12px 16px 8px; border-top:1px solid var(--line); flex:none; }
 .plan-create-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding-bottom:12px; font-size:10px; color:var(--muted); }
-.plan-create-row button { font-size:11px; padding:4px 8px; }
+.plan-create-row button { font-size:11px; padding:3px 8px; }
 #plan-form { padding:10px; border:1px solid var(--theme-hover-border); border-radius:8px; background:var(--theme-soft-surface); }
 #plan-form:focus-within { border-color:var(--accent); }
 #plan-message { width:100%; resize:none; border:0; outline:0; box-shadow:none; padding:2px; font-size:12px; line-height:1.6; color:var(--ink); background:transparent; min-height:48px; }
@@ -92,9 +92,9 @@
 }
 /* Dense plan rows; descriptions and editing controls expand on demand. */
 .plan-drafts { flex:0 1 auto; min-height:0; max-height:43%; padding:0 12px; }
-.plan-drafts .plan-draft-heading { margin:10px 0 2px; font-size:10px; }
-.plan-drafts .plan-batch-tools { gap:5px; margin:4px 0 7px; }
-.plan-drafts .plan-batch-tools button { padding:2px 5px; font-size:9px; }
+.plan-drafts .plan-draft-heading { margin:6px 0 1px; font-size:10px; }
+.plan-drafts .plan-batch-tools { gap:5px; margin:2px 0 5px; }
+.plan-drafts .plan-batch-tools button { padding:1px 5px; font-size:9px; }
 .plan-draft-list { border-top:1px solid var(--line); }
 .plan-draft-list .plan-card, .plan-draft-list .plan-created { position:relative; padding:0; margin:0; border:0; border-bottom:1px solid var(--line); border-radius:0; background:transparent; }
 .plan-card .plan-row-select { position:absolute; left:2px; top:11px; z-index:1; }
@@ -140,15 +140,15 @@
 .plan-created > a:hover { background:var(--theme-quiet-hover); }
 .plan-created .plan-row-ref { font-size:9px; }
 .plan-status { flex:none; margin:0 16px 10px; padding:10px 12px; border:1px solid var(--line); border-radius:6px; background:var(--theme-soft-surface); color:var(--muted); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
-.plan-status.busy { color:var(--accent); border-color:var(--accent); }
-.plan-status.busy::before { content:""; display:inline-block; width:10px; height:10px; margin-right:8px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:plan-spin 1s linear infinite; }
+.plan-status.busy { display:flex; align-items:center; gap:8px; color:var(--accent); border-color:var(--accent); }
+.plan-status.busy::before { content:""; display:inline-block; width:10px; height:10px; flex:none; margin:0; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:plan-spin 1s linear infinite; }
 @keyframes plan-spin { to { transform:rotate(360deg); } }
 @media (prefers-reduced-motion:reduce) { .plan-status.busy::before { animation:none; } }
 .plan-access { display:flex; align-items:center; gap:8px; font-size:11px; margin-bottom:8px; }
 .plan-status.error { color:var(--red); }
 .plan-status button { font-size:10px; margin:4px 5px 0 0; }
 .plan-context-note { line-height:1.6; }
-.plan-create-row .primary-button { padding:4px 7px; font-size:10px; }
+.plan-create-row .primary-button { padding:3px 7px; font-size:10px; }
 .plan-create-row { padding-bottom:8px; }
 .plan-composer-tools .select-control { min-width:0; }
 .plan-composer-tools #plan-model-trigger { max-width:150px; }
@@ -198,12 +198,13 @@
 .plan-receipts a > span:last-child { grid-column:3; grid-row:1; }
 .plan-receipts .plan-row-check { width:auto; }
 .plan-receipts .plan-row-group { display:none; }
-.plan-drafts { flex:0 1 auto; max-height:min(38%,320px); padding:0 16px; margin:0; background:transparent; border-top:1px solid var(--line); }
+.plan-drafts { flex:0 1 auto; max-height:min(38%,320px); padding:0 8px; margin:0; background:transparent; border-top:1px solid var(--line); }
 .plan-draft-heading { margin:0; }
-.plan-tray-toggle { display:flex; align-items:center; width:100%; gap:6px; padding:8px; border:0; background:transparent; text-align:left; font-size:12px; }
-.plan-tray-toggle [data-tray-toggle-label] { margin-left:auto; color:var(--muted); font-size:10px; }
+.plan-tray-toggle { display:flex; align-items:center; width:100%; gap:6px; padding:3px 6px; border:0; background:transparent; text-align:left; font-size:12px; }
+.plan-tray-chevron { width:14px; height:14px; flex:none; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+.plan-tray-toggle[aria-expanded=true] .plan-tray-chevron { transform:rotate(90deg); }
 .plan-drafts .plan-total { margin:0; background:transparent; padding:0; min-width:0; color:inherit; }
-.plan-drafts .plan-create-row { flex:none; padding:8px 0; }
+.plan-drafts .plan-create-row { flex:none; padding:5px 0; }
 .plan-drafts .plan-batch-tools[hidden], .plan-draft-list[hidden], .plan-create-row[hidden] { display:none; }
 .plan-card .plan-draft-details > summary { height:auto; min-height:40px; padding:8px 30px 8px 24px; align-items:flex-start; }
 .plan-card .plan-row-title { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.5; }
@@ -213,12 +214,12 @@
 .plan-bottom { border-top:0; padding-top:8px; }
 
 /* Stable proposal columns and a full-size editor outside the tray's scroll area. */
-.plan-draft-list .plan-card { display:grid; grid-template-columns:20px minmax(0,1fr) 28px; align-items:start; gap:8px; padding:8px 0; }
+.plan-draft-list .plan-card { display:grid; grid-template-columns:18px minmax(0,1fr) 28px; align-items:center; gap:8px; padding:1px 0; }
 .plan-card .plan-open-draft { min-width:0; width:100%; padding:3px 0; border:0; background:transparent; text-align:left; font:inherit; font-size:13px; line-height:22px; }
 .plan-card .plan-row-title { line-height:22px; }
 .plan-card .plan-dismiss { position:static; width:28px; height:28px; margin:0; }
-.plan-card input.plan-row-select { -webkit-appearance:none; appearance:none; position:static; box-sizing:border-box; width:16px; height:16px; min-height:0; margin:6px 2px; padding:0; border:1px solid var(--muted); border-radius:3px; background:transparent; cursor:pointer; }
-.plan-card input.plan-row-select:checked { border-color:var(--accent); background:var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3.5 8 3 3 6-6' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/16px 16px no-repeat; }
+.plan-card input.plan-row-select { -webkit-appearance:none; appearance:none; position:static; box-sizing:border-box; width:14px; height:14px; min-height:0; margin:0 2px; padding:0; border:1px solid var(--muted); border-radius:3px; background:transparent; cursor:pointer; }
+.plan-card input.plan-row-select:checked { border-color:var(--accent); background:var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3.5 8 3 3 6-6' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/14px 14px no-repeat; }
 .plan-card input.plan-row-select:focus-visible, .plan-open-draft:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 .plan-card input.plan-row-select:disabled { opacity:.45; cursor:not-allowed; }
 .plan-draft-dialog { box-sizing:border-box; width:min(720px,calc(100vw - 32px)); max-height:calc(100dvh - 48px); padding:0; border:1px solid var(--line); border-radius:12px; background:var(--surface,var(--theme-soft-surface)); color:var(--text); box-shadow:0 24px 90px #0005; }
@@ -261,3 +262,13 @@
 .plan-composer-settings { margin-bottom:8px; }
 .plan-composer-settings .select-trigger, .plan-composer-tools .select-trigger { max-width:100%; padding:4px 8px; border-radius:4px; }
 #plan-form .plan-path.visually-hidden { margin:0; }
+
+/* Match the sidebar's side insets to the 8px gap below the composer. */
+#right-panel .plan-context,
+#right-panel .plan-transcript,
+#right-panel .plan-drafts,
+#right-panel .plan-bottom,
+#right-panel .run-dashboard { padding-inline:8px; }
+
+#right-panel .plan-context { padding-bottom:4px; }
+#right-panel .plan-transcript { padding-top:4px; }
