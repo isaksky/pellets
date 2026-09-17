@@ -13,8 +13,9 @@ import (
 	"pellets/internal/storage"
 )
 
-// Planning uses its own read-only, request-owned process. It never enters the
-// execution supervisor's ownership, scheduling, or resume state machine.
+// Planning uses its own request-owned process with automatic approval review.
+// It never enters the execution supervisor's ownership, scheduling, or resume
+// state machine.
 func (a *WebApplication) planningOptions(ctx context.Context, p storage.Project, model, effort string) (codex.PlanningOptions, error) {
 	if len(p.Workspaces) == 0 {
 		return codex.PlanningOptions{}, domain.NewError(domain.Conflict, "planning_workspace_unavailable", "This project has no registered workspace.", nil)
@@ -133,7 +134,8 @@ func (a *WebApplication) SendPlanningMessage(ctx context.Context, p storage.Proj
 		groupBytes += len(*g)
 	}
 	// Summaries are bounded independently from the durable chat. Repository
-	// tools remain read-only; no memory or credential transcript is copied.
+	// inspection uses automatically reviewed shell access; no memory or credential
+	// transcript is copied.
 	pellets, err := a.Reader.ListWebPellets(ctx, p, storage.WebPelletFilters{})
 	if err != nil {
 		return current, err
@@ -206,6 +208,14 @@ func planningRuntimeError(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		message = "Planning stopped before a response was saved. Send again to retry."
 		code = "planning_stopped"
+	}
+	if errors.Is(err, codex.ErrPolicyUnavailable) || errors.Is(err, codex.ErrUnsupported) {
+		message = "Automatic review is unavailable in the configured Codex runtime or managed policy. Update Codex or check its approval settings, then retry."
+		code = "planning_policy_unavailable"
+	}
+	if errors.Is(err, codex.ErrPlanningInteraction) {
+		message = "Codex requested human input or approval that automatic planning could not resolve. No approval was granted. Your message and draft edits have been kept."
+		code = "planning_interaction_required"
 	}
 	if errors.Is(err, codex.ErrUnauthenticated) {
 		message = "Codex is not signed in. Sign in to the configured Codex runtime, then retry."

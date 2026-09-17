@@ -206,8 +206,10 @@ navigation. Draft rows support refinement, split/combine, selection, and group
 editing, with real routing hints and canonical created references.
 
 The production planner uses the installed Codex runtime with real model choices;
-it does not simulate responses. Planning is read-only with respect to repository
-and execution tools. Only the explicit Create action inserts ordinary open pellets
-in the authoritative database. It does not claim them, start a run, approve memory,
+it does not simulate responses. Planning can inspect the repository through shell
+execution in a workspace-write sandbox with Codex automatic approval review. The
+planner is instructed not to implement changes or mutate the queue; this is not a
+read-only filesystem guarantee. The explicit Create action inserts selected drafts
+as ordinary open pellets in the authoritative database. It does not claim them, start a run, approve memory,
 or manufacture checkpoint evidence. Chat persistence and conflict handling retain
 unfinished input while execution and navigation continue independently.

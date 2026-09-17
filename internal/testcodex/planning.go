@@ -26,11 +26,18 @@ func handlePlanning(mode, method string, id, raw json.RawMessage, write func(any
 		}
 		respond(map[string]any{"account": account, "requiresOpenaiAuth": true})
 	case "configRequirements/read":
-		policy := "never"
+		policy := "on-request"
 		if mode == "planning_policy_blocked" {
-			policy = "on-request"
+			policy = "never"
 		}
-		respond(map[string]any{"requirements": map[string]any{"allowedApprovalPolicies": []string{policy}, "allowedSandboxModes": []string{"read-only"}}})
+		reviewer, sandbox := "auto_review", "workspace-write"
+		if mode == "planning_reviewer_blocked" {
+			reviewer = "user"
+		}
+		if mode == "planning_sandbox_blocked" {
+			sandbox = "read-only"
+		}
+		respond(map[string]any{"requirements": map[string]any{"allowedApprovalPolicies": []string{policy}, "allowedApprovalsReviewers": []string{reviewer}, "allowedSandboxModes": []string{sandbox}}})
 	case "config/read":
 		respond(map[string]any{"config": map[string]any{
 			"model": "test-model", "model_reasoning_effort": "high",
@@ -104,6 +111,12 @@ func handlePlanning(mode, method string, id, raw json.RawMessage, write func(any
 		if mode == "planning_oversized" {
 			output = []byte(strings.Repeat("x", 300<<10))
 		}
+		// Shell output and runtime-owned review notifications must not become
+		// the structured assistant reply or trigger client-side approval.
+		notify("item/autoApprovalReview/started", map[string]any{"threadId": "planning-thread", "turnId": "planning-turn", "itemId": "command-one"})
+		notify("item/autoApprovalReview/completed", map[string]any{"threadId": "planning-thread", "turnId": "planning-turn", "itemId": "command-one"})
+		notify("item/completed", map[string]any{"threadId": "planning-thread", "turnId": "planning-turn", "item": map[string]any{"type": "commandExecution", "aggregatedOutput": "repository evidence"}})
+		notify("item/completed", map[string]any{"threadId": "planning-thread", "turnId": "planning-turn", "item": map[string]any{"type": "agentMessage", "phase": "commentary", "text": "I inspected the relevant files."}})
 		// A different thread/turn must not supply the planning result.
 		notify("item/completed", map[string]any{"threadId": "unrelated-thread", "turnId": "planning-turn", "item": map[string]any{"type": "agentMessage", "text": "unrelated"}})
 		notify("turn/completed", map[string]any{"threadId": "planning-thread", "turn": map[string]any{"id": "unrelated-turn", "status": "completed", "items": []any{map[string]any{"type": "agentMessage", "text": "unrelated"}}}})

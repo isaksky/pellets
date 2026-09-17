@@ -2,6 +2,8 @@ package codex
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -74,7 +76,7 @@ func TestPlanningCatalogUsesRuntimeWithoutStartingModel(t *testing.T) {
 	}
 }
 
-func TestPlanningUsesIsolatedReadOnlyThreadAndExactCompletedOutput(t *testing.T) {
+func TestPlanningUsesIsolatedAutoReviewShellAndExactCompletedOutput(t *testing.T) {
 	opts := planningTestOptions(t, "planning_chat")
 	opts.Model, opts.Effort = "test-fast", "low"
 	reply, err := Plan(context.Background(), opts)
@@ -90,14 +92,14 @@ func TestPlanningUsesIsolatedReadOnlyThreadAndExactCompletedOutput(t *testing.T)
 		case "thread/start":
 			threadCount++
 			var params struct {
-				Sandbox, ApprovalPolicy, Model string
-				Ephemeral                      bool
-				Config                         map[string]json.RawMessage
+				Sandbox, ApprovalPolicy, ApprovalsReviewer, Model string
+				Ephemeral                                         bool
+				Config                                            map[string]json.RawMessage
 			}
 			if err := json.Unmarshal(call.Params, &params); err != nil {
 				t.Fatal(err)
 			}
-			if params.Sandbox != "read-only" || params.ApprovalPolicy != "never" || !params.Ephemeral || params.Model != "test-fast" {
+			if params.Sandbox != "workspace-write" || params.ApprovalPolicy != "on-request" || params.ApprovalsReviewer != "auto_review" || !params.Ephemeral || params.Model != "test-fast" {
 				t.Fatalf("thread permissions = %s", call.Params)
 			}
 			var features map[string]bool
@@ -105,9 +107,21 @@ func TestPlanningUsesIsolatedReadOnlyThreadAndExactCompletedOutput(t *testing.T)
 				t.Fatal("tool capabilities missing")
 			}
 			for name, enabled := range features {
-				if enabled {
-					t.Fatalf("planning enabled capability %s", name)
+				if enabled != (name == "shell_tool" || name == "unified_exec") {
+					t.Fatalf("unexpected planning capability %s=%v", name, enabled)
 				}
+			}
+			if !features["shell_tool"] || !features["unified_exec"] {
+				t.Fatal("planning shell is disabled")
+			}
+			var sandbox struct {
+				WritableRoots       []string `json:"writable_roots"`
+				NetworkAccess       bool     `json:"network_access"`
+				ExcludeSlashTmp     bool     `json:"exclude_slash_tmp"`
+				ExcludeTmpdirEnvVar bool     `json:"exclude_tmpdir_env_var"`
+			}
+			if json.Unmarshal(params.Config["sandbox_workspace_write"], &sandbox) != nil || sandbox.WritableRoots == nil || len(sandbox.WritableRoots) != 0 || sandbox.NetworkAccess || !sandbox.ExcludeSlashTmp || !sandbox.ExcludeTmpdirEnvVar {
+				t.Fatalf("planning inherited broad shell access: %s", call.Params)
 			}
 			var servers map[string]struct{ Enabled bool }
 			if json.Unmarshal(params.Config["mcp_servers"], &servers) != nil || len(servers) != 1 || servers["fixture.external"].Enabled {
@@ -119,20 +133,22 @@ func TestPlanningUsesIsolatedReadOnlyThreadAndExactCompletedOutput(t *testing.T)
 		case "turn/start":
 			turnCount++
 			var params struct {
-				ThreadID, Model, Effort, ApprovalPolicy string
-				SandboxPolicy                           struct {
-					Type          string
-					NetworkAccess bool
+				ThreadID, Model, Effort, ApprovalPolicy, ApprovalsReviewer string
+				SandboxPolicy                                              struct {
+					Type                                 string
+					NetworkAccess                        bool
+					WritableRoots                        []string
+					ExcludeSlashTmp, ExcludeTmpdirEnvVar bool
 				}
 				OutputSchema json.RawMessage
 			}
 			if err := json.Unmarshal(call.Params, &params); err != nil {
 				t.Fatal(err)
 			}
-			if params.ThreadID != "planning-thread" || params.Model != "test-fast" || params.Effort != "low" || params.ApprovalPolicy != "never" || params.SandboxPolicy.Type != "readOnly" || params.SandboxPolicy.NetworkAccess || len(params.OutputSchema) == 0 {
+			if params.ThreadID != "planning-thread" || params.Model != "test-fast" || params.Effort != "low" || params.ApprovalPolicy != "on-request" || params.ApprovalsReviewer != "auto_review" || params.SandboxPolicy.Type != "workspaceWrite" || params.SandboxPolicy.WritableRoots == nil || len(params.SandboxPolicy.WritableRoots) != 0 || !params.SandboxPolicy.ExcludeSlashTmp || !params.SandboxPolicy.ExcludeTmpdirEnvVar || params.SandboxPolicy.NetworkAccess || len(params.OutputSchema) == 0 {
 				t.Fatalf("turn permissions/output = %s", call.Params)
 			}
-		case "thread/resume", "thread/read", "turn/steer", "review/start":
+		case "response", "thread/resume", "thread/read", "turn/steer", "review/start":
 			t.Fatalf("planning invoked execution operation %s", call.Method)
 		}
 	}
@@ -163,7 +179,9 @@ func TestPlanningFailuresDoNotReturnProposals(t *testing.T) {
 		{"planning_unsigned", ErrUnauthenticated},
 		{"planning_policy_blocked", ErrPlanningUnavailable},
 		{"planning_rpc_error", ErrPlanningUnavailable},
-		{"planning_interaction", ErrPlanningUnavailable},
+		{"planning_interaction", ErrPlanningInteraction},
+		{"planning_reviewer_blocked", ErrPolicyUnavailable},
+		{"planning_sandbox_blocked", ErrPolicyUnavailable},
 		{"planning_failed", ErrPlanningUnavailable},
 		{"planning_disconnect", ErrPlanningUnavailable},
 		{"planning_bad_json", ErrPlanningOutput},
@@ -250,5 +268,57 @@ func TestPlanningInputAndStructuredOutputBounds(t *testing.T) {
 	opts.Model, opts.Effort = "test-model", "ultra"
 	if _, err := Plan(context.Background(), opts); !errors.Is(err, ErrInvalidSettings) {
 		t.Fatalf("unsupported effort = %v", err)
+	}
+}
+
+// Opt-in because this starts a real model turn through the configured account.
+func TestInstalledPlanningShellAutomaticReview(t *testing.T) {
+	if os.Getenv("PELLETS_CODEX_PLANNING_LIVE") != "1" {
+		t.Skip("explicit live planning smoke test only; starts a model turn")
+	}
+	workspace := t.TempDir()
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		t.Fatal(err)
+	}
+	evidence := "planning-shell-" + hex.EncodeToString(nonce[:])
+	if err := os.WriteFile(filepath.Join(workspace, "planner-context.txt"), []byte(evidence), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	reply, err := Plan(ctx, PlanningOptions{WorkspaceDir: workspace, Prompt: "This is an authorized shell and automatic approval review smoke test. Use the shell with sandbox_permissions=require_escalated to run cat planner-context.txt in the current workspace, so the runtime can exercise automatic approval review for this harmless read. Do not modify anything. Return the exact contents of that file as your text and an empty drafts array. Do not guess the contents."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reply.Text, evidence) || len(reply.Drafts) != 0 {
+		t.Fatalf("planner did not return shell evidence: %#v", reply)
+	}
+	t.Logf("live planner read unique shell evidence and returned valid structured output using %s/%s", reply.Model, reply.Effort)
+}
+
+type planningRejectSession struct {
+	Session
+	id     json.RawMessage
+	result any
+	rpc    *RPCError
+}
+
+func (s *planningRejectSession) Respond(_ context.Context, id json.RawMessage, result any, rpc *RPCError) error {
+	s.id, s.result, s.rpc = id, result, rpc
+	return nil
+}
+
+func TestPlanningNeverGrantsFallbackClientApprovals(t *testing.T) {
+	for _, method := range []string{"item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval", "item/tool/requestUserInput"} {
+		t.Run(method, func(t *testing.T) {
+			peer := &planningRejectSession{}
+			session := &planningSession{Session: peer}
+			id := json.RawMessage(`"request-one"`)
+			err := session.handle(context.Background(), Event{Method: method, ID: id})
+			if !errors.Is(err, ErrPlanningInteraction) || !errors.Is(err, ErrPlanningUnavailable) || string(peer.id) != string(id) || peer.result != nil || peer.rpc == nil || peer.rpc.Code != -32601 {
+				t.Fatalf("fallback approval was not rejected: %#v, %v", peer, err)
+			}
+		})
 	}
 }

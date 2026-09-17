@@ -64,25 +64,44 @@ pellets atomically, with stable references preventing duplicate creation on retr
 Creation never claims work or starts execution. Group routing uses the current
 project assignments; groups retain their existing opaque exact-value semantics.
 
-Sending a message uses the configured Codex runtime in a separate ephemeral,
-read-only session with bounded conversation and draft context. Model choices come
-from that runtime, rather than the prototype's illustrative list. There are no
-local template replies or simulated model events. Repository inspection and external operations are disabled in planning; it reasons
-from the supplied queue summary, group sample, conversation, and drafts. The
-read-only sandbox independently prevents repository writes. Planning
-has no execution ownership or schedule. Failed, cancelled, or
-interrupted model calls leave the saved chat unchanged; retry is explicit. A
-successful exchange and its draft proposals are saved together using the original
-chat version. A response may append drafts or refine the explicitly selected
-uncreated draft, never silently replace unrelated work.
+Sending a message uses the configured Codex runtime in a separate ephemeral
+session with bounded conversation and draft context. Model choices come from
+that runtime; there are no local template replies or simulated model events.
+The planner can inspect repository files and Git state using shell commands.
+The panel labels this mode **Shell access · Automatic review**: commands use a
+workspace-write sandbox with `on-request` approvals and the runtime's
+`auto_review` reviewer. Network access and additional writable roots are not
+pre-granted. Apps, plugins, MCP tools, browsing, and delegation remain disabled.
+Managed policy and runtime capability checks must permit automatic review; there
+is no fallback to full access or manual approval. An unresolved request for human
+input or approval stops the call with an actionable error.
+
+The planner is instructed to investigate and propose work without implementing
+changes or mutating pellets through the shell. This is a behavioral restriction,
+not a read-only filesystem guarantee: workspace writes are technically permitted,
+and reviewer-approved commands can exceed the sandbox. Shell side effects are
+not rolled back if a response fails or the chat version conflicts. Planning has
+no execution ownership or schedule. Failed, cancelled, or interrupted model calls
+leave the saved chat unchanged; retry is explicit. A successful exchange and its
+draft proposals are saved together using the original chat version. A response
+may append drafts or refine the explicitly selected uncreated draft, never
+silently replace unrelated work.
 
 Each chat is bounded to 200 messages, 200 draft rows, and 512 KiB of encoded state.
 The browser retains unsaved input on conflicts and request failures. A bounded
 one-use reload handoff retains draft edits and exact retry identities. Long chats
 must start a new conversation rather than silently evicting prior messages.
 Planning is independent of execution evidence, review checkpoints, memory
-provenance, and approval. Its acceptance text is included in the created pellet's
+provenance, and checkpoint approval. Its acceptance text is included in the created pellet's
 description; it does not claim tests passed or mark a review approved.
+
+The optional live smoke test starts a real model turn using the configured account,
+asks for an automatically reviewed shell read of a temporary file, and verifies
+its unique contents in the structured reply. Normal tests skip it:
+
+```sh
+PELLETS_CODEX_PLANNING_LIVE=1 go test ./internal/codex -run '^TestInstalledPlanningShellAutomaticReview$' -count=1 -v
+```
 
 ## Workspace assignments
 

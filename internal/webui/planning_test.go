@@ -148,6 +148,23 @@ func TestPlanningSendRejectsUnrelatedModelEditsAndCancellation(t *testing.T) {
 	if w.Code != 409 || !strings.Contains(w.Body.String(), "planning_stopped") {
 		t.Fatal(w.Code, w.Body.String())
 	}
+	for _, test := range []struct {
+		err  error
+		code string
+	}{
+		{codex.ErrPolicyUnavailable, "planning_policy_unavailable"},
+		{codex.ErrUnsupported, "planning_policy_unavailable"},
+		{codex.ErrPlanningInteraction, "planning_interaction_required"},
+	} {
+		f.application.PlanningGenerate = func(context.Context, codex.PlanningOptions) (codex.PlanningReply, error) {
+			return codex.PlanningReply{}, test.err
+		}
+		w = planningHTTP(t, f, p.Code, send)
+		if w.Code != 409 || !strings.Contains(w.Body.String(), test.code) {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+
 	saved := planningChatResponse(t, planningHTTP(t, f, p.Code, nil))
 	if saved.Version != chat.Version || saved.State.Composer != "Improve it" {
 		t.Fatal("failed model changed chat")
