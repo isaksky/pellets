@@ -153,7 +153,7 @@
 .plan-composer-tools .select-control { min-width:0; }
 .plan-composer-tools #plan-model-trigger { max-width:150px; }
 .plan-send { flex:0 0 27px; }
-.plan-select-models { border:0; background:transparent; color:var(--dim); font-size:10px; padding:3px 0; }
+.plan-select-models { border:0; background:transparent; color:var(--dim); font-size:10px; padding:3px 9px; }
 .plan-new-confirm button { font-size:10px; }
 .plan-row-editor .plan-route { margin:6px 0; }
 .plan-busy { color:var(--accent); font-size:10px; padding:5px 0; }
@@ -193,7 +193,7 @@
 .plan-status[hidden], .plan-pending[hidden] { display:none; }
 .plan-pending { padding:12px; margin:12px 0; border-radius:7px; background:var(--theme-soft-surface); white-space:pre-wrap; overflow-wrap:anywhere; }
 .plan-receipts .plan-created { margin:10px 0; padding:10px 12px; background:var(--accent-bg); border:0; }
-.plan-receipts .plan-created a { display:grid; grid-template-columns:auto 1fr auto; align-items:baseline; gap:5px 8px; padding:0; height:auto; }
+.plan-receipts .plan-created a { display:grid; grid-template-columns:auto 1fr auto; align-items:baseline; gap:5px 8px; padding:3px 9px; height:auto; }
 .plan-receipts .plan-row-title { grid-column:1 / -1; grid-row:2; white-space:normal; overflow:visible; }
 .plan-receipts a > span:last-child { grid-column:3; grid-row:1; }
 .plan-receipts .plan-row-check { width:auto; }

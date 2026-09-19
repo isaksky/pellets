@@ -727,7 +727,7 @@ input[type="checkbox"] {
   background: transparent;
   color: var(--muted);
   font-weight: 400;
-  padding: 3px 0;
+  padding: 3px 9px;
   font-size: 12px;
 }
 .filters {
@@ -768,7 +768,7 @@ input[type="checkbox"] {
   border-radius: 3px;
   background: transparent;
   color: var(--muted);
-  padding: 5px 3px;
+  padding: 5px 9px;
   font-size: 11px;
   cursor: pointer;
   white-space: nowrap;
@@ -825,7 +825,7 @@ input[type="checkbox"] {
   justify-self: start;
   background: transparent;
   border: 0;
-  padding: 4px 0;
+  padding: 4px 9px;
   font-size: 11px;
 }
 .ui-update-notice {
@@ -1503,6 +1503,18 @@ dialog::backdrop {
 .inspector h2 {
   font-size: 15px;
 }
+.inspector > header .icon-button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.inspector > header .icon-button:hover {
+  background: var(--theme-quiet-hover);
+  color: var(--ink);
+}
 .inspector-scroll {
   flex: 1 1 auto;
   min-height: 0;
@@ -1556,7 +1568,7 @@ dialog::backdrop {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 0;
+  padding: 7px 9px;
   color: var(--muted);
   font-size: 12px;
   cursor: pointer;
@@ -2263,7 +2275,7 @@ dialog::backdrop {
 .theme-control .select-trigger {
   font-size: 10px;
   min-height: 20px;
-  padding: 0 3px;
+  padding: 0 9px;
 }
 .theme-control .select-chevron {
   width: 10px;

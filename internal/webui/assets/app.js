@@ -707,6 +707,9 @@ import { action, actions } from "./datastar-1.0.3.js";
   });
 
   document.addEventListener("click", function (event) {
+    document.querySelectorAll(".create-popover[open]").forEach(function (popover) {
+      if (!popover.contains(event.target)) popover.open = false;
+    });
     var projectDetails = document.getElementById("project-record");
     if (projectDetails && projectDetails.open && !projectDetails.contains(event.target)) {
       projectDetails.open = false;
