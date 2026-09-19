@@ -185,6 +185,27 @@ async function startServer(root) {
       });
     }), true, 'Recovery controls overflow the workspace on a narrow screen');
     await page.setViewportSize({width: 1280, height: 900});
+    const limitInput = resume.locator('input[name=limit]');
+    const increaseLimit = resume.getByRole('button', {name: 'Increase pellet limit'});
+    const decreaseLimit = resume.getByRole('button', {name: 'Decrease pellet limit'});
+    if (scenario.crash) {
+      assert.equal(await increaseLimit.isVisible(), false, 'Saved limits must not offer editing controls');
+      assert.equal(await decreaseLimit.isVisible(), false);
+    } else {
+      await limitInput.fill('100');
+      await increaseLimit.click();
+      assert.equal(await limitInput.inputValue(), '101');
+      await decreaseLimit.click();
+      assert.equal(await limitInput.inputValue(), '100');
+      await limitInput.press('ArrowUp');
+      assert.equal(await limitInput.inputValue(), '101', 'Native numeric keyboard support must remain available');
+      await limitInput.fill('10000');
+      await increaseLimit.click();
+      assert.equal(await limitInput.inputValue(), '10000');
+      await limitInput.fill('1');
+      await decreaseLimit.click();
+      assert.equal(await limitInput.inputValue(), '1');
+    }
     await resume.getByRole('button', {name: 'Resume', exact: true}).click();
     assert.equal(await resume.locator('select[name=mode]').evaluate(el => el.validity.valueMissing), true);
     await resume.locator('select[name=mode]').selectOption(scenario.mode, {force: true});

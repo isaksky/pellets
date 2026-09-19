@@ -1,5 +1,6 @@
 import * as uiVersion from "./ui-version.js";
 import "./workbench.js";
+import "./number-inputs.js";
 import { saveSetting } from "./settings.js";
 import { action, actions } from "./datastar-1.0.3.js";
 

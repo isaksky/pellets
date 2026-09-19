@@ -2442,6 +2442,135 @@ dialog::backdrop {
 
 .execution-access { display:flex; align-items:center; gap:8px; margin:8px 0; font-size:12px; }
 
+/* Execution forms share control sizing and wrap by available panel width. */
+.run-controls form[data-no-run-resume] {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 16px 12px;
+  align-items: start;
+  min-width: 0;
+}
+.run-controls label,
+.run-controls form[data-no-run-resume] label,
+.run-controls .number-field > label {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink);
+  gap: 6px;
+}
+.run-controls form[data-no-run-resume] > .execution-access,
+.run-controls .resume-mode,
+.run-controls .number-field {
+  grid-column: 1 / -1;
+}
+.run-controls form[data-no-run-resume] > .execution-access {
+  display: grid;
+  align-items: start;
+  margin: 0;
+}
+.run-controls form > p {
+  font-size: 12px;
+  color: var(--ink);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.run-controls .select-control,
+.run-controls .select-trigger,
+.run-controls input:not([type="hidden"]),
+.run-controls textarea {
+  width: 100%;
+}
+.run-controls input:not([type="hidden"]),
+.run-controls .select-trigger,
+.run-controls select:not(.select-native),
+.run-controls button[type="submit"] {
+  min-height: 36px;
+  font-size: 13px;
+}
+.run-controls .select-trigger {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--theme-field);
+  color: var(--ink);
+  padding: 7px 9px;
+  align-self: stretch;
+  justify-self: stretch;
+}
+.run-controls .select-value {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.run-controls textarea {
+  min-height: 72px;
+  font-size: 13px;
+}
+
+/* Reusable numeric control: native input semantics with themed step buttons. */
+.number-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.number-control {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--theme-field);
+}
+.number-control:focus-within {
+  outline: 1px solid var(--focus);
+  outline-offset: 2px;
+}
+.number-control input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  min-height: 34px;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+.number-control input::-webkit-inner-spin-button,
+.number-control input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.number-control button[data-number-step] {
+  display: grid;
+  place-items: center;
+  flex: 0 0 36px;
+  align-self: stretch;
+  min-height: 34px;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+}
+.number-control button:last-child { border-radius: 0 3px 3px 0; }
+.number-control button:not(:disabled):hover { background: var(--theme-hover); }
+.number-control button:focus-visible { outline-offset: -3px; }
+.number-control svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.number-control:has(input:read-only) button,
+.number-control:has(input:disabled) button { display: none; }
+
 /* Keep the queue heading closer to the application toolbar. */
 .workspace:has(#tasks-area) { padding-top:16px; }
 
