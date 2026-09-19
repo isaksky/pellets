@@ -481,6 +481,7 @@ registered project, workspace, pellet state, and memory; it supports routine
 queue and memory edits with optimistic conflict detection. Purge, memory
 removal, and other irreversible actions are intentionally absent.
 
+The interface adopts [web components](docs/web-components.md) for closely matching form controls; existing composite UI patterns retain their original implementations.
 The browser uses the [Workbench layout](docs/workbench-ui.md): project and view
 switchers in the breadcrumb, Queue, Memories, and workspaces in the left sidebar,
 and execution in the right sidebar. Selecting a workspace shows its queue and
@@ -491,6 +492,14 @@ filters and sorting never change execution selection. Pellet and memory details
 open in dialogs; review checkpoints appear as interactive scoped queue dividers.
 Both sidebars collapse independently. Five themes, including Gruvbox and Icy, live
 beside the bottom-right toggle and apply without losing edits or execution state.
+
+Development builds (`go run ./cmd/pl server` or an unversioned `go build`) expose
+the **Design system** link and `/dev/design-system`. This interactive catalogue
+shows the shared controls, menus, themes, feedback states, and dialog types using
+sample data. Preview actions never save project data or presentation settings.
+Versioned release builds return 404 for the gallery and its dedicated assets.
+Run its browser checks with `node scripts/test-web-design-system-browser.cjs`
+with Playwright on `NODE_PATH`, like the other optional browser suites.
 
 `pl web` remains a deprecated compatibility alias with the same options and
 foreground behavior. New scripts and documentation must use `pl server`.

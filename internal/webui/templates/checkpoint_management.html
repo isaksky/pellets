@@ -10,7 +10,7 @@
       <form id="checkpoint-scope-{{$.SelectedPellet.Pellet.Reference}}" action="/projects/{{$.Project.Code}}/checkpoints/{{$.SelectedPellet.Pellet.Reference}}/scope" method="post" data-on:submit="@submit()" class="stack-form dirty-track" data-checkpoint-scope-form>
         <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{$.SelectedPellet.Version}}">
         <fieldset class="checkpoint-scope-options"><legend>Explicit review scope</legend>
-        {{range .Choices}}<label class="check"><input type="checkbox" name="target" value="{{.Pellet.Reference}}:{{.Version}}"{{if .Selected}} checked{{end}}><span><code>{{.Pellet.Reference}}</code> · {{.Pellet.Title}} <small>{{statusLabel .Pellet.Status}}</small></span></label>{{end}}
+        {{range .Choices}}<label class="check"><pl-checkbox><input type="checkbox" name="target" value="{{.Pellet.Reference}}:{{.Version}}"{{if .Selected}} checked{{end}}></pl-checkbox><span><code>{{.Pellet.Reference}}</code> · {{.Pellet.Title}} <small>{{statusLabel .Pellet.Status}}</small></span></label>{{end}}
         </fieldset>
         <button type="submit">Save scope</button>
       </form>

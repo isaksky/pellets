@@ -249,7 +249,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
     const bounds=await page.locator('#right-panel').boundingBox();
     assert.ok(bounds&&bounds.x>=0&&bounds.x+bounds.width<=width+1,'Planning exceeds viewport');
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
-    assert.equal(await page.locator('#main').evaluate(el=>el.inert),width===390,'Phone Plan overlay leaves the covered queue interactive');
+    await until(async()=>await page.locator('#main').evaluate(el=>el.inert)===(width===390),'Plan overlay did not update queue inertness after resizing');
     if(width===390){
       await page.locator('#plan-tab').focus();
       for(let i=0;i<18;i++){

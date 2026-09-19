@@ -1,3 +1,4 @@
+import { refreshComponents } from "./components.js";
 // A loaded document must never consume markup from another UI build. Reloads
 // are explicit, with a bounded, one-use draft handoff in this tab's storage.
 export const revision = document.documentElement.dataset.uiRevision || "";
@@ -8,6 +9,13 @@ let outdated = false,
   pending = 0,
   checking = null;
 let lastFocus = null;
+let documentActive = true, versionController = null;
+window.addEventListener("beforeunload", () => { versionController?.abort(); });
+window.addEventListener("pagehide", () => {
+  documentActive = false;
+  versionController?.abort();
+});
+window.addEventListener("pageshow", () => { documentActive = true; });
 const bindings = [
   "request_id",
   "workspace_id",
@@ -141,10 +149,15 @@ export function inspectResponse(response) {
   return acceptRevision(response.headers.get("Pellets-UI-Revision"));
 }
 export async function checkVersion() {
+  // A navigation can cancel the event stream after this document has left.
+  // Don't start a fetch from that stale document (WebKit rejects its origin).
+  if (!documentActive) return false;
   if (!checking) {
+    versionController = new AbortController();
     checking = fetch("/ui-version", {
       cache: "no-store",
       credentials: "same-origin",
+      signal: versionController.signal,
     })
       .then((response) => (response.ok ? response.json() : null))
       .then((value) => {
@@ -153,10 +166,11 @@ export async function checkVersion() {
       .catch(() => {})
       .finally(() => {
         checking = null;
+        versionController = null;
       });
   }
   await checking;
-  return !outdated;
+  return documentActive && !outdated;
 }
 export function watchSource(source) {
   source.addEventListener("pellets-ui-revision", (event) => {
@@ -180,10 +194,20 @@ function focusSnapshot(target) {
     direction: field.selectionDirection,
   };
 }
-document.addEventListener("focusin", (event) => {
-  if (!event.target.closest("#ui-update-notice"))
-    lastFocus = focusSnapshot(event.target);
+function rememberFocus(target) {
+  const focus = focusSnapshot(target);
+  if (focus) lastFocus = focus;
+}
+for (const type of ["focusin", "input", "keyup", "select"]) {
+  document.addEventListener(type, event => rememberFocus(event.target));
+}
+document.addEventListener("selectionchange", () => {
+  rememberFocus(document.activeElement);
 });
+document.addEventListener("pointerdown", (event) => {
+  if (event.target.closest("[data-ui-reload]"))
+    lastFocus = focusSnapshot(document.activeElement) || lastFocus;
+}, true);
 
 function reloadWithDrafts() {
   if (pending || sensitiveInput()) {
@@ -193,21 +217,17 @@ function reloadWithDrafts() {
   try {
 	const plannerError = window.Planner?.prepareReload?.();
 	if (plannerError) throw Error(plannerError);
+    // WebKit may retain an active field in a background tab without delivering
+    // focusin. Prefer its actual selection, then the field preceding Reload.
+    const currentFocus = focusSnapshot(document.activeElement) || lastFocus;
     const focusedForm =
-      lastFocus &&
+      currentFocus &&
       Array.from(document.forms).find(
-        (form) => formKey(form) === lastFocus.form,
+        (form) => formKey(form) === currentFocus.form,
       );
-    const focusedField =
-      focusedForm &&
-      fields(focusedForm).find((field) => field.name === lastFocus.name);
-    const focus = focusedForm?.closest("#planning-panel") ? null : focusedField
-      ? focusSnapshot(
-          lastFocus.trigger
-            ? document.getElementById(focusedField.id + "-trigger")
-            : focusedField,
-        )
-      : lastFocus;
+    // A pointer on Reload can blur/reset a textarea's selection in WebKit.
+    // Preserve the receipt captured before that default pointer action.
+    const focus = focusedForm?.closest("#planning-panel") ? null : currentFocus;
     const drafts = Array.from(document.forms)
       .filter((form) => !form.closest("#planning-panel"))
       .filter(
@@ -219,6 +239,7 @@ function reloadWithDrafts() {
       )
       .map((form) => ({
         key: formKey(form),
+        disclosureOpen: form.closest("details")?.open,
         label:
           form.querySelector("label")?.textContent.trim().slice(0, 80) ||
           "Unfinished input",
@@ -329,6 +350,9 @@ export function restoreDrafts() {
     }
     // Keep the original optimistic version. A concurrent change must still
     // conflict when a restored edit is submitted. CSRF always stays fresh.
+    const disclosure = form.closest("details");
+    if (disclosure && typeof draft.disclosureOpen === "boolean")
+      disclosure.open = draft.disclosureOpen;
     form.dataset.dirty = "true";
     form.closest("[data-protect-dirty]")?.classList.add("is-dirty");
     if (form.matches(".filters") && fields(form).some(modified))
@@ -342,7 +366,7 @@ export function restoreDrafts() {
   // Restored choices can reveal dependent fields (for example, explicit group
   // assignments). Reconcile presentation before returning focus and scroll.
   window.Workbench?.initialize();
-  window.Dropdowns?.enhance();
+  refreshComponents();
   for (const scroll of saved.scrolls || []) {
     const element = scroll.id
       ? document.getElementById(scroll.id)

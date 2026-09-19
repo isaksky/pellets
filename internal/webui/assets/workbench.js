@@ -1,5 +1,5 @@
+import { refreshComponents } from "./components.js";
 import { saveSetting } from "./settings.js";
-import "./dropdowns.js";
 import { syncQueueFilters } from "./filters.js";
 import * as uiVersion from "./ui-version.js";
 import "./planner.js";
@@ -24,11 +24,11 @@ function applyTheme(choice) {
   if (!themes.includes(choice)) choice = "gruvbox-light";
   root.dataset.themeChoice = choice;
   root.dataset.theme = choice;
-  window.Dropdowns?.enhance();
+  refreshComponents();
   const select = document.getElementById("theme-select");
   if (select) {
     select.value = choice;
-    window.Dropdowns?.enhance();
+    refreshComponents();
   }
 }
 function panels() {
@@ -180,7 +180,7 @@ function restore() {
   // Recreate/synchronize custom controls after values and disclosures are
   // restored. Focus is independent of draft state: a clean control can be
   // keyboard-focused when an authoritative update arrives.
-  window.Dropdowns?.enhance();
+  refreshComponents();
   if (focusReceipt) {
     const form = forms.find(
       (candidate) => formKey(candidate) === focusReceipt.key,

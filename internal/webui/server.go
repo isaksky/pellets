@@ -52,6 +52,7 @@ type Options struct {
 	InitialProject   string
 	Port             uint16
 	NoOpen           bool
+	Development      bool // Enabled by the CLI only for unversioned development builds.
 	Stdout           io.Writer
 	Stderr           io.Writer
 }
@@ -134,7 +135,7 @@ func (runner Runner) Run(ctx context.Context, options Options) (runErr error) {
 
 	handler, err := newHandler(application, hub, handlerConfig{
 		Host: host, Origin: baseURL, CSRF: csrf, InitialProject: options.InitialProject,
-		Stopping: monitorContext.Done(),
+		Stopping: monitorContext.Done(), Development: options.Development,
 	})
 	if err != nil {
 		return err

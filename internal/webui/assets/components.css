@@ -1,0 +1,81 @@
+/* Component boundaries only. Existing styles and their order remain authoritative. */
+pl-select > .select-native {
+  position: absolute !important;
+  inset: 0 auto auto 0;
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Public light-DOM component boundaries. Native children keep their semantics
+   and participate directly in the existing flex/grid layout. */
+pl-button, pl-field, pl-checkbox, pl-menu, pl-disclosure, pl-dialog, pl-badge, pl-notice, pl-icon,
+pl-select[native], pl-resizer { display: contents; }
+pl-tabs { display: block; }
+pl-number { display: flex; }
+pl-button[hidden], pl-field[hidden], pl-checkbox[hidden], pl-menu[hidden],
+pl-disclosure[hidden], pl-dialog[hidden], pl-badge[hidden], pl-notice[hidden], pl-icon[hidden],
+pl-resizer[hidden], pl-select[hidden], pl-tabs[hidden], pl-number[hidden] { display: none !important; }
+pl-button[disabled] > a, pl-button[busy] > a { opacity: .48; cursor: not-allowed; }
+
+/* Keep the native picker, with equal visible insets for its text and chevron. */
+pl-select[native] { display: block; position: relative; min-width: 0; }
+pl-select[native] > select:not([multiple]):not([size]) {
+  display: block;
+  appearance: none;
+  height: 31px;
+  line-height: normal;
+  padding-inline: 12px 34px;
+}
+pl-select[native]:has(> select:not([multiple]):not([size]):not([hidden]))::after {
+  content: "";
+  position: absolute;
+  inset-inline-end: 12px;
+  top: 50%;
+  width: 10px;
+  height: 6px;
+  transform: translateY(-50%);
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='m1 1 4 4 4-4' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  pointer-events: none;
+}
+@media (forced-colors: active) {
+  pl-select[native] > select:not([multiple]):not([size]) { appearance: auto; padding-inline: 12px; }
+  pl-select[native]::after { display: none; }
+}
+
+/* One dialog surface, with deliberate size variants. Feature CSS owns the
+   content layout, while all dialogs share chrome, backdrop, and focus behavior. */
+pl-dialog > dialog {
+  --dialog-max-height: calc(100dvh - 48px);
+  box-sizing: border-box;
+  width: min(690px, calc(100vw - 32px));
+  max-height: var(--dialog-max-height);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--theme-menu-border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  box-shadow: var(--theme-dialog-shadow);
+}
+pl-dialog > dialog::backdrop { background: var(--theme-backdrop); }
+pl-dialog > dialog:not([open]) { display: none; }
+pl-dialog[variant="editor"] > dialog { width: min(720px, calc(100vw - 32px)); }
+pl-dialog[variant="confirm"] > dialog { width: min(420px, calc(100vw - 32px)); padding: 24px; }
+pl-dialog[variant="drawer"] > dialog { inset: 0 auto 0 0; margin: 0; width: min(300px, 90vw); height: 100dvh; max-height: none; padding: 18px; border-radius: 0; border-width: 0 1px 0 0; background: var(--pane); }
+pl-dialog > dialog > header, pl-dialog > dialog > footer { padding: 18px 24px; }
+pl-dialog > dialog > header { border-bottom: 1px solid var(--line); }
+pl-dialog > dialog > footer { border-top: 1px solid var(--line); }
+@media (max-width: 600px) {
+  pl-dialog > dialog { --dialog-max-height: calc(100dvh - 24px); }
+  pl-dialog > dialog > header, pl-dialog > dialog > footer { padding: 16px 18px; }
+}

@@ -1821,6 +1821,16 @@ dialog::backdrop {
 .create-popover form {
   background: var(--theme-menu-bg);
 }
+/* Creation forms must fit the queue even when both sidebars are visible. */
+.section-heading:has(> .create-popover) {
+  container-type: inline-size;
+}
+.section-heading > .create-popover {
+  margin-inline-start: auto;
+}
+.create-popover[open] > form {
+  max-width: 100cqw;
+}
 @media (max-width: 1100px) {
   :root[data-theme] {
     --rail: 160px;

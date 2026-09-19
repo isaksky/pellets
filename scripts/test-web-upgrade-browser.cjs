@@ -108,7 +108,7 @@ async function reloadWithDrafts(page, revision) {
   origin = await startServer(firstBinary);
   const port = new URL(origin).port;
   const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
-  browser = await engine.launch({headless: true, ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {})});
+  browser = await engine.launch({headless: true, ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}), ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});
   const context = await browser.newContext();
   await context.addInitScript(() => {
     window.upgradeResults = [];
@@ -133,6 +133,14 @@ async function reloadWithDrafts(page, revision) {
   const memoryPage = await openPage(context, origin + `/projects/${pellet.project}/memories/${memory.id}`);
   const cleanPage = await openPage(context, origin + queuePath);
   const assignmentPage = await openPage(context, origin + queuePath + '?workspace=1');
+  const creationPage = await openPage(context, origin + queuePath);
+  await creationPage.getByText('+ New pellet', {exact: true}).click();
+  const creationForm = creationPage.locator('.create-popover form');
+  await creationForm.locator('[name=title]').fill('Unsubmitted creation draft');
+  await creationForm.locator('[name=status]').selectOption('maybe_later');
+  await creationForm.locator('[name=description]').fill('Keep the open creation form too.');
+  await creationForm.locator('[name=description]').press('ArrowLeft');
+  const creationCaret = await creationForm.locator('[name=description]').evaluate(el => el.selectionStart);
   // A separate tab-storage context keeps planning preferences independent from
   // the record cases, while sharing the same actual server and database.
   const planningContext = await browser.newContext({viewport: {width: 1280, height: 850}});
@@ -220,8 +228,8 @@ async function reloadWithDrafts(page, revision) {
   assert.equal(await startServer(secondBinary, port), origin, 'Upgrade changed the origin');
   const newRevision = (await (await cleanPage.request.get(origin + '/ui-version')).json()).revision;
   assert.notEqual(newRevision, oldRevision, 'Separate embedded builds did not produce different revisions');
-  for (const page of [pelletPage, memoryPage, cleanPage, assignmentPage, planningPage]) await page.locator('#ui-update-notice').waitFor({state: 'visible', timeout: 25000});
-  for (const page of [pelletPage, memoryPage, cleanPage, assignmentPage, planningPage]) assert.equal(await page.locator('html').getAttribute('data-ui-revision'), oldRevision, 'An old tab automatically reloaded');
+  for (const page of [pelletPage, memoryPage, cleanPage, assignmentPage, creationPage, planningPage]) await page.locator('#ui-update-notice').waitFor({state: 'visible', timeout: 25000});
+  for (const page of [pelletPage, memoryPage, cleanPage, assignmentPage, creationPage, planningPage]) assert.equal(await page.locator('html').getAttribute('data-ui-revision'), oldRevision, 'An old tab automatically reloaded');
   assert.equal(await pelletForm.locator('[name=title]').inputValue(), titleDraft);
   assert.equal(await memoryForm.locator('[name=text]').inputValue(), memoryDraft);
   assert.equal(posts.length, postCount, 'Upgrade detection automatically submitted work');
@@ -283,6 +291,16 @@ async function reloadWithDrafts(page, revision) {
   assert.equal(cli('memory', 'show', String(memory.id)).text, 'Original human memory', 'Restoring a draft automatically saved memory');
   for (const asset of assets.slice(assetMark)) assert.ok(new URL(asset).pathname.startsWith('/assets/' + newRevision + '/'), 'Reload mixed old/unversioned assets: ' + asset);
   assert.ok(assets.slice(assetMark).some(asset => asset.endsWith('/ui-version.js')), 'Reload omitted the revision client from the new graph');
+
+  const postsBeforeCreationReload = posts.length;
+  await reloadWithDrafts(creationPage, newRevision);
+  assert.equal(await creationPage.locator('.create-popover').evaluate(el => el.open), true, 'Reload hid an open creation draft');
+  assert.equal(await creationForm.locator('[name=title]').inputValue(), 'Unsubmitted creation draft');
+  assert.equal(await creationForm.locator('[name=status]').inputValue(), 'maybe_later');
+  assert.equal(await creationForm.locator('[name=description]').inputValue(), 'Keep the open creation form too.');
+  assert.equal(await creationForm.locator('[name=description]').evaluate(el => el.selectionStart), creationCaret);
+  assert.equal(await creationForm.locator('[name=description]').evaluate(el => el === document.activeElement), true);
+  assert.equal(posts.length, postsBeforeCreationReload, 'Restoring a creation draft submitted it');
 
   const planningPostsBeforeReload = planningRequests.length;
   await reloadWithDrafts(planningPage, newRevision);
@@ -364,7 +382,7 @@ async function reloadWithDrafts(page, revision) {
   assert.equal(await routingForm.locator('[name=version]').inputValue(), externalVersion, 'Stale assignment submission overwrote newer routing');
   await routingEditor.locator('#assignment-popover > summary').click();
   assert.equal(await routingForm.locator('input[name=groups]:checked').count(), 1);
-  assert.match(await routingForm.locator('input[name=groups]:checked').locator('..').innerText(), /external-group/);
+  assert.match(await routingForm.locator('input[name=groups]:checked').evaluate(input => input.labels[0].innerText), /external-group/);
   await routingEditor.close();
 
   await pelletPage.getByRole('button', {name: 'Save changes', exact: true}).click();

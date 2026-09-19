@@ -1,6 +1,6 @@
 import * as uiVersion from "./ui-version.js";
 import "./workbench.js";
-import "./number-inputs.js";
+import "./components.js";
 import { saveSetting } from "./settings.js";
 import { action, actions } from "./datastar-1.0.3.js";
 
@@ -199,10 +199,29 @@ import { action, actions } from "./datastar-1.0.3.js";
   var editRevision = 0;
   var routeRevision = 0;
   var refreshTimer;
+  var documentActive = true;
+  window.addEventListener("beforeunload", function () {
+    clearTimeout(refreshTimer);
+    var background = pending.get("background");
+    if (background) background.controller.abort();
+  });
+  window.addEventListener("pagehide", function () {
+    documentActive = false;
+    clearTimeout(refreshTimer);
+    pending.forEach(function (state) { state.controller.abort(); });
+    if (source) source.close();
+  });
+  window.addEventListener("pageshow", function (event) {
+    documentActive = true;
+    if (event.persisted && !uiVersion.isOutdated()) {
+      connectSource();
+      refreshRegions();
+    }
+  });
 
   function refreshRegions() {
     clearTimeout(refreshTimer);
-    if (uiVersion.isOutdated()) return;
+    if (!documentActive || uiVersion.isOutdated()) return;
     refreshTimer = setTimeout(function () {
       document.dispatchEvent(new CustomEvent("pellets-refresh"));
     }, 120);
@@ -216,6 +235,7 @@ import { action, actions } from "./datastar-1.0.3.js";
   }
 
   async function request(ctx, targetID, kind) {
+    if (!documentActive) return;
     var el = ctx.el;
     var automatic = kind === "refresh";
     var mutation = kind === "submit";
@@ -717,15 +737,19 @@ import { action, actions } from "./datastar-1.0.3.js";
     }
   });
 
-  if (window.EventSource) {
-    var source = new EventSource("/events?ui_revision=" + encodeURIComponent(uiVersion.revision));
+  var source;
+  function connectSource() {
+    if (!window.EventSource || !documentActive) return;
+    if (source) source.close();
+    source = new EventSource("/events?ui_revision=" + encodeURIComponent(uiVersion.revision));
     uiVersion.watchSource(source);
     source.addEventListener("open", function () { uiVersion.checkVersion().then(function (current) { if (current) refreshRegions(); }); });
     source.addEventListener("pellets-invalidate", function () {
       refreshRegions();
     });
-    document.addEventListener("pellets-ui-outdated", function () { source.close(); });
   }
+  connectSource();
+  document.addEventListener("pellets-ui-outdated", function () { if (source) source.close(); });
   document.addEventListener("visibilitychange", function () {
     if (!document.hidden) refreshRegions();
   });

@@ -30,6 +30,7 @@ var embeddedFiles embed.FS
 const csrfCookieName = "pl_web_csrf"
 
 type handlerConfig struct {
+	Development    bool
 	Stopping       <-chan struct{}
 	Host           string
 	Origin         string
@@ -106,6 +107,8 @@ func (h *handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	switch {
+	case request.URL.Path == "/dev/design-system":
+		h.serveDesignSystem(response, request)
 	case request.URL.Path == "/settings":
 		h.serveSettings(response, request)
 	case isPlanningPath(request.URL.Path):
@@ -165,6 +168,10 @@ func (h *handler) serveAsset(response http.ResponseWriter, request *http.Request
 		name, versioned = parts[1], true
 	}
 	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "..") {
+		http.NotFound(response, request)
+		return
+	}
+	if strings.HasPrefix(name, "design-system.") && !h.config.Development {
 		http.NotFound(response, request)
 		return
 	}
@@ -236,6 +243,7 @@ func (h *handler) serveEvents(response http.ResponseWriter, request *http.Reques
 }
 
 type pageData struct {
+	Development         bool
 	SettingsJSON        string
 	ExecutionWorkspace  int64
 	WorkspaceName       string
@@ -1088,6 +1096,7 @@ func (h *handler) setCSRFCookie(response http.ResponseWriter) {
 }
 
 func (h *handler) render(response http.ResponseWriter, status int, name string, data pageData) {
+	data.Development = h.config.Development
 	if name == "page" {
 		var err error
 		data.SettingsJSON, err = h.pageSettings()

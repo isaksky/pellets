@@ -4,6 +4,7 @@
 // Use PLAYWRIGHT_BROWSER=webkit for Safari's browser engine.
 // Set PELLETS_WORKBENCH_BROWSER_CASE=dialogs to run only the modal regressions.
 // Set PELLETS_WORKBENCH_BROWSER_CASE=filters to run only the filter regressions.
+// Set PELLETS_WORKBENCH_BROWSER_CASE=creation to run creation form sizing checks.
 const assert = require("node:assert/strict");
 const fs = require("node:fs"),
   os = require("node:os"),
@@ -73,6 +74,33 @@ async function filterGeometry(page) {
     return [selector, [rect.x, rect.y, rect.width, rect.height]];
   })));
 }
+async function checkCreationWidths(page) {
+  for (const area of ["Queue", "Memories"]) {
+    await page.locator(".area-tabs a").filter({hasText: area}).click();
+    const disclosure = page.locator(".create-popover");
+    for (const width of [1280, 1092, 800, 678, 601, 600, 390]) {
+      await page.setViewportSize({width, height: 859});
+      await disclosure.locator("summary").click();
+      const form = disclosure.locator("form");
+      const bounds = await form.evaluate(node => {
+        const box = node.getBoundingClientRect(), main = node.closest("#main").getBoundingClientRect();
+        return {left: box.left, right: box.right, mainLeft: main.left, mainRight: main.right};
+      });
+      assert.ok(bounds.left >= Math.max(0, bounds.mainLeft) - 1 && bounds.right <= Math.min(width, bounds.mainRight) + 1,
+        area + " creation form is clipped at " + width + "px: " + JSON.stringify(bounds));
+      const submit = form.locator('button[type="submit"]');
+      await submit.scrollIntoViewIfNeeded();
+      assert.equal(await submit.evaluate(node => {
+        const box = node.getBoundingClientRect();
+        return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+      }), true, area + " creation button is reachable at " + width + "px");
+      await disclosure.locator("summary").click();
+    }
+  }
+  await page.setViewportSize({width: 1280, height: 800});
+  await page.locator(".area-tabs a").filter({hasText: "Queue"}).click();
+  console.log("PASS creation forms fit their content pane and remain reachable at seven viewport widths");
+}
 function assertStableFilters(before, after) {
   for (const selector of Object.keys(before))
     before[selector].forEach((value, index) => assert.ok(Math.abs(value - after[selector][index]) <= 1, "Opening/changing Filters moved toolbar geometry: " + selector + " before=" + JSON.stringify(before[selector]) + " after=" + JSON.stringify(after[selector])));
@@ -82,17 +110,24 @@ async function checkFilters(page, project, changedPellet) {
   await page.setViewportSize({width: 1280, height: 900});
   await trigger.click();
   await page.locator(".filter-fields:popover-open").waitFor();
-  const naturalSize = await panel.evaluate(node => ({height: node.getBoundingClientRect().height, rows: getComputedStyle(node).gridTemplateRows, children: Array.from(node.children, child => child.getBoundingClientRect().height)}));
+  const naturalSize = await panel.evaluate(node => ({height: node.getBoundingClientRect().height, rows: getComputedStyle(node).gridTemplateRows, children: Array.from(node.children, child => (child.matches("pl-button") ? child.firstElementChild : child).getBoundingClientRect().height)}));
   assert.ok(naturalSize.height <= 420, "Filter panel must fit its compact contents instead of stretching to the viewport: " + JSON.stringify(naturalSize));
-  const fieldGaps = await panel.evaluate(node => Array.from(node.children).slice(1).map(child => child.getBoundingClientRect().top - child.previousElementSibling.getBoundingClientRect().bottom));
+  const fieldGaps = await panel.evaluate(node => Array.from(node.children, child => child.matches("pl-button") ? child.firstElementChild : child).map(child => child.getBoundingClientRect()).slice(1).map((box, index) => box.top - (node.children[index].matches("pl-button") ? node.children[index].firstElementChild : node.children[index]).getBoundingClientRect().bottom));
   assert.ok(fieldGaps.every(gap => Math.abs(gap - 12) <= 1), "Filter fields must keep compact, even spacing: " + JSON.stringify(fieldGaps));
   await page.setViewportSize({width: 1280, height: 360});
-  await until(() => panel.evaluate(node => node.scrollHeight > node.clientHeight), "Short viewport must scroll compact filter content");
+  await until(() => panel.evaluate(node => node.scrollHeight > node.clientHeight + 2 && node.getBoundingClientRect().bottom <= innerHeight), "Short viewport must scroll compact filter content");
   const lastFilter = panel.getByRole("link", {name: "Clear filters", exact: true});
-  const scrollBox = await panel.boundingBox();
-  await page.mouse.move(scrollBox.x + scrollBox.width / 2, scrollBox.y + scrollBox.height / 2);
+  // Wait for the popover to settle after viewport resizing before wheeling.
+  await panel.hover();
   await page.mouse.wheel(0, 800);
-  await until(() => panel.evaluate(node => node.scrollTop + node.clientHeight >= node.scrollHeight - 2), "Filter panel did not scroll to its last control");
+  await until(async () => {
+    if (!await panel.evaluate(node => node.scrollTop + node.clientHeight >= node.scrollHeight - 2)) return false;
+    // WebKit's async scroller can update scrollTop before hit testing catches up.
+    return lastFilter.evaluate(node => {
+      const box = node.getBoundingClientRect(), panel = node.closest('.filter-fields').getBoundingClientRect();
+      return box.top >= panel.top - 1 && box.bottom <= panel.bottom + 1 && node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+    });
+  }, "Filter panel did not make its last control reachable");
   const lastControl = await lastFilter.evaluate(node => {
     const box = node.getBoundingClientRect(), panel = node.closest(".filter-fields").getBoundingClientRect();
     return {inside: box.top >= panel.top - 1 && box.bottom <= panel.bottom + 1, hit: node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)), box: box.toJSON(), panel: panel.toJSON()};
@@ -310,6 +345,9 @@ async function stop() {
     ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL
       ? { channel: process.env.PLAYWRIGHT_CHANNEL }
       : {}),
+    ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE
+      ? { executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE }
+      : {}),
   });
   const page = await browser.newPage({
     viewport: { width: 1280, height: 800 },
@@ -340,6 +378,11 @@ async function stop() {
     heights.every((n) => n === 37),
     "37px rows",
   );
+  if (!process.env.PELLETS_WORKBENCH_BROWSER_CASE || process.env.PELLETS_WORKBENCH_BROWSER_CASE === "creation") {
+    await checkCreationWidths(page);
+    assert.deepEqual(errors, []);
+    if (process.env.PELLETS_WORKBENCH_BROWSER_CASE === "creation") return;
+  }
   if (process.env.PELLETS_WORKBENCH_BROWSER_CASE !== "dialogs") {
     await checkFilters(page, a.project, d.id);
     assert.deepEqual(errors, []);
@@ -844,6 +887,13 @@ async function stop() {
       const approved = await approvalResponse;
       assert.equal(approved.status(), 202, "Approval must receive an accepted receipt: " + (approved.status() === 202 ? "" : await approved.text()));
     } else {
+      // A run is already "running" while thread/turn startup still changes its
+      // revision. Wait for the implementation receipt before steering that turn.
+      await until(() => page.locator(".run-facts").evaluate(node =>
+        Array.from(node.querySelectorAll("div")).some(row =>
+          row.querySelector("dt")?.textContent === "Phase" &&
+          row.querySelector("dd")?.textContent.toLowerCase() === "implementation")),
+      "Follow-up requires the active implementation receipt");
       await page
         .locator(".run-follow-up textarea")
         .fill("Keep the change focused.");
