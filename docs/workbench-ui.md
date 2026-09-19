@@ -117,9 +117,19 @@ PELLETS_CODEX_PLANNING_LIVE=1 go test ./internal/codex -run '^TestInstalledPlann
 Assignments persist in SQLite with project-scoped compare-and-swap versions.
 Workspaces can select exact groups, use All other groups, and optionally include
 ungrouped work. Explicit assignments may overlap. The project can disable routing
-while keeping saved assignments. Existing and newly registered workspaces default
-to All other groups plus ungrouped work, preserving prior eligibility without
-inventing role names or demo assignments.
+while keeping saved assignments. A workspace without saved preferences has no
+explicit assignments. Each routing read and new claim resolves uncovered All other
+groups and Ungrouped categories independently to the registered main checkout
+(its Git directory equals the project's common Git directory). Missing workspace
+roots or Git directories do not count as recipients. Defaults are never written
+back as preferences; explicit choices, including shared groups, survive a worktree
+being removed and later restored. No coverage constraint is imposed on saves.
+
+The Receives chips show effective assignments, marking automatic defaults. Clicking
+a special chip opens a project recipient chooser; choosing none restores automatic
+placement on main. The other chips open the workspace's saved assignment editor.
+Neither interaction changes the queue's group filter. An active group filter appears separately beside the queue as a removable chip.
+Removing it preserves the other filters and workspace context.
 
 Assignment changes apply to the next atomic claim. Owned work remains visible and
 is never transferred or silently retargeted. Exact Resume restores the policy

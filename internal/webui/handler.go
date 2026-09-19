@@ -236,16 +236,19 @@ func (h *handler) serveEvents(response http.ResponseWriter, request *http.Reques
 }
 
 type pageData struct {
-	SettingsJSON       string
-	ExecutionWorkspace int64
-	WorkspaceName      string
-	WorkspaceRoot      string
-	Routing            storage.ProjectRouting
-	Assignment         storage.WorkspaceAssignment
-	AssignmentGroups   []assignmentGroupView
-	ScopeCandidates    []pelletView
-	QueueContext       []pelletView
-	ProjectQueueCount  int
+	SettingsJSON        string
+	ExecutionWorkspace  int64
+	WorkspaceName       string
+	WorkspaceRoot       string
+	Routing             storage.ProjectRouting
+	Assignment          storage.WorkspaceAssignment
+	EffectiveAssignment storage.EffectiveWorkspaceAssignment
+	RoutingCategories   []routingCategoryView
+	ClearGroupURL       string
+	AssignmentGroups    []assignmentGroupView
+	ScopeCandidates     []pelletView
+	QueueContext        []pelletView
+	ProjectQueueCount   int
 
 	QueueOrderURL      string
 	ClearFiltersURL    string
@@ -1226,7 +1229,7 @@ func (h *handler) renderUpdates(response *datastarResponse, status int, primary 
 		names = append(names, "run-dashboard")
 	}
 	if data.Area == "tasks" {
-		names = append(names, "filter-summary", "queue-order", "queue-title")
+		names = append(names, "filter-summary", "queue-order", "queue-title", "active-group-filter")
 	}
 	if data.Area == "tasks" && primary != "tasks-area" && primary != "task-list" {
 		names = append(names, "task-list")

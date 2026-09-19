@@ -75,12 +75,12 @@ function updateAttention() {
 function formKey(form) {
   const req = form.querySelector('[name="request_id"]')?.value || "";
   const workspace = form.closest(".run-workspace")?.dataset.workspaceId || "";
-  return form.getAttribute("action") + "|" + workspace + "|" + req;
+  return form.getAttribute("action") + "|" + workspace + "|" + req + "|" + (form.id || "");
 }
 function remember() {
   document
     .querySelectorAll(
-      "#execution form, #main .create-popover form, .assignment-form",
+      "#execution form, #main .create-popover form, .assignment-form, .recipient-form",
     )
     .forEach((form) => {
       if (form.dataset.dirty !== "true") return;
@@ -117,11 +117,12 @@ function remember() {
   if (
     field?.matches("input,textarea,select") &&
     field.form &&
-    field.closest("#execution, #main .create-popover, .assignment-form")
+    field.closest("#execution, #main .create-popover, .assignment-form, .recipient-form")
   ) {
     focusReceipt = {
       key: formKey(field.form),
       name: field.name,
+      value: field.type === "checkbox" ? field.value : null,
       trigger: !!trigger,
       start: field.selectionStart,
       end: field.selectionEnd,
@@ -142,7 +143,7 @@ function scrollKey(el) {
 function restore() {
   const forms = Array.from(
     document.querySelectorAll(
-      "#execution form, #main .create-popover form, .assignment-form",
+      "#execution form, #main .create-popover form, .assignment-form, .recipient-form",
     ),
   );
   for (const form of forms) {
@@ -186,7 +187,7 @@ function restore() {
     );
     const field =
       form &&
-      Array.from(form.elements).find((el) => el.name === focusReceipt.name);
+      Array.from(form.elements).find((el) => el.name === focusReceipt.name && (focusReceipt.value === null || el.value === focusReceipt.value));
     const target =
       focusReceipt.trigger && field
         ? document.getElementById(field.id + "-trigger")
@@ -216,7 +217,7 @@ function saved(form) {
   drafts.delete(formKey(form));
   if (form.matches("[data-insert-form]"))
     document.getElementById("insert-dialog")?.close();
-  if (form.matches(".assignment-form")) form.closest("details").open = false;
+  if (form.matches(".assignment-form, .recipient-form")) form.closest("details").open = false;
 }
 function syncDialog() {
   const dialog = document.getElementById("record-dialog"),
@@ -265,7 +266,21 @@ function initialize() {
   connectActivity();
   assignmentMode();
   syncQueueFilters();
+  positionRecipients();
 }
+
+function positionRecipients() {
+  document.querySelectorAll(".category-popover[open]").forEach(menu => {
+    const form = menu.querySelector(".recipient-form");
+    const anchor = menu.getBoundingClientRect();
+    const width = form.getBoundingClientRect().width;
+    form.style.left = Math.max(8 - anchor.left, Math.min(0, innerWidth - width - 8 - anchor.left)) + "px";
+  });
+}
+document.addEventListener("toggle", event => {
+  if (event.target.matches(".category-popover")) positionRecipients();
+}, true);
+window.addEventListener("resize", positionRecipients);
 window.Workbench = {
   applyTheme,
   initialize,
@@ -341,29 +356,15 @@ document.addEventListener("click", (event) => {
     el.open = true;
     el.querySelector("input")?.focus();
   }
-  const group = event.target.closest("[data-browse-value]");
-  if (group) {
-    const select = document.querySelector('.filters select[name="group"]');
-    if (
-      select &&
-      Array.from(select.options).some(
-        (o) => o.value === group.dataset.browseValue,
-      )
-    ) {
-      select.value = group.dataset.browseValue;
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    }
-  }
-  const removeGroup = event.target.closest("[data-remove-assignment]");
-  if (removeGroup) {
-    const form = document.querySelector(".assignment-form");
-    const checkbox = Array.from(form.querySelectorAll('[name="groups"]')).find(
-      (x) => x.value === removeGroup.dataset.removeAssignment,
-    );
-    if (checkbox) {
-      checkbox.checked = false;
-      checkbox.dispatchEvent(new Event("change", { bubbles: true }));
-      form.requestSubmit();
+  const assignment = event.target.closest("[data-edit-assignment]");
+  if (assignment) {
+    const menu = document.getElementById("assignment-popover");
+    if (menu) {
+      menu.open = true;
+      assignmentMode();
+      const field = menu.querySelector('[name="' + assignment.dataset.editAssignment + '"]');
+      const trigger = field?.closest(".select-control")?.querySelector(".select-trigger");
+      (trigger || field || menu.querySelector("summary"))?.focus({preventScroll:true});
     }
   }
   const insert = event.target.closest("[data-insert-checkpoint]");
@@ -379,7 +380,7 @@ document.addEventListener("click", (event) => {
       ".switcher[open],.row-menu[open],.assignment-popover[open],.record-actions[open]",
     )
     .forEach((el) => {
-      if (!el.contains(event.target)) el.open = false;
+      if (!el.contains(event.target) && !(assignment && el.id === "assignment-popover")) el.open = false;
     });
 });
 document.addEventListener(
@@ -416,7 +417,7 @@ document.addEventListener(
       return;
     if (event.target.matches("input,textarea,select")) return;
     const choices = Array.from(
-      menu.querySelectorAll("[role=menuitem],.assignment-form button"),
+      menu.querySelectorAll("[role=menuitem],.assignment-form button,.recipient-form button"),
     ).filter((x) => !x.disabled);
     if (!choices.length) return;
     event.preventDefault();

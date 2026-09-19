@@ -484,7 +484,9 @@ removal, and other irreversible actions are intentionally absent.
 The browser uses the [Workbench layout](docs/workbench-ui.md): project and view
 switchers in the breadcrumb, Queue, Memories, and workspaces in the left sidebar,
 and execution in the right sidebar. Selecting a workspace shows its queue and
-persistent group assignments. The shared project queue stays available. Browsing
+effective group assignments. Unassigned catch-all and ungrouped work default to
+the main checkout at runtime; saved preferences are preserved. Assignment chips
+open their editor, while queue filters remain separate. The shared project queue stays available. Browsing
 filters and sorting never change execution selection. Pellet and memory details
 open in dialogs; review checkpoints appear as interactive scoped queue dividers.
 Both sidebars collapse independently. Five themes, including Gruvbox and Icy, live

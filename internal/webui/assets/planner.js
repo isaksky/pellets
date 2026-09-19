@@ -217,7 +217,7 @@ function routes(group) {
     if (data.assignments_enabled === false) return true;
     if (!group) return w.include_ungrouped;
     if (w.mode === 'explicit') return (w.groups || []).includes(group);
-    return !rows.some(other => other.id !== w.id && other.mode === 'explicit' && (other.groups || []).includes(group));
+    return !(w.groups || []).includes(group);
   });
   return matches.length ? 'Routes to ' + matches.map(w => w.name).join(', ') : 'No workspace currently accepts this group.';
 }

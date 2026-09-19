@@ -61,7 +61,7 @@ func (h *handler) planningSnapshot(ctx context.Context, project storage.Project,
 	}
 	rows := []map[string]any{}
 	for _, workspace := range project.Workspaces {
-		a := routing.Assignment(workspace.ID)
+		a := routing.Selection(workspace.ID)
 		name := filepath.Base(workspace.RootPath.Value)
 		if absolute, resolveErr := discovery.ResolveLocalPath(h.application.Database.Root, workspace.RootPath); resolveErr == nil {
 			name = filepath.Base(absolute)

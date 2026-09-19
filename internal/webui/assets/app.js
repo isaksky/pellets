@@ -209,7 +209,7 @@ import { action, actions } from "./datastar-1.0.3.js";
 
   function protectedTarget(target) {
     return target && (target.querySelector(".select-trigger[aria-expanded=true], .row-menu[open], .switcher[open], .assignment-popover[open], .record-actions[open]") || (target.id === "project-drawer" && target.classList.contains("open")) ||
-      (target.id === "workspace-groups" && target.querySelector(".assignment-form[data-dirty='true']")) ||
+      (target.id === "workspace-groups" && target.querySelector(".assignment-form[data-dirty='true'], .recipient-form[data-dirty='true']")) ||
       (target.id === "run-dashboard" && target.querySelector("form[data-no-run-resume][data-dirty='true'], form[data-schedule-pending='true'], form[data-admission-choice='true']")) ||
       (target.id === "project-record" && target.open));
   }

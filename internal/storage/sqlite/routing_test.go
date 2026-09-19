@@ -2,6 +2,8 @@ package sqlite
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -13,6 +15,13 @@ import (
 func routingFixture(t *testing.T, f pelletRepositoryFixture) (*WebReader, *WebWriter, storage.ProjectRouting) {
 	t.Helper()
 	ctx := context.Background()
+	for _, w := range f.main.Project.Workspaces {
+		for _, path := range []string{w.RootPath.Value, w.GitDir.Value} {
+			if err := os.MkdirAll(filepath.Join(filepath.Dir(f.path), path), 0700); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	reader, err := OpenWebReader(ctx, f.path)
 	if err != nil {
 		t.Fatal(err)
@@ -191,5 +200,109 @@ func TestWorkspaceRoutingCapturesSelectionInDurableResume(t *testing.T) {
 	resumed, err := db.CreateExecutionRun(ctx, capture)
 	if err != nil || !reflect.DeepEqual(resumed.WorkspaceSelection, first.WorkspaceSelection) {
 		t.Fatalf("resume retargeted: %+v %v", resumed.WorkspaceSelection, err)
+	}
+}
+
+func TestRuntimeFallbackTracksMissingWorktreeWithoutRewritingPreferences(t *testing.T) {
+	f := newPelletRepositoryFixture(t)
+	reader, writer, r := routingFixture(t, f)
+	ctx := context.Background()
+	r = saveAssignment(t, writer, f.main.Project, r, storage.WorkspaceAssignment{WorkspaceID: f.linked.Workspace.ID, Mode: "remaining", IncludeUngrouped: true})
+	if r.EffectiveAssignment(f.main.Workspace.ID).AutomaticRemaining {
+		t.Fatal("main stole an explicit assignment")
+	}
+	version := r.Version
+	root := filepath.Join(filepath.Dir(f.path), f.linked.Workspace.RootPath.Value)
+	if err := os.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+	r, err := reader.ReadProjectRouting(ctx, f.main.Project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.EffectiveAssignment(f.main.Workspace.ID).AutomaticRemaining || !r.EffectiveAssignment(f.main.Workspace.ID).AutomaticUngrouped || r.Version == version {
+		t.Fatalf("missing worktree did not resolve to main: %+v", r)
+	}
+	q := f.open(t)
+	defer q.Close()
+	group := "unclaimed-group"
+	for _, g := range []*string{nil, &group} {
+		p, err := q.CreatePellet(ctx, f.main, storage.NewPellet{Title: "fallback", Group: g})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pick, err := q.SelectScheduledPellet(ctx, f.main, storage.ScheduleSelection{UseWorkspaceAssignments: true})
+		if err != nil || pick.Pellet == nil || pick.Pellet.Reference != p.Reference || !pick.WorkspaceSelection.AcceptsGroup(g) {
+			t.Fatalf("fallback claim mismatch: %+v %v", pick, err)
+		}
+		if _, err = q.TransitionPellet(ctx, f.main, p.Reference, storage.PelletLifecycleRequest{Operation: storage.PelletClose}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	r, err = reader.ReadProjectRouting(ctx, f.main.Project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Version != version || r.EffectiveAssignment(f.main.Workspace.ID).AutomaticRemaining || !r.Assignment(f.linked.Workspace.ID).IncludeUngrouped {
+		t.Fatalf("restoring worktree lost saved preferences: %+v", r)
+	}
+	// Clearing both choices is valid and supplies defaults at runtime.
+	r = saveAssignment(t, writer, f.main.Project, r, storage.DefaultWorkspaceAssignment(f.linked.Workspace.ID))
+	if !r.EffectiveAssignment(f.main.Workspace.ID).AutomaticRemaining || !r.EffectiveAssignment(f.main.Workspace.ID).AutomaticUngrouped {
+		t.Fatal("empty preferences must remain valid")
+	}
+	var count int
+	if err := reader.db.QueryRow("SELECT count(*) FROM workspace_group_assignments WHERE workspace_id=?", f.main.Workspace.ID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("fallback wrote a preference: %d %v", count, err)
+	}
+}
+
+func TestRoutingCategoryRecipientsAreAtomicIndependentAndOptional(t *testing.T) {
+	f := newPelletRepositoryFixture(t)
+	reader, writer, r := routingFixture(t, f)
+	ctx := context.Background()
+	r = saveAssignment(t, writer, f.main.Project, r, storage.WorkspaceAssignment{WorkspaceID: f.linked.Workspace.ID, Mode: "explicit", Groups: []string{"shared"}})
+	before := r.Version
+	var err error
+	r, err = writer.SaveRoutingRecipients(ctx, f.main.Project, r.Version, "ungrouped", []int64{f.linked.Workspace.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Selection(f.main.Workspace.ID).AcceptsGroup(nil) || !r.Selection(f.linked.Workspace.ID).AcceptsGroup(nil) || r.Assignment(f.linked.Workspace.ID).Mode != "explicit" {
+		t.Fatal("recipient update affected wrong category")
+	}
+	if _, err = writer.SaveRoutingRecipients(ctx, f.main.Project, before, "remaining", []int64{f.main.Workspace.ID}); domain.PublicError(err).Code != "workspace_assignment_conflict" {
+		t.Fatalf("stale recipient save: %v", err)
+	}
+	if _, err = writer.SaveRoutingRecipients(ctx, f.main.Project, r.Version, "remaining", []int64{f.other.Workspace.ID}); err == nil {
+		t.Fatal("accepted foreign workspace")
+	}
+	unchanged, err := reader.ReadProjectRouting(ctx, f.main.Project)
+	if err != nil || unchanged.Version != r.Version {
+		t.Fatal("invalid save changed routing")
+	}
+	r, err = writer.SaveRoutingRecipients(ctx, f.main.Project, r.Version, "remaining", []int64{f.linked.Workspace.ID, f.main.Workspace.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.EffectiveAssignment(f.main.Workspace.ID).AutomaticRemaining || r.Assignment(f.linked.Workspace.ID).Mode != "remaining" {
+		t.Fatal("shared catch-all was not saved")
+	}
+	r, err = writer.SaveRoutingRecipients(ctx, f.main.Project, r.Version, "remaining", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.EffectiveAssignment(f.main.Workspace.ID).AutomaticRemaining || !r.Assignment(f.linked.Workspace.ID).IncludeUngrouped || !reflect.DeepEqual(r.Assignment(f.linked.Workspace.ID).Groups, []string{"shared"}) {
+		t.Fatal("clearing catch-all changed other choices")
+	}
+	r, err = writer.SaveRoutingRecipients(ctx, f.main.Project, r.Version, "ungrouped", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.EffectiveAssignment(f.main.Workspace.ID).AutomaticUngrouped {
+		t.Fatal("empty recipients did not restore default")
 	}
 }

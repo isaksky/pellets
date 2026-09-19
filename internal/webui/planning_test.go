@@ -276,6 +276,10 @@ func TestPlanningBindsSelectedWorktreeForTurnsModelsAndDisplay(t *testing.T) {
 	planningRepository(t, f)
 	mainRoot := filepath.Join(f.application.Database.Root, "project1")
 	linkedRoot := filepath.Join(f.application.Database.Root, "linked")
+	// Replace the routing fixture's placeholder administrative directory with a real worktree.
+	if err := os.Remove(filepath.Join(mainRoot, ".git", "worktrees", "linked")); err != nil {
+		t.Fatal(err)
+	}
 	for _, args := range [][]string{
 		{"-C", mainRoot, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgSign=false", "commit", "--allow-empty", "-qm", "initial"},
 		{"-C", mainRoot, "worktree", "add", "--detach", linkedRoot, "HEAD"},

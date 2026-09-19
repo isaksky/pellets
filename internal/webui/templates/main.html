@@ -145,6 +145,7 @@
     </div></details>
     {{template "queue-order" .}}
   </form>
+  {{template "active-group-filter" .}}
   {{template "task-list" .}}
 </section>{{end}}
 
@@ -253,3 +254,5 @@
 {{define "queue-order"}}<a id="queue-order" class="queue-order" href="{{.QueueOrderURL}}" data-on:click="@navigate('tasks-area')">Queue order</a>{{end}}
 
 {{define "queue-title"}}<h2 id="tasks-title">{{if .SelectedWorkspace}}{{.WorkspaceName}}{{else}}Queue{{end}} <small>{{queueCount .Pellets}}</small></h2>{{end}}
+
+{{define "active-group-filter"}}<div id="active-group-filter">{{if .Filters.GroupExact}}<a class="group-chip active-group-filter" href="{{.ClearGroupURL}}" data-on:click="@navigate('tasks-area')" aria-label="Clear group filter">Group: {{if .Filters.GroupUngrouped}}Ungrouped{{else}}{{.Filters.GroupText}}{{end}} <span aria-hidden="true">×</span></a>{{end}}</div>{{end}}

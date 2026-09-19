@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -22,6 +24,11 @@ import (
 func workbenchFixture(t *testing.T) (handlerFixture, storage.Project, int64, int64) {
 	t.Helper()
 	f := newHandlerFixture(t, 2)
+	for _, path := range []string{"linked", "project1/.git/worktrees/linked"} {
+		if err := os.MkdirAll(filepath.Join(filepath.Dir(f.databasePath), path), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	db, err := sqlite.OpenProjectDatabase(context.Background(), f.databasePath)
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +106,7 @@ func TestWorkbenchWorkspaceQueuesDefaultActiveRoutingAndOwnership(t *testing.T) 
 	}
 	_ = owned
 	assignWorkbench(t, f, p, main, "explicit", []string{web}, false)
-	if got := workbenchRows(t, f, base+"?workspace="+strconv.FormatInt(main, 10)); !slices.Equal(got, []string{a.Reference.String(), b.Reference.String()}) {
+	if got := workbenchRows(t, f, base+"?workspace="+strconv.FormatInt(main, 10)); !slices.Equal(got, []string{a.Reference.String(), b.Reference.String(), c.Reference.String()}) {
 		t.Fatalf("owned work hidden by reassignment: %v", got)
 	}
 	// A browsing filter hides rows only; it cannot mutate the routing selection.
@@ -337,5 +344,74 @@ func TestWorkbenchInsertionContextIgnoresDisplayFiltersAndSort(t *testing.T) {
 	}
 	if len(data.ScopeCandidates) != 3 {
 		t.Fatalf("scope editor lost filtered/deferred ordinary candidates: %+v", data.ScopeCandidates)
+	}
+}
+
+func TestWorkbenchShowsEffectiveDefaultsSeparatelyFromSavedChoicesAndFilters(t *testing.T) {
+	f, p, main, linked := workbenchFixture(t)
+	addWorkbenchPellet(t, f, p, "ungrouped", nil, domain.PelletOpen)
+	base := "/projects/project1/tasks?workspace=" + strconv.FormatInt(main, 10) + "&group=n&q=ungrouped"
+	response := performRequest(f.handler, http.MethodGet, base, "", nil)
+	body := response.Body.String()
+	for _, want := range []string{">Receives</span>", "id=\"assignment-remaining\"", "id=\"assignment-ungrouped\"", "· automatic", "Automatic here: all other groups and ungrouped pellets", "Group: Ungrouped", "name=\"include_ungrouped\" value=\"true\" >"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %q", want)
+		}
+	}
+	if strings.Contains(body, "data-browse-value") {
+		t.Fatal("assignment chips must not change browsing filters")
+	}
+	match := regexp.MustCompile(`href="([^"]+)"[^>]*aria-label="Clear group filter"`).FindStringSubmatch(body)
+	if len(match) != 2 {
+		t.Fatal("missing clear group action")
+	}
+	dest, err := url.Parse(html.UnescapeString(match[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dest.Query().Has("group") || dest.Query().Get("q") != "ungrouped" || dest.Query().Get("workspace") != strconv.FormatInt(main, 10) {
+		t.Fatalf("clear group lost other context: %s", dest)
+	}
+	assignWorkbench(t, f, p, linked, "remaining", nil, true)
+	response = performRequest(f.handler, http.MethodGet, base, "", nil)
+	if strings.Contains(response.Body.String(), "Automatic here:") {
+		t.Fatal("explicit recipient must suppress defaults")
+	}
+	// A real filter response must update the visible group indicator as well as rows.
+	response = performRequest(f.handler, http.MethodGet, base, "", http.Header{"Datastar-Request": {"true"}, "Pellets-Target": {"task-list"}})
+	if !strings.Contains(response.Body.String(), "selector #active-group-filter") {
+		t.Fatal("group indicator missing from filter update")
+	}
+}
+
+func TestCategoryRecipientSavePreservesViewAndAllowsAutomaticPlacement(t *testing.T) {
+	f, p, main, linked := workbenchFixture(t)
+	r, err := f.application.Routing(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := "/projects/project1/tasks?workspace=" + strconv.FormatInt(main, 10) + "&group=n"
+	form := url.Values{"_csrf": {testCSRF}, "version": {r.Version}, "category": {"ungrouped"}, "recipients": {strconv.FormatInt(linked, 10)}, "return_to": {page}}
+	response := performMutation(f.handler, "/projects/project1/routing", form, testOrigin, true, "application/x-www-form-urlencoded")
+	destination, _ := url.Parse(response.Header().Get("Location"))
+	if response.Code != 303 || destination.Query().Get("workspace") != strconv.FormatInt(main, 10) || destination.Query().Get("group") != "n" {
+		t.Fatalf("recipient save lost view: %d %s", response.Code, response.Header().Get("Location"))
+	}
+	r, err = f.application.Routing(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Selection(linked).AcceptsGroup(nil) || r.Selection(main).AcceptsGroup(nil) {
+		t.Fatal("recipient save did not reroute")
+	}
+	form.Set("version", r.Version)
+	form.Del("recipients")
+	response = performMutation(f.handler, "/projects/project1/routing", form, testOrigin, true, "application/x-www-form-urlencoded")
+	if response.Code != 303 {
+		t.Fatalf("automatic placement rejected: %d %s", response.Code, response.Body.String())
+	}
+	r, err = f.application.Routing(context.Background(), p)
+	if err != nil || !r.EffectiveAssignment(main).AutomaticUngrouped {
+		t.Fatal("missing automatic placement")
 	}
 }

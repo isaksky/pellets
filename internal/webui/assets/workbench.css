@@ -476,7 +476,8 @@ input[type="checkbox"] {
 }
 .switcher-menu,
 .row-popover,
-.assignment-form {
+.assignment-form,
+.recipient-form {
   position: absolute;
   top: calc(100% + 8px);
   left: 0;
@@ -1088,13 +1089,15 @@ input[type="checkbox"] {
   cursor: pointer;
   list-style: none;
 }
-.assignment-form {
+.assignment-form,
+.recipient-form {
   width: 275px;
   padding: 14px;
   display: grid;
   gap: 12px;
 }
 .assignment-form p,
+.recipient-form p,
 .routing-settings p {
   font-size: 11px;
   color: var(--dim);
@@ -2455,3 +2458,16 @@ dialog::backdrop {
 .breadcrumbs .switcher summary { padding:3px 6px; border-radius:4px; }
 .breadcrumbs .switcher summary:hover,
 .breadcrumbs .switcher summary:focus-visible { background:var(--theme-quiet-hover); }
+
+.assignment-auto { color:var(--dim); font-size:10px; }
+.assignment-popover > summary { padding:3px 9px; border-radius:4px; }
+.assignment-popover > summary:hover { background:var(--theme-quiet-hover); }
+.assignment-form .assignment-default, .recipient-form .assignment-default { padding:8px; background:var(--theme-chip); border-radius:4px; }
+.active-group-filter { display:inline-flex; align-items:center; gap:8px; margin:8px 0; padding:4px 9px; }
+.active-group-filter:hover { background:var(--theme-chip-hover); }
+
+.category-popover > summary { background:var(--theme-chip); color:var(--muted); }
+.recipient-form fieldset { border:0; padding:0; margin:0; display:grid; gap:8px; }
+.recipient-form legend { padding:0; margin-bottom:8px; font-size:11px; color:var(--dim); }
+.recipient-form .check { align-items:flex-start; }
+.recipient-form small { display:block; color:var(--dim); font-size:10px; overflow-wrap:anywhere; }

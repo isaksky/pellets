@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"testing"
 
+	"pellets/internal/discovery"
 	"pellets/internal/domain"
 	"pellets/internal/storage"
 	"pellets/internal/storage/sqlite"
@@ -31,7 +32,7 @@ func schedulerRouting(t *testing.T, s *Scheduler, r ScheduleRequest) (*sqlite.We
 	}
 	return reader, writer, routing
 }
-func TestWorkspaceAssignmentsWakeWaitingScheduleUsingNewClaimPolicy(t *testing.T) {
+func TestWorkspaceAssignmentsWakeWaitingScheduleWithMainFallback(t *testing.T) {
 	executable := installSupervisorPeer(t)
 	s, r, q := schedulerFixture(t, executable, "schedule_success")
 	_, writer, routing := schedulerRouting(t, s, r)
@@ -43,19 +44,58 @@ func TestWorkspaceAssignmentsWakeWaitingScheduleUsingNewClaimPolicy(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := startSchedule(t, s, r)
-	awaitScheduleState(t, h, "waiting")
-	// Existing ungrouped work becomes eligible on the next pickup after opt-out.
-	if _, err = writer.SetGroupAssignments(ctx, r.Selected.Project, routing.Version, false); err != nil {
+	linkedRoot := filepath.Join(t.TempDir(), "linked")
+	gitForExecutionTest(t, s.options.Database.Root, "worktree", "add", "-b", "routing-linked", linkedRoot)
+	identity, err := discovery.FindGitIdentity(ctx, linkedRoot)
+	if err != nil {
 		t.Fatal(err)
 	}
+	rootPath, err := discovery.NormalizeLocalPath(s.options.Database.Root, identity.WorkTreeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitDir, err := discovery.NormalizeLocalPath(s.options.Database.Root, identity.GitDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects, err := sqlite.OpenProjectDatabase(ctx, s.options.Database.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, _, err := projects.RegisterProject(ctx, storage.ProjectRegistration{Code: r.Selected.Project.Code, GitCommonDir: r.Selected.Project.GitCommonDir, GitDir: gitDir, WorkspaceRoot: rootPath})
+	projects.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var linkedID int64
+	for _, w := range project.Workspaces {
+		if w.GitDir == gitDir {
+			linkedID = w.ID
+		}
+	}
+	reader, err := sqlite.OpenWebReader(ctx, s.options.Database.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routing, err = reader.ReadProjectRouting(ctx, project)
+	reader.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = writer.SaveWorkspaceAssignment(ctx, project, linkedID, routing.Version, storage.WorkspaceAssignment{Mode: "explicit", IncludeUngrouped: true}); err != nil {
+		t.Fatal(err)
+	}
+	h := startSchedule(t, s, r)
+	awaitScheduleState(t, h, "waiting")
+	// Git can remove the preferred recipient without editing any Pellets preferences.
+	gitForExecutionTest(t, s.options.Database.Root, "worktree", "remove", linkedRoot)
 	changes <- struct{}{}
 	result := awaitSchedule(t, h)
 	if result.Completed != 1 || result.Reason != "limit_reached" {
 		t.Fatalf("watch did not reroute next claim: %+v", result)
 	}
 	run, err := s.options.Supervisor.options.Recorder.Read(ctx, s.options.Database, result.RunID)
-	if err != nil || run.WorkspaceSelection == nil || run.WorkspaceSelection.Enabled {
+	if err != nil || run.WorkspaceSelection == nil || !run.WorkspaceSelection.Enabled || !run.WorkspaceSelection.IncludeUngrouped {
 		t.Fatalf("atomic policy capture: %+v %v", run.WorkspaceSelection, err)
 	}
 	p, err := q.ReadPellet(ctx, r.Selected, domain.PelletReference{ProjectCode: r.Selected.Project.Code, Number: 1})

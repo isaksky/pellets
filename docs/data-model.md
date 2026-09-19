@@ -723,9 +723,13 @@ Migration 0016 adds `project_group_routing`, keyed by stable project ID, with an
 row means enabled at revision zero. `workspace_group_assignments` is keyed by
 stable workspace ID with a composite project/workspace foreign key, an
 `explicit` or `remaining` mode, independent `include_ungrouped` flag, and bounded
-JSON array of exact group strings. Missing workspace rows mean remaining groups
-plus ungrouped work. Defaults require no registration side effects or writes on
-browser reads. Assignment edits do not update pellets or their lifecycle
+JSON array of exact group strings. Missing workspace rows mean no saved preferences.
+At each read or new scheduled claim, uncovered remaining-group and ungrouped
+categories resolve independently to the registered main checkout. Main checkout
+identity comes from equality of its Git directory and the project's Git common
+directory, not registration order. Missing workspace roots or Git directories
+are excluded from effective coverage; saved preferences remain intact. Runtime
+defaults require no writes on browser reads. Assignment edits do not update pellets or their lifecycle
 generations.
 
 `execution_runs.workspace_selection_json` preserves the policy resolved at

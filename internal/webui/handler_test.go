@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -40,6 +42,9 @@ func newHandlerFixture(t *testing.T, projectCount int) handlerFixture {
 	projects := make([]storage.Project, 0, projectCount)
 	for index := range projectCount {
 		code := fmt.Sprintf("project%d", index+1)
+		if err := os.MkdirAll(filepath.Join(filepath.Dir(databasePath), code, ".git"), 0700); err != nil {
+			t.Fatal(err)
+		}
 		project, _, err := projectsDB.RegisterProject(context.Background(), storage.ProjectRegistration{
 			Code:          code,
 			GitCommonDir:  domain.LocalPath{Value: code + "/.git", Relative: true},

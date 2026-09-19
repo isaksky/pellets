@@ -19,10 +19,20 @@ type WorkspaceAssignment struct {
 }
 
 type ProjectRouting struct {
-	ProjectID   int64                 `json:"project_id"`
-	Enabled     bool                  `json:"enabled"`
-	Version     string                `json:"version"`
-	Assignments []WorkspaceAssignment `json:"assignments"`
+	ProjectID             int64                 `json:"project_id"`
+	Enabled               bool                  `json:"enabled"`
+	Version               string                `json:"version"`
+	Assignments           []WorkspaceAssignment `json:"assignments"`
+	MainWorkspaceID       int64                 `json:"main_workspace_id"`
+	UnavailableWorkspaces []int64               `json:"unavailable_workspaces,omitempty"`
+}
+
+// EffectiveWorkspaceAssignment adds runtime defaults without changing saved preferences.
+type EffectiveWorkspaceAssignment struct {
+	WorkspaceAssignment
+	AutomaticRemaining bool
+	AutomaticUngrouped bool
+	Unavailable        bool
 }
 
 // WorkspaceSelection is the policy observed atomically when a pellet was
@@ -36,7 +46,34 @@ type WorkspaceSelection struct {
 }
 
 func DefaultWorkspaceAssignment(workspaceID int64) WorkspaceAssignment {
-	return WorkspaceAssignment{WorkspaceID: workspaceID, Mode: "remaining", Groups: []string{}, IncludeUngrouped: true}
+	return WorkspaceAssignment{WorkspaceID: workspaceID, Mode: "explicit", Groups: []string{}}
+}
+
+func (r ProjectRouting) EffectiveAssignment(workspaceID int64) EffectiveWorkspaceAssignment {
+	a := EffectiveWorkspaceAssignment{WorkspaceAssignment: r.Assignment(workspaceID), Unavailable: slices.Contains(r.UnavailableWorkspaces, workspaceID)}
+	if a.Unavailable {
+		a.Mode, a.Groups, a.IncludeUngrouped = "explicit", []string{}, false
+		return a
+	}
+	if workspaceID == 0 || workspaceID != r.MainWorkspaceID {
+		return a
+	}
+	remaining, ungrouped := false, false
+	for _, other := range r.Assignments {
+		if slices.Contains(r.UnavailableWorkspaces, other.WorkspaceID) {
+			continue
+		}
+		remaining = remaining || other.Mode == "remaining"
+		ungrouped = ungrouped || other.IncludeUngrouped
+	}
+	a.AutomaticRemaining, a.AutomaticUngrouped = !remaining, !ungrouped
+	if a.AutomaticRemaining {
+		a.Mode = "remaining"
+	}
+	if a.AutomaticUngrouped {
+		a.IncludeUngrouped = true
+	}
+	return a
 }
 func (r ProjectRouting) Assignment(workspaceID int64) WorkspaceAssignment {
 	for _, a := range r.Assignments {
@@ -47,13 +84,19 @@ func (r ProjectRouting) Assignment(workspaceID int64) WorkspaceAssignment {
 	return DefaultWorkspaceAssignment(workspaceID)
 }
 func (r ProjectRouting) Selection(workspaceID int64) *WorkspaceSelection {
-	a := r.Assignment(workspaceID)
+	a := r.EffectiveAssignment(workspaceID)
 	s := &WorkspaceSelection{Enabled: r.Enabled, Mode: a.Mode, IncludeUngrouped: a.IncludeUngrouped, Groups: append([]string{}, a.Groups...)}
 	if a.Mode == "remaining" {
 		s.Groups = []string{}
 		for _, other := range r.Assignments {
-			if other.WorkspaceID != workspaceID && other.Mode == "explicit" {
-				s.Groups = append(s.Groups, other.Groups...)
+			if other.WorkspaceID != workspaceID && other.Mode == "explicit" && !slices.Contains(r.UnavailableWorkspaces, other.WorkspaceID) {
+				for _, group := range other.Groups {
+					// Explicitly shared groups remain included when the main checkout
+					// also picks up the automatic catch-all responsibility.
+					if !a.AutomaticRemaining || !slices.Contains(a.Groups, group) {
+						s.Groups = append(s.Groups, group)
+					}
+				}
 			}
 		}
 		slices.Sort(s.Groups)
@@ -128,4 +171,5 @@ type WorkspaceRoutingReader interface {
 type WorkspaceRoutingWriter interface {
 	SaveWorkspaceAssignment(context.Context, Project, int64, string, WorkspaceAssignment) (ProjectRouting, error)
 	SetGroupAssignments(context.Context, Project, string, bool) (ProjectRouting, error)
+	SaveRoutingRecipients(context.Context, Project, string, string, []int64) (ProjectRouting, error)
 }

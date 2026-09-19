@@ -16,6 +16,17 @@ type assignmentGroupView struct {
 	Assigned     bool
 }
 
+type routingCategoryView struct {
+	Category, Label, Description, Project, Version, CSRF, ReturnURL string
+	Automatic                                                       bool
+	Recipients                                                      []routingRecipientView
+}
+type routingRecipientView struct {
+	ID                        int64
+	Name, Root                string
+	Chosen, Main, Unavailable bool
+}
+
 func statusSymbol(value domain.PelletStatus) string {
 	switch value {
 	case domain.PelletInProgress:
@@ -108,6 +119,31 @@ func (h *handler) prepareWorkbench(request *http.Request, data *pageData) error 
 		}
 	}
 	data.Assignment = routing.Assignment(data.SelectedWorkspace)
+	data.EffectiveAssignment = routing.EffectiveAssignment(data.SelectedWorkspace)
+	for _, category := range []routingCategoryView{
+		{Category: "remaining", Label: "All other groups", Description: "Named groups not explicitly assigned to another workspace.", Automatic: data.EffectiveAssignment.AutomaticRemaining},
+		{Category: "ungrouped", Label: "Ungrouped", Description: "Pellets with no group.", Automatic: data.EffectiveAssignment.AutomaticUngrouped},
+	} {
+		if category.Category == "remaining" && data.EffectiveAssignment.Mode != "remaining" || category.Category == "ungrouped" && !data.EffectiveAssignment.IncludeUngrouped {
+			continue
+		}
+		category.Project, category.Version, category.CSRF, category.ReturnURL = data.Project.Code, routing.Version, data.CSRF, data.CurrentURL
+		for _, w := range data.RunWorkspaces {
+			a := routing.Assignment(w.ID)
+			chosen := a.Mode == "remaining"
+			if category.Category == "ungrouped" {
+				chosen = a.IncludeUngrouped
+			}
+			category.Recipients = append(category.Recipients, routingRecipientView{ID: w.ID, Name: w.Name, Root: w.Root, Chosen: chosen, Main: w.ID == routing.MainWorkspaceID, Unavailable: routing.EffectiveAssignment(w.ID).Unavailable})
+		}
+		data.RoutingCategories = append(data.RoutingCategories, category)
+	}
+	clearGroup := *request.URL
+	groupQuery := clearGroup.Query()
+	groupQuery.Del("group")
+	groupQuery.Del("datastar")
+	clearGroup.RawQuery = groupQuery.Encode()
+	data.ClearGroupURL = clearGroup.RequestURI()
 	all, err := h.application.Pellets(request.Context(), data.Project, storage.WebPelletFilters{Sort: storage.WebPelletSort{Column: storage.WebPelletSortColumn(data.Filters.Sort), Direction: storage.WebPelletSortDirection(data.Filters.Direction)}})
 	if err != nil {
 		return err
@@ -252,7 +288,18 @@ func (h *handler) prepareWorkbench(request *http.Request, data *pageData) error 
 
 func (h *handler) saveRouting(w http.ResponseWriter, r *http.Request, project storage.Project, workspace string) {
 	var err error
-	if workspace == "" {
+	if workspace == "" && r.PostForm.Has("category") {
+		var recipients []int64
+		for _, raw := range r.PostForm["recipients"] {
+			id, parseErr := strconv.ParseInt(raw, 10, 64)
+			if parseErr != nil {
+				h.renderError(w, 422, requestError("choose a registered workspace"), nil)
+				return
+			}
+			recipients = append(recipients, id)
+		}
+		_, err = h.application.SaveRoutingRecipients(r.Context(), project, r.PostForm.Get("version"), r.PostForm.Get("category"), recipients)
+	} else if workspace == "" {
 		_, err = h.application.SetGroupAssignments(r.Context(), project, r.PostForm.Get("version"), r.PostForm.Get("enabled") == "true")
 	} else {
 		id, parseErr := strconv.ParseInt(workspace, 10, 64)
