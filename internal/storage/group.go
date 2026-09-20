@@ -22,6 +22,15 @@ type Group struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// GroupContext is the current shared document returned with a CLI pellet detail
+// or selection. It is not a retained execution snapshot.
+type GroupContext struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Revision int64  `json:"revision"`
+	Context  string `json:"context"`
+}
+
 func ValidateGroupName(name string) error {
 	if name == "" || !utf8.ValidString(name) {
 		return domain.NewError(domain.Usage, "invalid_group_name", "group names must be nonempty UTF-8; names are preserved exactly", nil)

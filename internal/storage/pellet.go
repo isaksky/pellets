@@ -26,6 +26,10 @@ type Pellet struct {
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
 	CompletedAt            *time.Time
+	// GroupContext is populated only by detail/selection reads and starts, in
+	// the same snapshot as membership. Public serializers must opt in; this
+	// live document must not become part of retained execution evidence.
+	GroupContext *GroupContext `json:"-"`
 }
 
 // NewPellet contains the fields accepted when allocating a new pellet. Status

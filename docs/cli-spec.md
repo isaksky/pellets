@@ -348,6 +348,39 @@ pl show PELLET
 
 Return the complete pellet record. A pellet reference’s project code must identify the current/selected project.
 
+#### Current group context in detail and selection results
+
+`show`, `start`, `next`, and `start-next` include the pellet's current shared
+group document. In JSON v1, `show` and `start` add `data.group_context`;
+`next` and `start-next` add `data.pellet.group_context` when a pellet is selected.
+The existing nullable `group` name is preserved. The additive object is:
+
+```json
+{"group":"parser","group_context":{"id":7,"name":"parser","revision":3,"context":"# Shared context\n\nKeep identifiers intact.\n"}}
+```
+
+`id` is the stable project-scoped group's numeric identity; `name`, `revision`,
+and `context` are its current values. `context` is the complete original Markdown,
+without truncation or HTML rendering. An ungrouped pellet has both `group: null`
+and `group_context: null`. A group with an empty document still returns the
+object, with `context: ""`. No eligible work retains `selection_reason: "none"`
+and `pellet: null`, without a synthetic group context.
+
+Membership, group name, identity, revision, and Markdown are read consistently.
+Context belongs to the actual selected pellet, including when current ownership
+overrides the supplied exact filters; workspace routing does not choose it.
+`next` remains read-only and starts retain atomic ownership assignment. Later
+calls reflect context edits, renames, and membership changes. These live CLI
+observations do not replace any previously captured server execution snapshot.
+
+Default human output and `--human` show a labeled **Group context** section next
+to the pellet description, distinguishing `(ungrouped)` from `(empty)`.
+Automation should explicitly use `pl --json show foo-12`, `pl --json next`,
+`pl --json start foo-12`, or `pl --json start-next`; `--pretty` selects indented
+JSON. `list`, `search`, and other pellet mutation/lifecycle responses keep their
+existing compact contract: group names remain available, but `group_context`
+and full group documents are omitted.
+
 ### `pl edit`
 
 ```text

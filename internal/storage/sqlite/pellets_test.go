@@ -62,6 +62,10 @@ func TestPelletRepositoryAllocatesNumbersPrioritiesAndNullableOwnership(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	if read.GroupContext == nil || read.GroupContext.Name != group || read.GroupContext.Context != "" {
+		t.Fatalf("missing current empty group context: %+v", read.GroupContext)
+	}
+	read.GroupContext = nil // Detail enrichment is not a persisted pellet field.
 	if !reflect.DeepEqual(read, first) {
 		t.Fatalf("ReadPellet() = %#v, want %#v", read, first)
 	}
@@ -255,6 +259,7 @@ func TestPelletRepositoryUpdateIsAtomicAndPreservesLifecycleFields(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	afterRollback.GroupContext = nil
 	if !reflect.DeepEqual(afterRollback, updated) {
 		t.Fatalf("pellet after rollback = %#v, want %#v", afterRollback, updated)
 	}

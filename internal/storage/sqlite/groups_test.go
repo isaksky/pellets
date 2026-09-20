@@ -426,6 +426,10 @@ func TestGroupRenameRetainsExecutionAndCheckpointEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	after, err := q.ReadPellet(ctx, f.main, member.Reference)
+	if err == nil && (after.GroupContext == nil || after.GroupContext.Context != "later context" || after.GroupContext.Revision != renamed.Revision+1) {
+		t.Fatalf("detail did not observe current context: %+v", after.GroupContext)
+	}
+	before.GroupContext, after.GroupContext = nil, nil
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("context edit rewrote pellet: %+v %v", after, err)
 	}

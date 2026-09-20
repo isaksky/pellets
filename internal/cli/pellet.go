@@ -231,7 +231,7 @@ func ShowCommand(manager app.PelletManager) Command {
 			if err != nil {
 				return nil, err
 			}
-			return newPelletData(pellet), nil
+			return newPelletDetailData(pellet), nil
 		},
 	}
 }
@@ -284,7 +284,7 @@ func NextCommand(manager app.PelletManager) Command {
 			}
 			result := nextData{SelectionReason: selection.Reason}
 			if selection.Pellet != nil {
-				pellet := newPelletData(*selection.Pellet)
+				pellet := newPelletDetailData(*selection.Pellet)
 				result.Pellet = &pellet
 			}
 			return result, nil
@@ -314,7 +314,7 @@ func StartNextCommand(manager app.PelletManager) Command {
 			}
 			result := nextData{SelectionReason: selection.Reason}
 			if selection.Pellet != nil {
-				pellet := newPelletData(*selection.Pellet)
+				pellet := newPelletDetailData(*selection.Pellet)
 				result.Pellet = &pellet
 			}
 			return result, nil
@@ -387,6 +387,9 @@ func pelletLifecycleCommand(manager app.PelletManager, operation storage.PelletL
 			)
 			if err != nil {
 				return nil, err
+			}
+			if operation == storage.PelletStart {
+				return newPelletDetailData(result.Pellet), nil
 			}
 			return newLifecycleData(result), nil
 		},
@@ -1129,6 +1132,61 @@ type lifecycleData struct {
 	RecoveredWorkspace *pelletWorkspaceData `json:"recovered_workspace,omitempty"`
 }
 
+// Detail output opts in to live group documents. The compact pellet serializer
+// remains shared by lists, search and the other lifecycle responses.
+type pelletDetailData struct {
+	pelletData
+	GroupContext *storage.GroupContext `json:"group_context"`
+}
+
+func newPelletDetailData(pellet storage.Pellet) pelletDetailData {
+	return pelletDetailData{pelletData: newPelletData(pellet), GroupContext: pellet.GroupContext}
+}
+
+func (data pelletDetailData) RenderHuman(writer io.Writer) error {
+	if err := renderPelletSummary(writer, data.pelletData); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(writer, "\nDescription:\n%s\n", data.Description); err != nil {
+		return err
+	}
+	return data.renderGroupContext(writer)
+}
+
+func (data pelletDetailData) renderGroupContext(writer io.Writer) error {
+	if _, err := io.WriteString(writer, "\nGroup context:\n"); err != nil {
+		return err
+	}
+	if data.GroupContext == nil {
+		_, err := io.WriteString(writer, "(ungrouped)\n")
+		return err
+	}
+	group := data.GroupContext
+	if _, err := fmt.Fprintf(writer, "Group %d  %q  revision=%d\n", group.ID, group.Name, group.Revision); err != nil {
+		return err
+	}
+	markdown := group.Context
+	if markdown == "" {
+		markdown = "(empty)\n"
+	} else if !strings.HasSuffix(markdown, "\n") {
+		markdown += "\n"
+	}
+	_, err := io.WriteString(writer, markdown)
+	return err
+}
+
+func (data pelletDetailData) RenderHumanCommand(writer io.Writer, command string) error {
+	if command == "show" {
+		if err := output.RenderDetails(writer, data.pelletData); err != nil {
+			return err
+		}
+		return data.renderGroupContext(writer)
+	}
+	return data.RenderHuman(writer)
+}
+
+func (pelletDetailData) PreserveHumanLayout() bool { return true }
+
 func newLifecycleData(result storage.PelletLifecycleResult) lifecycleData {
 	data := lifecycleData{pelletData: newPelletData(result.Pellet)}
 	if result.RecoveredWorkspace != nil {
@@ -1177,7 +1235,7 @@ func (data pelletListData) RenderHuman(writer io.Writer) error {
 
 type nextData struct {
 	SelectionReason storage.NextSelectionReason `json:"selection_reason"`
-	Pellet          *pelletData                 `json:"pellet"`
+	Pellet          *pelletDetailData           `json:"pellet"`
 }
 
 type purgeData struct {
@@ -1210,8 +1268,10 @@ func (data nextData) RenderHuman(writer io.Writer) error {
 		_, err := io.WriteString(writer, "No open pellets.\n")
 		return err
 	}
-	return renderPelletSummary(writer, *data.Pellet)
+	return data.Pellet.RenderHuman(writer)
 }
+
+func (nextData) PreserveHumanLayout() bool { return true }
 
 func renderPelletSummary(writer io.Writer, pellet pelletData) error {
 	priority := "p=-"

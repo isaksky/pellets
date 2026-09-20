@@ -1,0 +1,151 @@
+next:
+foo-1  open  p=-  Implement parser
+
+Description:
+Keep identifiers intact.
+
+Group context:
+(ungrouped)
+start-next:
+foo-1  open  p=-  Implement parser
+
+Description:
+Keep identifiers intact.
+
+Group context:
+(ungrouped)
+start:
+foo-1  open  p=-  Implement parser
+
+Description:
+Keep identifiers intact.
+
+Group context:
+(ungrouped)
+show:
+completed at: none
+created at: 2026-09-20T12:00:00Z
+description: Keep identifiers intact.
+external id: none
+group: none
+id: foo-1
+number: 1
+priority: none
+project: foo
+status: open
+title: Implement parser
+updated at: 2026-09-20T12:00:00Z
+workspace: none
+
+Group context:
+(ungrouped)
+next:
+foo-1  open  p=-  Implement parser
+
+Description:
+Keep identifiers intact.
+
+Group context:
+Group 7  "empty"  revision=1
+(empty)
+start-next:
+foo-1  open  p=-  Implement parser
+
+Description:
+Keep identifiers intact.
+
+Group context:
+Group 7  "empty"  revision=1
+(empty)
+start:
+foo-1  open  p=-  Implement parser
+
+Description:
+Keep identifiers intact.
+
+Group context:
+Group 7  "empty"  revision=1
+(empty)
+show:
+completed at: none
+created at: 2026-09-20T12:00:00Z
+description: Keep identifiers intact.
+external id: none
+group: empty
+id: foo-1
+number: 1
+priority: none
+project: foo
+status: open
+title: Implement parser
+updated at: 2026-09-20T12:00:00Z
+workspace: none
+
+Group context:
+Group 7  "empty"  revision=1
+(empty)
+next:
+foo-1  open  p=-  Implement parser
+
+Description:
+Keep identifiers intact.
+
+Group context:
+Group 8  "parser"  revision=3
+# Shared
+
+```mermaid
+flowchart LR
+	A --> B
+```
+start-next:
+foo-1  open  p=-  Implement parser
+
+Description:
+Keep identifiers intact.
+
+Group context:
+Group 8  "parser"  revision=3
+# Shared
+
+```mermaid
+flowchart LR
+	A --> B
+```
+start:
+foo-1  open  p=-  Implement parser
+
+Description:
+Keep identifiers intact.
+
+Group context:
+Group 8  "parser"  revision=3
+# Shared
+
+```mermaid
+flowchart LR
+	A --> B
+```
+show:
+completed at: none
+created at: 2026-09-20T12:00:00Z
+description: Keep identifiers intact.
+external id: none
+group: parser
+id: foo-1
+number: 1
+priority: none
+project: foo
+status: open
+title: Implement parser
+updated at: 2026-09-20T12:00:00Z
+workspace: none
+
+Group context:
+Group 8  "parser"  revision=3
+# Shared
+
+```mermaid
+flowchart LR
+	A --> B
+```

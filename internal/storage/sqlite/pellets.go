@@ -14,7 +14,7 @@ import (
 	"pellets/internal/storage"
 )
 
-const pelletSelect = `
+const pelletSelectColumns = `
 	SELECT p.project_id, project.code, p.number,
 	       p.title, p.description, p.external_id, p.group_id, p.group_record_id,
 	       p.status, p.priority,
@@ -26,12 +26,24 @@ const pelletSelect = `
 	       workspace.git_dir, workspace.git_dir_relative,
 	       strftime('%Y-%m-%dT%H:%M:%fZ', workspace.created_at),
 	       strftime('%Y-%m-%dT%H:%M:%fZ', workspace.updated_at),
-	       p.kind, p.implementation_revision, ` + checkpointJSONSQL + `
+	       p.kind, p.implementation_revision, ` + checkpointJSONSQL
+
+const pelletSelectFrom = `
 	FROM pellets AS p
 	JOIN projects AS project ON project.project_id = p.project_id
 	LEFT JOIN project_workspaces AS workspace
 	  ON workspace.project_id = p.project_id
 	 AND workspace.workspace_id = p.workspace_id`
+
+const pelletSelect = pelletSelectColumns + pelletSelectFrom
+
+// One statement observes membership, name, revision and Markdown together.
+// Keep document bodies out of the shared list/search query.
+const pelletDetailSelect = pelletSelectColumns + `,
+	       context_group.group_id, context_group.name, context_group.revision, context_group.context` + pelletSelectFrom + `
+	LEFT JOIN groups AS context_group
+	  ON context_group.project_id = p.project_id
+	 AND context_group.group_id = p.group_record_id`
 
 // PelletRepository owns a configured real SQLite database used for core
 // pellet allocation and persistence.
@@ -336,7 +348,7 @@ func (repository *PelletRepository) ReadPellet(ctx context.Context, project stor
 	if err := ensureReferenceProject(ctx, repository.db, project.Project, reference); err != nil {
 		return storage.Pellet{}, err
 	}
-	pellet, err := loadPellet(ctx, repository.db, project.Project.ID, reference.Number)
+	pellet, err := loadPelletDetail(ctx, repository.db, project.Project.ID, reference.Number)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storage.Pellet{}, pelletNotFound(reference)
 	}
@@ -695,7 +707,7 @@ func (repository *PelletRepository) NextPellet(ctx context.Context, project stor
 		return storage.NextSelection{}, err
 	}
 
-	query := pelletSelect + `
+	query := pelletDetailSelect + `
 	WHERE p.project_id = ?
 	  AND (
 	        (p.status = 'in_progress' AND p.workspace_id = ?)
@@ -717,7 +729,7 @@ func (repository *PelletRepository) NextPellet(ctx context.Context, project stor
 	LIMIT 1`
 	arguments = append(arguments, project.Workspace.ID)
 
-	pellet, err := scanPellet(repository.db.QueryRowContext(ctx, query, arguments...))
+	pellet, err := scanPelletDetail(repository.db.QueryRowContext(ctx, query, arguments...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return storage.NextSelection{Reason: storage.NextNone}, nil
 	}
@@ -813,6 +825,12 @@ func (repository *PelletRepository) startNextPellet(ctx context.Context, project
 					}
 				}
 			}
+			if scheduled == nil {
+				owned, err = loadPelletDetail(ctx, connection, project.Project.ID, owned.Reference.Number)
+				if err != nil {
+					return storage.NextSelection{}, pelletStorageError("read resumed pellet context", err)
+				}
+			}
 			selection := storage.NextSelection{Reason: storage.NextResumeInProgress, Pellet: &owned, WorkspaceSelection: routing}
 			if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
 				return storage.NextSelection{}, pelletStorageError("commit start-next resume", err)
@@ -871,7 +889,11 @@ func (repository *PelletRepository) startNextPellet(ctx context.Context, project
 		if changed != 1 {
 			continue
 		}
-		started, err := loadPellet(ctx, connection, project.Project.ID, candidate.Reference.Number)
+		load := loadPellet
+		if scheduled == nil {
+			load = loadPelletDetail
+		}
+		started, err := load(ctx, connection, project.Project.ID, candidate.Reference.Number)
 		if err != nil {
 			return storage.NextSelection{}, pelletStorageError("read started next pellet", err)
 		}
@@ -954,7 +976,11 @@ func (repository *PelletRepository) transitionPellet(ctx context.Context, projec
 	if err := ensureReferenceProject(ctx, connection, project.Project, reference); err != nil {
 		return storage.PelletLifecycleResult{}, err
 	}
-	before, err := loadPellet(ctx, connection, project.Project.ID, reference.Number)
+	load := loadPellet
+	if request.Operation == storage.PelletStart && expectedVersion == "" {
+		load = loadPelletDetail
+	}
+	before, err := load(ctx, connection, project.Project.ID, reference.Number)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storage.PelletLifecycleResult{}, pelletNotFound(reference)
 	}
@@ -1000,7 +1026,7 @@ func (repository *PelletRepository) transitionPellet(ctx context.Context, projec
 			}
 			return storage.PelletLifecycleResult{}, pelletStorageError("verify pellet lifecycle update", err)
 		}
-		after, err = loadPellet(ctx, connection, project.Project.ID, reference.Number)
+		after, err = load(ctx, connection, project.Project.ID, reference.Number)
 		if err != nil {
 			return storage.PelletLifecycleResult{}, pelletStorageError("read transitioned pellet", err)
 		}
@@ -1650,7 +1676,29 @@ func loadPellet(ctx context.Context, query projectQuery, projectID, number int64
 
 type pelletScanner interface{ Scan(...any) error }
 
-func scanPellet(scanner pelletScanner) (storage.Pellet, error) {
+func loadPelletDetail(ctx context.Context, query projectQuery, projectID, number int64) (storage.Pellet, error) {
+	return scanPelletDetail(query.QueryRowContext(ctx, pelletDetailSelect+`
+		WHERE p.project_id = ? AND p.number = ?`, projectID, number))
+}
+
+func scanPelletDetail(scanner pelletScanner) (storage.Pellet, error) {
+	var id, revision sql.NullInt64
+	var name, markdown sql.NullString
+	pellet, err := scanPellet(scanner, &id, &name, &revision, &markdown)
+	if err != nil {
+		return storage.Pellet{}, err
+	}
+	if pellet.GroupID != nil {
+		if !id.Valid || !name.Valid || !revision.Valid || !markdown.Valid ||
+			id.Int64 != *pellet.GroupID || pellet.Group == nil || name.String != *pellet.Group {
+			return storage.Pellet{}, errors.New("inconsistent pellet group context row")
+		}
+		pellet.GroupContext = &storage.GroupContext{ID: id.Int64, Name: name.String, Revision: revision.Int64, Context: markdown.String}
+	}
+	return pellet, nil
+}
+
+func scanPellet(scanner pelletScanner, extra ...any) (storage.Pellet, error) {
 	var pellet storage.Pellet
 	var projectCode, status, createdAt, updatedAt string
 	var externalID, group sql.NullString
@@ -1660,14 +1708,15 @@ func scanPellet(scanner pelletScanner) (storage.Pellet, error) {
 	var rootPath, gitDir, workspaceCreatedAt, workspaceUpdatedAt sql.NullString
 	var rootRelative, gitDirRelative sql.NullInt64
 	var checkpointJSON string
-	if err := scanner.Scan(
+	destinations := []any{
 		&pellet.ProjectID, &projectCode, &pellet.Reference.Number,
 		&pellet.Title, &pellet.Description, &externalID, &group, &pellet.GroupID,
 		&status, &priority, &createdAt, &updatedAt, &completedAt,
 		&workspaceID, &workspaceProjectID, &rootPath, &rootRelative,
 		&gitDir, &gitDirRelative, &workspaceCreatedAt, &workspaceUpdatedAt,
 		&pellet.Kind, &pellet.ImplementationRevision, &checkpointJSON,
-	); err != nil {
+	}
+	if err := scanner.Scan(append(destinations, extra...)...); err != nil {
 		return storage.Pellet{}, err
 	}
 	pellet.Reference.ProjectCode = projectCode

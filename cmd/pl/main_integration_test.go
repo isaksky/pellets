@@ -308,6 +308,10 @@ func TestFoundationCompiledExecutable(t *testing.T) {
 		shown := decodeFoundationSuccess[foundationPellet](
 			t, runFoundationCLI(t, executable, mainRoot, "show", second.ID), "show",
 		)
+		if string(shown.GroupContext) != "null" || edited.GroupContext != nil {
+			t.Fatalf("ungrouped detail/compact context: %s / %s", shown.GroupContext, edited.GroupContext)
+		}
+		shown.GroupContext = nil // Compare persisted pellet fields after detail enrichment.
 		if edited.Title != "Second edited" || edited.Group != nil || !reflect.DeepEqual(shown, edited) {
 			t.Fatalf("compiled edit/show = %#v / %#v", edited, shown)
 		}
@@ -1141,6 +1145,8 @@ type foundationPellet struct {
 	CreatedAt   string                     `json:"created_at"`
 	UpdatedAt   string                     `json:"updated_at"`
 	CompletedAt *string                    `json:"completed_at"`
+	// RawMessage distinguishes an omitted compact field from a detail null.
+	GroupContext json.RawMessage `json:"group_context,omitempty"`
 }
 
 type foundationPelletWorkspace struct {
@@ -1349,6 +1355,18 @@ func decodeFoundationSuccess[T any](t *testing.T, result foundationResult, comma
 	if envelope.SchemaVersion != 1 || envelope.Command != command {
 		t.Fatalf("%s envelope = %#v", command, envelope)
 	}
+	switch data := any(envelope.Data).(type) {
+	case foundationPellet:
+		assertFoundationPelletContext(t, data, command == "show" || command == "start")
+	case foundationNext:
+		if data.Pellet != nil {
+			assertFoundationPelletContext(t, *data.Pellet, true)
+		}
+	case []foundationPellet:
+		for _, pellet := range data {
+			assertFoundationPelletContext(t, pellet, false)
+		}
+	}
 	encoded, err := json.Marshal(envelope)
 	if err != nil {
 		t.Fatal(err)
@@ -1357,6 +1375,38 @@ func decodeFoundationSuccess[T any](t *testing.T, result foundationResult, comma
 		t.Fatalf("%s stdout = %q, want exact compact envelope %q", command, result.stdout, want)
 	}
 	return envelope.Data
+}
+
+func assertFoundationPelletContext(t *testing.T, pellet foundationPellet, detail bool) {
+	t.Helper()
+	if !detail {
+		if pellet.GroupContext != nil {
+			t.Fatalf("compact pellet includes context: %s", pellet.GroupContext)
+		}
+		return
+	}
+	if pellet.Group == nil {
+		if string(pellet.GroupContext) != "null" {
+			t.Fatalf("ungrouped detail requires explicit null context: %s", pellet.GroupContext)
+		}
+		return
+	}
+	var group struct {
+		ID       int64  `json:"id"`
+		Name     string `json:"name"`
+		Revision int64  `json:"revision"`
+		Context  string `json:"context"`
+	}
+	if err := json.Unmarshal(pellet.GroupContext, &group); err != nil {
+		t.Fatal(err)
+	}
+	if group.ID <= 0 || group.Name != *pellet.Group || group.Revision <= 0 {
+		t.Fatalf("inconsistent selected group context: %+v for %q", group, *pellet.Group)
+	}
+	encoded, err := json.Marshal(group)
+	if err != nil || string(encoded) != string(pellet.GroupContext) {
+		t.Fatalf("unexpected group context contract: %s (%v)", pellet.GroupContext, err)
+	}
 }
 
 func decodeFoundationError(t *testing.T, result foundationResult, exit int, code, message string) foundationError {
