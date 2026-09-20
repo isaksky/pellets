@@ -41,6 +41,35 @@ visible notice. The routine projection explanation is available under **About
 reported activity**; connection and history warnings remain outside that
 disclosure. Neither condition means the execution finished.
 
+Adjacent commands, file reads, and file changes of the same kind share a native
+expandable summary once there are two events. Counts are **reported operations**
+(stable event IDs), not successful commands or unique files. File summaries also
+count distinct, nonempty **reported path strings** within that group: three edits
+to the same path are `3 file changes · 1 reported path`. Paths are not resolved,
+case-folded, or inferred from commands; missing paths add no path count. A file
+change operation here is one projected file event, not an entire multi-file patch.
+Counts cover retained members only; the feed header still counts individual
+events, including those beneath closed groups.
+
+Collapsed groups show in-progress, failed, declined and reported-only counts,
+plus the last active operation in first-observed order or the latest operation
+when none is active. These are reported item outcomes, never authoritative run
+state. Full commands, paths and existing detail views remain with every child.
+Messages, questions, approvals, turn boundaries, other kinds and action-required
+or unknown tool statuses break groups and stay independent. Separate activity
+URLs (project/run attempts) never share groups. Same-ID completions replace a
+member in place without adding counts or moving it past intervening commentary.
+
+Both group and child disclosures retain their choices on append and snapshot
+replay. Promoting an open/focused single event keeps it visible. Groups keep
+their identity through prefix eviction while any compatible member survives;
+unavailable history removes stale groups. Native summary controls support Tab,
+Enter and Space; the existing focus treatment is retained. Reconciliation keeps
+retained DOM nodes, selection, focus and visible child scroll anchors. Truncation
+and reconnect notices remain outside all groups. Grouping does not change the
+server projection, sanitization or retention bounds, and the browser still caps
+individual events at 128 rather than counting group wrappers toward that limit.
+
 Only the state label is a polite live region. Operation changes and feed updates
 do not repeatedly announce historical content. Reduced motion disables the
 working animation, retaining the indicator and explicit text.

@@ -45,6 +45,9 @@ async function stop() {
   fs.appendFileSync(path.join(repo, '.git', 'info', 'exclude'), '\n/fake-*\n/.agents/\n');
   cli('add', 'Keep execution state visible');
   cli('skill', 'install', '--scope', 'repo', '--agent', 'codex', '--yes');
+  const otherWorkspace = path.join(temporary, 'other-workspace');
+  git('worktree', 'add', '-qb', 'other-workspace', otherWorkspace);
+  execFileSync(binary, ['project', 'show'], {cwd: otherWorkspace, env});
   fs.writeFileSync(path.join(repo, 'fake-mode'), 'schedule_activity_gate');
   await start();
   const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
@@ -118,6 +121,7 @@ async function stop() {
   await expectState('Working', true);
   // Reconnected snapshots restore current details, never authoritative state.
   await send({...snapshot, reset: true});
+  await require('./web-activity-groups-contract.cjs')({page, send, temporary, until});
   // Mixed feed: completed commentary is primary reading content; tool rows
   // remain compact disclosures. All text still crosses the shared safe renderer.
   const prose = 'Stable `group_id` values keep **context** attached to the *same group*.\n\n' +
@@ -285,6 +289,7 @@ async function stop() {
   await page.getByRole('button', {name: '▷ Start next', exact: true}).click();
   await expectState('Working', true);
   await until(() => page.locator('.activity-event').count().then(count => count >= 5), 'Next run activity');
+  assert.equal(await page.locator('[data-event-id="fresh-a"], [data-event-id="mixed-0"]').count(), 0, 'Another execution attempt reused prior activity');
   await page.getByRole('button', {name: 'Stop now', exact: true}).click();
   await expectState('Stopping', false);
   await expectState('Interrupted', false);

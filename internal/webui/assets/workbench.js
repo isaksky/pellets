@@ -1,5 +1,6 @@
 import { highlightCode } from "./code-highlight.js";
 import { renderMarkdown } from "./markdown.js";
+import { activityRows, activityGroupSummary } from "./activity-groups.js";
 import { rememberDescriptions, refreshDescriptions } from "./description.js";
 import { refreshComponents } from "./components.js";
 import { saveSetting } from "./settings.js";
@@ -756,13 +757,17 @@ function activityAvailability(panel, message, notice) {
 function renderActivity(panel, snapshot) {
   const events = panel.querySelector("[data-activity-events]");
   if (!events) return;
-  const selection = window.getSelection(),
+  const selection = window.getSelection(), active = document.activeElement,
     reading = (!selection?.isCollapsed && panel.contains(selection?.anchorNode)) ||
-      events.contains(document.activeElement),
+      events.contains(active),
+    selected = !selection?.isCollapsed && events.contains(selection?.anchorNode) ?
+      {anchor: selection.anchorNode, start: selection.anchorOffset,
+        focus: selection.focusNode, end: selection.focusOffset} : null,
     workspace = panel.closest(".run-workspace"),
     workspaceTop = workspace.scrollTop,
     edge = panel.getBoundingClientRect().top,
-    anchors = Array.from(events.children).filter(node => node.getBoundingClientRect().bottom > edge)
+    anchors = Array.from(events.querySelectorAll(".activity-event, .activity-group > summary"))
+      .filter(node => { const box = node.getBoundingClientRect(); return box.height > 0 && box.bottom > edge + 1; })
       .map(node => ({node, offset: node.getBoundingClientRect().top - edge}));
   const following =
       !reading && panel.scrollHeight - panel.clientHeight - panel.scrollTop < 32,
@@ -773,18 +778,10 @@ function renderActivity(panel, snapshot) {
     activity.set(panel.dataset.activityUrl, cache);
     while (activity.size > 16) activity.delete(activity.keys().next().value);
   }
-  if (snapshot.reset) {
-    const retained = new Set((snapshot.items || []).map((item) => item.id));
-    for (const node of Array.from(events.children)) {
-      if (!retained.has(node.dataset.eventId)) {
-        expansions.delete(node.id);
-        node.remove();
-      }
-    }
-    cache.items.clear();
-  }
+  if (snapshot.reset || !snapshot.available) cache.items.clear();
   cache.cursor = snapshot.cursor;
   cache.available = snapshot.available;
+  cache.truncated = snapshot.truncated;
   cache.connected = snapshot.connected !== false;
   let availability = snapshot.message ||
     (snapshot.available
@@ -794,11 +791,17 @@ function renderActivity(panel, snapshot) {
     availability = "Earlier activity was truncated. " + availability;
   activityAvailability(panel, availability,
     !snapshot.available || snapshot.truncated || snapshot.connected === false);
-  for (const item of snapshot.items || []) {
-    cache.items.set(item.id, item);
-    let node = Array.from(events.children).find(
-      (x) => x.dataset.eventId === item.id,
-    );
+  if (snapshot.available) for (const item of snapshot.items || []) cache.items.set(item.id, item);
+  while (cache.items.size > 128) cache.items.delete(cache.items.keys().next().value);
+  const nodes = new Map(Array.from(events.querySelectorAll(".activity-event"), node => [node.dataset.eventId, node]));
+  for (const [id, node] of nodes) {
+    if (cache.items.has(id)) continue;
+    expansions.delete(node.id);
+    node.remove();
+    nodes.delete(id);
+  }
+  for (const item of cache.items.values()) {
+    let node = nodes.get(item.id);
     if (!node) {
       node = element(item.kind === "message" ? "article" : "details",
         "activity-event" + (item.kind === "message" ? " activity-message" : ""));
@@ -807,7 +810,7 @@ function renderActivity(panel, snapshot) {
       const heading = element(item.kind === "message" ? "h4" : "summary", "event-heading");
       heading.append(element("span", "event-title"), element("small", "event-path"), element("small", "event-status"));
       node.append(heading, element("div", "event-body"));
-      events.append(node);
+      nodes.set(item.id, node);
       if (item.kind !== "message") {
         node.open = expansions.get(node.id) ?? false;
         node.addEventListener("toggle", () => expansions.set(node.id, node.open));
@@ -858,26 +861,59 @@ function renderActivity(panel, snapshot) {
     if (!body.childNodes.length)
       body.append(element("p", "", "No additional details were reported."));
   }
-  // The server's retained order is chronological by first observation. An
-  // item's sequence is its revision cursor, not a reason to move it to the end.
-  let position = events.firstElementChild;
-  for (const id of cache.items.keys()) {
-    const node = Array.from(events.children).find(node => node.dataset.eventId === id);
-    if (node !== position) events.insertBefore(node, position);
-    position = node.nextElementSibling;
+  // Reconcile groups and their original children in place. Replayed snapshots
+  // and ordinary appends never detach retained nodes or collapse disclosures.
+  const groups = new Map(Array.from(events.querySelectorAll(".activity-group"), node => [node.dataset.groupId, node]));
+  cache.rows = activityRows(cache.items.values(), cache.rows);
+  const ordered = [];
+  for (const row of cache.rows) {
+    if (!row.kind) { ordered.push(nodes.get(row.id)); continue; }
+    let group = groups.get(row.id);
+    if (!group) {
+      group = element("details", "activity-group");
+      group.dataset.groupId = row.id;
+      group.id = "activity-group-" + panel.dataset.runId + "-" + row.id;
+      const summary = element("summary", "activity-group-heading");
+      summary.append(element("span", "activity-group-title"),
+        element("span", "activity-group-outcome"), element("span", "activity-group-operation"));
+      group.append(summary, element("div", "activity-group-members"));
+      // Promoting a single event must not hide an open or focused detail.
+      group.open = expansions.get(group.id) ?? row.items.some(item => {
+        const node = nodes.get(item.id);
+        return node.open || node.contains(active) || (selected && node.contains(selected.anchor));
+      });
+      group.addEventListener("toggle", () => expansions.set(group.id, group.open));
+    }
+    groups.delete(row.id);
+    const summary = activityGroupSummary(row);
+    for (const key of ["title", "outcome", "operation"]) {
+      const label = group.querySelector(".activity-group-" + key);
+      if (label.textContent !== summary[key]) label.textContent = summary[key];
+      label.hidden = !summary[key];
+    }
+    group.dataset.active = String(summary.active);
+    group.dataset.failed = String(summary.failed);
+    const members = group.querySelector(".activity-group-members");
+    placeActivityNodes(members, row.items.map(item => nodes.get(item.id)));
+    ordered.push(group);
   }
-  while (events.children.length > 128) {
-    const old = events.firstElementChild;
-    cache.items.delete(old.dataset.eventId);
-    expansions.delete(old.id);
-    old.remove();
+  placeActivityNodes(events, ordered);
+  for (const group of groups.values()) {
+    expansions.delete(group.id);
+    group.remove();
   }
-  while (cache.items.size > 128)
-    cache.items.delete(cache.items.keys().next().value);
+  // A newly created wrapper can require reparenting on browsers without the
+  // state-preserving moveBefore API. Restore only still-retained focus/text.
+  if (events.contains(active) && document.activeElement !== active) active.focus({preventScroll: true});
+  if (selected && events.contains(selected.anchor) && events.contains(selected.focus) &&
+      (selection.anchorNode !== selected.anchor || selection.anchorOffset !== selected.start ||
+       selection.focusNode !== selected.focus || selection.focusOffset !== selected.end)) {
+    selection.setBaseAndExtent(selected.anchor, selected.start, selected.focus, selected.end);
+  }
   while (expansions.size > 512)
     expansions.delete(expansions.keys().next().value);
   panel.querySelector("[data-activity-count]").textContent =
-    events.children.length + " events";
+    cache.items.size + " events";
   updateCurrentOperation(panel);
   if (following) panel.scrollTop = panel.scrollHeight;
   else {
@@ -887,6 +923,36 @@ function renderActivity(panel, snapshot) {
   }
   workspace.scrollTop = workspaceTop;
 }
+function placeActivityNodes(parent, nodes) {
+  let position = parent.firstElementChild;
+  for (const node of nodes) {
+    if (node !== position) {
+      if (parent.moveBefore && parent.isConnected && node.isConnected) parent.moveBefore(node, position);
+      else parent.insertBefore(node, position);
+    }
+    position = node.nextElementSibling;
+  }
+}
+// Keyboard scrolling knows the scroll containers, but not the sticky execution
+// summary that can cover them on phones. Keep grouped disclosures reachable.
+document.addEventListener("focusin", event => {
+  const target = event.target.closest?.(".activity-group summary");
+  if (!target) return;
+  requestAnimationFrame(() => {
+    if (document.activeElement !== target || !target.matches(":focus-visible")) return;
+    const panel = target.closest(".activity-panel"), workspace = panel.closest(".run-workspace"),
+      status = workspace.querySelector(".execution-status");
+    const inset = () => Math.max(workspace.getBoundingClientRect().top,
+      status && getComputedStyle(status).position === "sticky" ? status.getBoundingClientRect().bottom : 0);
+    if (panel.getBoundingClientRect().top < inset())
+      workspace.scrollTop -= inset() - panel.getBoundingClientRect().top;
+    const box = target.getBoundingClientRect(),
+      top = Math.max(panel.getBoundingClientRect().top, inset()) + 3,
+      bottom = Math.min(panel.getBoundingClientRect().bottom, workspace.getBoundingClientRect().bottom) - 3;
+    if (box.top < top) panel.scrollTop += box.top - top;
+    else if (box.bottom > bottom) panel.scrollTop += box.bottom - bottom;
+  });
+});
 function connectActivity() {
   if (uiVersion.isOutdated()) return;
   const panel = document.querySelector(".activity-panel"),
@@ -907,6 +973,7 @@ function connectActivity() {
       cursor: cache.cursor,
       items: Array.from(cache.items.values()),
       available: cache.available,
+      truncated: cache.truncated,
       connected: false,
       message: "Reconnecting to reported activity…",
     });

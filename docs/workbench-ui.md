@@ -441,8 +441,15 @@ work without inventing progress. Stop-after remains a separate schedule intent.
 Agent update/Agent response labels describe messages, never the run outcome.
 Messages are visible by default with 14px Markdown prose, paragraph spacing and
 wrapping. They share the description renderer's local highlighting, literal HTML,
-safe-link and image-alt-text rules. Tool events retain compact expandable rows;
-updates replace only changed content and keep each event's original position.
+safe-link and image-alt-text rules. Tool events retain compact expandable rows.
+Consecutive commands, reads or file changes share an expandable summary with
+operation counts, distinct reported path counts for files, active/failure outcomes
+and a current/latest preview. Expanding it reveals the original individual
+details. Commentary, action requests and turn boundaries always separate groups.
+Updates keep group/child disclosure choices, focus, selection and reading position,
+including on reconnect and retention eviction; each event keeps its original
+position. Counts describe retained reported events, not execution evidence or
+inferred successful work.
 Pending messages wait for a complete sanitized snapshot instead of suggesting
 that an empty message or a completed item ends the run.
 Activity disconnection and unavailable history appear separately from run state.
@@ -471,7 +478,11 @@ events, safe Markdown, long paths/code, empty/pending messages, selection and
 focused links/code across replay and database updates, disclosure choices,
 drafts/caret, scroll anchoring through updates and retention, and normal following
 at the bottom. It captures all five themes at desktop, intermediate and phone
-widths plus 480px-high layouts in Chromium and WebKit, alongside authoritative
+widths plus 480px-high layouts in Chromium and WebKit. Its
+`web-activity-groups-contract.cjs` contract additionally checks grouped long feeds
+in every theme/width, repeated paths, interleaved kinds and action boundaries,
+same-ID completions, active/failed summaries, live append, keyboard disclosure,
+child scroll anchors, reset/eviction and workspace switching, alongside authoritative
 state, stop, question/approval, reconnect and explicit-recovery checks.
 
 Detailed activity is an in-memory projection, not a durable transcript. Text and
