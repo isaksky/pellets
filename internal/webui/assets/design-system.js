@@ -1,9 +1,21 @@
 import { refreshComponents } from "./components.js";
 import "./filters.js";
 import { renderMarkdown } from "./markdown.js";
+import "./description-outline.js";
 
 // Deliberately no app.js, settings transport, event stream, or database requests.
 const root = document.documentElement;
+// Exercise the production outline with page-local presentation state only.
+const contentsReader = document.querySelector("#contents pl-description-reader");
+const contentsText = "Contents follows rendered headings and keeps navigation inside this description. ";
+contentsReader.querySelector(".markdown-body").replaceChildren(renderMarkdown(
+  "# Reading a pellet\n\n" + contentsText.repeat(8) +
+  "\n\n### Skipped heading level\n\n" + contentsText.repeat(8) +
+  "\n\n## Repeated section\n\n" + contentsText.repeat(8) +
+  "\n\n## Repeated section\n\n" + contentsText.repeat(8) +
+  "\n\n### 日本語 and `inline code`\n\n" + contentsText.repeat(8)
+));
+contentsReader.refresh({mode: "view"});
 const diagramExamples = [
   "flowchart LR\n  Draft --> Review\n  Review --> Ready",
   "sequenceDiagram\n  User->>Pellets: Save Mermaid source\n  Pellets-->>User: Render locally",

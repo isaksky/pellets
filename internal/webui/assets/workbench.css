@@ -2655,6 +2655,28 @@ dialog::backdrop {
 .markdown-body .align-right { text-align: right; }
 .markdown-body hr { border: 0; border-top: 1px solid var(--muted); margin: 1.2em 0; }
 .markdown-body .description-empty { color: var(--muted); }
+/* This outline belongs to the document, separate from workbench sidebars. */
+pl-description-reader { display: block; min-width: 0; }
+.description-contents { min-width: 0; max-height: 48vh; overflow: auto; overscroll-behavior: contain; padding: 10px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--pane); font-size: 12px; line-height: 1.45; }
+.description-contents[hidden], .description-toolbar button[hidden] { display: none; }
+.description-contents > strong { display: block; padding: 0 6px 6px; color: var(--muted); font-size: 11px; font-weight: 500; }
+.description-contents ol { list-style: none; margin: 0; padding: 0; }
+.description-contents ol ol { padding-left: 12px; }
+.description-contents a { display: block; padding: 5px 6px; border-left: 2px solid transparent; border-radius: 2px; color: var(--ink); overflow-wrap: anywhere; text-decoration: none; }
+.description-contents a:hover { background: var(--theme-quiet-hover); }
+.description-contents a[aria-current] { border-left-color: var(--ink); background: var(--theme-quiet-hover); font-weight: 650; }
+.description-contents a:focus-visible, .description-toolbar [data-description-contents]:focus-visible,
+pl-description-reader [data-markdown-heading]:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+@media (min-width: 960px) {
+  /* Add exactly the rail width + gap so auto visibility cannot oscillate as
+     widening the dialog changes wrapping in the document. */
+  #record-dialog:has(pl-description-reader[data-contents-open="true"]) { width: 914px; }
+  pl-description-reader[data-contents-open="true"] { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 16px; align-items: start; }
+}
+@media (max-width: 959px) {
+  .description-contents { max-height: 9rem; margin-bottom: 8px; }
+  .description-toolbar { flex-wrap: wrap; }
+}
 @media (max-width: 600px) {
   .markdown-body { padding: 10px; max-height: 42vh; }
 }

@@ -1,7 +1,8 @@
 import { renderMarkdown } from "./markdown.js";
+import "./description-outline.js";
 
 // Presentation only: source, dirty state, versions and submission remain owned
-// by the existing native forms. Receipts never contain description text.
+// by the existing native forms. Receipts retain presentation, not source copies.
 const receipts = new Map();
 const rendered = new WeakMap();
 const storageKey = "pellets-description-presentation-v1";
@@ -37,6 +38,7 @@ function capture(host) {
   } else {
     saved.viewScroll = scrollState(view);
     saved.blocks = Array.from(view.querySelectorAll("pre,.markdown-table"), scrollState);
+    host.querySelector("pl-description-reader")?.capture(saved);
   }
   const outer = host.closest(".inspector-scroll,.plan-row-editor");
   if (outer?.getClientRects().length) saved.outer = scrollState(outer);
@@ -48,7 +50,7 @@ export function rememberDescriptions(scope = document) {
     const active = document.activeElement;
     if (host.contains(active)) {
       const targets = Array.from(host.querySelectorAll("textarea,button,a,[tabindex]"));
-      focusReceipt = {key: key(host), index: targets.indexOf(active)};
+      focusReceipt = {key: key(host), id: active.id, index: targets.indexOf(active)};
     }
   }
 }
@@ -84,7 +86,7 @@ function draw(host) {
   view.setAttribute("aria-label", "Description preview");
   if (!field.id) field.id = "description-source-" + key(host);
   view.id = "description-view-" + key(host);
-  toolbar.querySelectorAll("button").forEach(button => {
+  toolbar.querySelectorAll("[data-description-mode]").forEach(button => {
     const editing = button.dataset.descriptionMode === "edit";
     button.setAttribute("aria-pressed", String(button.dataset.descriptionMode === saved.mode));
     button.setAttribute("aria-controls", editing ? field.id : view.id);
@@ -92,7 +94,8 @@ function draw(host) {
   label.hidden = saved.mode !== "edit";
   label.classList.add("description-source");
   view.hidden = saved.mode === "edit";
-  if (rendered.get(view) !== field.value) {
+  const changed = rendered.get(view) !== field.value;
+  if (changed) {
     view.replaceChildren(renderMarkdown(field.value));
     if (!field.value.trim()) {
       const empty = document.createElement("p");
@@ -107,12 +110,14 @@ function draw(host) {
   restoreScroll(view, saved.viewScroll);
   view.querySelectorAll("pre,.markdown-table").forEach((block, index) => restoreScroll(block, saved.blocks?.[index]));
   restoreScroll(host.closest(".inspector-scroll,.plan-row-editor"), saved.outer);
+  host.querySelector("pl-description-reader")?.refresh(saved, changed);
 }
 export function refreshDescriptions(scope = document) {
   for (const host of hosts(scope)) {
     draw(host);
     if (focusReceipt?.key === key(host)) {
-      const target = host.querySelectorAll("textarea,button,a,[tabindex]")[focusReceipt.index];
+      const target = (focusReceipt.id && document.getElementById(focusReceipt.id))
+        || host.querySelectorAll("textarea,button,a,[tabindex]")[focusReceipt.index];
       if (target?.getClientRects().length) target.focus({preventScroll: true});
       focusReceipt = null;
     }

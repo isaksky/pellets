@@ -43,6 +43,13 @@ async function start(binary) {
   await page.goto(origin + '/dev/design-system');
   await page.locator('#theme-select-trigger').waitFor();
   assert.equal(await page.title(), 'Design system · Pellets');
+  const contents = page.locator('#contents');
+  await contents.getByRole('navigation', {name:'Description contents'}).waitFor();
+  assert.equal(await contents.locator('nav a').count(), 5);
+  await contents.locator('nav a').last().focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelector('#contents nav a:last-child[aria-current]')?.textContent.includes('日本語'));
+  assert.equal(new URL(page.url()).hash, '', 'Document navigation changed gallery routing');
   await require('./web-components-contract.cjs')(page);
   // Exercise the public component API independently of application transport.
   assert.deepEqual(await page.evaluate(() => ['button','field','checkbox','select','number','menu','disclosure','dialog','tabs','badge','notice','icon','resizer'].filter(name => !customElements.get('pl-'+name))), []);
@@ -103,7 +110,7 @@ async function start(binary) {
     return {changes,stepped,submitted,selected,reset,opened,removedClosed,replaced,triggerCount,invalid,invalidFocused,validAgain,disabled,busy,restored,detachedPreserved,reconnectedClosed,guarded,dismissed};
   });
   assert.deepEqual(componentResult, {changes:1,stepped:'2',submitted:{title:'Edited',review:'yes',mode:'one',count:'2'},selected:'All',reset:'One',opened:true,removedClosed:true,replaced:'New options',triggerCount:1,invalid:true,invalidFocused:true,validAgain:true,disabled:true,busy:true,restored:true,detachedPreserved:true,reconnectedClosed:true,guarded:true,dismissed:true});
-  assert.deepEqual(await page.evaluate(() => Array.from(document.querySelectorAll('button, input:not([type=hidden]), textarea, select, dialog, details')).filter(control => !control.closest('pl-button, pl-field, pl-checkbox, pl-select, pl-number, pl-dialog, pl-menu, pl-disclosure, pl-diagram')).map(control => control.outerHTML.slice(0,100))), [], 'Gallery controls must use the component library or production diagram component');
+  assert.deepEqual(await page.evaluate(() => Array.from(document.querySelectorAll('button, input:not([type=hidden]), textarea, select, dialog, details')).filter(control => !control.closest('pl-button, pl-field, pl-checkbox, pl-select, pl-number, pl-dialog, pl-menu, pl-disclosure, pl-diagram') && !control.matches('#contents [data-description-contents]')).map(control => control.outerHTML.slice(0,100))), [], 'Gallery controls must use the component library or production description controls');
   await page.waitForFunction(() => document.querySelectorAll('#ds-diagrams pl-diagram[data-state=ready]').length === 3);
   assert.equal(await page.locator('#ds-diagrams pl-diagram[data-state=error]').count(), 4);
 

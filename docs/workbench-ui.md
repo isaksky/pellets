@@ -74,11 +74,47 @@ fields for comparison. Review them before saving again; nothing is retried
 automatically. CLI output, JSON, search and agent context continue to use the
 original Markdown, with no stored HTML or migration.
 
+Pellet dialogs provide a document-local **Contents** toggle in rendered mode
+whenever at least one Markdown heading exists. At viewport widths of **960px or
+wider**, contents opens automatically exactly when there are **two or more
+headings** and the rendered description's `scrollHeight` exceeds its
+`clientHeight` by **more than 1px**. The 208px rail and 16px gap widen the dialog
+by 224px, retaining the document's reading width. The rail and document scroll
+independently. Short, single-section, and headingless descriptions have no
+automatic rail; headingless descriptions also have no toggle. A user's explicit
+wide-screen toggle overrides the automatic rule for that record in the current
+browser tab. Below 960px, Contents starts collapsed and opens a bounded list
+above the document. Choosing a section collapses that list. It never overlays
+the text. The compact and wide-screen choices are independent.
+
+The outline follows rendered heading nodes in document order, nested beneath
+the nearest preceding lower-level heading; skipped levels do not create empty
+entries. Fenced code, Mermaid source/SVG and literal HTML contribute no headings.
+Labels use rendered text, including inline formatting and decoded entities.
+Anchors combine the document key with a Unicode-preserving, NFKC-normalized,
+lowercase heading slug. Punctuation becomes separators, empty slugs use
+`section`, and numerical suffixes resolve all collisions, including names that
+already end in a number. The same document source produces the same IDs; source
+and database records are never rewritten.
+
+Contents is a labeled navigation landmark with nested lists and native links.
+Click or Enter focuses the destination heading and scrolls only the description
+viewport, leaving a 12px inset below its edge. The dialog chrome is outside this
+viewport. Navigation preserves the workbench URL, selected pellet and surrounding
+scroll positions. The current entry has `aria-current="location"`, a visible
+marker and emphasis; manual scrolling and asynchronous diagram resizing update
+it. Focus is visible and reduced-motion preferences disable smooth scrolling.
+Saved/live edits and unsaved previews rebuild the outline, retaining the current
+heading and its offset where its anchor survives. Source caret and drafts retain
+the existing mode-switching behavior. The feature-owned `pl-description-reader`
+disconnects its listeners and resize observer when removed and observes content
+blocks as well as the reading viewport, so delayed diagram layout is tracked.
+
 `assets/markdown.js` exports `renderMarkdown(source)`, returning a DOM fragment
 from a pinned, locally bundled Marked lexer. Only explicit element/attribute
 choices become DOM; raw parser HTML is never inserted. Headings expose
-`data-markdown-heading`, and fences expose `data-language` for future consumers;
-heading navigation is not implemented. The license and
+`data-markdown-heading` for document outlines, and fences expose `data-language`.
+The license and
 package integrity are in `MARKED-LICENSE.txt` and `MARKED-NOTICE.txt`.
 `description.js` adds presentation around native fields and keeps bounded
 presentation receipts without storing a second copy of the source.
@@ -89,7 +125,12 @@ plain text, exact create/edit/save/reload/CLI source retrieval, malicious conten
 offline preview, refresh/conflict recovery, source and rendered selection,
 proposal autosave, and five themes at 1280, 1092 and 390 pixels. It saves real
 application screenshots; `PELLETS_DESCRIPTION_BASELINE=/path/to/old/pl` captures
-the original source-only dialog for comparison.
+the original dialog for comparison. Also run
+`node scripts/test-web-description-outline-browser.cjs` in both engines for
+hierarchy, duplicate/Unicode/punctuation anchors, every link's local scroll and
+keyboard focus, delayed Mermaid layout, visibility thresholds, draft/save/live
+edits, repeated refreshes and observer cleanup. It checks all five themes at
+1280, 1092, 959, 678 and 390 pixels and saves application screenshots.
 
 ### Mermaid diagrams
 

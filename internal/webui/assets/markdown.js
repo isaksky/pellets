@@ -36,7 +36,7 @@ function appendTokens(parent, tokens, loose = false, budget = {diagrams: 0}) {
       case "space": case "def": continue;
       case "heading":
         el = node("h" + Math.min(6, Math.max(1, token.depth)));
-        // Metadata for future heading navigation; no global IDs or navigation.
+        // Only actual Markdown heading nodes participate in document outlines.
         el.dataset.markdownHeading = String(token.depth);
         appendTokens(el, token.tokens, false, budget);
         break;
