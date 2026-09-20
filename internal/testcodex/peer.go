@@ -137,7 +137,7 @@ func Run() bool {
 			if mode == "schedule_prethread_failure" && message.Method == "thread/start" {
 				result = map[string]any{}
 			} else if strings.HasPrefix(mode, "review_") && message.Method == "thread/start" {
-				thread := "review-seed"
+				thread := "review-thread"
 				if reviewStarted {
 					triageCount++
 					thread = fmt.Sprintf("triage-thread-%d-%d", os.Getpid(), triageCount)
@@ -186,10 +186,20 @@ func Run() bool {
 				result = map[string]any{"thread": map[string]any{"id": "thread", "cwd": cwd, "status": map[string]any{"type": "notLoaded"}, "turns": []any{map[string]any{"id": "turn", "status": "completed"}, map[string]any{"id": "external-turn", "status": "completed"}}}}
 			}
 		case "review/start":
+			// Codex 0.154 starts paginated threads by default. Its stable API
+			// supports review in that thread, but cannot fork a detached review.
+			var params struct {
+				Delivery string `json:"delivery"`
+			}
+			must(json.Unmarshal(message.Params, &params))
+			if params.Delivery == "detached" {
+				write(map[string]any{"id": message.ID, "error": map[string]any{"code": -32600, "message": "paginated threads do not support detached review"}})
+				continue
+			}
 			reviewStarted = true
 			reviewThreadID := "review-thread"
-			if mode == "review_same_context" {
-				reviewThreadID = "review-seed"
+			if mode == "review_wrong_context" {
+				reviewThreadID = "unexpected-review-thread"
 			}
 			result = map[string]any{"reviewThreadId": reviewThreadID, "turn": map[string]any{"id": "review-turn", "status": "inProgress", "items": []any{}}}
 			scheduledTurn = append(scheduledTurn[:0], message.Params...)

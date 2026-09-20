@@ -171,7 +171,7 @@ func (recorder ExecutionRecorder) CallCodex(ctx context.Context, database Databa
 		}
 		progress.Phase = "turn_start"
 	case codex.ReviewStart:
-		if run.ThreadID == "" || run.CheckpointScope == nil || params["threadId"] != run.ThreadID {
+		if run.ThreadID == "" || run.TurnID != "" || run.CheckpointScope == nil || params["threadId"] != run.ThreadID || params["delivery"] != "inline" {
 			return run, nil, storage.ExecutionRunConflict(id)
 		}
 		progress.Phase = "review"
@@ -221,7 +221,7 @@ func (recorder ExecutionRecorder) CallCodex(ctx context.Context, database Databa
 					progress.TurnID = result.Turn.ID
 				}
 			case codex.ReviewStart:
-				if result.ReviewThreadID == "" || result.ReviewThreadID == run.ThreadID || result.Turn.ID == "" {
+				if result.ReviewThreadID != run.ThreadID || result.Turn.ID == "" {
 					callErr = codex.ErrProtocol
 				} else {
 					progress.ThreadID, progress.TurnID = result.ReviewThreadID, result.Turn.ID

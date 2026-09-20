@@ -527,7 +527,7 @@ func (db *ProjectDatabase) BeginExecutionOperation(ctx context.Context, id, revi
 			}
 			progress.Phase = "turn_start"
 		case "review/start":
-			if current.ThreadID == "" || current.CheckpointScope == nil {
+			if current.ThreadID == "" || current.TurnID != "" || current.CheckpointScope == nil {
 				return storage.ExecutionRunConflict(id)
 			}
 			progress.Phase = "review"
@@ -606,7 +606,7 @@ func (db *ProjectDatabase) FinishExecutionOperation(ctx context.Context, result 
 				}
 				progress.TurnID = result.TurnID
 			case "review/start":
-				if result.ThreadID == "" || result.ThreadID == current.ThreadID || result.TurnID == "" {
+				if result.ThreadID != current.ThreadID || result.TurnID == "" {
 					return storage.ExecutionRunConflict(result.ID)
 				}
 				progress.ThreadID, progress.TurnID = result.ThreadID, result.TurnID

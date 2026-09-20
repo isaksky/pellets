@@ -321,8 +321,10 @@ steering and start a new turn only after the prior turn is known idle.
 Ordinary server-supervised work follows test → commit → close. A review
 checkpoint freezes exact selected commits, applicable committed repository
 instructions, and each evidenced implementation's captured group context, then
-runs `review/start` detached from a new empty read-only seed
-thread. App-server's native rendered review text is normalized into a durable
+runs `review/start` inline in a new empty read-only reviewer
+thread. This keeps implementation context separate without requiring a detached
+fork, which paginated runtime history does not support. App-server's native
+rendered review text is normalized into a durable
 structured clean/findings result, Git/worktree side effects are rejected, and
 successful evidence plus checkpoint closure are atomic. Clean output requires
 the scope-bound marker because arbitrary headerless app-server review prose is

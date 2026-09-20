@@ -36,7 +36,7 @@ var requiredSchemaValues = map[string][]string{
 	"AskForApproval":    {"on-request", "never"},
 	"ApprovalsReviewer": {"auto_review", "user"},
 	"SandboxMode":       {"workspace-write", "read-only", "danger-full-access"},
-	"ReviewDelivery":    {"detached"},
+	"ReviewDelivery":    {"inline"},
 	"ReviewTarget":      {"custom"},
 }
 

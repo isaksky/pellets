@@ -19,7 +19,7 @@ when they share a name. Current group documents, checkpoint membership,
 scheduling filters, and queue adjacency never supply historical requirements or
 expand the selected target set.
 
-The detached reviewer and each independent finding assessor receive this same
+The dedicated reviewer and each independent finding assessor receive this same
 snapshot. Assessors distinguish the original requirements from current code,
 current repository instructions, and the active queue. The checkpoint's exact
 group and external ID still determine follow-up inheritance; implementation

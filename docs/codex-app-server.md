@@ -260,7 +260,7 @@ template; the server captures the installed Codex copy without updating it.
 For a new Codex thread, the scheduler prepends one deterministic
 `pellets-codex-prefix-v1` layer: snapshot identity, skill, CLI help, then the
 small stable workflow. After that layer it supplies the captured group context,
-then phase-specific instructions and variable task context. Fresh detached
+then phase-specific instructions and variable task context. Fresh dedicated
 checkpoint reviews and each fresh finding-assessment thread receive that same
 captured prefix once, followed by read-only role restrictions and exact
 snapshot/finding/queue context, including each target's captured implementation
@@ -613,10 +613,17 @@ path, and applicable committed `AGENTS.md` contents plus hashes. Missing objects
 stop for attention; the driver never checks out, merges, or cherry-picks
 evidence into existence.
 
-`review/start` uses `delivery: "detached"` with a `custom` target. Detached
-delivery forks its source history, so Pellets first creates a new empty seed
-thread with the usual `on-request`/`auto_review` policy reduced to a read-only
-sandbox. An explicitly selected reasoning effort is merged into that seed's
+`review/start` uses `delivery: "inline"` with a `custom` target inside a newly
+created, empty reviewer conversation. This thread is separate from every
+implementation conversation and uses the prepared approval policy reduced to a
+read-only sandbox. Codex CLI 0.154.0 defaults to paginated thread history, which
+rejects detached review. Inline delivery avoids that unsupported fork without
+opting into experimental history configuration. The response must retain the
+exact reviewer thread ID and return a turn ID; another thread is a protocol
+error. Existing completed detached-review evidence remains readable and is
+never rewritten or replayed.
+
+An explicitly selected reasoning effort is merged into the reviewer thread's
 `config.model_reasoning_effort` alongside any existing configuration overlay,
 because `review/start` has no effort parameter and does not send `turn/start`.
 An unset selection retains the runtime default; ordinary implementation and
@@ -923,7 +930,7 @@ traceable checks:
 | Concise activity, user questions, one-time approval decisions, active-turn follow-up | `TestConciseCodexActivityDoesNotExposeProtocolContent` and the interaction/steering scheduler tests |
 | Browser disconnect, Stop after Pellet, Stop now, foreground shutdown, explicit Resume | scheduler stop/recovery tests plus `TestSupervisorDisconnectShutdownAndDescendants` |
 | Linked-worktree concurrency and checkpoint evidence from multiple worktrees | `TestSupervisorLinkedWorktreesExecuteConcurrently` and `TestCheckpointReviewerUsesExactCommitsFromDifferentWorktrees` |
-| Checkpoint readiness, selected work in another workspace, noncontiguous commits, and completion without a commit | checkpoint SQLite tests, `TestCheckpointReviewerUsesFreshDetachedContextAndExactCommitSet`, and `TestCheckpointPolicyBypassesOrdinaryFinalizer` |
+| Checkpoint readiness, selected work in another workspace, noncontiguous commits, and completion without a commit | checkpoint SQLite tests, `TestCheckpointReviewerUsesFreshPaginatedContextAndExactCommitSet`, and `TestCheckpointPolicyBypassesOrdinaryFinalizer` |
 | Lost-response/expired-receipt recovery and duplicate-free partial triage | checkpoint triage SQLite/application tests |
 | Durable checkpoint inspector: clean/findings, partial recovery, purged refs, reconnect, later run and exact generation | `TestCheckpointOutcomeDurablePartialResumeAndExactGeneration`, `TestCheckpointOutcomePreservesPurgedFollowupReference`, `TestHTTPCheckpointDurableOutcomes`, and `node scripts/test-web-checkpoint-browser.cjs` |
 | Server forms, checkpoint composer, live refresh, conflict recovery, keyboard navigation | Go web-handler/asset tests plus `node scripts/test-web-browser.cjs` |

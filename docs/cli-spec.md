@@ -665,7 +665,7 @@ alone, or a no-op result cannot advance the schedule. Finalization recovery
 reuses durable tree/commit/close evidence and never repeats a completed
 implementation, commit, or close.
 
-Ready review checkpoints use a fresh detached read-only Codex review context
+Ready review checkpoints use a fresh dedicated read-only Codex review context
 and independently present every selected result commit, including
 noncontiguous commits and evidence produced in different registered worktrees.
 A selected Pellet still in progress in another workspace leaves the checkpoint

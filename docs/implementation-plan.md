@@ -275,7 +275,7 @@ Acceptance criteria:
 
 - A checkpoint requires explicit scope and records only its relationship to the
   run and concise outcome; normal work remains test → commit → close.
-- Review starts through installed app-server `review/start`, detached from an
+- Review starts through installed app-server `review/start`, inline in an
   empty seed thread rather than implementation history. It snapshots each
   selected commit independently and cannot change the run's worktree or
   silently alter queue lifecycle state.

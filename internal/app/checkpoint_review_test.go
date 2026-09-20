@@ -67,7 +67,7 @@ func preparedReviewCheckpointWithSetup(t *testing.T, executable, reviewMode stri
 	return s, request, checkpoint, runs
 }
 
-func TestCheckpointReviewerUsesFreshDetachedContextAndExactCommitSet(t *testing.T) {
+func TestCheckpointReviewerUsesFreshPaginatedContextAndExactCommitSet(t *testing.T) {
 	executable := installSupervisorPeer(t)
 	for _, test := range []struct {
 		mode, status, effort string
@@ -187,8 +187,16 @@ func TestCheckpointReviewerUsesFreshDetachedContextAndExactCommitSet(t *testing.
 			if review["effort"] != nil || review["config"] != nil {
 				t.Fatalf("unsupported review parameters: %#v", review)
 			}
-			if review["delivery"] != "detached" || review["threadId"] != "review-seed" {
+			if review["delivery"] != "inline" || review["threadId"] != run.ThreadID || run.ThreadID != "review-thread" {
 				t.Fatalf("review delivery: %#v", review)
+			}
+			if seed["historyMode"] != nil {
+				t.Fatal("review must not require experimental history configuration")
+			}
+			for _, implementation := range implementations {
+				if run.ThreadID == implementation.ThreadID {
+					t.Fatal("review reused an implementation conversation")
+				}
 			}
 			target := review["target"].(map[string]any)
 			instructions := target["instructions"].(string)
@@ -491,7 +499,7 @@ func TestCheckpointReviewerUsesExactCommitsFromDifferentWorktrees(t *testing.T) 
 
 func TestCheckpointReviewerRejectsMissingResultAndSideEffects(t *testing.T) {
 	executable := installSupervisorPeer(t)
-	for _, test := range []struct{ mode, code string }{{"review_same_context", "review_start_unconfirmed"}, {"review_missing_result", "review_result_invalid"}, {"review_malformed_result", "review_result_invalid"}, {"review_json_result", "review_result_invalid"}, {"review_fallback_prose", "review_result_invalid"}, {"review_truncated_json", "review_result_invalid"}, {"review_fenced_malformed", "review_result_invalid"}, {"review_side_effect", "review_side_effect_detected"}, {"review_dirty_side_effect", "review_side_effect_detected"}, {"review_interaction", "review_interaction_forbidden"}} {
+	for _, test := range []struct{ mode, code string }{{"review_wrong_context", "review_start_unconfirmed"}, {"review_missing_result", "review_result_invalid"}, {"review_malformed_result", "review_result_invalid"}, {"review_json_result", "review_result_invalid"}, {"review_fallback_prose", "review_result_invalid"}, {"review_truncated_json", "review_result_invalid"}, {"review_fenced_malformed", "review_result_invalid"}, {"review_side_effect", "review_side_effect_detected"}, {"review_dirty_side_effect", "review_side_effect_detected"}, {"review_interaction", "review_interaction_forbidden"}} {
 		t.Run(test.mode, func(t *testing.T) {
 			s, request, checkpoint, _ := preparedReviewCheckpoint(t, executable, test.mode)
 			if test.mode == "review_dirty_side_effect" {
