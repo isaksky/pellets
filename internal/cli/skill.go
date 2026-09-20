@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -155,7 +154,7 @@ func (data skillInstallData) RenderHuman(writer io.Writer) error {
 
 func runSkillInstall(ctx context.Context, installer app.SkillInstaller, invocation Invocation) (skillInstallData, error) {
 	input := invocation.Input.(skillInput)
-	interactive := invocation.Interactive && invocation.Globals.Human
+	interactive := invocation.Interactive
 	if (input.Scope == "" || input.Agent == "") && !interactive {
 		missing := make([]string, 0, 2)
 		if input.Scope == "" {
@@ -225,34 +224,32 @@ func runSkillInstall(ctx context.Context, installer app.SkillInstaller, invocati
 		}
 	}
 	allowReplacement := input.Force
-	if len(skillPlanConflicts(plan)) > 0 && !allowReplacement {
-		if !interactive {
-			return skillInstallData{}, installer.ConflictError(plan)
-		}
-		allowReplacement, err = wizard.confirm("Replace every differing existing skill file? [y/N]: ")
-		if err != nil {
-			return skillInstallData{}, err
-		}
-		if !allowReplacement {
-			return cancelledSkillData(input, &plan), nil
-		}
+	conflicts := len(skillPlanConflicts(plan)) > 0
+	needsWrite := false
+	for _, target := range plan.Targets {
+		needsWrite = needsWrite || target.State != "identical"
 	}
-	if !input.Yes {
+	if conflicts && !allowReplacement && !interactive {
+		return skillInstallData{}, installer.ConflictError(plan)
+	}
+	if needsWrite && (!input.Yes || conflicts && !allowReplacement) {
 		if !interactive {
-			return skillInstallData{}, domain.NewError(
-				domain.Confirmation,
-				"confirmation_required",
+			return skillInstallData{}, domain.NewError(domain.Confirmation, "confirmation_required",
 				"skill installation requires --yes when an interactive confirmation is unavailable",
-				map[string]any{"scope": input.Scope, "agent": input.Agent},
-			)
+				map[string]any{"scope": input.Scope, "agent": input.Agent})
 		}
-		confirmed, err := wizard.confirm("Install the Pellets skill at every displayed destination? [y/N]: ")
+		prompt := "Install the Pellets skill at every displayed destination? [y/N]: "
+		if conflicts {
+			prompt = "Install the Pellets skill and replace every differing existing skill file at these destinations? [y/N]: "
+		}
+		confirmed, err := wizard.confirm(prompt)
 		if err != nil {
 			return skillInstallData{}, err
 		}
 		if !confirmed {
 			return cancelledSkillData(input, &plan), nil
 		}
+		allowReplacement = conflicts || allowReplacement
 	}
 
 	result, err := installer.Apply(plan, allowReplacement)
@@ -266,12 +263,11 @@ func runSkillInstall(ctx context.Context, installer app.SkillInstaller, invocati
 }
 
 type skillWizard struct {
-	reader *bufio.Reader
-	writer io.Writer
+	*interaction
 }
 
 func newSkillWizard(reader io.Reader, writer io.Writer) *skillWizard {
-	return &skillWizard{reader: bufio.NewReader(reader), writer: writer}
+	return &skillWizard{interaction: newInteraction(reader, writer)}
 }
 
 func (wizard *skillWizard) repositoryUnavailable(home string) error {
@@ -371,36 +367,6 @@ func (wizard *skillWizard) showPlan(plan app.SkillPlan) error {
 		}
 	}
 	return nil
-}
-
-func (wizard *skillWizard) confirm(prompt string) (bool, error) {
-	if _, err := io.WriteString(wizard.writer, prompt); err != nil {
-		return false, err
-	}
-	for {
-		answer, err := wizard.readAnswer()
-		if err != nil {
-			return false, err
-		}
-		switch strings.ToLower(answer) {
-		case "y", "yes":
-			return true, nil
-		case "", "n", "no", "0", "cancel", "c", "q", "quit":
-			return false, nil
-		default:
-			if _, err := io.WriteString(wizard.writer, "Enter yes to continue or no to cancel: "); err != nil {
-				return false, err
-			}
-		}
-	}
-}
-
-func (wizard *skillWizard) readAnswer() (string, error) {
-	line, err := wizard.reader.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return "", err
-	}
-	return strings.TrimSpace(line), nil
 }
 
 func dryRunSkillData(plan app.SkillPlan, force bool) skillInstallData {

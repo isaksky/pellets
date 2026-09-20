@@ -50,12 +50,12 @@ func TestPelletsSkillGoldenPortableContract(t *testing.T) {
 
 	body := parts[1]
 	for _, required := range []string{
-		"pl --help", "default compact JSON", "database binding", "database_binding_unavailable", "linked worktrees",
-		"pl start-next", "pl next", "workspace_already_in_progress",
+		"pl --help", "Always pass `--json`", "database binding", "database_binding_unavailable", "linked worktrees",
+		"pl --json start-next", "pl --json next", "workspace_already_in_progress",
 		"pellet_in_progress_elsewhere", "--recover-workspace", "Keep retries bounded",
-		"pl add", "pl move", "pl close", "pl defer", "pl reopen",
+		"pl --json add", "pl --json move", "pl --json close", "pl --json defer", "pl --json reopen",
 		"external-id", "group", "focused", "--created-by agent", "--created-by human",
-		"pl memory approve", "Never edit the SQLite database directly", "commit `.pellets`",
+		"pl --json memory approve", "Never edit the SQLite database directly", "commit `.pellets`",
 		"dependencies", "epics", "agent/PID ownership", "leases", "heartbeats",
 		"parallel Markdown task queue", "account status through app-server", "Codex owns credential storage and refresh",
 		"`pl` on the inherited child `PATH`", "missing tool",

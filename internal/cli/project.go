@@ -296,13 +296,13 @@ func runProjectRename(
 	if err != nil {
 		return projectRenameData{}, err
 	}
-	interactive := invocation.Interactive && invocation.Globals.Human
+	interactive := invocation.Interactive
 	deleteConflicts := input.DeleteConflictingRedirects && input.Yes
 	if len(plan.Conflicts) > 0 && !deleteConflicts {
 		if !interactive {
 			return projectRenameData{}, projectRenameConfirmationRequired(plan)
 		}
-		wizard := newSkillWizard(invocation.Stdin, invocation.Stdout)
+		wizard := newInteraction(invocation.Stdin, invocation.Stdout)
 		if err := renderProjectRenameConflicts(invocation.Stdout, plan); err != nil {
 			return projectRenameData{}, err
 		}
@@ -361,7 +361,7 @@ func projectRenameConfirmationRequired(plan storage.ProjectRenamePlan) error {
 			"canonical_target": conflict.CanonicalCode,
 		}
 	}
-	retry := []string{"pl", "--project", plan.Project.Code, "project", "rename", plan.NewCode, "--delete-conflicting-redirects", "--yes"}
+	retry := []string{"pl", "--json", "--project", plan.Project.Code, "project", "rename", plan.NewCode, "--delete-conflicting-redirects", "--yes"}
 	return domain.NewError(
 		domain.Confirmation,
 		"project_rename_confirmation_required",
@@ -379,6 +379,10 @@ func projectRenameConfirmationRequired(plan storage.ProjectRenamePlan) error {
 type projectListData []projectData
 
 func (data projectListData) RenderHuman(writer io.Writer) error {
+	if len(data) == 0 {
+		_, err := io.WriteString(writer, "No projects.\n")
+		return err
+	}
 	for _, project := range data {
 		if err := project.RenderHuman(writer); err != nil {
 			return err

@@ -29,7 +29,7 @@ fs.mkdirSync(repo);
 const git = (...args) =>
   execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
 const cli = (...args) =>
-  JSON.parse(execFileSync(binary, args, { cwd: repo, env, encoding: "utf8" }))
+  JSON.parse(execFileSync(binary, ['--json', ...args], { cwd: repo, env, encoding: "utf8" }))
     .data;
 const until = async (fn, msg) => {
   const end = Date.now() + 25000;

@@ -247,26 +247,35 @@ links still resolve while successful JSON and human output use `new-code` and
 canonical code and redirects.
 
 A canonical code owned by another project is always a hard conflict. If the
-requested code is another project's redirect, default JSON and other
+requested code is another project's redirect, explicit JSON and other
 noninteractive invocations return `project_rename_confirmation_required` with
 the exact conflicting rules and retry arguments; they never wait for input.
 Review that payload before the explicit automation-safe retry:
 
 ```text
-pl --project old-code project rename new-code \
+pl --json --project old-code project rename new-code \
   --delete-conflicting-redirects --yes
 ```
 
-Only terminal `--human` mode offers the equivalent default-no prompt. Deleting
+The default terminal mode offers the equivalent default-no prompt. Deleting
 a conflicting redirect can break or reinterpret references held outside the
 database. The rename revalidates the displayed rules inside one transaction,
 and any changed conflict or failure leaves project and redirect state intact.
 
 ### JSON is the agent interface
 
-Compact JSON is the default; there is no `--json` flag. Each successful
+Readable text is now the default, including errors and redirected output.
+**Compatibility change:** scripts and agents must add `--json` before the
+command (for example, `pl --json next`). The JSON v1 envelopes and exit codes
+remain stable. `--json` never prompts and does not approve destructive actions.
+`--pretty` implies JSON/non-interactive mode and indents successes and errors;
+`--human` remains an explicit alias for the default and conflicts with either
+JSON flag. Human output wraps to terminal width without dropping content, uses
+no terminal styling, honors `NO_COLOR`, and is unwrapped when redirected.
+
+In JSON mode, each successful
 short-lived command writes one versioned object and a newline to stdout. For
-example, the read-only `next` command above returns this shape:
+example, `pl --json next` returns this shape:
 
 ```json
 {"schema_version":1,"command":"next","data":{"selection_reason":"next_open","pellet":{"id":"demo-1","project":"demo","number":1,"title":"Implement parser","description":"Reject malformed input.","external_id":"github:acme/demo#84","group":"parser","status":"open","priority":1024,"workspace":null,"created_at":"2026-08-29T20:00:00Z","updated_at":"2026-08-29T20:00:00Z","completed_at":null}}}
@@ -322,7 +331,7 @@ in-progress pellet. Linked worktrees are separate workspaces and may each own
 one different in-progress pellet in the same logical project. Ownership is a
 worktree coordination pointer, not an agent claim, lease, or authentication
 mechanism. Recovery from a removed worktree requires the explicit stored
-workspace ID and `--yes`; see the `release`, `close`, and `defer` forms in the
+workspace ID and a terminal confirmation (or `--yes` for automation); see the `release`, `close`, and `defer` forms in the
 [CLI specification](docs/cli-spec.md#pl-release).
 
 ### Review selected implementations
@@ -414,26 +423,28 @@ affects `next`, and is never created automatically when a pellet closes.
 
 ## Purge safely
 
-Closed pellets remain stored until explicitly purged. Preview the exact
-references first, then repeat with confirmation:
+Closed pellets remain stored until explicitly purged. In a terminal, one command
+shows the exact records and asks for approval:
 
 ```text
-pl purge --project demo --dry-run
-pl purge --project demo --yes
+pl purge --project demo
+pl purge --project demo --closed-before 2026-01-01
+pl memory remove MEMORY_ID
 ```
 
-To limit the selection, add a cutoff to both commands:
+For automation, preview first and explicitly approve the deletion:
 
 ```text
-pl purge --project demo --closed-before 2026-01-01 --dry-run
-pl purge --project demo --closed-before 2026-01-01 --yes
+pl --json purge --project demo --dry-run
+pl --json purge --project demo --yes
 ```
 
-Purge is permanent and database-level, so it always requires an explicit
-project and exactly one of `--dry-run` or `--yes`. It can delete only `closed`
-pellets—never open, in-progress, or deferred work—and never reuses their
-numbers. Purge does not delete memory. Remove one memory separately and
-irreversibly with `pl memory remove MEMORY_ID --yes`.
+Purge is permanent and always requires an explicit project. It selects only
+closed pellets and never reuses their numbers or deletes memories. The terminal
+approval binds the displayed records; changes during confirmation fail without
+deletion. Declining, EOF, or Ctrl-C cancels without mutation. Without terminal
+stdin and stdout, a required decision fails with an automation invocation;
+piped text is never consumed as an answer.
 
 ## Install the Pellets agent skill
 
@@ -441,8 +452,8 @@ Install the focused, instruction-only `pellets` skill for Codex, Claude, or
 both:
 
 ```text
-pl --human skill install
-pl skill install --scope repo --agent both --yes
+pl skill install
+pl --json skill install --scope repo --agent both --yes
 pl skill install --scope personal --agent codex --dry-run
 ```
 
@@ -452,11 +463,11 @@ These are ordinary untracked files until the user chooses to commit them; `pl`
 never changes the Git index or ignore files. Personal scope writes the same
 instructions beneath the operating-system home directory.
 
-The interactive wizard requires `--human` plus terminal stdin and stdout.
-Default JSON mode never prompts and requires explicit `--scope`, `--agent`,
+The default wizard uses terminal stdin and stdout and collects missing choices.
+Explicit `--json` mode never prompts and requires `--scope`, `--agent`,
 and `--yes` for writes. `--dry-run` returns every target and the full generated
-content without writing. Differing files require separate replacement consent
-or `--force`; a multi-agent install is preflighted and rolled back as one
+content without writing. One approval covers installation and any clearly displayed replacements.
+Automation additionally uses `--force` for differing files; a multi-agent install is preflighted and rolled back as one
 operation.
 
 The installed skill activates implicitly only when a prompt explicitly names

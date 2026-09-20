@@ -134,6 +134,8 @@ type PelletSearchOptions struct {
 // PelletPurgeOptions selects closed authoritative rows for permanent removal.
 // Confirmation and dry-run handling belong to the application/CLI boundary.
 type PelletPurgeOptions struct {
+	// Expected binds an interactive approval to the complete previewed set.
+	Expected        []Pellet
 	CompletedBefore *time.Time
 }
 
@@ -168,6 +170,8 @@ const (
 // CLI requires explicit confirmation before it constructs a non-nil recovery
 // workspace ID, and storage still verifies that ID against the stored owner.
 type PelletLifecycleRequest struct {
+	// Expected is the exact record displayed for interactive recovery.
+	Expected            *Pellet
 	Operation           PelletLifecycleOperation
 	RecoveryWorkspaceID *int64
 	// ExpectedImplementationRevision binds server finalization to its captured
@@ -190,6 +194,7 @@ type PelletRepository interface {
 	ListPellets(ctx context.Context, project ResolvedProject, options PelletListOptions) ([]Pellet, error)
 	SearchPellets(ctx context.Context, project ResolvedProject, options PelletSearchOptions) ([]Pellet, error)
 	PreviewClosedPelletPurge(ctx context.Context, project Project, options PelletPurgeOptions) ([]domain.PelletReference, error)
+	PlanClosedPelletPurge(ctx context.Context, project Project, options PelletPurgeOptions) ([]Pellet, error)
 	PurgeClosedPellets(ctx context.Context, project Project, options PelletPurgeOptions) ([]domain.PelletReference, error)
 	NextPellet(ctx context.Context, project ResolvedProject, externalID, group *string) (NextSelection, error)
 	StartNextPellet(ctx context.Context, project ResolvedProject, externalID, group *string) (NextSelection, error)

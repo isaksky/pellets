@@ -69,6 +69,12 @@ func TestServerCommandForegroundOwnsOutputAndRejectsFormatGlobals(t *testing.T) 
 	if err := command.Validate(GlobalOptions{Pretty: true}, WebOptions{}); err == nil || publicCode(err) != "format_not_supported" {
 		t.Fatalf("pretty validation error = %v", err)
 	}
+	if err := command.Validate(GlobalOptions{JSON: true}, WebOptions{}); err == nil || publicCode(err) != "format_not_supported" {
+		t.Fatalf("JSON validation error = %v", err)
+	}
+	if err := command.Validate(GlobalOptions{Human: true}, WebOptions{}); err != nil {
+		t.Fatalf("human server output: %v", err)
+	}
 	var stdout, stderr bytes.Buffer
 	err := command.RunForeground(context.Background(), Invocation{
 		Globals: GlobalOptions{Project: "demo"}, Input: WebOptions{Port: 8123, NoOpen: true},

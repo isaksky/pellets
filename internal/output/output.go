@@ -44,29 +44,37 @@ func (r JSONRenderer) Render(w io.Writer, command string, data any) error {
 }
 
 // HumanRenderer delegates presentation to the application result type.
-type HumanRenderer struct{}
+type HumanRenderer struct{ Width int }
 
-func (HumanRenderer) Render(w io.Writer, _ string, data any) error {
+func (r HumanRenderer) Render(w io.Writer, command string, data any) error {
 	human, ok := data.(HumanRenderable)
 	if !ok {
 		return fmt.Errorf("result type %T has no human renderer", data)
 	}
 	var buffer bytes.Buffer
-	if err := human.RenderHuman(&buffer); err != nil {
+	var err error
+	if detailed, ok := data.(interface{ RenderHumanCommand(io.Writer, string) error }); ok {
+		err = detailed.RenderHumanCommand(&buffer, command)
+	} else {
+		err = human.RenderHuman(&buffer)
+	}
+	if err != nil {
 		return err
 	}
-	return write(w, buffer.Bytes())
+	return write(w, []byte(wrapHuman(buffer.String(), r.Width)))
 }
 
-// WriteError emits the stable JSON error envelope. Errors remain JSON in human mode.
-func WriteError(w io.Writer, err error) error {
+// WriteError emits the stable compact JSON error envelope.
+func WriteError(w io.Writer, err error) error { return WriteJSONError(w, err, false) }
+
+func WriteJSONError(w io.Writer, err error, pretty bool) error {
 	public := domain.PublicError(err)
 	envelope := errorEnvelope{SchemaVersion: SchemaVersion}
 	envelope.Error.Code = public.Code
 	envelope.Error.Message = public.Message
 	envelope.Error.Details = public.Details
 
-	return encodeJSON(w, envelope, false)
+	return encodeJSON(w, envelope, pretty)
 }
 
 // IsWriteFailure reports whether rendering failed while writing completed output.

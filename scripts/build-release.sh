@@ -223,9 +223,9 @@ if [[ "$version_output" != "pl $version (JSON schema 1)" ]]; then
 fi
 
 git -C "$smoke_directory" init -q
-smoke_add="$(cd "$smoke_directory" && run_offline "$native_directory/pl" add 'release archive smoke')"
-smoke_start="$(cd "$smoke_directory" && run_offline "$native_directory/pl" start-next)"
-smoke_close="$(cd "$smoke_directory" && run_offline "$native_directory/pl" close smoke-1)"
+smoke_add="$(cd "$smoke_directory" && run_offline "$native_directory/pl" --json add 'release archive smoke')"
+smoke_start="$(cd "$smoke_directory" && run_offline "$native_directory/pl" --json start-next)"
+smoke_close="$(cd "$smoke_directory" && run_offline "$native_directory/pl" --json close smoke-1)"
 
 for expected_result in \
   "$smoke_add|\"command\":\"add\"|\"id\":\"smoke-1\"" \

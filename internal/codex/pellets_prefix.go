@@ -146,7 +146,7 @@ func resolvePelletsSkill(workspace string) (string, string, error) {
 			return "", "", fmt.Errorf("%w: read installed Pellets skill %q: %v", ErrToolUnavailable, path, err)
 		}
 	}
-	return "", "", fmt.Errorf("%w: install the Pellets Codex skill with `pl skill install --scope personal --agent codex --yes`, or add it at %s", ErrToolUnavailable, filepath.Join(workspace, ".agents", "skills", "pellets", "SKILL.md"))
+	return "", "", fmt.Errorf("%w: install the Pellets Codex skill with `pl --json skill install --scope personal --agent codex --yes`, or add it at %s", ErrToolUnavailable, filepath.Join(workspace, ".agents", "skills", "pellets", "SKILL.md"))
 }
 
 func buildPelletsPromptPrefix(skill, help, tool, version, skillSHA256, helpSHA256 string) string {
@@ -157,7 +157,7 @@ func buildPelletsPromptPrefix(skill, help, tool, version, skillSHA256, helpSHA25
 		"SNAPSHOT: Pellets executable " + tool + " (" + version + "); skill sha256 " + skillSHA256 + "; help sha256 " + helpSHA256 + "\n\n" +
 		"INSTALLED PELLETS SKILL\n---\n" + skill + "---\n\n" +
 		"REQUIRED INSTALLED PELLETS CLI HELP\n---\n" + help + "---\n\n" +
-		"STABLE PELLETS WORKFLOW\nUse `pl` as the authoritative local queue and memory interface for Pellets work. Before changing work, use the documented atomic selection and preserve the current workspace's exact in-progress pellet. Do not edit `.pellets` data directly, do not create a replacement queue, and do not silently overwrite user skills or Codex configuration. Keep durable knowledge in approved project memory only when appropriate; keep independently actionable future work as focused pellets.\n\n"
+		"STABLE PELLETS WORKFLOW\nUse `pl --json` as the authoritative local queue and memory interface for Pellets work. Always opt into `--json` for machine-readable, non-interactive commands; the default is human text and machine mode never implies approval. Help/version and the foreground server remain text. Before changing work, use the documented atomic selection and preserve the current workspace's exact in-progress pellet. Do not edit `.pellets` data directly, do not create a replacement queue, and do not silently overwrite user skills or Codex configuration. Keep durable knowledge in approved project memory only when appropriate; keep independently actionable future work as focused pellets.\n\n"
 }
 
 func normalizePromptText(text string) string {

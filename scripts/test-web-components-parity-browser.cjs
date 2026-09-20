@@ -76,7 +76,7 @@ async function measure(page, scene, build) {
   execFileSync('go', ['build', '-o', current, './cmd/pl'], {cwd: repository});
   fs.mkdirSync(fixture);
   execFileSync('git', ['init', '-q'], {cwd: fixture});
-  const cli = (...args) => JSON.parse(execFileSync(current, args, {cwd: fixture, encoding: 'utf8'})).data;
+  const cli = (...args) => JSON.parse(execFileSync(current, ['--json', ...args], {cwd: fixture, encoding: 'utf8'})).data;
   const first = cli('add', 'Preserve the existing interface', '--group', 'Interface');
   cli('add', 'Keep interactions predictable', '--group', 'Runtime');
   cli('add', 'Review interface work', '--review-targets', first.id);

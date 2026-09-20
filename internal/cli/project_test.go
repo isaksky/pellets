@@ -223,7 +223,7 @@ func TestProjectRenameCLIResolvesOldReferencesAndProtectsRedirectConflicts(t *te
 		t.Fatalf("non-interactive redirect conflict = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 	assertCompactErrorCode(t, stderr, "project_rename_confirmation_required")
-	if !strings.Contains(stderr, `"canonical_target":"baz"`) || !strings.Contains(stderr, `"retry_argv":["pl","--project","bar","project","rename","other","--delete-conflicting-redirects","--yes"]`) {
+	if !strings.Contains(stderr, `"canonical_target":"baz"`) || !strings.Contains(stderr, `"retry_argv":["pl","--json","--project","bar","project","rename","other","--delete-conflicting-redirects","--yes"]`) {
 		t.Fatalf("confirmation contract = %q", stderr)
 	}
 
@@ -240,7 +240,7 @@ func TestProjectRenameCLIResolvesOldReferencesAndProtectsRedirectConflicts(t *te
 	}
 	application.stdin = errorReader{}
 	stdout, stderr, exit = runTestApp(application, "--human", "--project", "bar", "project", "rename", "other")
-	if exit != 1 || !strings.Contains(stderr, `"code":"internal_error"`) {
+	if exit != 1 || !strings.Contains(stderr, "internal_error") {
 		t.Fatalf("interactive interruption = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 	stdout, stderr, exit = runTestApp(application, "project", "show", "bar")

@@ -13,7 +13,7 @@ const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-browser-'));
 const fixture = path.join(temporary, 'browser');
 const binary = path.join(temporary, process.platform === 'win32' ? 'pl.exe' : 'pl');
 let server, browser;
-const cli = (...args) => JSON.parse(execFileSync(binary, args, {cwd: fixture, encoding: 'utf8'}));
+const cli = (...args) => JSON.parse(execFileSync(binary, ['--json', ...args], {cwd: fixture, encoding: 'utf8'}));
 const until = async (predicate, message) => {
   const deadline = Date.now() + 10000;
   while (Date.now() < deadline) {

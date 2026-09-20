@@ -127,12 +127,12 @@ func TestCompiledServerDiscoveryStartupAndCleanShutdown(t *testing.T) {
 	}
 
 	invalid := runFoundationCLI(t, executable, root, "server", "--port", "080", "--no-open")
-	if invalid.exit != 2 || !strings.Contains(invalid.stderr, `"code":"invalid_port"`) || invalid.stdout != "" {
+	if invalid.exit != 2 || !strings.HasPrefix(invalid.stderr, "Error:") || !strings.Contains(invalid.stderr, "(invalid_port)") || invalid.stdout != "" {
 		t.Fatalf("invalid port = exit %d stdout %q stderr %q", invalid.exit, invalid.stdout, invalid.stderr)
 	}
 
 	alias := runFoundationCLI(t, executable, root, "web", "--port", "080", "--no-open")
-	if alias.exit != 2 || !strings.Contains(alias.stderr, `"code":"invalid_port"`) || alias.stdout != "" {
+	if alias.exit != 2 || !strings.HasPrefix(alias.stderr, "Error:") || !strings.Contains(alias.stderr, "(invalid_port)") || alias.stdout != "" {
 		t.Fatalf("web compatibility alias invalid port = exit %d stdout %q stderr %q", alias.exit, alias.stdout, alias.stderr)
 	}
 }

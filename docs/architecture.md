@@ -22,7 +22,7 @@ Each invocation follows the same shape:
 3. For current-project commands, ask Git for the worktree root, worktree-specific Git directory, and shared common directory. Use the shared repository binding, discover an existing database, or create one at the worktree root, normalize the identities relative to its root, reuse an existing logical project's current canonical code or allocate a deterministic generated code, and attach the current workspace when needed.
 4. Open/configure/migrate SQLite and resolve the registered current project/workspace for the requested operation.
 5. Execute one application operation through a narrow storage interface.
-6. Emit one compact, versioned JSON result to stdout, or one structured JSON error to stderr.
+6. Emit readable text by default, or explicit `--json` success/error envelopes to stdout/stderr.
 
 `init-db`, database-level project inspection/purge, and skill installation vary in discovery behavior as described in [cli-spec.md](cli-spec.md).
 
@@ -102,7 +102,7 @@ See [managed Codex runtime](codex-runtime.md) for distribution and recovery.
 
 `pl skill install` embeds one version-controlled, instruction-only `SKILL.md` template with portable `name` and `description` frontmatter. Its source checkout and installed bytes use LF line endings on every platform, and Codex and Claude receive byte-identical instructions; only their destination paths differ. No script, plugin manifest, MCP configuration, `AGENTS.md`, `CLAUDE.md`, settings file, runtime download, or prompt-framework dependency is generated.
 
-The CLI owns the small line-oriented wizard behind injected input, output, and terminal detection. The default JSON interface never prompts. Interactive `--human` mode prompts only when stdin and stdout are terminals, shows the Git root when repository scope is available, previews exact destinations, and obtains replacement and final-write confirmation separately. Parsing and enum validation occur before working-directory or Git inspection.
+The CLI owns the small line-oriented wizard behind injected input, output, and terminal detection. Explicit JSON mode never prompts. Default human mode prompts only when stdin and stdout are terminals, shows the Git root when repository scope is available, previews exact destinations, and obtains one installation/replacement approval. Parsing and enum validation occur before working-directory or Git inspection.
 
 The application service resolves the personal root with the platform home-directory API and the repository root with Git's existing worktree discovery. Planning is read-only: it computes the complete target matrix, checks lexical containment, walks every existing parent with `Lstat`, refuses symlink and non-regular paths, verifies usable parent permissions, reads existing regular files, and classifies them as missing, identical, or different. Dry-run stops after this plan and returns the embedded content.
 
@@ -169,7 +169,7 @@ A mutating command such as `pl start foo-12` flows as follows:
 6. Load the pellet and validate the `open -> in_progress` transition against current workspace ownership.
 7. Update it with the current workspace. A partial unique index rejects a second in-progress pellet in that workspace, and a composite foreign key rejects cross-project ownership.
 8. Commit.
-9. Render the result as JSON v1.
+9. Render readable text or explicitly selected JSON v1.
 
 Expected domain conflicts—missing pellet, wrong status, `workspace_already_in_progress`, or `pellet_in_progress_elsewhere`—are typed errors. They are not detected by parsing SQLite error strings in the CLI layer.
 
@@ -415,7 +415,7 @@ Use typed errors with stable machine codes, for example:
 - `schema_too_new`
 - `confirmation_required`
 
-Wrap internal causes for diagnostics, but never expose stack traces or raw SQL in default JSON. Human output may include a concise recovery hint. Exit-code mapping is specified in [cli-spec.md](cli-spec.md#exit-codes).
+Wrap internal causes for diagnostics, but never expose stack traces or raw SQL in public output. Human output may include a concise recovery hint. Exit-code mapping is specified in [cli-spec.md](cli-spec.md#exit-codes).
 
 ## Cross-platform distribution
 

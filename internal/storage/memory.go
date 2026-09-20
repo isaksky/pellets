@@ -59,6 +59,7 @@ type MemoryRepository interface {
 	ApproveMemory(ctx context.Context, project Project, memoryID int64) (Memory, error)
 	UpdateMemory(ctx context.Context, project Project, memoryID int64, text string) (Memory, error)
 	RemoveMemory(ctx context.Context, project Project, memoryID int64) (Memory, error)
+	RemoveMemoryConfirmed(ctx context.Context, project Project, expected Memory) (Memory, error)
 	RebuildMemorySearchIndex(ctx context.Context) error
 	Close() error
 }

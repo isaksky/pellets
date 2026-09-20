@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -45,9 +46,10 @@ type SkillEnvironment struct {
 
 // SkillTargetPlan is one exact destination and its read-only preflight state.
 type SkillTargetPlan struct {
-	Agent SkillAgent `json:"agent"`
-	Path  string     `json:"path"`
-	State string     `json:"state"`
+	Agent  SkillAgent `json:"agent"`
+	Path   string     `json:"path"`
+	State  string     `json:"state"`
+	digest [32]byte
 }
 
 // SkillPlan is a complete, write-free installation plan.
@@ -189,11 +191,12 @@ func (installer SkillInstaller) Plan(environment SkillEnvironment, scope SkillSc
 	}
 
 	for index := range plan.Targets {
-		state, _, _, err := inspectSkillTarget(root, plan.Targets[index].Path, []byte(plan.Content))
+		state, original, _, err := inspectSkillTarget(root, plan.Targets[index].Path, []byte(plan.Content))
 		if err != nil {
 			return SkillPlan{}, err
 		}
 		plan.Targets[index].State = state
+		plan.Targets[index].digest = sha256.Sum256(original)
 	}
 	return plan, nil
 }
@@ -224,6 +227,14 @@ func (installer SkillInstaller) Apply(plan SkillPlan, allowReplacement bool) (Sk
 	if err != nil {
 		return SkillApplyResult{}, err
 	}
+	if len(plan.Targets) != len(refreshed.Targets) {
+		return SkillApplyResult{}, skillPlanChanged()
+	}
+	for i, target := range refreshed.Targets {
+		if target != plan.Targets[i] {
+			return SkillApplyResult{}, skillPlanChanged()
+		}
+	}
 	if !allowReplacement {
 		if err := installer.ConflictError(refreshed); err != nil {
 			return SkillApplyResult{}, err
@@ -249,6 +260,9 @@ func (installer SkillInstaller) Apply(plan SkillPlan, allowReplacement bool) (Sk
 		currentState, original, mode, inspectErr := inspectSkillTarget(refreshed.Root, target.Path, []byte(refreshed.Content))
 		if inspectErr != nil {
 			return SkillApplyResult{}, rollbackSkillInstallation(applied, createdDirectories, writer, target.Path, inspectErr)
+		}
+		if currentState != target.State || sha256.Sum256(original) != target.digest {
+			return SkillApplyResult{}, rollbackSkillInstallation(applied, createdDirectories, writer, target.Path, skillPlanChanged())
 		}
 		if currentState == "identical" {
 			result.Result = "idempotent"
@@ -558,4 +572,8 @@ func invalidSkillAgent(value string) error {
 		fmt.Sprintf("invalid skill agent %q; expected codex, claude, or both", value),
 		map[string]any{"agent": value, "allowed": []string{"codex", "claude", "both"}},
 	)
+}
+
+func skillPlanChanged() error {
+	return domain.NewError(domain.Conflict, "skill_plan_changed", "skill destinations changed during confirmation; inspect them and retry", nil)
 }

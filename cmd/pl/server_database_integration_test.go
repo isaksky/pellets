@@ -73,9 +73,10 @@ func TestCompiledServerOutsideGit(t *testing.T) {
 				createFoundationRepository(t, child)
 				decodeFoundationSuccess[foundationPellet](t, runFoundationCLI(t, executable, child, "add", "child task"), "add")
 				result := runFoundationCLI(t, executable, root, command, "--no-open")
-				assertFoundationErrorPath(t, result, 3, "database_not_found",
-					"no Pellets database was found in the current directory or its ancestors; run inside a Git worktree or create a common-parent database with pl init-db",
-					"start_path", foundationCanonicalPath(t, root))
+				if result.exit != 3 || result.stdout != "" || !strings.Contains(result.stderr, "Error:") ||
+					!strings.Contains(result.stderr, "database_not_found") || !strings.Contains(result.stderr, foundationCanonicalPath(t, root)) {
+					t.Fatalf("human server discovery error = %#v", result)
+				}
 				if _, err := os.Stat(discovery.DatabasePath(root)); !os.IsNotExist(err) {
 					t.Fatalf("startup created an outside-Git database: %v", err)
 				}

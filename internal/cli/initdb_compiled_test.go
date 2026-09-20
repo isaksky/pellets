@@ -307,7 +307,7 @@ func buildTestExecutable(t *testing.T) string {
 
 func runCompiledCLI(t *testing.T, executable, directory string, args ...string) (string, string, int) {
 	t.Helper()
-	command := exec.Command(executable, args...)
+	command := exec.Command(executable, machineTestArgs(args)...)
 	command.Dir = directory
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout

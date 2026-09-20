@@ -138,10 +138,10 @@ Text replacement sends the old text to the external-content FTS delete command, 
 ### Remove
 
 ```text
-pl memory remove MEMORY_ID --yes
+pl memory remove MEMORY_ID [--yes]
 ```
 
-Permanently delete one memory and its derived FTS row. Task purge never calls this command implicitly.
+Permanently delete one memory and its derived FTS row. In a terminal, display the exact record and ask for approval; agents and scripts use `pl --json memory remove MEMORY_ID --yes`. Decline, EOF, or Ctrl-C cancels without writes. The deletion transaction revalidates the displayed record. Task purge never calls this command implicitly.
 
 ## JSON shape
 

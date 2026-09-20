@@ -25,7 +25,7 @@ func MemoryCommand(manager app.MemoryManager) Command {
 			"  pl memory show MEMORY_ID\n" +
 			"  pl memory search QUERY [--approved-only] [--limit N]\n" +
 			"  pl memory approve MEMORY_ID\n" +
-			"  pl memory remove MEMORY_ID --yes\n\n" +
+			"  pl memory remove MEMORY_ID [--yes]\n\n" +
 			"Memory text must be non-empty valid UTF-8 and at most 1,048,576 bytes.",
 		Parse:                 parseMemory,
 		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
@@ -90,6 +90,27 @@ func MemoryCommand(manager app.MemoryManager) Command {
 				}
 				return newMemoryData(memory), nil
 			case "remove":
+				if !input.Yes {
+					memory, err := manager.Show(ctx, database, invocation.WorkingDirectory, invocation.Globals.Project, input.ID)
+					if err != nil {
+						return nil, err
+					}
+					if _, err := fmt.Fprintf(invocation.Stdout, "Remove memory %d from %s (%s):\n%s\n", memory.ID, memory.ProjectCode, memory.CreatedBy, memory.Text); err != nil {
+						return nil, err
+					}
+					confirmed, err := newInteraction(invocation.Stdin, invocation.Stdout).confirm("Permanently remove this memory? [y/N]: ")
+					if err != nil {
+						return nil, err
+					}
+					if !confirmed {
+						return cancelledData{}, nil
+					}
+					removed, err := manager.RemoveConfirmed(ctx, database, invocation.WorkingDirectory, invocation.Globals.Project, memory)
+					if err != nil {
+						return nil, err
+					}
+					return newMemoryData(removed), nil
+				}
 				memory, err := manager.Remove(ctx, database, invocation.WorkingDirectory, invocation.Globals.Project, input.ID)
 				if err != nil {
 					return nil, err
@@ -103,6 +124,7 @@ func MemoryCommand(manager app.MemoryManager) Command {
 }
 
 type memoryInput struct {
+	Yes          bool
 	Action       string
 	Text         *string
 	File         *string
@@ -291,7 +313,6 @@ func parseMemorySearch(args []string) (memoryInput, error) {
 func parseMemoryRemove(args []string) (memoryInput, error) {
 	var input memoryInput
 	memoryIDSet := false
-	yes := false
 	seen := make(map[string]bool)
 	for len(args) > 0 {
 		argument := args[0]
@@ -319,18 +340,13 @@ func parseMemoryRemove(args []string) (memoryInput, error) {
 		if hasValue {
 			return memoryInput{}, flagTakesNoValue(name)
 		}
-		yes = true
+		input.Yes = true
 		args = args[1:]
 	}
 	if !memoryIDSet {
 		return memoryInput{}, domain.NewError(domain.Usage, "missing_memory_id", "memory remove requires a memory ID", nil)
 	}
-	if !yes {
-		return memoryInput{}, domain.NewError(
-			domain.Confirmation, "confirmation_required", "memory removal requires --yes",
-			map[string]any{"memory_id": input.ID},
-		)
-	}
+
 	return input, nil
 }
 
@@ -435,11 +451,7 @@ func (data memoryData) RenderHuman(writer io.Writer) error {
 	if data.HumanApproved {
 		approval = "approved"
 	}
-	text := data.Text
-	if data.Snippet != nil {
-		text = *data.Snippet
-	}
-	_, err := fmt.Fprintf(writer, "%d  %s  %s  %s\n", data.ID, data.CreatedBy, approval, text)
+	_, err := fmt.Fprintf(writer, "%d  %s  %s  %s\n", data.ID, data.CreatedBy, approval, data.Text)
 	return err
 }
 
@@ -456,4 +468,26 @@ func (data memoryListData) RenderHuman(writer io.Writer) error {
 		}
 	}
 	return nil
+}
+
+func (data memoryData) RenderHumanCommand(w io.Writer, command string) error {
+	if command == "memory show" {
+		return output.RenderDetails(w, data)
+	}
+	switch command {
+	case "memory add":
+		approval := "unapproved"
+		if data.HumanApproved {
+			approval = "approved"
+		}
+		_, err := fmt.Fprintf(w, "Added memory %d to %s (%s, %s).\n", data.ID, data.Project, data.CreatedBy, approval)
+		return err
+	case "memory approve":
+		_, err := fmt.Fprintf(w, "Approved memory %d in %s.\n", data.ID, data.Project)
+		return err
+	case "memory remove":
+		_, err := fmt.Fprintf(w, "Removed memory %d from %s.\n", data.ID, data.Project)
+		return err
+	}
+	return data.RenderHuman(w)
 }

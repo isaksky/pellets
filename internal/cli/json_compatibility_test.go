@@ -143,7 +143,7 @@ func TestJSONV1EveryCommandErrorGoldenAndExitCode(t *testing.T) {
 		{label: "memory-approve-error", exit: 2, code: "invalid_memory_id", args: []string{"memory", "approve", "01"}},
 		{label: "memory-remove-error", exit: 6, code: "confirmation_required", args: []string{"memory", "remove", "1"}},
 		{label: "skill-install-error", exit: 2, code: "missing_skill_choices", args: []string{"skill", "install"}},
-		{label: "server-error", exit: 2, code: "invalid_port", args: []string{"server", "--port", "080"}},
+		{label: "server-error", exit: 2, code: "invalid_port", args: []string{"--json", "server", "--port", "080"}},
 	}
 
 	var golden strings.Builder

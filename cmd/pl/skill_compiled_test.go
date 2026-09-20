@@ -213,7 +213,7 @@ func TestCompiledSkillInstallerWithoutPelletsDatabase(t *testing.T) {
 
 func runCompiledSkill(t *testing.T, executable, directory, home string, args ...string) foundationResult {
 	t.Helper()
-	command := exec.Command(executable, args...)
+	command := exec.Command(executable, machineCLIArgs(args)...)
 	command.Dir = directory
 	command.Env = compiledSkillEnvironment(home)
 	command.Stdin = strings.NewReader("input must not be read in JSON mode")

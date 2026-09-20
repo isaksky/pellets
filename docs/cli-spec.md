@@ -1,6 +1,6 @@
 # CLI Specification
 
-The product is Pellets; the executable is `pl`. The CLI is designed for coding agents first. Compact JSON is the default interface.
+The product is Pellets; the executable is `pl`. Readable text is the default interface. Agents and scripts explicitly select `--json` for stable, non-interactive JSON v1 output. This changes the former default; existing machine consumers must add `--json` before the command.
 
 See [project-goals.md](project-goals.md) for product intent, [data-model.md](data-model.md) for invariants, and [memory.md](memory.md) for memory behavior.
 
@@ -19,20 +19,21 @@ pl [global-options] <command> [command-options] [arguments]
 - External IDs are optional, opaque, case-sensitive strings matched exactly by filters.
 - Groups are optional, opaque, case-sensitive strings. A pellet has at most one group, and group filters are exact and project-scoped.
 - Dates accepted from the CLI use RFC 3339 or `YYYY-MM-DD`; stored dates use SQLite Julian `REAL` values.
-- Results are compact JSON followed by one newline unless `--human` is set.
+- Results and errors are human-readable text unless `--json` or `--pretty` is set; redirection never changes the selected format.
 - Unknown flags and positional arguments are errors; the parser never silently guesses.
 
 ## Global options
 
 | Option | Meaning |
 |---|---|
-| `--human` | Render concise human-readable text instead of JSON. |
-| `--pretty` | Pretty-print JSON. Mutually exclusive with `--human`. |
+| `--human` | Explicit alias for the default readable text. Conflicts with `--json` and `--pretty`. |
+| `--json` | Compact JSON success/error envelopes; never prompt. |
+| `--pretty` | Pretty JSON successes and errors; implies JSON and never prompts. May be combined with `--json`. |
 | `--project CODE` | Select a registered project explicitly where the command permits it. |
 | `--help` | Print help to stdout and exit successfully. |
 | `--version` | Print executable and JSON schema versions. |
 
-There is no `--json` flag because JSON is already the default. There is no color in JSON. Human output uses color only on a terminal and honors `NO_COLOR`.
+No mode adds color or terminal control codes, honoring `NO_COLOR`. Human results wrap to the terminal width without truncating content; redirected results are unwrapped. Help/version remain text in all modes. Format flags are global and precede the command, including when requesting JSON validation errors.
 
 ## Database and project selection
 
@@ -118,7 +119,7 @@ Renaming to the current canonical code is an idempotent success. Renaming to a r
 
 If `NEW_CODE` is a redirect owned by another project, JSON and every noninteractive invocation return `project_rename_confirmation_required` without reading stdin. Its details contain every conflicting `code` and `canonical_target`, the warning that deletion can break or reinterpret old pellet references, and the exact `retry_argv`. Automation may retry only with both `--delete-conflicting-redirects --yes`. Those flags must be supplied together. The rename transaction revalidates the complete displayed conflict set and deletes only those rules; a changed set returns `project_redirect_conflicts_changed` without writes.
 
-Only terminal `--human` mode prompts. It lists every conflicting rule and target, repeats the warning, and asks `Delete only these redirect rules and rename OLD_CODE to NEW_CODE? [y/N]:`. Answering no, EOF, or interruption cancels without a write. Answering yes performs the same atomic conflict revalidation and rename. A failed rename leaves project and redirect state unchanged.
+Default human mode prompts when both stdin and stdout are terminals. It lists every conflicting rule and target, repeats the warning, and asks `Delete only these redirect rules and rename OLD_CODE to NEW_CODE? [y/N]:`. Answering no, EOF, or interruption cancels without a write. Answering yes performs the same atomic conflict revalidation and rename. A failed rename leaves project and redirect state unchanged.
 
 ### `pl add`
 
@@ -302,7 +303,7 @@ In one immediate transaction, resume the current workspace's pellet or select an
 
 ```text
 pl release PELLET
-pl release PELLET --recover-workspace WORKSPACE_ID --yes
+pl release PELLET --recover-workspace WORKSPACE_ID [--yes]
 ```
 
 The owning workspace returns its `in_progress` pellet to `open`, clearing ownership while retaining active priority. Another workspace is rejected by default. The second form is an explicit confirmed recovery for a removed or unavailable worktree; the supplied ID must match the stored owner and the response names that workspace. It is not authentication or silent stealing.
@@ -311,10 +312,10 @@ The owning workspace returns its `in_progress` pellet to `open`, clearing owners
 
 ```text
 pl close PELLET
-pl close PELLET --recover-workspace WORKSPACE_ID --yes
+pl close PELLET --recover-workspace WORKSPACE_ID [--yes]
 ```
 
-Move an `open` or current-workspace `in_progress` pellet to `closed`, set `completed_at`, and clear priority and workspace ownership. Repeating `close` on a closed pellet is idempotent and does not replace the original completion time. Closing another workspace's in-progress pellet requires `--recover-workspace WORKSPACE_ID --yes` with the same recovery semantics as `release`.
+Move an `open` or current-workspace `in_progress` pellet to `closed`, set `completed_at`, and clear priority and workspace ownership. Repeating `close` on a closed pellet is idempotent and does not replace the original completion time. Closing another workspace's in-progress pellet requires `--recover-workspace WORKSPACE_ID` and terminal confirmation (or `--yes` for automation) with the same recovery semantics as `release`.
 
 ### `pl reopen`
 
@@ -328,10 +329,10 @@ Move a `closed` or `maybe_later` pellet to `open`, clear `completed_at` and any 
 
 ```text
 pl defer PELLET
-pl defer PELLET --recover-workspace WORKSPACE_ID --yes
+pl defer PELLET --recover-workspace WORKSPACE_ID [--yes]
 ```
 
-Move an `open` or current-workspace `in_progress` pellet to `maybe_later` and clear priority and workspace ownership. Repeating it on a deferred pellet is idempotent. Deferring another workspace's in-progress pellet requires `--recover-workspace WORKSPACE_ID --yes`. Deferred pellets are excluded from `next` and the active priority index until reopened.
+Move an `open` or current-workspace `in_progress` pellet to `maybe_later` and clear priority and workspace ownership. Repeating it on a deferred pellet is idempotent. Deferring another workspace's in-progress pellet requires `--recover-workspace WORKSPACE_ID` and terminal confirmation (or `--yes` for automation). Deferred pellets are excluded from `next` and the active priority index until reopened.
 
 ### `pl search`
 
@@ -349,14 +350,14 @@ Search includes every status by default so closed pellets remain discoverable in
 Permanently delete closed pellets from a project.
 
 ```text
-pl purge --project CODE [--closed-before DATE] --yes
+pl purge --project CODE [--closed-before DATE] [--yes]
 pl purge --project CODE [--closed-before DATE] --dry-run
 ```
 
 - With no date filter, select every closed pellet in the project.
 - With `--closed-before`, select only pellets completed before the cutoff.
 - Never select open, in-progress, or `maybe_later` pellets.
-- `--yes` is required for deletion; there is no interactive prompt in default JSON mode.
+- Terminal human mode displays the exact closed records and asks once. `--yes` is required when prompts are unavailable; JSON mode never prompts. The exact displayed set and complete record versions are revalidated under the writer lock before deletion.
 - `--dry-run` returns the count and references without deleting.
 - Purge does not delete memories or reuse pellet numbers.
 
@@ -399,9 +400,9 @@ The exact destination matrix is:
 
 `<git-root>` is Git's resolved current worktree root, including linked-worktree semantics. `<home>` comes from the operating system's user-home API. A personal selection never substitutes a repository-relative location. Repository installation creates ordinary untracked files the user may choose to commit. The command never edits `.gitignore`, Git local exclude, the index, commits, `AGENTS.md`, `CLAUDE.md`, settings, or `.pellets` data.
 
-Compact JSON is the default, so JSON invocations never prompt or read stdin. They require both `--scope` and `--agent`; a write also requires `--yes`. Missing choices return `missing_skill_choices` with exit 2. A write without an available final confirmation returns `confirmation_required` with exit 6. Unknown choice values are `invalid_skill_scope` or `invalid_skill_agent`, and unavailable repository scope is `repository_scope_unavailable`; all fail before target creation.
+Explicit `--json` and `--pretty` invocations never prompt or read stdin implicitly. They require both `--scope` and `--agent`; a write also requires `--yes`. Missing choices return `missing_skill_choices` with exit 2. A write without an available final confirmation returns `confirmation_required` with exit 6. Unknown choice values are `invalid_skill_scope` or `invalid_skill_agent`, and unavailable repository scope is `repository_scope_unavailable`; all fail before target creation.
 
-The wizard runs only with `--human` when both stdin and stdout are interactive terminals. Supplied choices are retained and only missing choices are asked. When Git is available, the scope prompt is exactly:
+The wizard runs by default when both stdin and stdout are interactive terminals. Supplied choices are retained and only missing choices are asked. When Git is available, the scope prompt is exactly:
 
 ```text
 Git repository root: <git-root>
@@ -430,8 +431,7 @@ Choose agent target:
 Agent:
 ```
 
-After read-only preflight, human mode prints the selected scope, the repository root when applicable, and every exact destination. A differing regular file is labeled `(different existing file)` and an identical file `(already current)`. A differing file is never silently overwritten: without `--force`, interactive mode asks `Replace every differing existing skill file? [y/N]:`; noninteractive mode returns `skill_content_conflict` with every conflicting agent/path and exit 4. `--yes` does not suppress this replacement question. The final prompt is `Install the Pellets skill at every displayed destination? [y/N]:` unless `--yes` is present.
-
+After read-only preflight, terminal human mode prints the selected scope, the repository root when applicable, and every exact destination. A differing regular file is labeled `(different existing file)` and an identical file `(already current)`. One approval covers all displayed installation and replacement work: `Install the Pellets skill and replace every differing existing skill file at these destinations? [y/N]:` when replacing, otherwise `Install the Pellets skill at every displayed destination? [y/N]:`. `--yes` skips installation approval but does not approve differing-file replacement; `--force` supplies replacement approval. Fully identical targets need no confirmation or write. The installer revalidates the planned paths and contents; changes during confirmation return `skill_plan_changed` without replacement.
 Empty input, `0`, `cancel`, `c`, `q`, `quit`, `n`, or `no` cancels at the applicable prompt. Cancellation exits 0, writes no files, and reports `status: "cancelled"` with per-target `result: "cancelled"` for targets already planned. Invalid interactive answers are explained and retried without writing.
 
 Normal JSON results use `command: "skill install"`:
@@ -459,7 +459,7 @@ pl [--project CODE] server [--port PORT] [--no-open]
 - Print `http://127.0.0.1:PORT` followed by one newline after the listener is ready. This foreground command is the sole exception to the normal JSON-success envelope.
 - Unless `--no-open` is present, open the default browser only after readiness. A launcher failure writes a useful warning to stderr while leaving the printed URL and server usable.
 - Remain in the foreground until interrupted. Interruption performs bounded graceful shutdown; `pl server` never installs, daemonizes, or registers a background service. It owns any Codex execution it starts, so closing a browser tab does not stop work and stopping the server does.
-- `--human` and `--pretty` are rejected because the command owns its foreground output.
+- `--json` and `--pretty` are rejected with `format_not_supported` because the command emits a plain listener URL. Default output and `--human` are supported.
 
 `pl web [--port PORT] [--no-open]` remains a deprecated compatibility alias.
 It has identical parsing and foreground behavior, but its `--help` output uses
@@ -582,7 +582,7 @@ No available pellet is not an error:
 
 ### Errors
 
-Errors emit one compact object to stderr and nothing to stdout:
+With `--json`, errors emit one compact object to stderr and nothing to stdout (`--pretty` indents the same envelope):
 
 ```json
 {"schema_version":1,"error":{"code":"workspace_already_in_progress","message":"workspace 7 already owns foo-9","details":{"workspace_id":7,"pellet_id":"foo-9"}}}
@@ -594,7 +594,7 @@ SQLite lock contention is `database_busy` with exit code 4 and a stable string `
 
 ## Human-readable output
 
-`--human` is intended for inspection, not scripting. It may use tables for lists and labeled fields for `show`, but must remain concise. Human formatting is not stable across releases.
+Default human output (also selected by `--human`) is intended for inspection, not scripting. It may use tables for lists and labeled fields for `show`, but must remain concise. Human formatting is not stable across releases.
 
 Examples:
 
@@ -606,14 +606,14 @@ foo-12  open  p=2048  Add parser
 No open pellets.
 ```
 
-Never truncate titles or descriptions when stdout is not a terminal. Terminal truncation must be visibly marked.
+Never truncate titles or descriptions when stdout is not a terminal. Terminal output wraps without dropping data.
 
 ## stdin, stdout, and stderr
 
-- stdin is read only when an explicit option names `-`, such as `--description-file -` or `pl memory add --file -`, or by a documented `--human` wizard or project-rename confirmation when both stdin and stdout are terminals.
+- stdin is read only when an explicit option names `-`, such as `--description-file -` or `pl memory add --file -`, or by a documented default-human wizard or confirmation when both stdin and stdout are terminals.
 - JSON commands never read stdin implicitly; this prevents an agent invocation from hanging.
-- stdout contains the successful result only. For `pl server`, that result is the ready listener URL rather than JSON.
-- stderr contains the structured error only, plus diagnostics only when an explicit future debug flag is used. A non-fatal `pl server` browser-launch warning is the documented exception.
+- stdout contains the successful result, plus choices/previews/prompts only during terminal human interaction. For `pl server`, that result is the ready listener URL rather than JSON.
+- stderr contains readable errors and actionable details by default, or the stable JSON error envelope in machine mode. A non-fatal `pl server` browser-launch warning is the documented exception.
 - Help and version text go to stdout with exit code 0.
 - Broken-pipe errors terminate quietly with a nonzero operational exit.
 
@@ -633,11 +633,13 @@ Specific machine error codes disambiguate cases that share an exit code.
 
 ## Confirmation and idempotency rules
 
-- `purge` requires `--yes`; `--human` does not weaken this rule.
-- `memory remove` requires `--yes`.
-- Cross-workspace recovery requires both the exact stored `--recover-workspace WORKSPACE_ID` and `--yes`; human output does not weaken this rule.
+Routine add/edit/move/lifecycle commands need no approval. Consequential deletion, replacement and explicit recovery use a default-no decision. Decline, blank input, EOF (including a partial answer) or Ctrl-C while prompting cancels cleanly without mutation. Non-TTY invocations never read confirmation from stdin; they fail with a readable automation invocation. `--json` never implicitly approves an action. Changes to displayed records during confirmation fail atomically with `confirmation_changed`; project and skill plans retain their specific conflict diagnostics.
+
+- `purge` displays and confirms the exact records in a terminal, or requires `--yes` without prompts.
+- `memory remove` displays the project, memory ID, provenance and text for confirmation in a terminal, or requires `--yes`. Its displayed record version is rechecked under the deletion lock.
+- Cross-workspace recovery always requires the explicitly requested `--recover-workspace WORKSPACE_ID`. Terminal mode displays the pellet, exact stored owner and paths, then asks once; noninteractive mode requires `--yes`. Ownership checks and atomic record revalidation still apply.
 - Project rename deletes foreign redirect conflicts only after terminal human confirmation or an exact noninteractive retry with both `--delete-conflicting-redirects` and `--yes`; the transaction revalidates the displayed set.
-- Noninteractive `skill install` writes require `--yes`; interactive cancellation is a successful write-free result. Differing skill files additionally require `--force` or the separate interactive replacement confirmation.
+- Noninteractive `skill install` writes require `--yes`; interactive cancellation is a successful write-free result. Differing skill files additionally require `--force` or one combined interactive installation/replacement confirmation.
 - `init-db` and automatic bootstrap never overwrite an existing database.
 - `start`, `close`, `reopen`, and `defer` are idempotent only when the pellet is already in their target status.
 - Repeating `add` without `--request-id` creates another pellet. With a request ID, identical creation inputs replay the original result for two days; conflicting inputs fail. Every successful add prunes older request records without deleting pellets.

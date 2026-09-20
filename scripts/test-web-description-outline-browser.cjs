@@ -8,7 +8,7 @@ const {chromium, webkit} = require('playwright');
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-outline-browser-'));
 const binary = path.join(temporary, 'pl'), fixture = path.join(temporary, 'outline');
-const cli = (...args) => JSON.parse(execFileSync(binary, args, {cwd: fixture, encoding: 'utf8'})).data;
+const cli = (...args) => JSON.parse(execFileSync(binary, ['--json', ...args], {cwd: fixture, encoding: 'utf8'})).data;
 let server, browser;
 const until = async (fn, message) => {
   const end = Date.now() + 15000;

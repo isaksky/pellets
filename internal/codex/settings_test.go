@@ -145,6 +145,9 @@ func TestPelletsPromptPrefixSnapshotsStableBytesAndRefreshes(t *testing.T) {
 	if stable < 0 || help <= stable || workflow <= help || !strings.Contains(first.Text, "$ pl start-next --help\n") {
 		t.Fatalf("unstable prefix ordering: %q", first.Text)
 	}
+	if !strings.Contains(first.Text[workflow:], "Use `pl --json`") || !strings.Contains(first.Text[workflow:], "machine mode never implies approval") {
+		t.Fatal("captured workflow must explicitly request non-interactive JSON without approving destructive work")
+	}
 	if strings.Count(first.Text, "INSTALLED PELLETS SKILL\n---\n"+skill+"---\n\n") != 1 || first.SkillSHA256 != digest([]byte(skill)) {
 		t.Fatal("prefix does not retain the exact canonical skill and its digest")
 	}

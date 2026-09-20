@@ -44,7 +44,7 @@ func TestGoldenOutputs(t *testing.T) {
 		{
 			name:   "compact JSON",
 			app:    NewWithCommands("test", statusCommand()),
-			args:   []string{"status"},
+			args:   []string{"--json", "status"},
 			stdout: "compact.golden",
 		},
 		{
@@ -74,21 +74,21 @@ func TestGoldenOutputs(t *testing.T) {
 		{
 			name:   "unknown command",
 			app:    New("test"),
-			args:   []string{"wat"},
+			args:   []string{"--json", "wat"},
 			exit:   2,
 			stderr: "unknown-command.golden",
 		},
 		{
 			name:   "unknown global flag",
 			app:    New("test"),
-			args:   []string{"--wat"},
+			args:   []string{"--json", "--wat"},
 			exit:   2,
 			stderr: "unknown-flag.golden",
 		},
 		{
 			name:   "unknown command flag",
 			app:    NewWithCommands("test", statusCommand()),
-			args:   []string{"status", "--wat"},
+			args:   []string{"--json", "status", "--wat"},
 			exit:   2,
 			stderr: "unknown-flag.golden",
 		},
@@ -141,7 +141,7 @@ func TestStrictGlobalParsing(t *testing.T) {
 			if exit := app.Run(test.args, &stdout, &stderr); exit != 2 {
 				t.Fatalf("exit = %d, want 2", exit)
 			}
-			if !bytes.Contains(stderr.Bytes(), []byte(`"code":"`+test.code+`"`)) {
+			if !bytes.Contains(stderr.Bytes(), []byte(test.code)) {
 				t.Fatalf("stderr = %q, want code %q", stderr.String(), test.code)
 			}
 			if stdout.Len() != 0 {

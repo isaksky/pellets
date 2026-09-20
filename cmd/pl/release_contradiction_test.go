@@ -223,14 +223,14 @@ func TestWindowsReleaseSmokeUsesAutomaticallyGeneratedPelletIdentity(t *testing.
 	workflow := readReleaseContractFile(t, filepath.Join(repositoryRoot, ".github", "workflows", "foundation.yml"))
 	for _, required := range []string{
 		`$started.data.pellet.id -ne $added.data.id`,
-		`$executable close $added.data.id`,
+		`$executable --json close $added.data.id`,
 		`$closed.data.id -ne $added.data.id`,
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Errorf("Windows release smoke does not preserve the generated pellet identity through %q", required)
 		}
 	}
-	if strings.Contains(workflow, `$executable close smoke-1`) {
+	if strings.Contains(workflow, `$executable --json close smoke-1`) {
 		t.Error("Windows release smoke hard-codes a project code instead of using the first-use bootstrap result")
 	}
 }

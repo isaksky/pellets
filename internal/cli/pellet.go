@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"pellets/internal/app"
+	"pellets/internal/discovery"
 	"pellets/internal/domain"
 	"pellets/internal/output"
 	"pellets/internal/storage"
@@ -128,8 +129,8 @@ func PurgeCommand(manager app.PelletManager) Command {
 	return Command{
 		Name:    "purge",
 		Summary: "Permanently delete explicitly selected closed pellets.",
-		Usage: "pl purge --project CODE [--closed-before DATE] (--dry-run | --yes)\n" +
-			"  pl --project CODE purge [--closed-before DATE] (--dry-run | --yes)",
+		Usage: "pl purge --project CODE [--closed-before DATE] [--dry-run | --yes]\n" +
+			"  pl --project CODE purge [--closed-before DATE] [--dry-run | --yes]",
 		Parse: parsePurge,
 		Validate: func(globals GlobalOptions, value any) error {
 			input := value.(purgeInput)
@@ -150,12 +151,7 @@ func PurgeCommand(manager app.PelletManager) Command {
 			if input.DryRun && input.Yes {
 				return conflictingFlags("--dry-run", "--yes")
 			}
-			if !input.DryRun && !input.Yes {
-				return domain.NewError(
-					domain.Confirmation, "confirmation_required", "purge requires exactly one of --dry-run or --yes",
-					map[string]any{"flags": []string{"--dry-run", "--yes"}},
-				)
-			}
+
 			return nil
 		},
 		Run: func(ctx context.Context, invocation Invocation) (any, error) {
@@ -164,11 +160,41 @@ func PurgeCommand(manager app.PelletManager) Command {
 			if project == "" {
 				project = invocation.Globals.Project
 			}
+			options := storage.PelletPurgeOptions{CompletedBefore: input.CompletedBefore}
+			if !input.DryRun && !input.Yes {
+				plan, err := manager.PlanPurge(ctx, invocationDatabase(invocation), project, options)
+				if err != nil {
+					return nil, err
+				}
+				if len(plan) == 0 {
+					canonical, err := manager.Projects.ShowByCode(ctx, invocationDatabase(invocation), project)
+					if err != nil {
+						return nil, err
+					}
+					return purgeData{Project: canonical.Code, References: []string{}}, nil
+				}
+				if _, err := fmt.Fprintln(invocation.Stdout, "Permanently delete these closed pellets:"); err != nil {
+					return nil, err
+				}
+				for _, pellet := range plan {
+					if _, err := fmt.Fprintf(invocation.Stdout, "  %s  %s\n", pellet.Reference, pellet.Title); err != nil {
+						return nil, err
+					}
+				}
+				confirmed, err := newInteraction(invocation.Stdin, invocation.Stdout).confirm("Purge these records permanently? [y/N]: ")
+				if err != nil {
+					return nil, err
+				}
+				if !confirmed {
+					return cancelledData{}, nil
+				}
+				options.Expected = plan
+			}
 			references, err := manager.Purge(
 				ctx,
 				invocationDatabase(invocation),
 				project,
-				storage.PelletPurgeOptions{CompletedBefore: input.CompletedBefore},
+				options,
 				input.DryRun,
 			)
 			if err != nil {
@@ -316,7 +342,7 @@ func pelletLifecycleCommand(manager app.PelletManager, operation storage.PelletL
 	usage := fmt.Sprintf("pl %s PELLET", operation)
 	parse := func(args []string) (any, error) { return parseLifecycleReference(operation, args) }
 	if recovery {
-		usage += " [--recover-workspace WORKSPACE_ID --yes]"
+		usage += " [--recover-workspace WORKSPACE_ID [--yes]]"
 		parse = func(args []string) (any, error) { return parseRecoverableLifecycle(operation, args) }
 	}
 	return Command{
@@ -324,10 +350,40 @@ func pelletLifecycleCommand(manager app.PelletManager, operation storage.PelletL
 		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
 		Run: func(ctx context.Context, invocation Invocation) (any, error) {
 			input := invocation.Input.(lifecycleInput)
+			request := storage.PelletLifecycleRequest{Operation: operation, RecoveryWorkspaceID: input.RecoveryWorkspaceID}
+			if input.RecoveryWorkspaceID != nil && !input.Yes {
+				pellet, err := manager.Show(ctx, invocationDatabase(invocation), invocation.WorkingDirectory, invocation.Globals.Project, input.Reference)
+				if err != nil {
+					return nil, err
+				}
+				if pellet.Workspace == nil || pellet.Workspace.ID != *input.RecoveryWorkspaceID {
+					return nil, domain.NewError(domain.Conflict, "recovery_workspace_mismatch", "the requested workspace is not the pellet's recorded owner", map[string]any{"workspace_id": *input.RecoveryWorkspaceID})
+				}
+				root, err := discovery.ResolveLocalPath(invocation.Database.Root, pellet.Workspace.RootPath)
+				if err != nil {
+					return nil, err
+				}
+				gitDir, err := discovery.ResolveLocalPath(invocation.Database.Root, pellet.Workspace.GitDir)
+				if err != nil {
+					return nil, err
+				}
+				if _, err := fmt.Fprintf(invocation.Stdout, "%s %s (%s), recovering recorded workspace %d at %s (Git directory %s).\nRecovery coordinates worktrees; it does not authenticate an agent.\n",
+					operation, pellet.Reference, pellet.Title, pellet.Workspace.ID, root, gitDir); err != nil {
+					return nil, err
+				}
+				confirmed, err := newInteraction(invocation.Stdin, invocation.Stdout).confirm("Apply this workspace recovery? [y/N]: ")
+				if err != nil {
+					return nil, err
+				}
+				if !confirmed {
+					return cancelledData{}, nil
+				}
+				request.Expected = &pellet
+			}
 			result, err := manager.Transition(
 				ctx, invocationDatabase(invocation), invocation.WorkingDirectory, invocation.Globals.Project,
 				input.Reference,
-				storage.PelletLifecycleRequest{Operation: operation, RecoveryWorkspaceID: input.RecoveryWorkspaceID},
+				request,
 			)
 			if err != nil {
 				return nil, err
@@ -817,6 +873,7 @@ type nextInput struct {
 }
 
 type lifecycleInput struct {
+	Yes                 bool
 	Reference           domain.PelletReference
 	RecoveryWorkspaceID *int64
 }
@@ -841,7 +898,6 @@ func parseLifecycleReference(operation storage.PelletLifecycleOperation, args []
 func parseRecoverableLifecycle(operation storage.PelletLifecycleOperation, args []string) (any, error) {
 	var input lifecycleInput
 	referenceSet := false
-	yes := false
 	seen := make(map[string]bool)
 	for len(args) > 0 {
 		argument := args[0]
@@ -883,7 +939,7 @@ func parseRecoverableLifecycle(operation storage.PelletLifecycleOperation, args 
 			if hasValue {
 				return nil, flagTakesNoValue(name)
 			}
-			yes = true
+			input.Yes = true
 			args = args[1:]
 		default:
 			return nil, unknownFlag(name)
@@ -892,18 +948,13 @@ func parseRecoverableLifecycle(operation storage.PelletLifecycleOperation, args 
 	if !referenceSet {
 		return nil, missingLifecycleReference(operation)
 	}
-	if input.RecoveryWorkspaceID == nil && yes {
+	if input.RecoveryWorkspaceID == nil && input.Yes {
 		return nil, domain.NewError(
 			domain.Usage, "recovery_workspace_required", "--yes requires --recover-workspace for lifecycle recovery",
 			map[string]any{"flag": "--yes"},
 		)
 	}
-	if input.RecoveryWorkspaceID != nil && !yes {
-		return nil, domain.NewError(
-			domain.Confirmation, "confirmation_required", "workspace recovery requires --yes",
-			map[string]any{"workspace_id": *input.RecoveryWorkspaceID},
-		)
-	}
+
 	return input, nil
 }
 
@@ -1174,3 +1225,12 @@ func renderPelletSummary(writer io.Writer, pellet pelletData) error {
 	_, err := fmt.Fprintf(writer, "%s  %s  %s%s  %s\n", pellet.ID, pellet.Status, priority, owner, pellet.Title)
 	return err
 }
+
+func (data pelletData) RenderHumanCommand(w io.Writer, command string) error {
+	if command == "show" {
+		return output.RenderDetails(w, data)
+	}
+	return data.RenderHuman(w)
+}
+
+func (data lifecycleData) RenderHumanCommand(w io.Writer, _ string) error { return data.RenderHuman(w) }

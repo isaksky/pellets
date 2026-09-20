@@ -20,7 +20,7 @@ const peer = path.join(temporary, process.platform === 'win32' ? 'codex.exe' : '
 const environment = {...process.env, PATH: temporary + path.delimiter + process.env.PATH,
   PELLETS_CODEX_EXECUTABLE: peer, PELLETS_SUPERVISOR_PEER: '1'};
 let browser, server, origin, currentBinary = firstBinary;
-const cli = (...args) => JSON.parse(execFileSync(currentBinary, args, {cwd: fixture, env: environment, encoding: 'utf8'})).data;
+const cli = (...args) => JSON.parse(execFileSync(currentBinary, ['--json', ...args], {cwd: fixture, env: environment, encoding: 'utf8'})).data;
 const until = async (predicate, message) => {
   const deadline = Date.now() + 25000;
   while (Date.now() < deadline) {

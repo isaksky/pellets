@@ -19,7 +19,7 @@ The first release includes:
 - independent FTS5 project memory with provenance and human approval;
 - optional foreground, loopback-only `pl server` Datastar inspector/editor with optimistic concurrency and invalidation-only live refresh (`pl web` is a deprecated alias);
 - explicit closed-pellet purge;
-- compact versioned JSON by default and optional human output;
+- human output by default and explicit compact versioned JSON;
 - embedded forward database migrations;
 - a database-independent installer for one embedded portable Pellets Agent Skill shared by Codex and Claude;
 - the narrowly scoped server-execution slices below: durable per-run state, foreground lifecycle ownership, installed-Codex supervision, and explicit review checkpoints.
@@ -295,7 +295,7 @@ Acceptance criteria:
 - The generated frontmatter is valid portable Agent Skills metadata with `name: pellets` and a narrow description that requires explicit `pl` or Pellet/Pellets naming while rejecting generic task/project/memory triggers.
 - The shared instructions use only implemented CLI commands and teach atomic `start-next`, current-workspace resumption, conflict/recovery behavior, lifecycle/order/project/group/external-ID semantics, focused follow-ups, and memory provenance/approval.
 - Repository and platform-home roots produce the exact Codex, Claude, and Both path matrix; nested paths, linked worktrees, spaces, Unicode, macOS homes, and Windows path behavior are covered.
-- JSON never prompts. Noninteractive missing choices and confirmation fail with stable typed errors; interactive choices, exact path preview, replacement confirmation, final confirmation, and cancellation use injected input/output/terminal detection.
+- JSON never prompts. Noninteractive missing choices and confirmation fail with stable typed errors; interactive choices, exact path preview, combined installation/replacement confirmation and cancellation use injected input/output/terminal detection.
 - Dry-run creates no directories or temporary files and returns the complete plan/content. Identical targets are idempotent. Differing files require explicit replacement authority.
 - Complete preflight rejects symlinks, non-regular paths, escapes, and unusable permissions. Atomic per-file writes and injected second-target failures prove Both restores replaced files and removes invocation-created files/directories.
 - Golden frontmatter/body tests plus static positive/negative trigger fixtures preserve the activation boundary. The embedded and installed artifact remains LF-normalized across checkout and filesystem platforms. A drift contract parses every documented command example and rejects referenced flags without implemented CLI coverage.
@@ -348,7 +348,7 @@ Run against temporary real SQLite files, not a mocked SQL interface:
 
 Invoke the compiled executable in temporary Git repositories and assert stdout, stderr, exit code, database location, local Git exclude changes, and final rows. Cover nested directories, sibling repositories, a main work tree plus two linked worktrees, worktree move/removal/duplicate/stale registration, and filenames with spaces/Unicode.
 
-Invoke the compiled skill installer in temporary home and repository fixtures without a Pellets database. Assert exact destinations and content, default JSON non-interactivity, dry-run write freedom, idempotence/conflicts, and unchanged Git index/ignore/config files.
+Invoke the compiled skill installer in temporary home and repository fixtures without a Pellets database. Assert exact destinations and content, explicit JSON non-interactivity, dry-run write freedom, idempotence/conflicts, and unchanged Git index/ignore/config files.
 
 ### Property and concurrency tests
 

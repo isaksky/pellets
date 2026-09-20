@@ -62,7 +62,7 @@ async function startServer(root) {
     const root = path.join(temporary, scenario.name);
     fs.mkdirSync(root);
     const git = (...args) => execFileSync('git', args, {cwd: root, encoding: 'utf8'});
-    const cli = (...args) => JSON.parse(execFileSync(binary, args, {cwd: root, env: environment, encoding: 'utf8'})).data;
+    const cli = (...args) => JSON.parse(execFileSync(binary, ['--json', ...args], {cwd: root, env: environment, encoding: 'utf8'})).data;
     git('init', '-q');
     git('config', 'user.name', 'Test');
     git('config', 'user.email', 'test@example.invalid');

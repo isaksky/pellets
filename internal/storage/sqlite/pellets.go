@@ -511,6 +511,18 @@ func (repository *PelletRepository) RebuildPelletSearchIndex(ctx context.Context
 // PreviewClosedPelletPurge reads the exact project-scoped selection used by
 // PurgeClosedPellets without writing authoritative or derived state.
 func (repository *PelletRepository) PreviewClosedPelletPurge(ctx context.Context, project storage.Project, options storage.PelletPurgeOptions) ([]domain.PelletReference, error) {
+	pellets, err := repository.PlanClosedPelletPurge(ctx, project, options)
+	if err != nil {
+		return nil, err
+	}
+	references := make([]domain.PelletReference, len(pellets))
+	for i, pellet := range pellets {
+		references[i] = pellet.Reference
+	}
+	return references, nil
+}
+
+func (repository *PelletRepository) PlanClosedPelletPurge(ctx context.Context, project storage.Project, options storage.PelletPurgeOptions) ([]storage.Pellet, error) {
 	if err := validatePelletProject(project); err != nil {
 		return nil, err
 	}
@@ -537,11 +549,19 @@ func (repository *PelletRepository) PreviewClosedPelletPurge(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
+	pellets := make([]storage.Pellet, 0, len(references))
+	for _, reference := range references {
+		pellet, err := loadPellet(ctx, transaction, project.ID, reference.Number)
+		if err != nil {
+			return nil, pelletStorageError("read purge plan", err)
+		}
+		pellets = append(pellets, pellet)
+	}
 	if err := transaction.Commit(); err != nil {
 		return nil, pelletStorageError("commit pellet purge preview", err)
 	}
 	committed = true
-	return references, nil
+	return pellets, nil
 }
 
 // PurgeClosedPellets removes the selected authoritative rows and their
@@ -578,6 +598,21 @@ func (repository *PelletRepository) PurgeClosedPellets(ctx context.Context, proj
 	references, err := selectPelletPurgeReferences(ctx, connection, canonicalCode, predicate, arguments)
 	if err != nil {
 		return nil, err
+	}
+
+	if options.Expected != nil {
+		if len(references) != len(options.Expected) {
+			return nil, confirmationChanged()
+		}
+		for i, reference := range references {
+			current, err := loadPellet(ctx, connection, project.ID, reference.Number)
+			if err != nil {
+				return nil, pelletStorageError("revalidate purge plan", err)
+			}
+			if storage.PelletVersion(current) != storage.PelletVersion(options.Expected[i]) {
+				return nil, confirmationChanged()
+			}
+		}
 	}
 
 	if _, err := connection.ExecContext(ctx, `
@@ -928,6 +963,9 @@ func (repository *PelletRepository) transitionPellet(ctx context.Context, projec
 	}
 	if expectedVersion != "" && expectedVersion != storage.PelletVersion(before) {
 		return storage.PelletLifecycleResult{}, &storage.OptimisticConflict{Pellet: &before}
+	}
+	if request.Expected != nil && storage.PelletVersion(before) != storage.PelletVersion(*request.Expected) {
+		return storage.PelletLifecycleResult{}, confirmationChanged()
 	}
 	if request.ExpectedImplementationRevision != nil && (before.ImplementationRevision != *request.ExpectedImplementationRevision || before.Status != domain.PelletInProgress || before.Workspace == nil || before.Workspace.ID != project.Workspace.ID) {
 		return storage.PelletLifecycleResult{}, domain.NewError(domain.Conflict, "implementation_ownership_changed", "the exact pellet's ownership or implementation revision changed", nil)
@@ -1980,4 +2018,8 @@ func pelletFTSError(operation string, err error) error {
 		map[string]any{"operation": operation},
 		err,
 	)
+}
+
+func confirmationChanged() error {
+	return domain.NewError(domain.Conflict, "confirmation_changed", "records changed during confirmation; inspect the current state and retry", nil)
 }

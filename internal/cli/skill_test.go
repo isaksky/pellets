@@ -39,7 +39,7 @@ func TestSkillInstallJSONIsNonInteractiveAndDatabaseIndependent(t *testing.T) {
 
 	application := newSkillTestApp(t, home, repository, working, errorReader{}, true)
 	var stdout, stderr bytes.Buffer
-	exit := application.Run([]string{"skill", "install", "--scope", "repo", "--agent", "both", "--yes"}, &stdout, &stderr)
+	exit := application.Run([]string{"--json", "skill", "install", "--scope", "repo", "--agent", "both", "--yes"}, &stdout, &stderr)
 	if exit != 0 || stderr.Len() != 0 {
 		t.Fatalf("skill install = exit %d stdout %q stderr %q", exit, stdout.String(), stderr.String())
 	}
@@ -62,7 +62,7 @@ func TestSkillInstallJSONIsNonInteractiveAndDatabaseIndependent(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	exit = application.Run([]string{"skill", "install", "--scope", "repo", "--agent", "both", "--yes"}, &stdout, &stderr)
+	exit = application.Run([]string{"--json", "skill", "install", "--scope", "repo", "--agent", "both", "--yes"}, &stdout, &stderr)
 	if exit != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"status":"idempotent"`) || strings.Count(stdout.String(), `"result":"idempotent"`) != 2 {
 		t.Fatalf("idempotent JSON = exit %d stdout %q stderr %q", exit, stdout.String(), stderr.String())
 	}
@@ -97,7 +97,7 @@ func TestSkillInstallRequiresChoicesAndConfirmationWithoutPrompts(t *testing.T) 
 		t.Run(test.name, func(t *testing.T) {
 			application := newSkillTestApp(t, root, "", root, errorReader{}, true)
 			var stdout, stderr bytes.Buffer
-			exit := application.Run(test.args, &stdout, &stderr)
+			exit := application.Run(machineTestArgs(test.args), &stdout, &stderr)
 			if exit != test.exit || stdout.Len() != 0 || !strings.Contains(stderr.String(), `"code":"`+test.code+`"`) {
 				t.Fatalf("result = exit %d stdout %q stderr %q", exit, stdout.String(), stderr.String())
 			}
@@ -205,7 +205,7 @@ func TestSkillInstallInteractiveOutsideGitAndCancellation(t *testing.T) {
 			}
 			application := newSkillTestApp(t, home, repository, repository, strings.NewReader(test.input), true)
 			var stdout, stderr bytes.Buffer
-			exit := application.Run(test.args, &stdout, &stderr)
+			exit := application.Run(machineTestArgs(test.args), &stdout, &stderr)
 			if exit != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), test.marker) || !strings.Contains(stdout.String(), "Installation cancelled; no files were written.") {
 				t.Fatalf("cancel = exit %d stdout %q stderr %q", exit, stdout.String(), stderr.String())
 			}
@@ -226,7 +226,7 @@ func TestSkillInstallConflictDryRunAndInteractiveReplacement(t *testing.T) {
 		root := t.TempDir()
 		application := newSkillTestApp(t, root, "", root, errorReader{}, false)
 		var stdout, stderr bytes.Buffer
-		exit := application.Run([]string{"skill", "install", "--scope", "personal", "--agent", "both", "--dry-run"}, &stdout, &stderr)
+		exit := application.Run([]string{"--json", "skill", "install", "--scope", "personal", "--agent", "both", "--dry-run"}, &stdout, &stderr)
 		if exit != 0 || stderr.Len() != 0 {
 			t.Fatalf("dry-run = exit %d stdout %q stderr %q", exit, stdout.String(), stderr.String())
 		}
@@ -258,13 +258,13 @@ func TestSkillInstallConflictDryRunAndInteractiveReplacement(t *testing.T) {
 		}
 		application := newSkillTestApp(t, root, "", root, errorReader{}, false)
 		var stdout, stderr bytes.Buffer
-		exit := application.Run([]string{"skill", "install", "--scope", "personal", "--agent", "both", "--yes"}, &stdout, &stderr)
+		exit := application.Run([]string{"--json", "skill", "install", "--scope", "personal", "--agent", "both", "--yes"}, &stdout, &stderr)
 		if exit != 4 || stdout.Len() != 0 || !strings.Contains(stderr.String(), `"code":"skill_content_conflict"`) || strings.Count(stderr.String(), `"reason":"content_differs"`) != 2 {
 			t.Fatalf("conflict = exit %d stdout %q stderr %q", exit, stdout.String(), stderr.String())
 		}
 		stdout.Reset()
 		stderr.Reset()
-		exit = application.Run([]string{"skill", "install", "--scope", "personal", "--agent", "both", "--force", "--yes"}, &stdout, &stderr)
+		exit = application.Run([]string{"--json", "skill", "install", "--scope", "personal", "--agent", "both", "--force", "--yes"}, &stdout, &stderr)
 		if exit != 0 || stderr.Len() != 0 || strings.Count(stdout.String(), `"result":"replaced"`) != 2 {
 			t.Fatalf("forced conflict replacement = exit %d stdout %q stderr %q", exit, stdout.String(), stderr.String())
 		}
@@ -290,7 +290,7 @@ func TestSkillInstallConflictDryRunAndInteractiveReplacement(t *testing.T) {
 		application := newSkillTestApp(t, home, repository, repository, strings.NewReader("1\n1\nn\n"), true)
 		var stdout, stderr bytes.Buffer
 		exit := application.Run([]string{"--human", "skill", "install", "--yes"}, &stdout, &stderr)
-		if exit != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), "Replace every differing existing skill file?") || !strings.Contains(stdout.String(), "Installation cancelled") {
+		if exit != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), "replace every differing existing skill file") || !strings.Contains(stdout.String(), "Installation cancelled") {
 			t.Fatalf("replacement cancellation = exit %d stdout %q stderr %q", exit, stdout.String(), stderr.String())
 		}
 		if got, err := os.ReadFile(target); err != nil || string(got) != sentinel {
@@ -349,7 +349,7 @@ func TestPelletsSkillReferencedCommandAndFlagContract(t *testing.T) {
 
 	flagPattern := regexp.MustCompile(`--[a-z][a-z-]*`)
 	supportedFlags := map[string]bool{
-		"--help": true, "--pretty": true, "--human": true, "--project": true,
+		"--json": true, "--help": true, "--pretty": true, "--human": true, "--project": true,
 		"--request-id": true, "--external-id": true, "--group": true, "--recover-workspace": true,
 		"--yes": true, "--before": true, "--after": true, "--created-by": true,
 		"--approved-only": true, "--text": true, "--delete-conflicting-redirects": true,

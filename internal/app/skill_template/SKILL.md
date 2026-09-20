@@ -10,7 +10,7 @@ Use `pl` as the authoritative local queue and memory interface when the user exp
 ## Start safely
 
 - Run `pl --help` and the relevant command's `--help` before relying on remembered syntax. The installed executable is authoritative.
-- Prefer the default compact JSON output for machine parsing; use `--pretty` only when readable JSON helps. Do not scrape `--human` output.
+- Always pass `--json` before the command for compact JSON and non-interactive behavior. The default is readable text, even when redirected. `--pretty` also selects JSON and never prompts. Never scrape human output; machine mode does not approve deletion or replacement.
 - Let `pl` use the database binding in Git’s common directory, falling back to ancestor/worktree discovery only when unbound. Linked worktrees share that binding even outside the checkout. On `database_binding_unavailable`, restore or coordinate repair of the reported database; never create a replacement queue.
 - On the first valid current-project command, let `pl` create or discover the database, derive the initial canonical project code, and register the logical repository and current worktree automatically. No separate project initialization command is required. That one-time bootstrap may create `.pellets/`, add it to Git's local exclude, and record the shared database binding before the requested operation runs.
 - Treat former project codes as direct redirects. Inputs may use them, but successful output is authoritative and always uses the current canonical project code and pellet reference.
@@ -18,41 +18,41 @@ Use `pl` as the authoritative local queue and memory interface when the user exp
 - Before beginning new work, use atomic selection:
 
 ```text
-pl start-next
-pl start-next --external-id "github:acme/tool#84" --group "parser-rollout"
+pl --json start-next
+pl --json start-next --external-id "github:acme/tool#84" --group "parser-rollout"
 ```
 
-`pl next` is read-only. It resumes only the current workspace's in-progress pellet before considering open work. Resume that pellet; never resume work owned by another workspace.
+`pl --json next` is read-only. It resumes only the current workspace's in-progress pellet before considering open work. Resume that pellet; never resume work owned by another workspace.
 
 ## Handle coordination deliberately
 
-- On `workspace_already_in_progress`, run `pl next`, inspect the current workspace pellet, and resume it instead of starting another.
-- On `pellet_in_progress_elsewhere`, do not steal or duplicate the work. Refresh state and select other eligible work with `pl start-next`, or ask the user to coordinate.
+- On `workspace_already_in_progress`, run `pl --json next`, inspect the current workspace pellet, and resume it instead of starting another.
+- On `pellet_in_progress_elsewhere`, do not steal or duplicate the work. Refresh state and select other eligible work with `pl --json start-next`, or ask the user to coordinate.
 - Keep retries bounded. Re-read the current state between retries and stop when the same conflict persists.
-- Release current-workspace work normally with `pl release`. Use recovery only when the recorded worktree is unavailable and the user has explicitly approved the exact workspace recovery:
+- Release current-workspace work normally with `pl --json release`. Use recovery only when the recorded worktree is unavailable and the user has explicitly approved the exact workspace recovery:
 
 ```text
-pl release foo-12 --recover-workspace 7 --yes
+pl --json release foo-12 --recover-workspace 7 --yes
 ```
 
 Recovery coordinates worktrees; it does not authenticate an agent or transfer a lease.
 
 ## Maintain the queue
 
-- For retryable creation, supply `pl add --request-id ID` with a fresh ID per intended pellet and reuse it on retries. Matching inputs replay the creation result for two days; changed inputs return `request_id_conflict`. Every successful add expires older retry records without deleting pellets. Use `pl show` for current state after a replay.
-- Use `pl add` for a focused, independently actionable follow-up. Do not encode epics or dependencies in pellets.
+- For retryable creation, supply `pl --json add --request-id ID` with a fresh ID per intended pellet and reuse it on retries. Matching inputs replay the creation result for two days; changed inputs return `request_id_conflict`. Every successful add expires older retry records without deleting pellets. Use `pl --json show` for current state after a replay.
+- Use `pl --json add` for a focused, independently actionable follow-up. Do not encode epics or dependencies in pellets.
 - Use lifecycle commands for status and ordering commands for priority:
 
 ```text
-pl add "Handle invalid UTF-8" --before foo-12 --external-id "github:acme/tool#84" --group "parser-rollout"
-pl move foo-13 --after foo-12
-pl close foo-12
-pl defer foo-13
-pl reopen foo-13
+pl --json add "Handle invalid UTF-8" --before foo-12 --external-id "github:acme/tool#84" --group "parser-rollout"
+pl --json move foo-13 --after foo-12
+pl --json close foo-12
+pl --json defer foo-13
+pl --json reopen foo-13
 ```
 
-- Preserve project semantics. A project is one logical Git repository shared by its registered worktrees. Put global selection before the command when an explicit project is appropriate: `pl --project foo project show`.
-- Rename a project only when the user requests it: `pl [--project OLD_CODE] project rename NEW_CODE`. A foreign canonical code is a hard conflict. If JSON returns `project_rename_confirmation_required`, show the user every conflicting redirect and canonical target plus the warning; do not infer permission. Retry only after explicit approval with the exact documented `--delete-conflicting-redirects --yes` contract. Human confirmation is terminal-only and defaults to no.
+- Preserve project semantics. A project is one logical Git repository shared by its registered worktrees. Put global selection before the command when an explicit project is appropriate: `pl --json --project foo project show`.
+- Rename a project only when the user requests it: `pl --json [--project OLD_CODE] project rename NEW_CODE`. A foreign canonical code is a hard conflict. If JSON returns `project_rename_confirmation_required`, show the user every conflicting redirect and canonical target plus the warning; do not infer permission. Retry only after explicit approval with the exact documented `--delete-conflicting-redirects --yes` contract. Human confirmation is terminal-only and defaults to no.
 - Preserve one optional opaque `external-id` for correspondence with an outside system and one optional opaque `group` for exact filtering. A group is not an epic, dependency, hierarchy, or tag set.
 - Lower priority order means earlier work; do not invent or edit raw priorities.
 
@@ -81,17 +81,17 @@ flowchart LR
 - A failed retry reports an error.
 ````
 
-For multiline descriptions, prefer `--description-file task.md` with `pl add` or `pl edit`; `--description-file -` reads stdin. Write the source in an editor or use your shell's literal quoting (for example, a quoted here-document delimiter such as `<<'EOF'` in POSIX shells) to preserve literal fences and avoid shell interpolation.
+For multiline descriptions, prefer `--description-file task.md` with `pl --json add` or `pl --json edit`; `--description-file -` reads stdin. Write the source in an editor or use your shell's literal quoting (for example, a quoted here-document delimiter such as `<<'EOF'` in POSIX shells) to preserve literal fences and avoid shell interpolation.
 
 ```text
-pl add "Limit fetch retries" --description-file task.md
+pl --json add "Limit fetch retries" --description-file task.md
 ```
 
 ## Review checkpoints
 
-- Create only an explicitly requested review of selected ordinary Pellets with `pl add "Review selected changes" --review-targets foo-12,foo-15 --request-id REVIEW_ID`. Select 1–1000 distinct references in one project. Checkpoint targets are forbidden; this is not a dependency or epic mechanism. Do not combine review targets with manual placement or `--maybe-later`.
+- Create only an explicitly requested review of selected ordinary Pellets with `pl --json add "Review selected changes" --review-targets foo-12,foo-15 --request-id REVIEW_ID`. Select 1–1000 distinct references in one project. Checkpoint targets are forbidden; this is not a dependency or epic mechanism. Do not combine review targets with manual placement or `--maybe-later`.
 - Creation atomically inserts after the last selected active target; with no active targets it appends. Completed and deferred targets are allowed. Only the explicit set is reviewed, never all adjacent rows or an inferred broad commit range. Reordering preserves this scope.
-- Read `pl show` for the current `kind` and `checkpoint.version: 1` contract. Checkpoint targets include stable project ID/number, current and originally selected references, immutable scope, live status/revision, a readiness reason, and exact implementation run/workspace/starting-head/result-commit evidence. Ordinary JSON omits these additive fields.
+- Read `pl --json show` for the current `kind` and `checkpoint.version: 1` contract. Checkpoint targets include stable project ID/number, current and originally selected references, immutable scope, live status/revision, a readiness reason, and exact implementation run/workspace/starting-head/result-commit evidence. Ordinary JSON omits these additive fields.
 - A ready checkpoint requires every selected ordinary Pellet to be closed with matching retained successful implementation evidence. Queue closure alone is insufficient across worktrees. Reopen, release, defer, edits, missing/purged targets, or missing evidence can make it wait; never treat that as successful review or substitute different targets. `next`/`start-next` skip waiting open checkpoints for unrelated eligible work.
 - A selected checkpoint uses the installed Codex app-server reviewer in a fresh detached conversation, never the implementation discussion. The server snapshots exact Pellet/commit/path evidence and applicable committed repository instructions, resolves every recorded Git object, and presents each commit independently with a custom `review/start` target; it never substitutes an adjacent or first..last range, checks out evidence, or mutates Git/Pellets during review. Missing objects, scope drift, side effects, invalid output, and interrupted review without a durable final result require attention. Do not run checkpoints as ordinary implementation work or broaden their scope.
 - After a successful review, the server independently triages every distinct finding in a fresh read-only Codex context against current code, applicable instructions, the complete open/in-progress queue, and prior assessments. Persist invalid, already-fixed, stylistic, duplicate, or existing-Pellet dispositions with reasons. Each valid distinct issue becomes one actionable ordinary Pellet, with context and acceptance criteria, immediately after the checkpoint in deterministic finding order and with the checkpoint's exact group/external-ID. The server performs these queue writes; the assessor must not edit repository code or queue state.
@@ -103,11 +103,11 @@ pl add "Limit fetch retries" --description-file task.md
 - Agent-authored memory must retain agent provenance and begins unapproved:
 
 ```text
-pl memory add --text "Parser identifiers preserve underscores." --created-by agent
-pl memory search "parser identifiers" --approved-only
+pl --json memory add --text "Parser identifiers preserve underscores." --created-by agent
+pl --json memory search "parser identifiers" --approved-only
 ```
 
-- Use `--created-by human` only for text actually supplied or authored by a human. `pl memory approve` represents explicit human review; never use it to mark agent-created content as human-approved.
+- Use `--created-by human` only for text actually supplied or authored by a human. `pl --json memory approve` represents explicit human review; never use it to mark agent-created content as human-approved.
 - Treat memory as project knowledge, not task state, history, or a dependency edge.
 
 ## Preserve the product boundary
@@ -121,7 +121,7 @@ pl memory search "parser identifiers" --approved-only
 
 - Use `pl server [--port PORT] [--no-open]` for the local foreground inspector. `pl web` is a deprecated compatibility alias; use `server` in new commands and examples.
 - The server is loopback-only and foreground-bound. It owns the browser UI and any Codex execution it starts: closing a browser tab does not stop work, while stopping the server does. Do not treat it as a daemon, persistent worker, remote service, or worktree manager.
-- Participating servers permit one active execution per canonical Git worktree using a process-safe lock in that worktree's Git directory. Independent existing worktrees/projects can run concurrently. `pl start-next` is queue coordination, not execution exclusion; coordinate separately with external Codex sessions or agents that do not participate in the server lock.
+- Participating servers permit one active execution per canonical Git worktree using a process-safe lock in that worktree's Git directory. Independent existing worktrees/projects can run concurrently. `pl --json start-next` is queue coordination, not execution exclusion; coordinate separately with external Codex sessions or agents that do not participate in the server lock.
 - Shutdown stops admission, requests active-turn interruption, then stops and reaps only owned Codex processes and descendants before releasing the lock. On macOS/Linux an invocation custodian retains the lock through cleanup after foreground process death; Windows uses kill-on-close Job Objects. Never kill Codex by executable name or assume unrelated sessions belong to the server.
 - On `workspace_execution_busy`, wait for or coordinate with the owning foreground server. On `workspace_execution_recovery_required`, inspect the reported exact database/run evidence and preserve the recovery fence; never delete `pellets-execution.lock`, steal a PID, or automatically replay the run. Crashes and unconfirmed cleanup require explicit reconciliation. These errors are internal supervision boundaries, not new CLI recovery commands.
 - Queue and memory commands remain usable without Codex installed or authenticated. If the server supervises Codex, it reuses the installed runtime's credentials, configuration, instructions, and tools; never assume blanket approval or a disabled sandbox.

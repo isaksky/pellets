@@ -3,9 +3,15 @@ Pellets is a local task queue for coding agents.
 Usage:
   pl [global-options] <command> [command-options] [arguments]
 
+Output defaults to readable text, including when redirected.
+Terminal decisions prompt once; automation must supply choices and approvals.
+Help/version and the foreground server URL are always text.
+
 Global options:
-  --human        Render concise human-readable text instead of JSON.
-  --pretty       Pretty-print JSON (mutually exclusive with --human).
+  --json         Emit compact JSON and never prompt (for agents and scripts).
+  --pretty       Emit pretty JSON and never prompt; implies --json.
+  --human        Explicit alias for the default readable text output.
+                 --human conflicts with --json and --pretty.
   --project CODE Select a registered project where the command permits it.
   --help         Print help and exit.
   --version      Print executable and JSON schema versions.

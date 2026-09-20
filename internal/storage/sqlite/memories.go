@@ -435,6 +435,14 @@ func (repository *MemoryRepository) updateMemory(ctx context.Context, project st
 // RemoveMemory deletes one project-scoped authoritative row and its derived
 // external-content FTS entry under the same immediate transaction.
 func (repository *MemoryRepository) RemoveMemory(ctx context.Context, project storage.Project, memoryID int64) (storage.Memory, error) {
+	return repository.removeMemory(ctx, project, memoryID, nil)
+}
+
+func (repository *MemoryRepository) RemoveMemoryConfirmed(ctx context.Context, project storage.Project, expected storage.Memory) (storage.Memory, error) {
+	return repository.removeMemory(ctx, project, expected.ID, &expected)
+}
+
+func (repository *MemoryRepository) removeMemory(ctx context.Context, project storage.Project, memoryID int64, expected *storage.Memory) (storage.Memory, error) {
 	if err := validateMemoryProject(project); err != nil {
 		return storage.Memory{}, err
 	}
@@ -465,6 +473,9 @@ func (repository *MemoryRepository) RemoveMemory(ctx context.Context, project st
 	}
 	if err != nil {
 		return storage.Memory{}, memoryStorageError("read memory before removal", err)
+	}
+	if expected != nil && storage.MemoryVersion(memory) != storage.MemoryVersion(*expected) {
+		return storage.Memory{}, confirmationChanged()
 	}
 	if _, err := connection.ExecContext(ctx, `
 		INSERT INTO memories_fts(memories_fts, rowid, text)

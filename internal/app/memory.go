@@ -181,3 +181,17 @@ func closeMemoryRepository(repository storage.MemoryRepository, operationErr err
 func memoryManagerConfigurationError() error {
 	return domain.NewError(domain.Unexpected, "internal_error", "memory manager is not configured", nil)
 }
+
+// RemoveConfirmed revalidates the displayed memory under the deletion lock.
+func (manager MemoryManager) RemoveConfirmed(ctx context.Context, database Database, workingDirectory, selectedCode string, expected storage.Memory) (storage.Memory, error) {
+	project, err := manager.resolve(ctx, database, workingDirectory, selectedCode)
+	if err != nil {
+		return storage.Memory{}, err
+	}
+	repository, err := manager.open(ctx, database.Path)
+	if err != nil {
+		return storage.Memory{}, err
+	}
+	memory, operationErr := repository.RemoveMemoryConfirmed(ctx, project, expected)
+	return memory, closeMemoryRepository(repository, operationErr)
+}

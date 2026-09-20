@@ -9,7 +9,7 @@ let browser,server;
  const binary=path.join(temp,'pl'),repo=path.join(temp,'settings');fs.mkdirSync(repo);
  execFileSync('go',['build','-o',binary,'./cmd/pl']);
  execFileSync('git',['init','-q'],{cwd:repo});
- const pellet=JSON.parse(execFileSync(binary,['add','Settings test'],{cwd:repo,encoding:'utf8'})).data;
+ const pellet=JSON.parse(execFileSync(binary, ['--json', 'add','Settings test'],{cwd:repo,encoding:'utf8'})).data;
  server=spawn(binary,['server','--port','0','--no-open'],{cwd:repo});
  const origin=await new Promise((resolve,reject)=>{let out='';server.stdout.on('data',d=>{out+=d;if(out.includes('\n'))resolve(out.split('\n')[0].trim())});server.once('error',reject);});
  const engine=process.env.PLAYWRIGHT_BROWSER==='webkit'?webkit:chromium;

@@ -48,7 +48,7 @@ async function until(check, message) {
   for (const mode of cases.filter(mode => !selectedCase || selectedCase === mode)) {
     const root = path.join(temporary, mode); fs.mkdirSync(root);
     const git = (...args) => execFileSync('git', args, {cwd: root, stdio: 'pipe'});
-    const cli = (...args) => JSON.parse(execFileSync(binary, args, {cwd: root, env: environment, encoding: 'utf8'})).data;
+    const cli = (...args) => JSON.parse(execFileSync(binary, ['--json', ...args], {cwd: root, env: environment, encoding: 'utf8'})).data;
     git('init', '-q'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');
     git('config', 'commit.gpgSign', 'false'); git('commit', '--allow-empty', '-m', 'initial');
     fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '\n/fake-*\n/.agents/\n');

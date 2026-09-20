@@ -95,7 +95,7 @@ The optional skill installer uses one embedded instruction template and local fi
 
 ### Agent output is an API
 
-Compact JSON is the default output. Its versioned shape, exit codes, and stdout/stderr behavior are public compatibility contracts. Human-readable output is optional presentation.
+Readable text is the default output. Agents and scripts explicitly request `--json`; its versioned shape, exit codes, and stdout/stderr behavior remain public compatibility contracts. Terminal decisions complete within the original invocation.
 
 ### Destructive behavior is visible
 

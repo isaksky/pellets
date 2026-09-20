@@ -281,3 +281,17 @@ func closePelletRepository(repository storage.PelletRepository, operationErr err
 func pelletManagerConfigurationError() error {
 	return domain.NewError(domain.Unexpected, "internal_error", "pellet manager is not configured", nil)
 }
+
+// PlanPurge captures the exact records for an interactive deletion approval.
+func (manager PelletManager) PlanPurge(ctx context.Context, database Database, selectedCode string, options storage.PelletPurgeOptions) ([]storage.Pellet, error) {
+	project, err := manager.Projects.ShowByCode(ctx, database, selectedCode)
+	if err != nil {
+		return nil, err
+	}
+	repository, err := manager.open(ctx, database.Path)
+	if err != nil {
+		return nil, err
+	}
+	plan, operationErr := repository.PlanClosedPelletPurge(ctx, project, options)
+	return plan, closePelletRepository(repository, operationErr)
+}

@@ -1301,7 +1301,7 @@ func runFoundationCLIWithBlockedStdin(t *testing.T, executable, directory string
 }
 
 func foundationCLICommand(executable, directory string, args ...string) (*exec.Cmd, *bytes.Buffer, *bytes.Buffer) {
-	command := exec.Command(executable, args...)
+	command := exec.Command(executable, machineCLIArgs(args)...)
 	command.Dir = directory
 	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
 	var stdout, stderr bytes.Buffer
@@ -1775,4 +1775,18 @@ func foundationShortTempDir(t *testing.T) string {
 		}
 	})
 	return directory
+}
+
+func machineCLIArgs(args []string) []string {
+	for _, arg := range args {
+		if arg == "--json" || arg == "--pretty" || arg == "--human" || arg == "--help" || arg == "--version" {
+			return args
+		}
+	}
+	for _, arg := range args {
+		if arg == "server" || arg == "web" {
+			return args
+		}
+	}
+	return append([]string{"--json"}, args...)
 }

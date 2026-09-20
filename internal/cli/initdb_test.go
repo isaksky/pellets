@@ -290,7 +290,7 @@ func assertDiscoveredDatabase(t *testing.T, application *App, wantPath string) {
 
 func runTestApp(application *App, args ...string) (stdout, stderr string, exit int) {
 	var stdoutBuffer, stderrBuffer bytes.Buffer
-	exit = application.Run(args, &stdoutBuffer, &stderrBuffer)
+	exit = application.Run(machineTestArgs(args), &stdoutBuffer, &stderrBuffer)
 	return stdoutBuffer.String(), stderrBuffer.String(), exit
 }
 
@@ -333,4 +333,20 @@ func entryNames(entries []os.DirEntry) []string {
 func strconvQuote(value string) string {
 	encoded, _ := json.Marshal(value)
 	return string(encoded)
+}
+
+// Existing envelope-contract fixtures opt into JSON; new default-output tests
+// call App.Run directly so this helper cannot conceal a default regression.
+func machineTestArgs(args []string) []string {
+	for _, arg := range args {
+		if arg == "--json" || arg == "--pretty" || arg == "--human" || arg == "--help" || arg == "--version" {
+			return args
+		}
+	}
+	for _, arg := range args {
+		if arg == "server" || arg == "web" {
+			return args
+		}
+	}
+	return append([]string{"--json"}, args...)
 }

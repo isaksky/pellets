@@ -32,8 +32,8 @@ func ServerCommand(run ServerRunner) Command {
 		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
 		AllowOutsideGit:       true,
 		Validate: func(globals GlobalOptions, _ any) error {
-			if globals.Human || globals.Pretty {
-				return domain.NewError(domain.Usage, "format_not_supported", "server does not use JSON or human output formatting", nil)
+			if globals.machine() {
+				return domain.NewError(domain.Usage, "format_not_supported", "server emits a plain listener URL; omit --json and --pretty", nil)
 			}
 			if run == nil {
 				return domain.NewError(domain.Unexpected, "internal_error", "server command is not configured", nil)

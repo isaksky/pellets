@@ -178,7 +178,6 @@ func TestMemoryCommandStrictParsing(t *testing.T) {
 		{name: "search noncanonical limit", args: []string{"search", "fact", "--limit", "01"}, code: "invalid_limit"},
 		{name: "search approved value", args: []string{"search", "fact", "--approved-only=true"}, code: "unexpected_flag_value"},
 		{name: "remove missing ID", args: []string{"remove", "--yes"}, code: "missing_memory_id"},
-		{name: "remove confirmation required", args: []string{"remove", "1"}, code: "confirmation_required"},
 		{name: "remove confirmation value", args: []string{"remove", "1", "--yes=true"}, code: "unexpected_flag_value"},
 		{name: "remove noncanonical ID", args: []string{"remove", "01", "--yes"}, code: "invalid_memory_id"},
 		{name: "add missing source", args: []string{"add"}, code: "missing_memory_text"},

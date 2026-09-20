@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mattn/go-isatty"
+
 	"pellets/internal/discovery"
 	"pellets/internal/domain"
 	"pellets/internal/output"
@@ -19,6 +21,7 @@ const productDescription = "Pellets is a local task queue for coding agents."
 // GlobalOptions are parsed before a command name and apply to every command.
 type GlobalOptions struct {
 	Human   bool
+	JSON    bool
 	Pretty  bool
 	Project string
 }
@@ -137,7 +140,7 @@ func (a *App) WithCurrentWorkspaceBootstrap(
 func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 	parsed, err := a.parse(args)
 	if err != nil {
-		return writeFailure(stderr, err)
+		return writeFailure(stderr, err, outputOptions(args), args)
 	}
 
 	switch parsed.action {
@@ -166,7 +169,10 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 			} else {
 				invocation := Invocation{
 					Globals: parsed.globals, Input: input, Stdin: a.stdin, Stdout: stdout,
-					Interactive: a.isInteractive(a.stdin, stdout),
+					Interactive: !parsed.globals.machine() && a.isInteractive(a.stdin, stdout),
+				}
+				if err = validateInteraction(invocation); err != nil {
+					return writeFailure(stderr, err, parsed.globals, args)
 				}
 				invocation.WorkingDirectory, err = a.workingDirectory()
 				if err != nil {
@@ -222,8 +228,8 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 				}
 				if err == nil && !foreground {
 					renderer := output.Renderer(output.JSONRenderer{Pretty: parsed.globals.Pretty})
-					if parsed.globals.Human {
-						renderer = output.HumanRenderer{}
+					if !parsed.globals.machine() {
+						renderer = output.HumanRenderer{Width: terminalWidth(stdout)}
 					}
 					resultName := parsed.command.Name
 					if parsed.command.ResultName != nil {
@@ -239,7 +245,7 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 		if output.IsWriteFailure(err) || parsed.action == actionHelp || parsed.action == actionVersion || parsed.action == actionCommandHelp {
 			return 1
 		}
-		return writeFailure(stderr, err)
+		return writeFailure(stderr, err, parsed.globals, args)
 	}
 	return 0
 }
@@ -252,10 +258,7 @@ func streamsAreInteractive(input io.Reader, outputWriter io.Writer) bool {
 	if !inputOK || !outputOK {
 		return false
 	}
-	inputInfo, inputErr := inputFile.Stat()
-	outputInfo, outputErr := outputFile.Stat()
-	return inputErr == nil && outputErr == nil &&
-		inputInfo.Mode()&os.ModeCharDevice != 0 && outputInfo.Mode()&os.ModeCharDevice != 0
+	return isatty.IsTerminal(inputFile.Fd()) && isatty.IsTerminal(outputFile.Fd())
 }
 
 // ParseNoArguments is a strict parser for commands that accept no options or arguments.
@@ -333,6 +336,11 @@ func (a *App) parse(args []string) (parsedInvocation, error) {
 		seen[name] = true
 
 		switch name {
+		case "--json":
+			if hasValue {
+				return parsedInvocation{}, flagTakesNoValue(name)
+			}
+			parsed.globals.JSON = true
 		case "--human":
 			if hasValue {
 				return parsedInvocation{}, flagTakesNoValue(name)
@@ -392,6 +400,9 @@ func (a *App) parse(args []string) (parsedInvocation, error) {
 }
 
 func validateFormats(parsed parsedInvocation) error {
+	if parsed.globals.Human && parsed.globals.JSON {
+		return conflictingFlags("--human", "--json")
+	}
 	if parsed.globals.Human && parsed.globals.Pretty {
 		return conflictingFlags("--human", "--pretty")
 	}
@@ -455,8 +466,19 @@ func flagTakesNoValue(flag string) error {
 	)
 }
 
-func writeFailure(stderr io.Writer, err error) int {
-	if writeErr := output.WriteError(stderr, err); writeErr != nil {
+func writeFailure(stderr io.Writer, err error, globals GlobalOptions, args []string) int {
+	var writeErr error
+	if globals.machine() {
+		writeErr = output.WriteJSONError(stderr, err, globals.Pretty)
+	} else {
+		writeErr = output.WriteHumanError(stderr, err, terminalWidth(stderr))
+		if writeErr == nil {
+			if hint := automationHint(err, args); hint != "" {
+				_, writeErr = fmt.Fprintln(stderr, hint)
+			}
+		}
+	}
+	if writeErr != nil {
 		return 1
 	}
 	return domain.ExitCode(err)
@@ -481,9 +503,15 @@ func (a *App) help() string {
 	}
 
 	builder.WriteString(`
+Output defaults to readable text, including when redirected.
+Terminal decisions prompt once; automation must supply choices and approvals.
+Help/version and the foreground server URL are always text.
+
 Global options:
-  --human        Render concise human-readable text instead of JSON.
-  --pretty       Pretty-print JSON (mutually exclusive with --human).
+  --json         Emit compact JSON and never prompt (for agents and scripts).
+  --pretty       Emit pretty JSON and never prompt; implies --json.
+  --human        Explicit alias for the default readable text output.
+                 --human conflicts with --json and --pretty.
   --project CODE Select a registered project where the command permits it.
   --help         Print help and exit.
   --version      Print executable and JSON schema versions.

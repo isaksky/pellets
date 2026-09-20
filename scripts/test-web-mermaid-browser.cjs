@@ -10,7 +10,7 @@ const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-mermaid-browser
 const binary = path.join(temporary, 'pl');
 const fixture = path.join(temporary, 'markdown');
 let server, browser, origin;
-const cli = (...args) => JSON.parse(execFileSync(binary, args, {cwd: fixture, encoding: 'utf8'})).data;
+const cli = (...args) => JSON.parse(execFileSync(binary, ['--json', ...args], {cwd: fixture, encoding: 'utf8'})).data;
 const until = async (fn, message) => {
   const end = Date.now() + 15000;
   while (Date.now() < end) { if (await fn()) return; await new Promise(r => setTimeout(r, 70)); }

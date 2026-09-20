@@ -8,7 +8,7 @@ const repository = path.resolve(__dirname, '..'), temporary = fs.mkdtempSync(pat
 const binary = path.join(temporary, 'pl'), peer = path.join(temporary, 'codex'), fixture = path.join(temporary, 'planner');
 const env = {...process.env, PATH:temporary+path.delimiter+process.env.PATH, PELLETS_CODEX_EXECUTABLE:peer, PELLETS_SUPERVISOR_PEER:'1'};
 let browser, server;
-const cli = (...args) => JSON.parse(execFileSync(binary,args,{cwd:fixture,env,encoding:'utf8'})).data;
+const cli = (...args) => JSON.parse(execFileSync(binary, ['--json', ...args],{cwd:fixture,env,encoding:'utf8'})).data;
 const sameFolder = (a,b) => {const x=fs.statSync(a),y=fs.statSync(b);return x.dev===y.dev&&x.ino===y.ino;};
 const until = async (predicate,message) => {const end=Date.now()+25000;while(Date.now()<end){if(await predicate())return;await new Promise(r=>setTimeout(r,60));}throw Error(message);};
 async function stop(){if(server&&server.exitCode===null){const done=new Promise(r=>server.once('exit',r));server.kill('SIGINT');await done;}}
@@ -21,10 +21,10 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   const original=cli('add','Existing queue context','--group','web-ui');
   const linkedRoot=path.join(temporary,'linked');
   execFileSync('git',['worktree','add','--detach',linkedRoot,'HEAD'],{cwd:fixture});
-  const linkedRegistration=JSON.parse(execFileSync(binary,['project','show'],{cwd:linkedRoot,env,encoding:'utf8'})).data;
+  const linkedRegistration=JSON.parse(execFileSync(binary, ['--json', 'project','show'],{cwd:linkedRoot,env,encoding:'utf8'})).data;
   fs.writeFileSync(path.join(linkedRoot,'fake-mode'),'planning_full');
   const otherRoot=path.join(fixture,'other');init(otherRoot);
-  const other=JSON.parse(execFileSync(binary,['add','Other project work'],{cwd:otherRoot,env,encoding:'utf8'})).data;
+  const other=JSON.parse(execFileSync(binary, ['--json', 'add','Other project work'],{cwd:otherRoot,env,encoding:'utf8'})).data;
   fs.appendFileSync(path.join(fixture,'.git/info/exclude'),'\n/fake-*\n/other/\n');
   fs.writeFileSync(path.join(fixture,'fake-mode'),'planning_gate');
   server=spawn(binary,['server','--port','0','--no-open'],{cwd:fixture,env});
