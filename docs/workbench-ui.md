@@ -172,7 +172,10 @@ plain text, exact create/edit/save/reload/CLI source retrieval, malicious conten
 offline preview, refresh/conflict recovery, source and rendered selection,
 proposal autosave, and five themes at 1280, 1092 and 390 pixels. It saves real
 application screenshots; `PELLETS_DESCRIPTION_BASELINE=/path/to/old/pl` captures
-the original dialog for comparison. Also run
+the original dialog as `before-description.png` for comparison. Fixture commands
+use `--pretty` so historical executables predating `--json` remain supported.
+Run `node --test scripts/test-web-description-fixture.cjs` for the standalone
+historical/current CLI invocation regression checks (no browser required). Also run
 `node scripts/test-web-description-outline-browser.cjs` in both engines for
 hierarchy, duplicate/Unicode/punctuation anchors, every link's local scroll and
 keyboard focus, delayed Mermaid layout, visibility thresholds, draft/save/live
