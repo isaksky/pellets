@@ -122,6 +122,7 @@ async function stop() {
   // Reconnected snapshots restore current details, never authoritative state.
   await send({...snapshot, reset: true});
   await require('./web-activity-groups-contract.cjs')({page, send, temporary, until});
+  await require('./web-activity-summary-contract.cjs')({page, send, temporary, repo});
   // Mixed feed: completed commentary is primary reading content; tool rows
   // remain compact disclosures. All text still crosses the shared safe renderer.
   const prose = 'Stable `group_id` values keep **context** attached to the *same group*.\n\n' +

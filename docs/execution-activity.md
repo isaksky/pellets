@@ -93,6 +93,40 @@ Read command output is labeled as output, not reconstructed source. Missing
 source, diffs, command output or exit codes stay missing. The browser explains
 this limitation; it does not invent a transcript to match the prototype.
 
+Individual tool rows and group previews use the same deterministic summary of
+the sanitized fields. Commands show a whitespace-normalized command excerpt;
+read/change rows show the reported path relative to the selected workspace root
+when an exact lexical prefix establishes that relationship. No files, symlinks
+or historical source are read to construct a summary. Prefix lookalikes,
+`..` segments, redacted paths and unavailable roots are not made relative.
+Remaining absolute paths are explicitly labeled **Absolute path**. Directory
+segments are retained to distinguish duplicate basenames; long duplicates prefer
+a distinguishing suffix marked `…/`. Very long paths keep their beginning and
+end. Previews wrap to two lines, and expanded evidence retains the complete safe
+path, original command whitespace, reported output, source and diff. **Turn
+changes** labels a reported diff (or excerpt), without implying verified changes.
+
+Failed/declined operations show their operation, reported exit code or its
+absence, and **Impact unknown**. An explicit tool error message is summarized
+and retained in full; arbitrary output is never interpreted as an error or
+recovery signal. Completed operations with a nonzero exit are still failures.
+Groups keep failure counts and a separate last-failure summary even when a newer
+operation runs or succeeds. Failure impact and counts are not line-clamped.
+Nothing correlates separate successes with earlier failures or changes the
+authoritative run state from this reported activity.
+
+Exact-turn runtime `error` notifications expose only the sanitized message and
+explicit `willRetry` flag: **Retry reported**, **No retry planned (reported)**,
+or unknown impact if the flag is missing. These historical reports stay separate
+from commands, since they have no command identity. The protocol provides no
+operation-level recovery relationship; agent statements about recovery remain
+clearly labeled, expanded **Agent update** prose and do not resolve failed rows.
+A failed turn says that the turn ended with an error and directs the reader to
+Current execution. Input/approval requests stay outside groups and point to the
+run's existing revision-checked controls. Actual waiting, attention and recovery
+actions continue to come from authoritative records; stale reported requests
+cannot create an answer control or authorize a retry.
+
 Only selected presentation fields can enter the projection. Credential patterns,
 Authorization headers, known token formats, command credential arguments,
 private keys, ANSI escapes, control bytes and bidi controls are removed. File
@@ -118,7 +152,9 @@ opaque stable hashes, not protocol IDs or filesystem paths.
 
 Each item has `id`, `sequence`, `kind`, `status`, `title`, `timestamp` (the local
 observation time) and optional `text`, `path`, `source`, `diff`, `command`,
-`output`, `exit_code` and `truncated`. Items are complete sanitized replacements;
+`output`, `error`, `exit_code` and `truncated`. `error` contains only an explicit
+reported tool/runtime error message, subject to the same field, item and memory
+bounds as other text. Items are complete sanitized replacements;
 an omitted optional field is unavailable. A zero cursor requests the retained
 snapshot. Otherwise only changed items are returned. `reset` instructs the
 browser to discard stale items after truncation, unavailable history or an
@@ -143,3 +179,11 @@ first observation, not the latest revision cursor. Readers away from the bottom
 keep a retained visible event as their scroll anchor, including when earlier
 content changes height or is evicted. Selection or focus inside the feed also
 suppresses automatic following; readers at the end otherwise follow new events.
+
+`web-activity-summary-contract.cjs`, included in the execution-state browser
+runner, verifies command outcomes, missing evidence, relative/long/duplicate and
+outside-workspace paths, redacted values, explicit retry and recovery reports,
+unknown failure impact, failed turns and independent input requests. It checks
+collapsed summaries and expanded evidence in Chromium/WebKit across all five
+themes at desktop, intermediate and phone widths. The containing runner retains
+its short-window, keyboard, live-update, wait/stop and explicit-recovery checks.

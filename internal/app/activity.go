@@ -41,6 +41,7 @@ type ActivityItem struct {
 	Diff      string    `json:"diff,omitempty"`
 	Command   string    `json:"command,omitempty"`
 	Output    string    `json:"output,omitempty"`
+	Error     string    `json:"error,omitempty"`
 	ExitCode  *int      `json:"exit_code,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 	Truncated bool      `json:"truncated,omitempty"`
@@ -86,7 +87,7 @@ func (p *activityProjection) begin(key activeExecutionKey) {
 }
 
 func activityItemBytes(item ActivityItem) int {
-	return 256 + len(item.ID) + len(item.Kind) + len(item.Status) + len(item.Title) + len(item.Text) + len(item.Path) + len(item.Source) + len(item.Diff) + len(item.Command) + len(item.Output)
+	return 256 + len(item.ID) + len(item.Kind) + len(item.Status) + len(item.Title) + len(item.Text) + len(item.Path) + len(item.Source) + len(item.Diff) + len(item.Command) + len(item.Output) + len(item.Error)
 }
 
 func (p *activityProjection) publish(key activeExecutionKey, item ActivityItem) {
@@ -240,6 +241,8 @@ type activityEvent struct {
 	Reason      string                          `json:"reason"`
 	Explanation string                          `json:"explanation"`
 	Diff        string                          `json:"diff"`
+	WillRetry   *bool                           `json:"willRetry"`
+	Error       *struct{ Message string }       `json:"error"`
 	Plan        []struct{ Step, Status string } `json:"plan"`
 	Turn        struct {
 		ID, Status string
@@ -248,6 +251,7 @@ type activityEvent struct {
 	Item struct {
 		ID, Type, Status, Text, Phase, Command, AggregatedOutput, Path, Content, Source, Tool string
 		ExitCode                                                                              *int `json:"exitCode"`
+		Error                                                                                 *struct{ Message string }
 		Changes                                                                               []struct {
 			Path, Diff string
 			Kind       json.RawMessage
@@ -299,6 +303,9 @@ func projectCodexActivity(event codex.Event, threadID, turnID string) []Activity
 			item.Kind = "command"
 			item.Title = "Command"
 			item.Command = payload.Item.Command
+			if payload.Item.Status == "failed" || payload.Item.Status == "declined" {
+				item.Status = payload.Item.Status
+			}
 			if event.Method == "item/completed" {
 				item.Output = payload.Item.AggregatedOutput
 				item.ExitCode = payload.Item.ExitCode
@@ -336,6 +343,9 @@ func projectCodexActivity(event codex.Event, threadID, turnID string) []Activity
 			item.Kind = "file_read"
 			item.Title = "Read file"
 			item.Path = payload.Item.Path
+			if payload.Item.Status == "failed" {
+				item.Status = "failed"
+			}
 			if event.Method == "item/completed" {
 				item.Source = payload.Item.Source
 				if item.Source == "" {
@@ -351,6 +361,12 @@ func projectCodexActivity(event codex.Event, threadID, turnID string) []Activity
 		case "mcpToolCall":
 			item.Kind = "tool"
 			item.Title = "Tool: " + payload.Item.Tool
+			if payload.Item.Status == "failed" {
+				item.Status = "failed"
+			}
+			if event.Method == "item/completed" && payload.Item.Error != nil {
+				item.Error = payload.Item.Error.Message
+			}
 		default:
 			return nil
 		}
@@ -363,6 +379,19 @@ func projectCodexActivity(event codex.Event, threadID, turnID string) []Activity
 				break
 			}
 			item.Text += "\n" + step.Status + ": " + step.Step
+		}
+	case "error":
+		// Runtime errors have exact turn scope and an explicit retry flag, but
+		// no command identity. Never attach them to the nearest tool operation.
+		item.Kind, item.Title, item.Status = "error", "Runtime error", "failed"
+		if payload.Error != nil {
+			item.Error = payload.Error.Message
+		}
+		if payload.WillRetry != nil {
+			item.Status = "not_retrying"
+			if *payload.WillRetry {
+				item.Status = "retrying"
+			}
 		}
 	case "turn/diff/updated":
 		item.Kind = "diff"
@@ -407,7 +436,7 @@ func sanitizeActivityItem(item ActivityItem) ActivityItem {
 		item.Text = "Contents withheld for a credential file."
 	}
 	remaining := activityMaxItemBytes - 512
-	for _, field := range []*string{&item.Kind, &item.Status, &item.Title, &item.Path, &item.Command, &item.Text, &item.Source, &item.Diff, &item.Output} {
+	for _, field := range []*string{&item.Kind, &item.Status, &item.Title, &item.Path, &item.Command, &item.Error, &item.Text, &item.Source, &item.Diff, &item.Output} {
 		limit := min(activityMaxFieldBytes, remaining)
 		value, truncated := sanitizeActivityText(*field, limit)
 		*field = value

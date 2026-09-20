@@ -327,6 +327,7 @@ type runWorkspaceView struct {
 	URL               string
 	ID                int64
 	Root              string
+	ActivityRoot      string
 	ActivePellet      string
 	Run               *runView
 	Schedule          *scheduleView
@@ -742,7 +743,7 @@ func (h *handler) runWorkspaceViews(request *http.Request, project storage.Proje
 			root = filepath.Join(h.application.Database.Root, root)
 		}
 		name := filepath.Base(filepath.Clean(root))
-		view := runWorkspaceView{ID: workspace.ID, Root: localPath(workspace.RootPath), Name: name,
+		view := runWorkspaceView{ID: workspace.ID, Root: localPath(workspace.RootPath), ActivityRoot: root, Name: name,
 			URL: "/projects/" + url.PathEscape(project.Code) + "/workspaces/" + strconv.FormatInt(workspace.ID, 10)}
 		owned, hasOwned := owners[workspace.ID]
 		if hasOwned {

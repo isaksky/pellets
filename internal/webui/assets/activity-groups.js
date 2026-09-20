@@ -1,3 +1,5 @@
+import { activityOutcome, activitySummary } from "./activity-summary.js";
+
 // Presentation only: input order is first observation, never revision sequence.
 // Unknown/action-required statuses stay independent even on a tool event.
 function compatibleKind(item) {
@@ -31,7 +33,7 @@ export function activityRows(items, previous = []) {
   return rows;
 }
 
-export function activityGroupSummary(row) {
+export function activityGroupSummary(row, root = "", context = row.items) {
   const items = row.items, count = items.length;
   const noun = {command: "command", file_read: "file read", file_change: "file change"}[row.kind];
   let title = count + " " + noun + (count === 1 ? "" : "s");
@@ -41,7 +43,7 @@ export function activityGroupSummary(row) {
   }
   const totals = new Map();
   for (const item of items) {
-    const status = item.exit_code != null && item.exit_code !== 0 ? "failed" : item.status;
+    const status = activityOutcome(item);
     totals.set(status, (totals.get(status) || 0) + 1);
   }
   const outcome = [];
@@ -51,9 +53,13 @@ export function activityGroupSummary(row) {
   }
   const active = items.filter(item => item.status === "running").at(-1),
     latest = active || items.at(-1),
-    detail = (latest.path || latest.command || latest.title || "").replace(/\s+/g, " ").trim();
+    summary = activitySummary(latest, root, context),
+    detail = summary.operation || summary.title,
+    failed = items.filter(item => ["failed", "declined"].includes(activityOutcome(item))).at(-1),
+    failure = failed && activitySummary(failed, root, context);
   return {title, outcome: outcome.join(" · ") || "Completed",
     active: totals.has("running"), failed: totals.has("failed") || totals.has("declined"),
-    operation: detail ? (active ? "Current: " : "Latest: ") +
-      (detail.length > 180 ? detail.slice(0, 177) + "…" : detail) : ""};
+    operation: detail ? (active ? "Current: " : "Latest: ") + detail : "",
+    failure: failure ? "Last failure: " + (failure.operation || failure.title) + " · " +
+      failure.outcome + (failure.error ? " · " + failure.error : "") + " · " + failure.impact : ""};
 }

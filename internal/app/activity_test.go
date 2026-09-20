@@ -35,6 +35,53 @@ func TestActivityMessagesAreUpdatesAndTurnCompletionIsSeparate(t *testing.T) {
 	}
 }
 
+func TestActivityFailureStatusWithoutExitAndExplicitToolError(t *testing.T) {
+	for _, kind := range []string{"commandExecution", "mcpToolCall", "fileRead"} {
+		got := projectCodexActivity(activityFixtureEvent("item/completed", "thread", "turn", map[string]any{
+			"id": "failed", "type": kind, "status": "failed", "command": "check", "tool": "check",
+			"error":  map[string]any{"message": "Connection refused\nAuthorization: Bearer private-value"},
+			"result": map[string]any{"value": "NEVER COPY"},
+		}), "thread", "turn")
+		if len(got) != 1 || got[0].Status != "failed" || got[0].ExitCode != nil || got[0].Output != "" {
+			t.Fatalf("failure without exit/output lost: %+v", got)
+		}
+		encoded, _ := json.Marshal(got)
+		if strings.Contains(string(encoded), "private-value") || strings.Contains(string(encoded), "NEVER COPY") {
+			t.Fatalf("unselected/unsafe error data: %s", encoded)
+		}
+		if kind == "mcpToolCall" && !strings.Contains(got[0].Error, "Connection refused") {
+			t.Fatalf("missing explicit tool error: %+v", got)
+		}
+	}
+	got := projectCodexActivity(activityFixtureEvent("item/completed", "thread", "turn", map[string]any{
+		"id": "declined", "type": "commandExecution", "status": "declined",
+	}), "thread", "turn")
+	if len(got) != 1 || got[0].Status != "declined" {
+		t.Fatalf("declined command lost: %+v", got)
+	}
+}
+
+func TestActivityRuntimeRetryIsExplicitScopedAndBounded(t *testing.T) {
+	for _, tc := range []struct{ flag, status string }{{`,"willRetry":true`, "retrying"}, {`,"willRetry":false`, "not_retrying"}, {"", "failed"}} {
+		event := codex.Event{Method: "error", Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","error":{"message":"Connection lost; token=private-value","additionalDetails":"NEVER COPY"}` + tc.flag + `}`)}
+		got := projectCodexActivity(event, "thread", "turn")
+		if len(got) != 1 || got[0].Kind != "error" || got[0].Status != tc.status || !strings.Contains(got[0].Error, "[redacted]") {
+			t.Fatalf("retry projection: %+v", got)
+		}
+		encoded, _ := json.Marshal(got)
+		if strings.Contains(string(encoded), "private-value") || strings.Contains(string(encoded), "NEVER COPY") {
+			t.Fatalf("unsafe retry projection: %s", encoded)
+		}
+		if len(projectCodexActivity(event, "other", "turn")) != 0 || len(projectCodexActivity(event, "thread", "other")) != 0 {
+			t.Fatal("unrelated error projected")
+		}
+	}
+	item := sanitizeActivityItem(ActivityItem{Error: strings.Repeat("error ", activityMaxFieldBytes)})
+	if !item.Truncated || len(item.Error) > activityMaxFieldBytes || activityItemBytes(item) > activityMaxItemBytes {
+		t.Fatalf("error field escaped bounds: %d", len(item.Error))
+	}
+}
+
 func TestActivityProjectsOnlyExactReportedItemsAndRedactsCompletePayloads(t *testing.T) {
 	event := activityFixtureEvent("item/completed", "thread", "turn", map[string]any{"id": "command", "type": "commandExecution", "command": "go test ./... --token private-flag", "aggregatedOutput": "ok first\nAuthorization: Bearer private-authorization\nAPI_KEY=private-api\nok last\n", "exitCode": 0, "environment": map[string]any{"secret": "NEVER COPY"}})
 	got := projectCodexActivity(event, "thread", "turn")

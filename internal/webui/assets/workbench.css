@@ -1470,37 +1470,46 @@ input[type="checkbox"] {
 }
 .activity-event > summary {
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 6px;
   font-size: 11px;
   list-style: none;
 }
 .activity-event > summary:after {
   content: "›";
-  margin-left: auto;
+  grid-column: 2;
+  grid-row: 1;
   color: var(--dim);
 }
+.activity-event > summary::-webkit-details-marker { display: none; }
 .activity-event[open] > summary:after {
   content: "⌄";
 }
 .activity-event > summary small {
+  grid-column: 1;
   font-size: 10px;
-  color: var(--dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.activity-event > summary .event-title,
-.activity-event > summary .event-status {
-  flex-shrink: 0;
-}
-.activity-event > summary .event-title {
-  max-width: 55%;
+  color: var(--muted);
   overflow-wrap: anywhere;
 }
-.activity-event > summary .event-status { margin-left: auto; }
-.activity-event > summary:after { margin-left: 0; flex-shrink: 0; }
+.activity-event > summary .event-title {
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.activity-event > summary .event-path,
+.activity-event > summary .event-error {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.activity-event > summary [hidden] { display: none; }
+.activity-event[data-failed="true"] > summary .event-status,
+.activity-event[data-action="true"] > summary .event-status {
+  color: var(--text);
+  font-weight: 600;
+}
+.activity-event[data-action="true"] { border-left: 2px solid var(--text); padding-left: 8px; }
 .activity-event .event-body {
   padding: 9px 0 0 12px;
 }
@@ -1545,7 +1554,7 @@ input[type="checkbox"] {
 }
 .activity-group[open] > summary::after { content: "⌄"; }
 .activity-group-title { overflow-wrap: anywhere; font-weight: 550; }
-.activity-group-outcome, .activity-group-operation {
+.activity-group-outcome, .activity-group-operation, .activity-group-failure {
   grid-column: 1;
   color: var(--muted);
   font-size: 10px;
@@ -1555,8 +1564,10 @@ input[type="checkbox"] {
   overflow: hidden;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
+  -webkit-line-clamp: 2;
 }
+.activity-group-failure { border-left: 2px solid var(--line); padding-left: 6px; }
+.activity-group > summary [hidden] { display: none; }
 .activity-group[data-active="true"] .activity-group-outcome,
 .activity-group[data-failed="true"] .activity-group-outcome {
   color: var(--text);

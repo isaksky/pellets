@@ -144,7 +144,8 @@ module.exports = async function activityGroups({page, send, temporary, until}) {
   const lastTop = await last.evaluate(el => el.getBoundingClientRect().top);
   await publish([file('live-file', 'file_change', '/repo/new.go')]);
   assert.equal(await last.locator('summary').evaluate(el => el === document.activeElement), true);
-  assert.ok(Math.abs(await last.evaluate(el => el.getBoundingClientRect().top) - lastTop) < 2);
+  const appendedTop = await last.evaluate(el => el.getBoundingClientRect().top);
+  assert.ok(Math.abs(appendedTop - lastTop) < 2, 'Append moved focused child: ' + lastTop + ' → ' + appendedTop);
   assert.equal(await groups.last().evaluate(el => el.open), true);
   await page.locator('.run-follow-up textarea').focus();
   await feed.evaluate(el => { el.scrollTop = el.scrollHeight; });

@@ -445,7 +445,7 @@ safe-link and image-alt-text rules. Tool events retain compact expandable rows.
 Consecutive commands, reads or file changes share an expandable summary with
 operation counts, distinct reported path counts for files, active/failure outcomes
 and a current/latest preview. Expanding it reveals the original individual
-details. Commentary, action requests and turn boundaries always separate groups.
+details. Tool summaries show command previews or workspace-relative paths and reported exits; failed operations say when their impact is unknown. Groups retain the last failure even after later success. Full safe paths, commands, output and diffs stay in expanded evidence. Explicit runtime retry reports remain separate from commands; recovery prose does not automatically resolve failures. Commentary, action requests and turn boundaries always separate groups.
 Updates keep group/child disclosure choices, focus, selection and reading position,
 including on reconnect and retention eviction; each event keeps its original
 position. Counts describe retained reported events, not execution evidence or

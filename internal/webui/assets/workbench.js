@@ -1,6 +1,7 @@
 import { highlightCode } from "./code-highlight.js";
 import { renderMarkdown } from "./markdown.js";
 import { activityRows, activityGroupSummary } from "./activity-groups.js";
+import { activitySummary } from "./activity-summary.js";
 import { rememberDescriptions, refreshDescriptions } from "./description.js";
 import { refreshComponents } from "./components.js";
 import { saveSetting } from "./settings.js";
@@ -737,8 +738,9 @@ function updateCurrentOperation(panel) {
       .sort((a, b) => b.sequence - a.sequence)[0];
     if (active) {
       const label = {command: "Running command", file_read: "Reading file", file_change: "Updating file", tool: "Using tool"}[active.kind];
-      const detail = (active.path || active.command || active.title || "").replace(/\s+/g, " ").trim();
-      text = label + (detail ? ": " + (detail.length > 180 ? detail.slice(0, 177) + "…" : detail) : "");
+      const summary = activitySummary(active, panel.dataset.workspaceRoot, items);
+      const detail = summary.operation || summary.title;
+      text = label + (detail ? ": " + detail : "");
     }
   }
   // Neither the operation nor the feed is a live region. Only state changes
@@ -768,7 +770,11 @@ function renderActivity(panel, snapshot) {
     edge = panel.getBoundingClientRect().top,
     anchors = Array.from(events.querySelectorAll(".activity-event, .activity-group > summary"))
       .filter(node => { const box = node.getBoundingClientRect(); return box.height > 0 && box.bottom > edge + 1; })
-      .map(node => ({node, offset: node.getBoundingClientRect().top - edge}));
+      .map(node => ({node, offset: node.getBoundingClientRect().top - edge,
+        focused: node.contains(active) || !!(selected && node.contains(selected.anchor))}))
+      // A group's preview can change height above a focused child. Keep that
+      // reading target steady before falling back to the first visible row.
+      .sort((a, b) => Number(b.focused) - Number(a.focused));
   const following =
       !reading && panel.scrollHeight - panel.clientHeight - panel.scrollTop < 32,
     top = panel.scrollTop;
@@ -808,7 +814,8 @@ function renderActivity(panel, snapshot) {
       node.dataset.eventId = item.id;
       node.id = "event-" + panel.dataset.runId + "-" + item.id;
       const heading = element(item.kind === "message" ? "h4" : "summary", "event-heading");
-      heading.append(element("span", "event-title"), element("small", "event-path"), element("small", "event-status"));
+      heading.append(element("span", "event-title"), element("small", "event-path"),
+        element("small", "event-status"), element("small", "event-error"), element("small", "event-impact"));
       node.append(heading, element("div", "event-body"));
       nodes.set(item.id, node);
       if (item.kind !== "message") {
@@ -817,12 +824,15 @@ function renderActivity(panel, snapshot) {
       }
     }
     const body = node.querySelector(".event-body");
+    const summary = activitySummary(item, panel.dataset.workspaceRoot, Array.from(cache.items.values()));
+    node.dataset.failed = String(!!summary.failed);
+    node.dataset.action = String(!!summary.action);
     const labels = {
-      "event-title": item.kind === "message" ?
-        (item.title === "Agent response" ? "Agent response" : "Agent update") : item.title || item.kind,
-      "event-path": item.path || "",
-      "event-status": item.kind === "message" ? "" :
-        ({running: "In progress", completed: "Completed", failed: "Failed", awaiting_input: "Waiting", resolved: "Resolved"})[item.status] || item.status || "",
+      "event-title": summary.title,
+      "event-path": summary.operation || "",
+      "event-status": summary.outcome || "",
+      "event-error": summary.error ? "Reported error: " + summary.error : "",
+      "event-impact": summary.impact || "",
     };
     for (const [name, text] of Object.entries(labels)) {
       const label = node.querySelector("." + name);
@@ -832,7 +842,7 @@ function renderActivity(panel, snapshot) {
     // Replayed snapshots and status-only changes must not replace selected
     // message text, focused links/code, or horizontally scrolled output.
     const pending = item.kind === "message" && !item.text?.trim() && item.status === "running";
-    const content = JSON.stringify([item.text, item.source, item.diff, item.command,
+    const content = JSON.stringify([item.text, item.path, item.error, item.source, item.diff, item.command,
       item.output, item.exit_code, item.truncated, pending]);
     if (node.activityContent === content) continue;
     node.activityContent = content;
@@ -844,6 +854,8 @@ function renderActivity(panel, snapshot) {
         "Waiting for the complete message…" : "No message text was reported."));
       body.append(message);
     } else if (item.text) body.append(element("p", "", item.text));
+    if (item.path) body.append(element("p", "event-full-path", "Reported path: " + item.path));
+    if (item.error) body.append(element("p", "", "Reported error: " + item.error));
     if (item.source) body.append(highlightCode(item.source));
     if (item.diff) body.append(highlightCode(item.diff, true));
     if (item.command)
@@ -854,8 +866,12 @@ function renderActivity(panel, snapshot) {
         body.append(highlightCode(item.output));
       } else body.append(element("pre", "command-output", item.output));
     }
-    if (item.exit_code !== undefined)
+    if (item.exit_code != null)
       body.append(element("p", "event-result", "Exit " + item.exit_code));
+    if (item.kind === "command" || item.command) {
+      if (!item.output) body.append(element("p", "", "Output not reported."));
+      if (item.exit_code == null) body.append(element("p", "event-result", "Exit code not reported."));
+    }
     if (item.truncated)
       body.append(element("p", "", "Output limited to the retained excerpt."));
     if (!body.childNodes.length)
@@ -875,7 +891,8 @@ function renderActivity(panel, snapshot) {
       group.id = "activity-group-" + panel.dataset.runId + "-" + row.id;
       const summary = element("summary", "activity-group-heading");
       summary.append(element("span", "activity-group-title"),
-        element("span", "activity-group-outcome"), element("span", "activity-group-operation"));
+        element("span", "activity-group-outcome"), element("span", "activity-group-operation"),
+        element("span", "activity-group-failure"));
       group.append(summary, element("div", "activity-group-members"));
       // Promoting a single event must not hide an open or focused detail.
       group.open = expansions.get(group.id) ?? row.items.some(item => {
@@ -885,8 +902,8 @@ function renderActivity(panel, snapshot) {
       group.addEventListener("toggle", () => expansions.set(group.id, group.open));
     }
     groups.delete(row.id);
-    const summary = activityGroupSummary(row);
-    for (const key of ["title", "outcome", "operation"]) {
+    const summary = activityGroupSummary(row, panel.dataset.workspaceRoot, Array.from(cache.items.values()));
+    for (const key of ["title", "outcome", "operation", "failure"]) {
       const label = group.querySelector(".activity-group-" + key);
       if (label.textContent !== summary[key]) label.textContent = summary[key];
       label.hidden = !summary[key];
