@@ -138,6 +138,21 @@ pl add TITLE [--request-id ID] [--description TEXT | --description-file PATH]
 - `--maybe-later` creates the pellet in `maybe_later` with `priority: null`; otherwise it is `open`. It is mutually exclusive with `--before` and `--after`.
 - New project-local numbers are monotonically allocated and never reused.
 
+Descriptions retain their original Markdown/Mermaid source in CLI output and
+agent context. Use Markdown structure where useful, with meaningful heading
+levels for the browser UI's hierarchical table of contents in longer
+descriptions. Diagrams are optional: use fenced `mermaid` blocks only when they
+clarify relationships, flows, states, architecture, or sequences that concise
+prose cannot convey easily. Keep simple descriptions simple and essential
+context and acceptance criteria understandable in text. The UI renders diagrams
+inline with a larger zoom/pan viewer; diagrams add no dependency graphs, epics,
+or other queue features. See [supported rendering and examples](workbench-ui.md#mermaid-diagrams).
+
+Prefer `--description-file task.md` or `--description-file -` for multiline
+descriptions with `add` or `edit`. Write the source in an editor or use literal
+shell quoting (such as `<<'EOF'` in POSIX shells) to preserve fences and avoid
+shell interpolation.
+
 `--request-id` is an optional non-empty, opaque, case-sensitive key scoped to the
 logical project, shared across its worktrees. Within its retention window, the
 same ID and normalized creation inputs return the stored creation snapshot with

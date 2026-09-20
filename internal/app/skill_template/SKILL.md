@@ -56,6 +56,37 @@ pl reopen foo-13
 - Preserve one optional opaque `external-id` for correspondence with an outside system and one optional opaque `group` for exact filtering. A group is not an epic, dependency, hierarchy, or tag set.
 - Lower priority order means earlier work; do not invent or edit raw priorities.
 
+## Write clear descriptions
+
+- Pellet descriptions support Markdown. Use structure where useful; for longer descriptions, use meaningful heading levels (`##` for sections, `###` for subsections) so the UI can build a hierarchical table of contents. Keep simple descriptions simple.
+- Diagrams are optional. Use them only when they clarify relationships, flows, state transitions, architecture, or sequences that are hard to communicate in concise prose. Do not add a diagram to every pellet, use one as decoration, or inflate a straightforward task to exercise the feature.
+- Put diagrams in fenced `mermaid` blocks with plain labels and connections. The UI renders them inline and offers **View larger** with zoom and pan. Keep essential task context and acceptance criteria understandable in text: CLI consumers and agents receive the original Markdown/Mermaid source. Diagrams illustrate task context; they do not add dependency graphs, epics, or other queue features.
+
+For example, a description can make a retry branch explicit while retaining its requirements in text:
+
+````markdown
+## Behavior
+Retry a transient fetch failure once. Return data on success; report an error if the retry fails.
+
+```mermaid
+flowchart LR
+  Fetch -->|Success| Data
+  Fetch -->|Transient failure| Retry
+  Retry -->|Success| Data
+  Retry -->|Failure| Error
+```
+
+### Acceptance criteria
+- A transient failure triggers at most one retry.
+- A failed retry reports an error.
+````
+
+For multiline descriptions, prefer `--description-file task.md` with `pl add` or `pl edit`; `--description-file -` reads stdin. Write the source in an editor or use your shell's literal quoting (for example, a quoted here-document delimiter such as `<<'EOF'` in POSIX shells) to preserve literal fences and avoid shell interpolation.
+
+```text
+pl add "Limit fetch retries" --description-file task.md
+```
+
 ## Review checkpoints
 
 - Create only an explicitly requested review of selected ordinary Pellets with `pl add "Review selected changes" --review-targets foo-12,foo-15 --request-id REVIEW_ID`. Select 1–1000 distinct references in one project. Checkpoint targets are forbidden; this is not a dependency or epic mechanism. Do not combine review targets with manual placement or `--maybe-later`.

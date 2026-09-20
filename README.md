@@ -463,6 +463,21 @@ The installed skill activates implicitly only when a prompt explicitly names
 `pl` or Pellet/Pellets. Generic task, issue, backlog, project-management, or
 memory requests are deliberately excluded.
 
+The skill includes guidance for Markdown descriptions: use meaningful heading
+levels in longer descriptions for the UI's hierarchical **Contents** navigation.
+Mermaid diagrams are optional; use them only when relationships, flows, states,
+architecture, or sequences are hard to explain in concise prose. Keep simple
+tasks simple, and keep essential context and acceptance criteria in text because
+CLI consumers and agents receive the original source. Fenced `mermaid` blocks
+render inline with a larger zoom/pan viewer; they add no queue dependencies or
+epics. See [description reading and editing](docs/workbench-ui.md#description-reading-and-editing)
+and [Mermaid diagrams](docs/workbench-ui.md#mermaid-diagrams).
+
+For multiline descriptions with `pl add` or `pl edit`, prefer
+`--description-file task.md` or `--description-file -` to read stdin. Create the
+source in an editor or use literal shell quoting (such as `<<'EOF'` in POSIX
+shells) to preserve fences and prevent interpolation.
+
 ## Local foreground server
 
 ```text

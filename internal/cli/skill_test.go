@@ -355,6 +355,7 @@ func TestPelletsSkillReferencedCommandAndFlagContract(t *testing.T) {
 		"--approved-only": true, "--text": true, "--delete-conflicting-redirects": true,
 		"--port": true, "--no-open": true,
 		"--review-targets": true, "--maybe-later": true,
+		"--description-file": true,
 	}
 	for _, flag := range flagPattern.FindAllString(app.PelletsSkillContent(), -1) {
 		if !supportedFlags[flag] {
@@ -366,6 +367,7 @@ func TestPelletsSkillReferencedCommandAndFlagContract(t *testing.T) {
 		{"add", "retryable task", "--request-id", "request-1"},
 		{"add", "Review exact scope", "--review-targets", "foo-12,foo-15"},
 		{"add", "Deferred task", "--maybe-later"},
+		{"add", "Description from stdin", "--description-file", "-"},
 		{"--project", "foo", "project", "show"},
 		{"--project", "foo", "project", "rename", "bar", "--delete-conflicting-redirects", "--yes"},
 		{"server", "--port", "0", "--no-open"},

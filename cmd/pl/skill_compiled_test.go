@@ -247,6 +247,13 @@ func assertCompiledPortableSkill(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 	text := string(content)
+	template, err := os.ReadFile(filepath.Join("..", "..", "internal", "app", "skill_template", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(content, bytes.ReplaceAll(template, []byte("\r\n"), []byte("\n"))) {
+		t.Fatalf("compiled installed skill %q differs from the canonical template", path)
+	}
 	if !strings.HasPrefix(text, "---\nname: pellets\ndescription: ") || !strings.Contains(text, "\n---\n\n# Pellets\n") {
 		t.Fatalf("compiled installed skill %q is not portable: %q", path, text)
 	}

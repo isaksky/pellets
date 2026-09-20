@@ -120,11 +120,16 @@ func pelletsToolPeer(mode string) {
 func TestPelletsPromptPrefixSnapshotsStableBytesAndRefreshes(t *testing.T) {
 	installFakePelletsTool(t)
 	workspace := t.TempDir()
+	template, err := os.ReadFile(filepath.Join("..", "app", "skill_template", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	skill := normalizePromptText(string(template))
 	skillPath := filepath.Join(workspace, ".agents", "skills", "pellets", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(skillPath), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(skillPath, []byte("---\r\nname: pellets\r\n---\r\nStable skill.\r\n"), 0600); err != nil {
+	if err := os.WriteFile(skillPath, []byte(strings.ReplaceAll(skill, "\n", "\r\n")), 0600); err != nil {
 		t.Fatal(err)
 	}
 	log := filepath.Join(t.TempDir(), "tool.log")
@@ -137,8 +142,11 @@ func TestPelletsPromptPrefixSnapshotsStableBytesAndRefreshes(t *testing.T) {
 		t.Fatalf("prefix line endings/header = %q", first.Text)
 	}
 	stable, help, workflow := strings.Index(first.Text, "INSTALLED PELLETS SKILL\n"), strings.Index(first.Text, "REQUIRED INSTALLED PELLETS CLI HELP\n"), strings.Index(first.Text, "STABLE PELLETS WORKFLOW\n")
-	if stable < 0 || help <= stable || workflow <= help || !strings.Contains(first.Text, "Stable skill.\n") || !strings.Contains(first.Text, "$ pl start-next --help\n") {
+	if stable < 0 || help <= stable || workflow <= help || !strings.Contains(first.Text, "$ pl start-next --help\n") {
 		t.Fatalf("unstable prefix ordering: %q", first.Text)
+	}
+	if strings.Count(first.Text, "INSTALLED PELLETS SKILL\n---\n"+skill+"---\n\n") != 1 || first.SkillSHA256 != digest([]byte(skill)) {
+		t.Fatal("prefix does not retain the exact canonical skill and its digest")
 	}
 	second, err := preparePelletsPromptPrefix(context.Background(), workspace)
 	if err != nil || second != first {
