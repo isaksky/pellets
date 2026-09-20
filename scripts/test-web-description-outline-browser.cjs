@@ -63,6 +63,7 @@ const source = '# Overview &amp; *verification*\n\n' + paragraph +
     document.addEventListener('securitypolicyviolation', event => window.cspFailures = [...(window.cspFailures || []), event.violatedDirective]);
     document.addEventListener('datastar-fetch', event => {
       if (event.detail.type === 'datastar-patch-elements') window.outlinePatches = (window.outlinePatches || 0) + 1;
+      if (event.detail.type === 'finished' && event.detail.el === document.body) window.liveRefreshFinished = (window.liveRefreshFinished || 0) + 1;
     });
   });
   let releaseDiagram;
@@ -173,7 +174,7 @@ const source = '# Overview &amp; *verification*\n\n' + paragraph +
   await until(() => cli('show', record.id).description === draft, 'Save did not preserve source');
   assert.equal(await links.count(), titles.length + 2);
   // Live saved description changes rebuild the outline without switching pellets.
-  const liveSource = draft + '\n## Live addition\n\nMore text.\n';
+  let liveSource = draft + '\n## Live addition\n\nMore text.\n';
   cli('edit', record.id, '--description', liveSource);
   const refresh = page.waitForResponse(r => r.request().headers()['pellets-target'] === 'live');
   await page.evaluate(() => document.dispatchEvent(new CustomEvent('pellets-refresh')));
@@ -188,6 +189,78 @@ const source = '# Overview &amp; *verification*\n\n' + paragraph +
     await page.waitForTimeout(20);
     assert.deepEqual(await page.evaluate(() => (window.cspFailures || []).splice(0)), engine === webkit ? ['style-src-elem'] : []);
   };
+  const settleLayout = () => page.evaluate(() => new Promise(resolve => {
+    // Include resize/scroll observers and the animation frames they schedule.
+    requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }));
+  const liveRefresh = async () => {
+    const completed = await page.evaluate(() => window.liveRefreshFinished || 0);
+    const response = page.waitForResponse(r => r.request().headers()['pellets-target'] === 'live');
+    await page.evaluate(() => document.dispatchEvent(new CustomEvent('pellets-refresh')));
+    assert.equal((await response).status(), 200);
+    // A response/first patch alone misses later draws in the Datastar cycle.
+    await page.waitForFunction(count => (window.liveRefreshFinished || 0) > count, completed);
+    await settleLayout();
+  };
+  const sectionOffset = () => view.evaluate((node, id) =>
+    document.getElementById(id).getBoundingClientRect().top - node.getBoundingClientRect().top, ids[5]);
+  for (const width of [1280, 678, 390]) {
+    await page.setViewportSize({width, height:850});
+    await settleLayout();
+    if (!await nav.isVisible()) await toggle.click();
+    await nav.locator(`[data-description-anchor="${ids[5]}"]`).focus();
+    await page.keyboard.press('Enter');
+    // Preserve a manually adjusted offset, not just the navigation's 12px inset.
+    await view.evaluate(node => node.scrollTop += 6);
+    await page.locator('.inspector-scroll').evaluate(node => node.scrollTop = 37);
+    await settleLayout();
+    const offset = await sectionOffset(), surrounding = await surroundings();
+    const assertSection = async stage => {
+      assert.ok(Math.abs(await sectionOffset() - offset) <= 1, `${width}px ${stage}: surviving heading moved from ${offset} to ${await sectionOffset()}`);
+      assert.equal(await nav.locator('[aria-current]').getAttribute('data-description-anchor'), ids[5], `${width}px ${stage}: wrong active section`);
+      assert.equal(await mode('view').getAttribute('aria-pressed'), 'true');
+      assert.equal(await field.isVisible(), false);
+      assert.equal(await field.inputValue(), liveSource, 'Live source must remain exact');
+      assert.equal(await nav.isVisible(), width >= 960, 'Contents expansion changed');
+      assert.deepEqual(await surroundings(), surrounding, `${width}px ${stage}: surrounding scroll changed`);
+    };
+    const insertAbove = () => {
+      liveSource = liveSource.replace('#### 日本語', `Live insertion at ${width}px.\n\n` + paragraph.repeat(2) + '#### 日本語');
+      cli('edit', record.id, '--description', liveSource);
+    };
+    insertAbove();
+    await liveRefresh();
+    await assertSection('complete live patch');
+    for (let refresh = 0; refresh < 3; refresh++) {
+      await liveRefresh();
+      await assertSection('unchanged refresh ' + refresh);
+      assert.equal(await page.evaluate(id => document.activeElement?.id === id, ids[5]), true, 'Heading focus was lost');
+    }
+    await screenshot(`restored-section-${width}.png`);
+    // A hidden preview must defer restoration until Edit returns to View.
+    await mode('edit').click();
+    await field.evaluate(node => { node.setSelectionRange(17,29,'backward'); node.scrollTop = 45; });
+    const editState = await field.evaluate(node => [node.selectionStart,node.selectionEnd,node.selectionDirection,node.scrollTop]);
+    const editSurrounding = await surroundings();
+    insertAbove();
+    await liveRefresh();
+    for (let refresh = 0; refresh < 2; refresh++) {
+      assert.equal(await mode('edit').getAttribute('aria-pressed'), 'true');
+      assert.equal(await field.inputValue(), liveSource);
+      assert.equal(await field.evaluate(node => node === document.activeElement), true);
+      assert.deepEqual(await field.evaluate(node => [node.selectionStart,node.selectionEnd,node.selectionDirection,node.scrollTop]), editState);
+      assert.deepEqual(await surroundings(), editSurrounding);
+      await liveRefresh();
+    }
+    await mode('view').click();
+    await liveRefresh();
+    // Switching presentation can change the inspector's available scroll range;
+    // the document-local heading offset must still survive its deferred restore.
+    assert.ok(Math.abs(await sectionOffset() - offset) <= 1, `${width}px deferred section restoration was lost`);
+    assert.equal(await nav.locator('[aria-current]').getAttribute('data-description-anchor'), ids[5]);
+    assert.equal(cli('show', record.id).description, liveSource);
+  }
+  console.log('PASS inserted content retains section offset, active entry, source, modes, focus and surrounding scroll through complete desktop/compact refreshes');
   for (const theme of ['gruvbox-light','gruvbox-dark','light','dark','icy']) {
     await page.evaluate(theme => window.Workbench.applyTheme(theme), theme);
     for (const width of [1280,1092,959,678,390]) {

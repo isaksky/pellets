@@ -118,8 +118,13 @@ class DescriptionReader extends HTMLElement {
     if (!visible) return;
     if (this.restoreSection) {
       const heading = this.headings.find(node => node.id === this.restoreSection.id);
-      if (heading) this.view.scrollTop += heading.getBoundingClientRect().top
-        - this.view.getBoundingClientRect().top - this.restoreSection.offset;
+      if (heading) {
+        this.view.scrollTop += heading.getBoundingClientRect().top
+          - this.view.getBoundingClientRect().top - this.restoreSection.offset;
+        // A patch may draw again without another capture. Keep its pixel
+        // fallback in sync, including restoration deferred until View is shown.
+        this.saved.viewScroll = {top: this.view.scrollTop, left: this.view.scrollLeft};
+      }
       this.restoreSection = null;
     }
     this.track();

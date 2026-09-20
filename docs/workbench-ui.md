@@ -176,8 +176,10 @@ the original dialog for comparison. Also run
 `node scripts/test-web-description-outline-browser.cjs` in both engines for
 hierarchy, duplicate/Unicode/punctuation anchors, every link's local scroll and
 keyboard focus, delayed Mermaid layout, visibility thresholds, draft/save/live
-edits, repeated refreshes and observer cleanup. It checks all five themes at
-1280, 1092, 959, 678 and 390 pixels and saves application screenshots.
+edits, content inserted above the current section through full live refreshes,
+deferred restoration from Edit, repeated refreshes and observer cleanup. It
+checks all five themes at 1280, 1092, 959, 678 and 390 pixels and saves application
+screenshots.
 
 ### Mermaid diagrams
 
