@@ -181,6 +181,12 @@ deferred restoration from Edit, repeated refreshes and observer cleanup. It
 checks all five themes at 1280, 1092, 959, 678 and 390 pixels and saves application
 screenshots.
 
+Run `node scripts/test-web-task-list-browser.cjs` in both engines for compact,
+text-aligned markers in tight, loose and nested task lists. It checks proposed
+pellets, existing records, creation previews and group context across all five
+themes at 1280, 1092 and 390 pixels, including ordinary planner field sizing
+and unchanged Markdown through preview, creation and proposal autosave.
+
 ### Mermaid diagrams
 
 Use a fenced `mermaid` block in a description. Record views, unsaved creation/edit
