@@ -96,7 +96,8 @@ function remember() {
           'input:not([type="hidden"]),textarea,select,input[type="hidden"][name="version"]',
         )
         .forEach((el) => {
-          if (el.type === "password") return;
+          // Rendered task markers belong to the Markdown source, not the draft.
+          if (el.type === "password" || el.closest(".markdown-body")) return;
           fields.push({ name: el.name, value: el.value, checked: el.checked });
         });
       drafts.set(formKey(form), fields);
@@ -159,6 +160,7 @@ function restore() {
     for (const el of form.querySelectorAll(
       'input:not([type="hidden"]),textarea,select,input[type="hidden"][name="version"]',
     )) {
+      if (el.closest(".markdown-body")) continue;
       const field = fields.find(
         (x) =>
           x.name === el.name &&

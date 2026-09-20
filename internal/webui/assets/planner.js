@@ -378,7 +378,10 @@ function render() {
   updateOptions(composer.elements.effort, effortOptions, state.effort || '');
   composer.querySelector('[type=submit]').disabled = !workspace || !state.input.trim() || !!flight || !!failed || conflict || uiVersion.isOutdated();
   for (const button of panel.querySelectorAll('[data-plan=new],[data-plan=confirm-new]')) button.disabled = !!flight;
-  for(const field of panel.querySelectorAll('input,textarea,select'))field.disabled=!!activeOperation?.replace;
+  // Markdown controls are presentation owned by the renderer, not editable fields.
+  for (const field of panel.querySelectorAll('input,textarea,select')) {
+    if (!field.closest('.markdown-body')) field.disabled = !!activeOperation?.replace;
+  }
   panel.querySelector('#plan-workspace').disabled = !!chat?.state.workspace_id || !!flight;
   composer.elements.model.disabled = !workspace || !!activeOperation?.replace;
   composer.elements.effort.disabled = !workspace || !!activeOperation?.replace;

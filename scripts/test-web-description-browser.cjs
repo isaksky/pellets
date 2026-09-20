@@ -64,6 +64,22 @@ const source = '# Delivery &amp; verification\n\nParagraph with **strong**, *emp
   const field = page.locator('#record-dialog textarea[name=description]');
   const view = host.locator('.markdown-body');
   const mode = (name, container = host) => container.locator(`[data-description-mode=${name}]`);
+  const taskCases = [
+    {text: source, checked: [true, false]},
+    {text: source.replace('- [x] Done\n- [ ] Pending', '- [ ] Pending\n- [x] Done'), checked: [false, true]},
+  ];
+  const assertTasks = async (container, checked, message) => {
+    assert.deepEqual(await container.locator('.markdown-task input').evaluateAll(inputs =>
+      inputs.map(input => ({checked: input.checked, disabled: input.disabled}))),
+    checked.map(checked => ({checked, disabled: true})), message);
+  };
+  const liveRefresh = async () => {
+    const completed = await page.evaluate(() => window.liveRefreshFinished || 0);
+    const response = page.waitForResponse(r => r.request().headers()['pellets-target'] === 'live');
+    await page.evaluate(() => document.dispatchEvent(new CustomEvent('pellets-refresh')));
+    assert.equal((await response).status(), 200);
+    await page.waitForFunction(count => (window.liveRefreshFinished || 0) > count, completed);
+  };
   if (process.env.PELLETS_DESCRIPTION_BASELINE) {
     await screenshot('before-description.png');
     console.log('BASELINE ' + temporary); return;
@@ -212,7 +228,30 @@ const source = '# Delivery &amp; verification\n\nParagraph with **strong**, *emp
   const create = page.locator('.create-popover form');
   const createHost = create.locator('[data-description]');
   await create.locator('[name=title]').fill('Created from Markdown');
+  await create.locator('[name=status]').selectOption('maybe_later');
+  for (const {text, checked} of taskCases) {
+    await mode('edit', createHost).click();
+    await create.locator('[name=description]').fill(text);
+    await mode('view', createHost).click();
+    await assertTasks(createHost, checked, 'Creation preview starts with source-derived tasks');
+    await create.locator('[name=title]').focus();
+    await create.locator('[name=title]').evaluate(el => el.setSelectionRange(3, 10, 'backward'));
+    for (let i=0; i<3; i++) {
+      await liveRefresh();
+      await assertTasks(createHost, checked, 'Live refresh must not restore task markers as form fields');
+      assert.equal(await create.locator('[name=description]').inputValue(), text);
+      assert.equal(await createHost.locator('.markdown-body').isVisible(), true);
+      assert.equal(await create.locator('[name=title]').inputValue(), 'Created from Markdown');
+      assert.equal(await create.locator('[name=status]').inputValue(), 'maybe_later');
+      assert.equal(await create.locator('[name=title]').isEnabled(), true);
+      assert.deepEqual(await create.locator('[name=title]').evaluate(el =>
+        [el === document.activeElement, el.selectionStart, el.selectionEnd, el.selectionDirection]), [true, 3, 10, 'backward']);
+    }
+    await screenshot(`creation-tasks-${checked[0]}.png`);
+  }
+  await mode('edit', createHost).click();
   await create.locator('[name=description]').fill(source);
+  await create.locator('[name=status]').selectOption('open');
   await mode('view', createHost).click();
   await createHost.locator('pl-diagram[data-state=ready]').waitFor();
   for (let i=0; i<3; i++) {
@@ -273,6 +312,59 @@ const source = '# Delivery &amp; verification\n\nParagraph with **strong**, *emp
   }
   await mode('edit', proposalHost).click();
   assert.equal(await proposal.locator('[name=description]').inputValue(), source);
+  await page.setViewportSize({width:1280,height:850});
+  // Keep the same rendered nodes through ordinary rerenders and a real autosave.
+  // Holding the request makes busy/idle assertions independent of server speed.
+  const planningURL = origin + '/projects/' + record.project + '/planning';
+  for (const {text, checked} of taskCases) {
+    await mode('edit', proposalHost).click();
+    await proposal.locator('[name=description]').fill(text);
+    await mode('view', proposalHost).click();
+    await page.evaluate(() => window.Planner.flush());
+    await assertTasks(proposalHost, checked, 'Idle planner must keep task markers disabled');
+    for (let i=0; i<3; i++) {
+      await page.evaluate(() => window.Planner.sync());
+      await assertTasks(proposalHost, checked, 'Planner rerenders must preserve presentation task markers');
+    }
+    let heldSave = false, resumeSave, finishSave;
+    const saveGate = new Promise(resolve => { resumeSave = resolve; });
+    const saveContinued = new Promise(resolve => { finishSave = resolve; });
+    const holdSave = async route => {
+      if (route.request().method() === 'POST' && route.request().postDataJSON().action === 'save') {
+        heldSave = true;
+        await saveGate;
+        try { await route.continue(); } finally { finishSave(); }
+      } else await route.continue();
+    };
+    await page.route(planningURL, holdSave);
+    await proposal.locator('[name=acceptance]').fill('Preserve task order ' + checked.join(','));
+    await proposal.locator('[name=title]').focus();
+    await proposal.locator('[name=title]').evaluate(el => el.setSelectionRange(2, 9, 'backward'));
+    try {
+      await until(() => !!heldSave, 'Proposal autosave did not start');
+      assert.equal(await page.locator('.plan-status').evaluate(el => el.classList.contains('busy')), true);
+      assert.equal(await page.locator('#plan-access').isDisabled(), true);
+      assert.equal(await proposal.locator('[name=title]').isEnabled(), true);
+      assert.equal(await page.locator('.plan-card [name=selected]').isEnabled(), true);
+      await page.evaluate(() => window.Planner.sync());
+      await assertTasks(proposalHost, checked, 'Busy planner must keep task markers disabled');
+    } finally {
+      resumeSave();
+      if (heldSave) await saveContinued;
+      await page.unroute(planningURL, holdSave);
+    }
+    await until(async () => !(await page.locator('.plan-status').evaluate(el => el.classList.contains('busy'))), 'Proposal autosave did not finish');
+    await assertTasks(proposalHost, checked, 'Returning to idle must not enable task markers');
+    assert.equal(await page.locator('#plan-access').isEnabled(), true);
+    assert.equal(await proposal.locator('[name=description]').inputValue(), text);
+    assert.deepEqual(await proposal.locator('[name=title]').evaluate(el =>
+      [el === document.activeElement, el.selectionStart, el.selectionEnd, el.selectionDirection]), [true, 2, 9, 'backward']);
+    const saved = (await (await page.request.get(planningURL)).json()).chat.state.drafts[0];
+    assert.equal(saved.description, text, 'Autosave must retain byte-identical Markdown');
+    assert.equal(saved.acceptance, 'Preserve task order ' + checked.join(','));
+    assert.equal(saved.selected, true);
+    await screenshot(`proposal-tasks-${checked[0]}.png`);
+  }
   assert.deepEqual(errors, []);
   assert.deepEqual(external, [], 'Renderer must make no external requests');
   assert.deepEqual(await page.evaluate(() => window.cspFailures || []), []);
