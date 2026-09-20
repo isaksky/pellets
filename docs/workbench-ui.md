@@ -447,11 +447,15 @@ questions, approvals, steering, stopping, and explicit Resume retain the existin
 application checks.
 
 **Current execution** stays visible beside the feed while reading older events.
-It shows Working, Waiting for input/approval, Stopping, Needs attention,
+It shows Working, Waiting for work/input/approval, Stopping, Needs attention,
 Interrupted, or Finished from the authoritative record. Failed outcomes and
 ended attempts are distinguished; recovery without a live process does not
-look active. A working indicator continues between reported operations, with
-animation disabled for reduced motion. A concise active command/file operation
+look active. An idle Watch schedule shows Waiting for work even when the last
+completed run remains in Run details and the activity history. It has no working
+animation or active-operation preview; new matching work returns it to Working.
+Stopping the idle schedule reveals the last run's Finished state. A working
+indicator continues between reported operations, with animation disabled for
+reduced motion. A concise active command/file operation
 appears when reported; otherwise the phase description explains the current
 work without inventing progress. Stop-after remains a separate schedule intent.
 Agent update/Agent response labels describe messages, never the run outcome.
@@ -549,6 +553,10 @@ combinations, narrow layouts, activity, input preservation, stopping, and restar
 The separate runtime, recovery, and checkpoint browser suites preserve their
 execution and evidence scenarios. Go storage/application tests cover atomic claims,
 concurrency, project isolation, captured intent, and checkpoint generations.
+The runtime suite's `PELLETS_RUNTIME_BROWSER_CASE=watch_waiting` scenario checks
+Watch waiting alongside completed history on initial rendering and live updates,
+automatic return to work, stale activity, and both idle stop controls in Chromium
+and WebKit, with screenshots of the affected screens.
 `test-web-execution-state-browser.cjs` adds real execution transitions and
 controlled activity delivery: completed history during active work, operation
 and turn completion, input/approval waits, both stop controls, terminal states,

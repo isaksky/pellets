@@ -70,3 +70,52 @@ func TestExecutionPhasesAndRecovery(t *testing.T) {
 		}
 	}
 }
+
+func TestWaitingScheduleWithHistoricalRun(t *testing.T) {
+	for _, state := range []string{"", "completed", "resolved"} {
+		t.Run("history_"+state, func(t *testing.T) {
+			workspace := runWorkspaceView{Schedule: &scheduleView{Mode: "watch", State: "waiting"}}
+			if state != "" {
+				workspace.Run = &runView{State: state, Phase: "implementation"}
+			}
+			want := executionPresentation{Label: "Waiting for work", Detail: "Waiting for a matching pellet."}
+			if got := workspace.ExecutionStatus(); got == nil || *got != want {
+				t.Fatalf("waiting schedule with %q history: %+v", state, got)
+			}
+			workspace.Schedule.Stopping = true
+			if got := workspace.ExecutionStatus(); got.Label != "Stopping" || got.Working || got.ShowOperation {
+				t.Fatalf("stop intent hidden by waiting schedule: %+v", got)
+			}
+			workspace.RecoveryAttention = "cleanup unconfirmed"
+			if got := workspace.ExecutionStatus(); got.Label != "Needs attention" || got.Working || got.ShowOperation {
+				t.Fatalf("recovery hidden by stopping schedule: %+v", got)
+			}
+			workspace.RecoveryAttention, workspace.Schedule = "", nil
+			if got := workspace.ExecutionStatus(); state == "" {
+				if got != nil {
+					t.Fatalf("stopped schedule without history: %+v", got)
+				}
+			} else if want := map[string]string{"completed": "Finished", "resolved": "Ended"}[state]; got.Label != want || got.Working || got.ShowOperation {
+				t.Fatalf("stopped schedule lost historical state: %+v", got)
+			}
+		})
+	}
+	// Run capture and schedule updates can be observed independently. Waiting
+	// must not hide active work, a human wait, or recovery of an unfinished run.
+	for _, workspace := range []runWorkspaceView{
+		{Run: &runView{State: "running", Active: true, Phase: "implementation"}},
+		{Run: &runView{State: "awaiting_input", Active: true}},
+		{Run: &runView{State: "running", Active: true, PendingOperation: "turn/interrupt"}},
+		{Run: &runView{State: "running", UnownedActive: true}},
+		{Run: &runView{State: "needs_attention", Outcome: "failed"}},
+		{Run: &runView{State: "interrupted"}},
+		{Run: &runView{State: "completed"}, RecoveryAttention: "cleanup unconfirmed"},
+		{Run: &runView{State: "completed"}, NoRunResume: &noRunResumeView{}},
+	} {
+		want := *workspace.ExecutionStatus()
+		workspace.Schedule = &scheduleView{Mode: "watch", State: "waiting"}
+		if got := workspace.ExecutionStatus(); *got != want {
+			t.Errorf("waiting schedule changed %q to %+v", want.Label, got)
+		}
+	}
+}

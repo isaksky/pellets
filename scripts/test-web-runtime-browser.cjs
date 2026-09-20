@@ -1,6 +1,6 @@
 // Compiled production server and protocol peer, disposable queue only.
 // NODE_PATH=... PLAYWRIGHT_CHANNEL=chrome node scripts/test-web-runtime-browser.cjs
-// Set PELLETS_RUNTIME_BROWSER_CASE=stop_after_pellet for the stop-control regression alone.
+// Set PELLETS_RUNTIME_BROWSER_CASE to run one scenario, e.g. watch_waiting.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -42,7 +42,7 @@ async function until(check, message) {
   execFileSync('go', ['test', '-c', '-o', peer, './internal/app'], {cwd: repository});
   const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
   browser = await engine.launch({headless: true, ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}), ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});
-  const cases = [...(process.platform === 'win32' ? [] : ['runtime_probe_gate']), 'runtime_old', 'schedule_runtime_error', 'schedule_rpc_error', 'schedule_unfinished', 'schedule_fresh_choice', 'schedule_noop', 'stop_after_pellet'];
+  const cases = [...(process.platform === 'win32' ? [] : ['runtime_probe_gate']), 'runtime_old', 'schedule_runtime_error', 'schedule_rpc_error', 'schedule_unfinished', 'schedule_fresh_choice', 'schedule_noop', 'stop_after_pellet', 'watch_waiting'];
   const selectedCase = process.env.PELLETS_RUNTIME_BROWSER_CASE;
   assert.ok(!selectedCase || cases.includes(selectedCase), 'Unknown PELLETS_RUNTIME_BROWSER_CASE');
   for (const mode of cases.filter(mode => !selectedCase || selectedCase === mode)) {
@@ -55,17 +55,129 @@ async function until(check, message) {
     const pellet = cli('add', 'Runtime compatibility regression');
     const queued = mode === 'stop_after_pellet' ? cli('add', 'Leave this queued after stopping') : undefined;
     cli('skill', 'install', '--scope', 'repo', '--agent', 'codex', '--yes');
-    fs.writeFileSync(path.join(root, 'fake-mode'), mode === 'schedule_fresh_choice' ? 'schedule_unfinished' : mode === 'stop_after_pellet' ? 'schedule_gate' : mode);
+    fs.writeFileSync(path.join(root, 'fake-mode'), mode === 'schedule_fresh_choice' ? 'schedule_unfinished' : mode === 'stop_after_pellet' ? 'schedule_gate' : mode === 'watch_waiting' ? 'schedule_activity_gate' : mode);
     let origin = await start(root);
     const page = await browser.newPage({viewport: {width: 1280, height: 1000}});
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     const route = `/projects/${pellet.project}/workspaces/1`;
+    if (mode === 'watch_waiting') {
+      await page.addInitScript(() => {
+        const NativeSource = window.EventSource;
+        window.EventSource = class extends NativeSource {
+          constructor(url, options) { super(url, options); if (url.includes('/activity?')) window.activitySource = this; }
+        };
+      });
+    }
     await page.goto(origin + route);
     const startForm = page.locator('form[data-schedule]').filter({has: page.locator('select[name=mode]')});
     await startForm.getByRole('combobox', {name: 'Execution intention'}).click();
-    await page.getByRole('option', {name: mode === 'stop_after_pellet' ? /^Through matching queue/ : /^One pellet/}).click();
-    assert.equal(await startForm.locator('select[name=mode]').inputValue(), mode === 'stop_after_pellet' ? 'drain' : 'run_one');
+    await page.getByRole('option', {name: mode === 'stop_after_pellet' ? /^Through matching queue/ : mode === 'watch_waiting' ? /^Wait for matching work/ : /^One pellet/}).click();
+    assert.equal(await startForm.locator('select[name=mode]').inputValue(), mode === 'stop_after_pellet' ? 'drain' : mode === 'watch_waiting' ? 'watch' : 'run_one');
     await startForm.getByRole('button', {name: /Start next/}).click();
+    if (mode === 'watch_waiting') {
+      const artifacts = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-watch-state-'));
+      console.log('Watch visual artifacts: ' + artifacts);
+      const status = page.getByRole('region', {name: 'Current execution', exact: true});
+      const label = status.locator('.execution-state-label');
+      const operation = status.locator('.execution-operation');
+      const activity = page.locator('.activity-panel');
+      const expectState = async (text, working) => {
+        await until(async () => await label.textContent() === text, 'Expected execution state ' + text);
+        assert.equal(await status.getAttribute('data-working'), String(working));
+        assert.equal(await status.getAttribute('data-show-operation'), String(working));
+        assert.equal(await label.getAttribute('role'), 'status');
+        assert.equal(await status.locator('.execution-indicator').evaluate(el => getComputedStyle(el).animationName), working ? 'execution-working' : 'none');
+        if (!working) assert.equal(await operation.isVisible(), false, 'Inactive state retained an active operation');
+      };
+      const reportOperation = () => page.evaluate(() => window.activitySource.dispatchEvent(new MessageEvent('pellets-activity', {
+        data: JSON.stringify({available: true, cursor: 100, items: [{id: 'watch-operation', sequence: 100, kind: 'command',
+          status: 'running', title: 'Command', command: 'go test ./internal/webui'}]})
+      })));
+      const waitForWork = async () => {
+        await until(() => activity.locator('.activity-event').count().then(count => count >= 5), 'Reported run history');
+        await until(() => status.locator('.execution-phase').textContent().then(text => text === 'Working on the pellet.'), 'Implementation phase');
+        await expectState('Working', true);
+        await reportOperation();
+        await operation.waitFor({state: 'visible'});
+      };
+      const receiptURL = origin + (await page.locator('form[action$="/stop-now"]').getAttribute('action')).replace(/\/stop-now$/, '');
+      const receipt = async () => (await page.request.get(receiptURL)).json();
+      const completeAndWait = async completed => {
+        fs.writeFileSync(path.join(root, 'fake-complete'), 'complete');
+        await until(async () => {
+          const schedule = await receipt();
+          return schedule.state === 'waiting' && schedule.completed === completed;
+        }, 'Watch did not wait after completion');
+        await until(() => page.locator('.schedule-state').textContent().then(text => /waiting for a matching queue target/.test(text)), 'Waiting schedule patch');
+        await page.screenshot({path: path.join(artifacts, `watch-waiting-${completed}.png`)});
+        await expectState('Waiting for work', false);
+      };
+      const expectHistory = async (id, runID, commit) => {
+        assert.equal(await activity.getAttribute('data-run-id'), runID);
+        assert.equal(await page.locator('.run-facts .run-state').textContent(), 'Completed');
+        assert.match(await page.locator('.run-facts').textContent(), new RegExp(id));
+        assert.equal(await page.locator('.run-outcome code').textContent(), commit);
+        assert.ok(await activity.locator('.activity-event').count() >= 5, 'Completed activity was removed');
+      };
+      await waitForWork();
+      const firstRun = await activity.getAttribute('data-run-id');
+      await completeAndWait(1);
+      assert.equal(cli('show', pellet.id).status, 'closed');
+      const firstCommit = git('rev-parse', 'HEAD').toString().trim();
+      await expectHistory(pellet.id, firstRun, firstCommit);
+      assert.equal(await page.locator('.run-details').evaluate(el => el.open), false);
+      await reportOperation();
+      await expectState('Waiting for work', false);
+      // A fresh document must render the live schedule above historical run state.
+      const html = await (await page.request.get(origin + route)).text();
+      assert.match(html, /class="execution-state-label" role="status">Waiting for work</);
+      await page.reload();
+      await until(() => activity.locator('.activity-event').count().then(count => count >= 5), 'Reloaded run history');
+      await expectState('Waiting for work', false);
+      await expectHistory(pellet.id, firstRun, firstCommit);
+      await page.locator('.run-details > summary').focus(); await page.keyboard.press('Enter');
+      assert.equal(await page.locator('.run-details').evaluate(el => el.open), true);
+      await page.screenshot({path: path.join(artifacts, 'watch-waiting-history.png')});
+      await page.keyboard.press('Enter');
+      await page.setViewportSize({width: 390, height: 900});
+      await page.screenshot({path: path.join(artifacts, 'watch-waiting-phone.png')});
+      await page.setViewportSize({width: 1280, height: 1000});
+      // Queue changes wake this same schedule without another start or reload.
+      fs.unlinkSync(path.join(root, 'fake-complete'));
+      const next = cli('add', 'Wake the waiting Watch schedule');
+      await until(async () => await activity.getAttribute('data-run-id') !== firstRun, 'Watch did not start the next run');
+      await waitForWork();
+      assert.equal(cli('show', next.id).status, 'in_progress');
+      await page.screenshot({path: path.join(artifacts, 'watch-working-again.png')});
+      const nextRun = await activity.getAttribute('data-run-id');
+      await completeAndWait(2);
+      assert.equal(cli('show', next.id).status, 'closed');
+      const nextCommit = git('rev-parse', 'HEAD').toString().trim();
+      await expectHistory(next.id, nextRun, nextCommit);
+      // Both idle stop controls remove the live schedule, revealing Finished.
+      for (const control of ['Stop now', 'Stop after']) {
+        const stopForm = page.locator('form[data-schedule]').filter({has: page.getByRole('button', {name: control, exact: true})});
+        const endpoint = origin + await stopForm.getAttribute('action');
+        const accepted = page.waitForResponse(response => response.url() === endpoint && response.request().method() === 'POST');
+        await stopForm.getByRole('button', {name: control, exact: true}).click();
+        assert.equal((await accepted).status(), 202);
+        await until(async () => (await (await page.request.get(endpoint.replace(/\/stop-(now|after)$/, ''))).json()).state === 'stopped', 'Idle Watch did not stop');
+        await expectState('Finished', false);
+        assert.equal(await page.locator('.schedule-state').count(), 0);
+        await expectHistory(next.id, nextRun, nextCommit);
+        if (control === 'Stop now') {
+          await page.screenshot({path: path.join(artifacts, 'watch-stopped.png')});
+          await startForm.getByRole('combobox', {name: 'Execution intention'}).click();
+          await page.getByRole('option', {name: /^Wait for matching work/}).click();
+          await startForm.getByRole('button', {name: /Start next/}).click();
+          await expectState('Waiting for work', false);
+        }
+      }
+      assert.deepEqual(errors, []);
+      await page.close(); await stop();
+      console.log('PASS Watch waiting with history: initial render, live completion, idle activity, automatic wake, both stop controls');
+      continue;
+    }
     if (mode === 'stop_after_pellet') {
       const eventsFile = path.join(root, 'fake-events.jsonl');
       const events = () => fs.existsSync(eventsFile) ? fs.readFileSync(eventsFile, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];

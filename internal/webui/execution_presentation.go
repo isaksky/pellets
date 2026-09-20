@@ -19,11 +19,13 @@ func (workspace runWorkspaceView) ExecutionStatus() *executionPresentation {
 	if workspace.NoRunResume != nil {
 		return &executionPresentation{Label: "Not running", Detail: "Resume explicitly to continue this pellet."}
 	}
+	// Watch retains the last run as history while waiting for another pellet.
+	// A newly captured active run or unfinished recovery still takes precedence.
+	if workspace.Schedule != nil && workspace.Schedule.State == "waiting" && (run == nil || run.State == "completed" || run.State == "resolved") {
+		return &executionPresentation{Label: "Waiting for work", Detail: "Waiting for a matching pellet."}
+	}
 	if run == nil {
 		if workspace.Schedule != nil {
-			if workspace.Schedule.State == "waiting" {
-				return &executionPresentation{Label: "Waiting for work", Detail: "Waiting for a matching pellet."}
-			}
 			return &executionPresentation{Label: "Preparing execution", Detail: "Selecting and checking the next pellet.", Working: true}
 		}
 		return nil
