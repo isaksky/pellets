@@ -44,6 +44,7 @@ const source = '# Delivery &amp; verification\n\nParagraph with **strong**, *emp
     document.addEventListener('securitypolicyviolation', e => window.cspFailures = [...(window.cspFailures || []), e.violatedDirective]);
     document.addEventListener('datastar-fetch', e => {
       if (e.detail.type === 'datastar-patch-signals') window.webStatuses = [...(window.webStatuses || []), JSON.parse(e.detail.argsRaw.signals)._webResult?.status];
+      if (e.detail.type === 'finished' && e.detail.el === document.body) window.liveRefreshFinished = (window.liveRefreshFinished || 0) + 1;
     });
   });
   const screenshot = async name => {
@@ -133,9 +134,13 @@ const source = '# Delivery &amp; verification\n\nParagraph with **strong**, *emp
     el.focus({preventScroll:true});
   });
   for (let i=0; i<3; i++) {
+    const completed = await page.evaluate(() => window.liveRefreshFinished || 0);
     const refresh = page.waitForResponse(r => r.request().headers()['pellets-target'] === 'live');
     await page.evaluate(() => document.dispatchEvent(new CustomEvent('pellets-refresh')));
-    await (await refresh).finished();
+    assert.equal((await refresh).status(),200);
+    // Chromium can omit response.finished for a consumed SSE response. Wait
+    // for Datastar's actual completion with Playwright's bounded page wait.
+    await page.waitForFunction(count => (window.liveRefreshFinished || 0) > count, completed);
     await page.waitForTimeout(100);
     assert.equal(await view.evaluate(el => el === window.descriptionView), true, 'Refresh replaced rendered DOM');
     assert.equal(await view.evaluate(el => el === document.activeElement), true, 'Refresh lost rendered focus');

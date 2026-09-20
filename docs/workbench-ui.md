@@ -149,11 +149,26 @@ flowchart LR
 The locally bundled Mermaid **11.17.2** supports `flowchart` / `graph`,
 `sequenceDiagram` and `stateDiagram` / `stateDiagram-v2`, with plain labels,
 connections, groups and `accTitle` / `accDescr` accessibility text.
-Diagrams fit the description without changing aspect ratio. **View larger**
-expands to natural size inside a scrollable region; **Fit diagram** restores the
-fitted view. A separate zoom/pan viewer is not implemented. **Mermaid source**
-always exposes selectable/copyable text, including when rendering fails.
-All controls work with the keyboard.
+Diagrams fit the description without changing aspect ratio. Click a diagram,
+activate it with Enter/Space, or choose **View larger** to open a viewport-sized
+native modal. The viewer copies the existing vector SVG at full quality and
+starts fitted (up to 100%). **− / +**, the current zoom percentage, **Fit**, and
+**100%** remain visible. Zoom is bounded to **0.1%–800%**; the low minimum lets
+even the maximum supported 20,000-unit diagrams fit on narrow screens.
+Scroll/trackpad gestures zoom around the pointer, touch supports pinch and drag,
+and dragging pans. Pan bounds keep small diagrams centered and let every edge
+of a larger diagram reach the canvas with a 24px margin. Anchored zoom is
+constrained only when it reaches those bounds.
+
+With the canvas focused, **+ / −** zoom, **arrow keys** pan (Shift takes larger
+steps), **F** fits, and **0** resets to centered 100%. Resizing recalculates a
+fitted view; after manual zoom/pan it preserves zoom and the center subject to
+pan bounds. Gestures are contained in the canvas; browser zoom shortcuts and
+gestures elsewhere retain their native behavior. **Close** or **Escape** closes
+only the viewer and returns focus without scrolling the originating diagram.
+The parent dialog, description scroll and unsaved source remain intact.
+**Mermaid source** exposes selectable/copyable text in both surfaces, including
+when rendering fails. SVG accessibility titles/descriptions are retained.
 
 For untrusted content, configuration directives and YAML frontmatter, author
 CSS/classes, HTML/entities, Markdown/math labels, links/callbacks, icons/images,
@@ -171,14 +186,19 @@ At most 32 diagrams wait across surfaces; excess diagrams offer **Retry diagram*
 once the queue drains. This uses bounded native browser
 layout, not a worker or a claim that timers interrupt synchronous JavaScript.
 Disconnected content drops queued work/styles; theme changes invalidate pending
-results. Unchanged Datastar refreshes retain diagrams and source disclosures.
+results. Unchanged Datastar refreshes retain diagrams, source disclosures and an
+open viewer. Theme rerenders refresh that viewer's vector/colors while retaining
+zoom. Changing or removing its exact source element closes the viewer rather
+than silently retargeting another diagram. Reopening starts fitted again.
 
 `diagrams.js` owns `pl-diagram`, created by `createDiagram(source)`. Its native
-activation button emits the bubbling, cancelable `pellets-diagram-activate`
-event with `{source, svg, trigger}`. A larger viewer can prevent default inline
-expansion and call `createDiagram(source)` for a new surface with its own IDs and
-styles. The `svg` reference belongs to the existing surface; directly cloning it
-requires remapping both IDs and scoped CSS. No Mermaid click handlers are bound.
+activation button and keyboard-accessible canvas emit the bubbling, cancelable
+`pellets-diagram-activate` event with `{source, svg, trigger}`. Preventing default
+suppresses the standard viewer. `diagram-viewer.js` owns the modal and cleans up
+its resize observer, pointer state and stylesheet on closure. It remaps copied
+SVG IDs, ARIA/marker references and scoped CSS without parsing source again.
+The `svg` reference still belongs to the inline surface. No Mermaid click
+handlers are bound.
 Generated CSS is scoped and SVG is rebuilt through an allowlist with unique IDs.
 Source cannot enable HTML, scripts, resources or weaker Mermaid security.
 The application's CSP remains unchanged.
@@ -196,7 +216,10 @@ malformed, unsafe and oversized source. Run
 Playwright on `NODE_PATH`, repeating with `PLAYWRIGHT_BROWSER=webkit`. The Mermaid
 suite checks diagram families, local errors, limits, source alternatives, IDs,
 cleanup, rapid edits, offline rendering and zero application CSP violations,
-plus screenshots/contrast at 1280, 1092 and 390px in all five themes.
+plus screenshots/contrast at 1280, 1092 and 390px in all five themes. Its
+`web-diagram-viewer-contract.cjs` checks click/keyboard opening, nested Escape,
+focus containment/return, anchored zoom, limits, pan bounds, fit/reset, resizing,
+drafts, repeated live updates, source removal, theme changes and touch input.
 The description suite covers save/reload/CLI round trips and proposal autosave.
 
 ## Planning chat

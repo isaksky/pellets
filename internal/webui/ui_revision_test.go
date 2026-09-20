@@ -54,7 +54,7 @@ func TestUIRevisionPageAndAssetGraph(t *testing.T) {
 			t.Fatalf("page asset lacks revision: %s", asset)
 		}
 	}
-	for _, asset := range []string{"app.js", "workbench.js", "dropdowns.js", "filters.js", "datastar-1.0.3.js", "app.css", "workbench.css", "theme-preflight.js", "diagrams.js", "diagrams.css", "mermaid-11.17.2.js", "MERMAID-LICENSES.txt", "MERMAID-NOTICE.txt"} {
+	for _, asset := range []string{"app.js", "workbench.js", "dropdowns.js", "filters.js", "datastar-1.0.3.js", "app.css", "workbench.css", "theme-preflight.js", "diagrams.js", "diagram-viewer.js", "diagrams.css", "mermaid-11.17.2.js", "MERMAID-LICENSES.txt", "MERMAID-NOTICE.txt"} {
 		response := performRequest(f.handler, http.MethodGet, "/assets/"+uiRevision+"/"+asset, "", nil)
 		if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
 			t.Fatalf("versioned asset %s: %d %s", asset, response.Code, response.Body.String())

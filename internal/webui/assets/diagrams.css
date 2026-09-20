@@ -1,7 +1,6 @@
 .mermaid-diagram { display: block; min-width: 0; max-width: 100%; margin: 0 0 1em; padding: 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); }
-.mermaid-canvas { max-width: 100%; overflow: auto; overscroll-behavior: contain; }
+.mermaid-canvas { max-width: 100%; overflow: auto; overscroll-behavior: contain; cursor: zoom-in; }
 .mermaid-canvas > svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
-.mermaid-expanded .mermaid-canvas > svg { max-width: none; }
 .mermaid-diagram .mermaid-activate, .mermaid-diagram .mermaid-retry { display: block; margin: 8px 0; padding: 5px 9px; border: 1px solid var(--line); border-radius: 3px; background: var(--pane); color: var(--ink); font: inherit; font-size: 12px; cursor: pointer; }
 .mermaid-diagram [hidden] { display: none; }
 .mermaid-source > summary { cursor: pointer; color: var(--ink); font-size: 12px; }
@@ -10,3 +9,45 @@
 .mermaid-canvas:focus-visible, .mermaid-activate:focus-visible, .mermaid-retry:focus-visible, .mermaid-source > summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 /* The native renderer measures text offscreen under the same local CSS/CSP. */
 .mermaid-stage { position: fixed; left: -30000px; top: 0; width: 1200px; pointer-events: none; font-family: Arial, sans-serif; }
+
+/* This native dialog is feature-owned, like the record and planning dialogs. */
+.diagram-viewer-open, .diagram-viewer-open body { overflow: hidden; }
+.diagram-viewer {
+  box-sizing: border-box; width: calc(100vw - 32px); height: calc(100dvh - 32px);
+  max-width: none; max-height: none; margin: auto; padding: 0;
+  border: 1px solid var(--theme-menu-border); border-radius: 7px;
+  background: var(--bg); color: var(--ink); box-shadow: var(--theme-dialog-shadow);
+  overflow: hidden; overscroll-behavior: contain; font: inherit;
+}
+.diagram-viewer[open] { display: flex; flex-direction: column; }
+.diagram-viewer::backdrop { background: var(--theme-backdrop); }
+.diagram-viewer-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.diagram-viewer-header h2 { margin: 0; font: inherit; font-weight: 600; }
+.diagram-viewer button { min-width: 44px; min-height: 36px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--pane); color: var(--ink); font: inherit; cursor: pointer; }
+.diagram-viewer button:hover { border-color: var(--ink); }
+.diagram-viewer button:disabled { opacity: .5; cursor: default; }
+.diagram-viewer-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; padding: 10px 12px 0; }
+.diagram-viewer-zoom { min-width: 65px; text-align: center; font-variant-numeric: tabular-nums; }
+.diagram-viewer-help { margin: 8px 16px 12px; color: var(--ink); font-size: 12px; text-align: center; }
+.diagram-viewer-canvas { position: relative; flex: 1; min-height: 48px; margin: 0 12px; overflow: hidden; border: 1px solid var(--line); border-radius: 4px; touch-action: none; overscroll-behavior: none; cursor: grab; user-select: none; }
+.diagram-viewer-canvas.is-panning { cursor: grabbing; }
+.diagram-viewer-viewport { position: absolute; inset: 0; display: block; width: 100%; height: 100%; max-width: none; font-family: Arial, sans-serif; }
+.diagram-viewer-source { flex: none; padding: 10px 16px; min-height: 0; }
+.diagram-viewer-source summary { cursor: pointer; font-size: 12px; }
+.diagram-viewer-source pre { margin: 8px 0 0; padding: 8px; max-height: min(24dvh, 180px); overflow: auto; overscroll-behavior: contain; background: var(--pane); color: var(--ink); font-size: 12px; }
+.diagram-viewer :is(button, summary, pre):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.diagram-viewer-canvas:focus-visible { outline: 2px solid var(--ink); outline-offset: -3px; }
+@media (max-width: 600px) {
+  .diagram-viewer { width: calc(100vw - 12px); height: calc(100dvh - 12px); }
+  .diagram-viewer-header { padding: 8px 12px; }
+  .diagram-viewer button { min-height: 44px; }
+  .diagram-viewer-toolbar { gap: 6px; }
+  .diagram-viewer-canvas { margin: 0 8px; }
+}
+@media (max-height: 420px) {
+  .diagram-viewer { width: calc(100vw - 12px); height: calc(100dvh - 12px); }
+  .diagram-viewer-header { padding: 4px 12px; }
+  .diagram-viewer-toolbar { padding-top: 4px; }
+  .diagram-viewer-help { margin: 4px 12px; }
+  .diagram-viewer-source { padding: 4px 12px; }
+}

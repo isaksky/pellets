@@ -35,6 +35,9 @@ async function stop() {
   }
 }
 async function measure(page, scene, build) {
+  // Capture the same idle pointer state on both builds. WebKit can retain or
+  // clear hover after a click-triggered patch, independently of the CSS.
+  await page.mouse.move(0, 0);
   // Native dialog autofocus can select the title text. Normalize the caret for
   // screenshots; the workflow suites independently verify focus preservation.
   if (scene.endsWith('-record-actions') || scene.endsWith('-checkpoint-scope'))

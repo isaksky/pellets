@@ -1,5 +1,6 @@
 // Mermaid is presentation only. Native description fields remain authoritative.
 // The locally bundled renderer is loaded once, only when a diagram is present.
+import { openDiagramViewer, refreshDiagramViewer, closeDiagramViewer } from "./diagram-viewer.js";
 let runtime, serial = 0, draining = false;
 const queue = new Map(), connected = new Set();
 const maximumText = 4096;
@@ -153,12 +154,13 @@ async function drain() {
 class PelletDiagram extends HTMLElement {
   version = 0;
   connectedCallback() { connected.add(this); this.schedule(); }
-  disconnectedCallback() { connected.delete(this); queue.delete(this); this.version++; this.clearSheet(); }
+  disconnectedCallback() { closeDiagramViewer(this); connected.delete(this); queue.delete(this); this.version++; this.clearSheet(); }
   clearSheet() {
     if (this.sheet) document.adoptedStyleSheets = document.adoptedStyleSheets.filter(sheet => sheet !== this.sheet);
     this.sheet = null;
   }
   schedule() {
+    refreshDiagramViewer(this);
     this.version++;
     const error = this.limited ? "Only the first eight Mermaid diagrams in a description are rendered. Split this description to view more." : sourceError(this.source);
     if (error) { this.fail(error); return; }
@@ -171,6 +173,7 @@ class PelletDiagram extends HTMLElement {
     drain();
   }
   fail(message, retry = false) {
+    closeDiagramViewer(this);
     this.clearSheet(); this.canvas.replaceChildren(); this.activate.hidden = true;
     this.canvas.hidden = true; this.retry.hidden = !retry;
     this.dataset.state = "error"; this.status.hidden = false;
@@ -181,7 +184,19 @@ class PelletDiagram extends HTMLElement {
     this.sheet = new CSSStyleSheet(); this.sheet.replaceSync(css);
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, this.sheet];
     this.canvas.replaceChildren(svg); this.canvas.hidden = false; this.activate.hidden = false;
+    // A button's descendants are presentational to assistive technology. Keep
+    // Mermaid's title/description available on the activation controls too.
+    const title = svg.querySelector("title")?.textContent.trim();
+    this.canvas.setAttribute("aria-label", "Open diagram viewer" + (title ? ": " + title : ""));
+    this.activate.setAttribute("aria-label", "View larger" + (title ? ": " + title : ""));
+    for (const control of [this.canvas, this.activate]) {
+      const description = svg.getAttribute("aria-describedby");
+      if (description) control.setAttribute("aria-describedby", description);
+      else control.removeAttribute("aria-describedby");
+    }
     this.status.hidden = true; this.dataset.state = "ready";
+    this.css = css;
+    refreshDiagramViewer(this, svg);
   }
 }
 customElements.define("pl-diagram", PelletDiagram);
@@ -193,23 +208,28 @@ export function createDiagram(source, limited = false) {
   host.status.setAttribute("role", "status");
   host.canvas = element("div"); host.canvas.className = "mermaid-canvas";
   host.canvas.hidden = true;
-  host.canvas.tabIndex = 0; host.canvas.setAttribute("role", "region");
-  host.canvas.setAttribute("aria-label", "Diagram (expand for full size)");
+  host.canvas.tabIndex = 0; host.canvas.setAttribute("role", "button");
+  host.canvas.setAttribute("aria-label", "Open diagram viewer");
+  host.canvas.setAttribute("aria-haspopup", "dialog");
+  host.canvas.title = "Open diagram viewer to zoom and pan";
   host.activate = element("button", "View larger"); host.activate.type = "button";
   host.activate.className = "mermaid-activate"; host.activate.hidden = true;
-  host.activate.setAttribute("aria-expanded", "false");
+  host.activate.setAttribute("aria-haspopup", "dialog");
   host.retry = element("button", "Retry diagram"); host.retry.type = "button";
   host.retry.className = "mermaid-retry"; host.retry.hidden = true;
   host.retry.addEventListener("click", () => host.schedule());
-  host.activate.addEventListener("click", () => {
-    // A future viewer can preventDefault and own this activation. Native button
-    // semantics provide Enter/Space access without per-refresh listeners.
+  const activate = trigger => {
     if (!host.dispatchEvent(new CustomEvent("pellets-diagram-activate", {
-      bubbles: true, cancelable: true, detail: {source: host.source, svg: host.canvas.querySelector("svg"), trigger: host.activate},
+      bubbles: true, cancelable: true, detail: {source: host.source, svg: host.canvas.querySelector("svg"), trigger},
     }))) return;
-    const expanded = host.classList.toggle("mermaid-expanded");
-    host.activate.textContent = expanded ? "Fit diagram" : "View larger";
-    host.activate.setAttribute("aria-expanded", String(expanded));
+    openDiagramViewer(host, trigger);
+  };
+  host.activate.addEventListener("click", () => activate(host.activate));
+  host.canvas.addEventListener("click", () => activate(host.canvas));
+  host.canvas.addEventListener("keydown", event => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    if (!event.repeat) activate(host.canvas);
   });
   host.details = element("details"); host.details.className = "mermaid-source";
   const pre = element("pre"); pre.tabIndex = 0; pre.dataset.language = "mermaid";

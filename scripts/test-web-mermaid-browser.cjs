@@ -50,6 +50,7 @@ const source = examples.map(fence).join('\n\n') + '\n\n```js\nconst ordinary = t
     document.addEventListener('securitypolicyviolation', e => window.cspFailures = [...(window.cspFailures || []), e.violatedDirective]);
     document.addEventListener('datastar-fetch', e => {
       if (e.detail.type === 'datastar-patch-signals') window.webStatuses = [...(window.webStatuses || []), JSON.parse(e.detail.argsRaw.signals)._webResult?.status];
+      if (e.detail.type === 'finished' && e.detail.el === document.body) window.liveRefreshFinished = (window.liveRefreshFinished || 0) + 1;
     });
   });
   const screenshot = async name => {
@@ -87,9 +88,16 @@ const source = examples.map(fence).join('\n\n') + '\n\n```js\nconst ordinary = t
     await host.locator('[data-description-mode=view]').click();
   };
   const noDuplicateIDs = async () => assert.deepEqual(await page.evaluate(() => {
-    const ids = [...document.querySelectorAll('pl-diagram svg [id],pl-diagram svg[id]')].map(node => node.id);
+    const ids = [...document.querySelectorAll('pl-diagram svg [id],pl-diagram svg[id],.diagram-viewer [id]')].map(node => node.id);
     return ids.filter((id, i) => ids.indexOf(id) !== i);
   }), []);
+  const refresh = async () => {
+    const completed = await page.evaluate(() => window.liveRefreshFinished || 0);
+    const response = page.waitForResponse(r => r.request().headers()['pellets-target'] === 'live');
+    await page.evaluate(() => document.dispatchEvent(new CustomEvent('pellets-refresh')));
+    assert.equal((await response).status(),200);
+    await page.waitForFunction(count => (window.liveRefreshFinished || 0) > count, completed);
+  };
   await noDuplicateIDs();
   // Defense at the SVG boundary does not rely on CSP or Mermaid's sanitizer.
   await page.evaluate(async () => {
@@ -109,22 +117,24 @@ const source = examples.map(fence).join('\n\n') + '\n\n```js\nconst ordinary = t
   }));
   const activation = view.locator('.mermaid-activate').first();
   await activation.focus(); await page.keyboard.press('Enter');
-  assert.equal(await activation.getAttribute('aria-expanded'), 'true');
+  await page.getByRole('dialog', {name:'Diagram viewer'}).waitFor();
   assert.equal(await page.evaluate(() => window.activatedSource), examples[0]);
-  await activation.click();
-  assert.equal(await activation.getAttribute('aria-expanded'), 'false');
+  await noDuplicateIDs();
   // Repeated real Datastar refreshes preserve one SVG, source, and activation.
   await view.evaluate(node => { window.originalDiagram = node.querySelector('svg'); });
   for (let i=0; i<3; i++) {
-    const refresh = page.waitForResponse(r => r.request().headers()['pellets-target'] === 'live');
-    await page.evaluate(() => document.dispatchEvent(new CustomEvent('pellets-refresh')));
-    await (await refresh).finished(); await page.waitForTimeout(100);
+    await refresh(); await page.waitForTimeout(100);
     await ready(); await noDuplicateIDs();
     assert.equal(await view.evaluate(node => window.originalDiagram === node.querySelector('svg')), true);
   }
+  assert.equal(await page.locator('.diagram-viewer[open]').count(), 1);
+  await page.keyboard.press('Escape');
+  await page.locator('.diagram-viewer').waitFor({state:'detached'});
+  assert.equal(await activation.evaluate(node => node === document.activeElement), true);
   await activation.click();
-  assert.equal(await page.evaluate(() => window.activations), 3);
-  await activation.click();
+  assert.equal(await page.evaluate(() => window.activations), 2);
+  await page.getByRole('button', {name:'Close diagram viewer'}).click();
+  await require('./web-diagram-viewer-contract.cjs')({page, view, field, fresh, ready, refresh, screenshot, noDuplicateIDs, source, fence, engine});
   // All themes and widths; inspect text/shape contrast and preserve SVG ratio.
   for (const theme of ['gruvbox-light', 'gruvbox-dark', 'light', 'dark', 'icy']) {
     await page.evaluate(theme => window.Workbench.applyTheme(theme), theme);
@@ -152,6 +162,16 @@ const source = examples.map(fence).join('\n\n') + '\n\n```js\nconst ordinary = t
         assert.ok(Math.abs(dimensions.ratio-dimensions.expected) < .02, JSON.stringify(dimensions));
         assert.ok(dimensions.contrast >= 4.5, theme + ' text contrast ' + JSON.stringify(dimensions));
         await screenshot(`${theme}-${width}-${index}.png`);
+        await diagram.locator('.mermaid-canvas').click();
+        await noDuplicateIDs();
+        const modal = page.getByRole('dialog', {name:'Diagram viewer'});
+        await modal.waitFor();
+        assert.equal(await modal.locator('svg svg text').first().evaluate(node => getComputedStyle(node).fill),
+          await diagram.locator('svg text').first().evaluate(node => getComputedStyle(node).fill));
+        assert.ok(await modal.evaluate(node => node.scrollWidth <= node.clientWidth && node.scrollHeight <= node.clientHeight));
+        if (index === 0) await screenshot(`viewer-${theme}-${width}.png`);
+        await page.keyboard.press('Escape');
+        assert.equal(await diagram.locator('.mermaid-canvas').evaluate(node => node === document.activeElement), true);
       }
     }
   }
@@ -210,6 +230,9 @@ const source = examples.map(fence).join('\n\n') + '\n\n```js\nconst ordinary = t
   // Renderer works with the network offline once local application assets load.
   await page.context().setOffline(true);
   await fresh(source + '\nOffline preview.'); await ready();
+  await view.locator('.mermaid-canvas').first().click();
+  await page.getByRole('button',{name:'Zoom in',exact:true}).click();
+  await page.getByRole('button',{name:'Close diagram viewer'}).click();
   await page.context().setOffline(false);
   // Repeated surfaces require globally unique SVG/marker IDs and stylesheet cleanup.
   await page.evaluate(async source => {

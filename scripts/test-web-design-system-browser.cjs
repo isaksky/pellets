@@ -113,6 +113,13 @@ async function start(binary) {
   assert.deepEqual(await page.evaluate(() => Array.from(document.querySelectorAll('button, input:not([type=hidden]), textarea, select, dialog, details')).filter(control => !control.closest('pl-button, pl-field, pl-checkbox, pl-select, pl-number, pl-dialog, pl-menu, pl-disclosure, pl-diagram') && !control.matches('#contents [data-description-contents]')).map(control => control.outerHTML.slice(0,100))), [], 'Gallery controls must use the component library or production description controls');
   await page.waitForFunction(() => document.querySelectorAll('#ds-diagrams pl-diagram[data-state=ready]').length === 3);
   assert.equal(await page.locator('#ds-diagrams pl-diagram[data-state=error]').count(), 4);
+  const diagramTrigger = page.locator('#ds-diagrams .mermaid-canvas').first();
+  await diagramTrigger.click();
+  await page.getByRole('dialog', {name:'Diagram viewer'}).waitFor();
+  await page.getByRole('button', {name:'Zoom in',exact:true}).click();
+  await page.keyboard.press('Escape');
+  await page.locator('.diagram-viewer').waitFor({state:'detached'});
+  assert.equal(await diagramTrigger.evaluate(node => node === document.activeElement), true);
 
   for (const value of ['gruvbox-dark', 'light', 'dark', 'icy', 'gruvbox-light']) {
     await page.locator('#theme-select-trigger').click();
