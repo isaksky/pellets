@@ -26,11 +26,20 @@ Known execution phases have plain-language descriptions, such as checking the
 workspace, working on the pellet, checking the implementation result and saving
 verified changes. Detailed diagnostics remain under Run details. Commentary is
 **Agent update** and a final message is **Agent response**; neither carries a
-run-completion label. Individual commands and file operations keep their own
-reported status. Disconnection clears the active-operation description and
+run-completion label. Both appear expanded as readable prose in chronological
+position, while commands and file operations remain compact native disclosures.
+Messages use the shared local Markdown renderer for paragraphs, inline code,
+lists, emphasis, safe links and highlighted code fences. Raw HTML stays literal,
+unsafe link schemes stay inert, and images become alt text without fetching
+remote assets. Long paths wrap; code blocks scroll horizontally with keyboard
+access. A pending message explicitly waits for its complete snapshot, and an
+empty completed message says that no text was reported. Individual commands and
+file operations keep their own reported status. Disconnection clears the active-operation description and
 shows a reconnect notice while retaining the last authoritative execution state.
 Unavailable/reset snapshots clear stale history; truncated history keeps its
-notice. Neither condition means the execution finished.
+visible notice. The routine projection explanation is available under **About
+reported activity**; connection and history warnings remain outside that
+disclosure. Neither condition means the execution finished.
 
 Only the state label is a polite live region. Operation changes and feed updates
 do not repeatedly announce historical content. Reduced motion disables the
@@ -98,3 +107,10 @@ Activity updates target only the activity container. They are independent of the
 Datastar database-invalidation stream and must preserve dialog drafts, pending
 answers, active focus, expansions and scroll position. The ordinary database
 monitor continues to refresh authoritative records and execution controls.
+Unchanged rendered content retains its DOM nodes, including on snapshot replay
+and status-only changes, preserving text selection, focused links and code-block
+scroll. Changed content is replaced only in its own event. Event order follows
+first observation, not the latest revision cursor. Readers away from the bottom
+keep a retained visible event as their scroll anchor, including when earlier
+content changes height or is evicted. Selection or focus inside the feed also
+suppresses automatic following; readers at the end otherwise follow new events.

@@ -1,4 +1,5 @@
 import { highlightCode } from "./code-highlight.js";
+import { renderMarkdown } from "./markdown.js";
 import { rememberDescriptions, refreshDescriptions } from "./description.js";
 import { refreshComponents } from "./components.js";
 import { saveSetting } from "./settings.js";
@@ -745,11 +746,26 @@ function updateCurrentOperation(panel) {
   output.hidden = !text;
 }
 
+function activityAvailability(panel, message, notice) {
+  panel.querySelector(".activity-availability").textContent = message;
+  const status = panel.querySelector(".activity-notice");
+  status.textContent = notice ? message : "";
+  status.hidden = !notice;
+}
+
 function renderActivity(panel, snapshot) {
   const events = panel.querySelector("[data-activity-events]");
   if (!events) return;
+  const selection = window.getSelection(),
+    reading = (!selection?.isCollapsed && panel.contains(selection?.anchorNode)) ||
+      events.contains(document.activeElement),
+    workspace = panel.closest(".run-workspace"),
+    workspaceTop = workspace.scrollTop,
+    edge = panel.getBoundingClientRect().top,
+    anchors = Array.from(events.children).filter(node => node.getBoundingClientRect().bottom > edge)
+      .map(node => ({node, offset: node.getBoundingClientRect().top - edge}));
   const following =
-      panel.scrollHeight - panel.clientHeight - panel.scrollTop < 32,
+      !reading && panel.scrollHeight - panel.clientHeight - panel.scrollTop < 32,
     top = panel.scrollTop;
   let cache = activity.get(panel.dataset.activityUrl);
   if (!cache) {
@@ -770,36 +786,61 @@ function renderActivity(panel, snapshot) {
   cache.cursor = snapshot.cursor;
   cache.available = snapshot.available;
   cache.connected = snapshot.connected !== false;
-  panel.querySelector(".activity-availability").textContent =
-    snapshot.message ||
+  let availability = snapshot.message ||
     (snapshot.available
       ? "Reported activity; complete messages and output appear when available."
       : "Detailed activity is unavailable for this attempt.");
+  if (snapshot.truncated && !availability.includes("truncated"))
+    availability = "Earlier activity was truncated. " + availability;
+  activityAvailability(panel, availability,
+    !snapshot.available || snapshot.truncated || snapshot.connected === false);
   for (const item of snapshot.items || []) {
     cache.items.set(item.id, item);
     let node = Array.from(events.children).find(
       (x) => x.dataset.eventId === item.id,
     );
     if (!node) {
-      node = element("details", "activity-event");
+      node = element(item.kind === "message" ? "article" : "details",
+        "activity-event" + (item.kind === "message" ? " activity-message" : ""));
       node.dataset.eventId = item.id;
       node.id = "event-" + panel.dataset.runId + "-" + item.id;
-      node.append(element("summary"), element("div", "event-body"));
+      const heading = element(item.kind === "message" ? "h4" : "summary", "event-heading");
+      heading.append(element("span", "event-title"), element("small", "event-path"), element("small", "event-status"));
+      node.append(heading, element("div", "event-body"));
       events.append(node);
-      node.open = expansions.get(node.id) ?? false;
-      node.addEventListener("toggle", () => expansions.set(node.id, node.open));
+      if (item.kind !== "message") {
+        node.open = expansions.get(node.id) ?? false;
+        node.addEventListener("toggle", () => expansions.set(node.id, node.open));
+      }
     }
-    const summary = node.querySelector("summary"),
-      body = node.querySelector(".event-body");
-    summary.replaceChildren(
-      element("span", "event-title", item.kind === "message" ?
-        (item.title === "Agent response" ? "Agent response" : "Agent update") : item.title || item.kind),
-    );
-    if (item.path) summary.append(element("small", "event-path", item.path));
-    if (item.kind !== "message") summary.append(element("small", "event-status",
-      ({running: "In progress", completed: "Completed", failed: "Failed", awaiting_input: "Waiting", resolved: "Resolved"})[item.status] || item.status || ""));
+    const body = node.querySelector(".event-body");
+    const labels = {
+      "event-title": item.kind === "message" ?
+        (item.title === "Agent response" ? "Agent response" : "Agent update") : item.title || item.kind,
+      "event-path": item.path || "",
+      "event-status": item.kind === "message" ? "" :
+        ({running: "In progress", completed: "Completed", failed: "Failed", awaiting_input: "Waiting", resolved: "Resolved"})[item.status] || item.status || "",
+    };
+    for (const [name, text] of Object.entries(labels)) {
+      const label = node.querySelector("." + name);
+      if (label.textContent !== text) label.textContent = text;
+      label.hidden = !text;
+    }
+    // Replayed snapshots and status-only changes must not replace selected
+    // message text, focused links/code, or horizontally scrolled output.
+    const pending = item.kind === "message" && !item.text?.trim() && item.status === "running";
+    const content = JSON.stringify([item.text, item.source, item.diff, item.command,
+      item.output, item.exit_code, item.truncated, pending]);
+    if (node.activityContent === content) continue;
+    node.activityContent = content;
     body.replaceChildren();
-    if (item.text) body.append(element("p", "", item.text));
+    if (item.kind === "message") {
+      const message = element("div", "markdown-body activity-message-text");
+      if (item.text?.trim()) message.append(renderMarkdown(item.text));
+      else message.append(element("p", "activity-message-pending", pending ?
+        "Waiting for the complete message…" : "No message text was reported."));
+      body.append(message);
+    } else if (item.text) body.append(element("p", "", item.text));
     if (item.source) body.append(highlightCode(item.source));
     if (item.diff) body.append(highlightCode(item.diff, true));
     if (item.command)
@@ -817,6 +858,14 @@ function renderActivity(panel, snapshot) {
     if (!body.childNodes.length)
       body.append(element("p", "", "No additional details were reported."));
   }
+  // The server's retained order is chronological by first observation. An
+  // item's sequence is its revision cursor, not a reason to move it to the end.
+  let position = events.firstElementChild;
+  for (const id of cache.items.keys()) {
+    const node = Array.from(events.children).find(node => node.dataset.eventId === id);
+    if (node !== position) events.insertBefore(node, position);
+    position = node.nextElementSibling;
+  }
   while (events.children.length > 128) {
     const old = events.firstElementChild;
     cache.items.delete(old.dataset.eventId);
@@ -831,7 +880,12 @@ function renderActivity(panel, snapshot) {
     events.children.length + " events";
   updateCurrentOperation(panel);
   if (following) panel.scrollTop = panel.scrollHeight;
-  else panel.scrollTop = top;
+  else {
+    const anchor = anchors.find(({node}) => node.isConnected);
+    panel.scrollTop = anchor ? panel.scrollTop + anchor.node.getBoundingClientRect().top -
+      panel.getBoundingClientRect().top - anchor.offset : top;
+  }
+  workspace.scrollTop = workspaceTop;
 }
 function connectActivity() {
   if (uiVersion.isOutdated()) return;
@@ -877,8 +931,7 @@ function connectActivity() {
       const cache = activity.get(url);
       if (cache) cache.connected = false;
       updateCurrentOperation(current);
-      current.querySelector(".activity-availability").textContent =
-        "Activity could not be read. Reconnect to retry.";
+      activityAvailability(current, "Activity could not be read. Reconnect to retry.", true);
     }
   });
   stream.addEventListener("error", () => {
@@ -887,8 +940,7 @@ function connectActivity() {
       const cache = activity.get(url);
       if (cache) cache.connected = false;
       updateCurrentOperation(current);
-      current.querySelector(".activity-availability").textContent =
-        "Activity connection interrupted. Reconnecting…";
+      activityAvailability(current, "Activity connection interrupted. Reconnecting…", true);
     }
   });
 }

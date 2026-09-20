@@ -43,7 +43,7 @@ func TestEmbeddedUIAssetsStayOfflineAccessibleResponsiveAndStateAware(t *testing
 			t.Fatalf("authoritative update/input protection missing %q", required)
 		}
 	}
-	for _, required := range []string{`dialog.showModal()`, `event.preventDefault();closeRecord()`, `focus({preventScroll:true})`, `setSelectionRange(`, `stream.close()`, `pellets-activity`, `node.dataset.eventId`, `panel.scrollTop=top`, `localStorage.setItem("pellets-panels"`, `drafts.delete(formKey(form))`, `expansions.set(node.id,node.open)`} {
+	for _, required := range []string{`dialog.showModal()`, `event.preventDefault();closeRecord()`, `focus({preventScroll:true})`, `setSelectionRange(`, `stream.close()`, `pellets-activity`, `node.dataset.eventId`, `workspace.scrollTop=workspaceTop`, `localStorage.setItem("pellets-panels"`, `drafts.delete(formKey(form))`, `expansions.set(node.id,node.open)`} {
 		if !strings.Contains(compactCSS(workbench), compactCSS(required)) {
 			t.Fatalf("Workbench interaction/state contract missing %q", required)
 		}

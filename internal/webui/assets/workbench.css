@@ -1214,13 +1214,17 @@ input[type="checkbox"] {
   color: var(--muted);
   font-size: 12px;
 }
-.run-details {
+.run-details,
+.schedule-details {
   font-size: 11px;
-  color: var(--dim);
-  margin-bottom: 10px;
+  color: var(--muted);
+  margin-bottom: 6px;
+  flex-shrink: 0;
+  overflow-wrap: anywhere;
 }
-.run-details summary {
-  font-size: 10px;
+.run-details summary,
+.schedule-details summary {
+  font-size: 11px;
   cursor: pointer;
 }
 .run-group-context pre {
@@ -1417,11 +1421,16 @@ input[type="checkbox"] {
 .execution-operation[hidden] {
   display: none;
 }
-@media (max-width: 600px) {
-  /* The phone pane cannot pin the state, a feed and a full composer at once.
+@media (max-width: 600px), (max-height: 600px) {
+  /* A small pane cannot pin the state, a feed and a full composer at once.
      Keep inputs reachable in the workspace scroll instead of covering events. */
   .run-workspace:has(.execution-status) > .run-follow-up,
   .run-workspace:has(.execution-status) > .run-interaction {
+    position: static;
+  }
+}
+@media (max-height: 600px) {
+  .execution-status {
     position: static;
   }
 }
@@ -1437,19 +1446,29 @@ input[type="checkbox"] {
   margin: 0;
 }
 .activity-heading span,
-.activity-availability {
+.activity-availability,
+.activity-help,
+.activity-notice {
   font-size: 10px;
-  color: var(--dim);
+  color: var(--muted);
 }
+.activity-help { margin: 4px 0 10px; }
+.activity-help summary { cursor: pointer; }
 .activity-availability {
-  margin: 3px 0 12px;
+  margin: 6px 0;
+}
+.activity-notice {
+  margin: 8px 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 .activity-event {
   border-top: 1px solid var(--line);
   font-size: 11px;
-  padding: 10px 0;
+  padding: 8px 0;
+  min-width: 0;
 }
-.activity-event summary {
+.activity-event > summary {
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1457,21 +1476,31 @@ input[type="checkbox"] {
   font-size: 11px;
   list-style: none;
 }
-.activity-event summary:after {
+.activity-event > summary:after {
   content: "›";
   margin-left: auto;
   color: var(--dim);
 }
-.activity-event[open] summary:after {
+.activity-event[open] > summary:after {
   content: "⌄";
 }
-.activity-event summary small {
+.activity-event > summary small {
   font-size: 10px;
   color: var(--dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.activity-event > summary .event-title,
+.activity-event > summary .event-status {
+  flex-shrink: 0;
+}
+.activity-event > summary .event-title {
+  max-width: 55%;
+  overflow-wrap: anywhere;
+}
+.activity-event > summary .event-status { margin-left: auto; }
+.activity-event > summary:after { margin-left: 0; flex-shrink: 0; }
 .activity-event .event-body {
   padding: 9px 0 0 12px;
 }
@@ -2247,7 +2276,7 @@ dialog::backdrop {
   flex-shrink: 0;
 }
 .run-workspace > .activity-panel {
-  min-height: 120px;
+  min-height: 180px;
   flex: 1 1 auto;
 }
 .run-workspace > .run-controls {
@@ -2728,6 +2757,28 @@ dialog::backdrop {
 .markdown-body .align-right { text-align: right; }
 .markdown-body hr { border: 0; border-top: 1px solid var(--muted); margin: 1.2em 0; }
 .markdown-body .description-empty { color: var(--muted); }
+/* Agent prose uses the shared safe Markdown renderer, but reads as part of
+   the chronological feed rather than a bordered, independently scrolled field. */
+.activity-message { padding: 16px 0; }
+.activity-message .event-heading {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.activity-message .event-body { padding: 0; }
+.activity-message .activity-message-text {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  max-height: none;
+  overflow: visible;
+  font-size: 14px;
+  line-height: 1.65;
+}
+.activity-message .activity-message-pending { color: var(--muted); font-style: italic; }
+.activity-message .activity-message-text pre { border: 0; font-size: 1em; }
 /* This outline belongs to the document, separate from workbench sidebars. */
 pl-description-reader { display: block; min-width: 0; }
 .description-contents { min-width: 0; max-height: 48vh; overflow: auto; overscroll-behavior: contain; padding: 10px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--pane); font-size: 12px; line-height: 1.45; }

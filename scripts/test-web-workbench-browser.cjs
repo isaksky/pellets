@@ -811,7 +811,7 @@ async function stop() {
   await page.getByRole("button", { name: "Resume", exact: true }).waitFor();
   assert.equal(cli("show", b.id).status, "in_progress");
   assert.match(
-    await page.locator(".activity-availability").innerText(),
+    await page.locator(".activity-notice").innerText(),
     /unavailable|foreground|restart|retained|Loading/i,
   );
   assert.equal(
@@ -894,7 +894,7 @@ async function stop() {
     } else {
       // A run is already "running" while thread/turn startup still changes its
       // revision. Wait for the implementation receipt before steering that turn.
-      await until(() => page.locator(".run-facts").evaluate(node =>
+      await until(() => page.locator(".run-details > .run-facts").evaluate(node =>
         Array.from(node.querySelectorAll("div")).some(row =>
           row.querySelector("dt")?.textContent === "Phase" &&
           row.querySelector("dd")?.textContent.toLowerCase() === "implementation")),
