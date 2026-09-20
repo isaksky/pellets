@@ -10,7 +10,7 @@ const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-ui-parity-'));
 const fixture = path.join(temporary, 'parity'), current = path.join(temporary, 'pl-current');
 const baseline = process.env.PELLETS_UI_BASELINE ? path.resolve(process.env.PELLETS_UI_BASELINE) : path.join(temporary, 'pl-baseline');
-const results = {};
+const results = {}, groupAdditions = {};
 let server, browser;
 
 async function start(binary) {
@@ -34,6 +34,21 @@ async function stop() {
     await ended;
   }
 }
+async function settleRootUnits(page) {
+  if (process.env.PLAYWRIGHT_BROWSER !== 'webkit') return;
+  // WebKit can retain the detached document's 16px rem basis on a streamed
+  // theme label even while the root is 13px (reproduced on the baseline).
+  // Force a recalculation, then restore the exact authored cascade. This uses
+  // each build's own root size and does not normalize any measured property.
+  await page.evaluate(() => {
+    const root = document.documentElement, value = root.style.getPropertyValue('font-size'), priority = root.style.getPropertyPriority('font-size');
+    root.style.setProperty('font-size', (parseFloat(getComputedStyle(root).fontSize) + 1) + 'px');
+    void document.body.offsetHeight;
+    if (value) root.style.setProperty('font-size', value, priority); else root.style.removeProperty('font-size');
+    void document.body.offsetHeight;
+  });
+}
+
 async function measure(page, scene, build) {
   // Capture the same idle pointer state on both builds. WebKit can retain or
   // clear hover after a click-triggered patch, independently of the CSS.
@@ -42,7 +57,14 @@ async function measure(page, scene, build) {
   // screenshots; the workflow suites independently verify focus preservation.
   if (scene.endsWith('-record-actions') || scene.endsWith('-checkpoint-scope'))
     await page.locator('#record-dialog input[name=title]').evaluate(input => input.setSelectionRange(input.value.length, input.value.length));
+  await settleRootUnits(page);
   await page.screenshot({path: path.join(temporary, `${build}-${scene}.png`), animations: 'disabled', caret: 'hide'});
+  await settleRootUnits(page);
+  groupAdditions[build][scene] = await page.evaluate(() => {
+    const navigation = [...document.querySelectorAll('#area-tabs a')].find(a => new URL(a.href).pathname.endsWith('/groups'));
+    const details = document.querySelector('[data-group-details-link]');
+    return {navigation: navigation?.getBoundingClientRect().height || 0, details: details?.getBoundingClientRect().height || 0};
+  });
   results[build][scene] = await page.evaluate(() => {
     const closed = Array.from(document.querySelectorAll('details:not([open])'));
     const selectors = 'button, input:not([type=hidden]):not(.select-native), textarea, select:not(.select-native), label, summary, dialog[open], .task-row, .checkpoint-row, .memory-card, .section-heading, #main, #right-panel, #project-drawer, .plan-tabs, .create-popover[open] > form, .filter-fields:popover-open, .select-popover, .select-value, .select-chevron, .inspector > header, .dialog-footer';
@@ -86,7 +108,7 @@ async function measure(page, scene, build) {
     ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}),
     ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});
   for (const [build, binary] of [['before', baseline], ['after', current]]) {
-    results[build] = {};
+    results[build] = {}; groupAdditions[build] = {};
     const origin = await start(binary), page = await browser.newPage({viewport: {width: 1280, height: 900}});
     page.setDefaultTimeout(12000);
     const tasksURL = origin + '/projects/' + first.project + '/tasks?workspace=1';
@@ -151,11 +173,44 @@ async function measure(page, scene, build) {
     await stop();
   }
   fs.writeFileSync(path.join(temporary, 'measurements.json'), JSON.stringify(results, null, 2));
+  fs.writeFileSync(path.join(temporary, 'group-additions.json'), JSON.stringify(groupAdditions, null, 2));
   console.log('Visual artifacts: ' + temporary);
   const labels = {status: ['Status'], sort: ['Sort'], direction: ['Direction', 'Move'], group: ['Group'], target: ['Task'], workspace_id: ['Workspace']};
   for (const scene of Object.keys(results.before)) {
     const before = results.before[scene], after = structuredClone(results.after[scene]);
     assert.equal(after.length, before.length, scene + ': visible control count changed');
+    // Group details intentionally add one project-navigation row and one
+    // 19.5px link below pellet metadata. Account only for their measured layout
+    // displacement; every original size/style and every other position matches.
+    const additionsBefore = groupAdditions.before[scene], additionsAfter = groupAdditions.after[scene];
+    if (!additionsBefore.navigation && additionsAfter.navigation) {
+      const settings = after.findIndex(control => control.label === 'Workspace group settings');
+      if (scene.includes('-mobile-')) {
+        assert.equal(additionsAfter.navigation, 31); // horizontal mobile navigation
+      } else if (settings >= 0) {
+        assert.equal(additionsAfter.navigation, 35); // plus the existing 2px row gap
+        assert.equal(after[settings].bounds[1] - before[settings].bounds[1], 37);
+        after[settings].bounds[1] = before[settings].bounds[1];
+      }
+    }
+    if (!additionsBefore.details && additionsAfter.details) {
+      assert.ok(scene.endsWith('-editor') || scene.endsWith('-record-actions'));
+      assert.equal(additionsAfter.details, 19.5);
+      const dialog = after.findIndex(control => control.tag === 'DIALOG');
+      const metadataEnd = after.findIndex((control, index) => index > dialog && control.tag === 'INPUT' && control.name === 'group');
+      assert.ok(dialog >= 0 && metadataEnd > dialog);
+      assert.equal(after[dialog].bounds[3] - before[dialog].bounds[3], 19.5);
+      for (let i = dialog; i < after.length; i++) {
+        const delta = i <= metadataEnd ? -9.75 : 9.75;
+        assert.ok(Math.abs(after[i].bounds[1] - before[i].bounds[1] - delta) < .011, scene + ': group link displaced an unexpected control');
+        after[i].bounds[1] = before[i].bounds[1];
+      }
+      after[dialog].bounds[3] = before[dialog].bounds[3];
+      const oldMargin = before[dialog].style.margin.split(' '), newMargin = after[dialog].style.margin.split(' ');
+      assert.equal(Number.parseFloat(oldMargin[0]) - Number.parseFloat(newMargin[0]), 9.75);
+      assert.deepEqual(newMargin.slice(1), oldMargin.slice(1));
+      after[dialog].style.margin = before[dialog].style.margin;
+    }
     // macOS WebKit ignores authored padding on appearance:auto selects. The
     // requested chevron correction now uses the app's 31px form-control height
     // and 4px corners there too. Account only for this documented 11px change.
@@ -190,6 +245,6 @@ async function measure(page, scene, build) {
       }
     });
     assert.deepEqual(after, before, scene + ': geometry or computed styling changed');
-    console.log('PASS ' + scene + ': geometry and styles match the baseline');
+    console.log('PASS ' + scene + ': original controls match baseline with documented group additions');
   }
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => { await browser?.close(); await stop(); });

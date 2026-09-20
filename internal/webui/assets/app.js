@@ -183,7 +183,7 @@ import { action, actions } from "./datastar-1.0.3.js";
   document.addEventListener("click", function (event) {
     var sorter = event.target.closest(".task-sort");
     if (sorter) sortOpenerID = sorter.id;
-    var opener = event.target.closest(".row-link, .task-title, .memory-card > a");
+    var opener = event.target.closest(".row-link, .task-title, .memory-card > a, .group-card > a, [data-group-create]");
     if (!opener) return;
     inspectorOpener = opener;
     inspectorOpenerHref = opener.getAttribute("href") || "";
@@ -287,7 +287,7 @@ import { action, actions } from "./datastar-1.0.3.js";
       var sorted = new URL(url, location.href);
       sorted.pathname = location.pathname;
       url = sorted.pathname + sorted.search;
-    } else if (kind === "navigate" && el.matches("[aria-label='Close inspector']")) {
+    } else if (kind === "navigate" && el.matches("[aria-label='Close inspector']:not([data-close-route])")) {
       url = new URL(url, location.href).pathname + location.search;
     }
     if (mutation) url += location.search;
@@ -644,7 +644,7 @@ import { action, actions } from "./datastar-1.0.3.js";
     var table = document.querySelector(".table-scroll");
     if (table) table.scrollLeft = tableScrollLeft;
     if ((!inspectorOpener || !document.contains(inspectorOpener)) && inspectorOpenerHref) {
-      Array.prototype.some.call(document.querySelectorAll(".row-link, .task-title, .memory-card > a"), function (candidate) {
+      Array.prototype.some.call(document.querySelectorAll(".row-link, .task-title, .memory-card > a, .group-card > a, [data-group-create]"), function (candidate) {
         if (candidate.getAttribute("href") !== inspectorOpenerHref) return false;
         inspectorOpener = candidate;
         return true;

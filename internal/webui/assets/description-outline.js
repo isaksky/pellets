@@ -62,7 +62,7 @@ class DescriptionReader extends HTMLElement {
     this.nav = document.createElement("nav");
     this.nav.className = "description-contents";
     this.nav.id = "description-contents-" + key;
-    this.nav.setAttribute("aria-label", "Description contents");
+    this.nav.setAttribute("aria-label", (this.closest("[data-description]").dataset.descriptionLabel || "Description") + " contents");
     const title = document.createElement("strong");
     title.textContent = "On this page";
     const list = document.createElement("ol");

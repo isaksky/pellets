@@ -26,7 +26,13 @@ func (h *handler) serveMutation(response http.ResponseWriter, request *http.Requ
 		h.renderError(response, http.StatusUnsupportedMediaType, requestError("mutations require application/x-www-form-urlencoded"), nil)
 		return
 	}
-	request.Body = http.MaxBytesReader(response, request.Body, maxMutationBody)
+	bodyLimit := maxMutationBody
+	segments := pathSegments(request.URL.Path)
+	if len(segments) >= 3 && segments[2] == "groups" {
+		// URL encoding may triple the UTF-8 byte size of valid raw Markdown.
+		bodyLimit = 3*storage.MaxGroupContextBytes + (64 << 10)
+	}
+	request.Body = http.MaxBytesReader(response, request.Body, bodyLimit)
 	if err := request.ParseForm(); err != nil {
 		h.renderError(response, http.StatusBadRequest, requestError("could not parse the submitted form"), nil)
 		return
@@ -37,7 +43,6 @@ func (h *handler) serveMutation(response http.ResponseWriter, request *http.Requ
 		return
 	}
 
-	segments := pathSegments(request.URL.Path)
 	if len(segments) < 3 || segments[0] != "projects" {
 		http.NotFound(response, request)
 		return
@@ -50,6 +55,8 @@ func (h *handler) serveMutation(response http.ResponseWriter, request *http.Requ
 	project := projectSummary.Project
 
 	switch {
+	case segments[2] == "groups":
+		h.mutateGroup(response, request, project, segments)
 	case len(segments) == 5 && segments[2] == "checkpoints":
 		h.serveCheckpointMutation(response, request, project, segments[3], segments[4])
 	case len(segments) == 3 && segments[2] == "routing":

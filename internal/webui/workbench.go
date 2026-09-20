@@ -89,6 +89,7 @@ func (h *handler) prepareWorkbench(request *http.Request, data *pageData) error 
 	if data.ExecutionWorkspace != 0 {
 		executionQuery := url.Values{"execution": {strconv.FormatInt(data.ExecutionWorkspace, 10)}}
 		data.TasksURL = taskURL(data.Project.Code, executionQuery, "", storage.WebPelletSort{Column: storage.WebPelletSortColumn(data.Filters.Sort), Direction: storage.WebPelletSortDirection(data.Filters.Direction)})
+		data.GroupsURL = "/projects/" + url.PathEscape(data.Project.Code) + "/groups?" + executionQuery.Encode()
 		data.MemoriesURL = "/projects/" + url.PathEscape(data.Project.Code) + "/memories?" + executionQuery.Encode()
 		for i := range data.Memories {
 			data.Memories[i].URL += "?" + executionQuery.Encode()

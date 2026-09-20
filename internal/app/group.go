@@ -110,3 +110,15 @@ func (a *WebApplication) RenameGroup(ctx context.Context, p storage.Project, id,
 func groupsUnavailable() error {
 	return domain.NewError(domain.Unexpected, "groups_unavailable", "project groups are unavailable", nil)
 }
+
+// CreateGroupWithContext uses the shared atomic create contract, including
+// duplicate-name rejection, for explicit browser creation.
+func (a *WebApplication) CreateGroupWithContext(ctx context.Context, p storage.Project, name, markdown string) (storage.Group, error) {
+	w, ok := a.Writer.(interface {
+		CreateGroupWithContext(context.Context, storage.Project, string, string) (storage.Group, error)
+	})
+	if !ok {
+		return storage.Group{}, groupsUnavailable()
+	}
+	return w.CreateGroupWithContext(ctx, p, name, markdown)
+}

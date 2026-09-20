@@ -20,12 +20,21 @@ native buttons, text fields, or application dialogs.
 | Native creation status select | `pl-select native` | Keeps the browser dropdown. Text and a decorative chevron have matching 12px insets, correcting the browser arrow's cramped right spacing. The 31px height and 4px radius are retained in Chromium; macOS WebKit previously forced 20px height and 5px corners, so the correction also normalizes that one control and increases its form height by 11px. The earlier migration incorrectly replaced this with a custom listbox. |
 | Numeric stepping | `pl-number` replaces `.number-control`'s container | Same native input, step buttons, limits, appearance and input/change events. |
 | Creation forms in narrow content panes | Original disclosure and form, constrained to the heading's content width | Fixes an existing overflow when two sidebars leave less than 420px for the queue. The trigger remains right-aligned when the heading wraps. Full-width forms retain their original geometry. |
-| Record, checkpoint and planning dialogs | Original native dialogs and handlers | Generic dialog adoption is deferred. Preserve each existing size, padding, radius, backdrop, dirty guard, navigation and focus behavior. Pellet descriptions use the feature-owned View / Preview and Edit controls described in [Workbench](workbench-ui.md#description-reading-and-editing); the native textarea remains authoritative. |
+| Record, checkpoint and planning dialogs | Original native dialogs and handlers | Generic dialog adoption is deferred. Preserve each existing size, padding, radius, backdrop, dirty guard, navigation and focus behavior. Pellet descriptions and group context use the feature-owned View / Preview and Edit controls described in [Workbench](workbench-ui.md#description-reading-and-editing); the native textarea remains authoritative. |
 | Menus, disclosures and filters | Original implementations | Generic outside-click/keyboard behavior is deferred; filters retain nested top-layer handling and assignments retain their specific interactions. |
 | Mermaid descriptions | Feature-owned `pl-diagram` and native diagram viewer in the shared Markdown renderer | Local strict SVG rendering with source alternatives and a viewport-sized zoom/pan modal. The viewer remaps SVG IDs/styles and preserves native nested-dialog focus and source ownership. See [Mermaid authoring and activation API](workbench-ui.md#mermaid-diagrams). The gallery includes production examples and errors. |
-| Description contents | Feature-owned `pl-description-reader` in pellet dialogs | A document-local hierarchical navigation rail, with a collapsible list below 960px. It owns heading anchors and resize/listener cleanup; source fields still own edits. The dialog widens by the rail's width to preserve reading space. The gallery has a page-local outline fixture. See [description reading and editing](workbench-ui.md#description-reading-and-editing) for visibility and navigation rules. |
+| Description contents | Feature-owned `pl-description-reader` in pellet and group dialogs | A document-local hierarchical navigation rail, with a collapsible list below 960px. It owns heading anchors and resize/listener cleanup; source fields still own edits. The dialog widens by the rail's width to preserve reading space. The gallery has a page-local outline fixture. See [description reading and editing](workbench-ui.md#description-reading-and-editing) for visibility and navigation rules. |
 | Planning tabs and sidebar resizing | Original implementations | Keep routing, draft preservation, narrow-screen behavior, geometry and saved preferences. |
 | Badges, notices and icons | Original native markup | Additional wrappers add no needed behavior here and can change child selectors or layout. |
+
+The Groups addition deliberately adds one 35px row and its 2px gap to desktop project navigation
+and one 19.5px group-details link below pellet metadata. The parity fixture
+measures those additions, checks only their exact position/height effects, and
+continues to compare all original control sizes and styles. Group dialogs and
+routing separation have their own browser suite in both engines. The WebKit
+comparison forces root-relative units to recalculate and restores the authored
+root style before measuring; this avoids its reproducible detached-document
+16px rem cache on the theme label without ignoring any style differences.
 
 The quality audit also fixed nonvisual interaction defects: implicit and nested
 select labels focus and name the visible control, option replacement/visibility

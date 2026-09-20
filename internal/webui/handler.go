@@ -282,6 +282,11 @@ type pageData struct {
 	Pellets            []pelletView
 	Memories           []memoryView
 	Groups             []groupView
+	GroupRecords       []groupRecordView
+	GroupsURL          string
+	SelectedGroup      *groupRecordView
+	NewGroup           bool
+	RenameGroup        bool
 	Filters            filterView
 	SortHeaders        []sortHeaderView
 	SelectedPellet     *pelletView
@@ -464,7 +469,7 @@ func (h *handler) servePage(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	code, area := segments[1], segments[2]
-	if area != "tasks" && area != "memories" && area != "workspaces" || len(segments) > 4 {
+	if area != "tasks" && area != "memories" && area != "workspaces" && area != "groups" || len(segments) > 4 {
 		http.NotFound(response, request)
 		return
 	}
@@ -591,6 +596,7 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 		MultiProject: len(projects) > 1, Area: area,
 		TasksURL:    "/projects/" + url.PathEscape(code) + "/tasks",
 		MemoriesURL: "/projects/" + url.PathEscape(code) + "/memories",
+		GroupsURL:   "/projects/" + url.PathEscape(code) + "/groups",
 		CurrentURL:  pageURL.RequestURI(),
 	}
 	data.Projects, err = h.projectViews(request, projects, code, area)
@@ -698,6 +704,11 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 			views := makeMemoryViews([]storage.Memory{memory}, code, selectedMemoryID)
 			data.SelectedMemory = &views[0]
 			data.CloseURL = data.MemoriesURL
+		}
+	}
+	if area == "groups" {
+		if err := h.loadGroups(request, &data, segments); err != nil {
+			return pageData{}, err
 		}
 	}
 	if err := h.prepareWorkbench(request, &data); err != nil {
@@ -1249,12 +1260,15 @@ func (h *handler) renderUpdates(response *datastarResponse, status int, primary 
 	if data.Area == "memories" && primary != "memory-list" {
 		names = append(names, "memory-list")
 	}
+	if data.Area == "groups" && primary != "app-content" {
+		names = append(names, "group-list")
+	}
 	if primary == "live" {
 		names = append(names, "inspector")
 	}
 	if primary == "app-content" {
 		names = []string{"app-content"}
-		if data.SelectedPellet != nil || data.SelectedMemory != nil {
+		if data.SelectedPellet != nil || data.SelectedMemory != nil || data.SelectedGroup != nil || data.NewGroup || response.request.Header.Get("Pellets-Target") == "app-content" {
 			names = append(names, "inspector")
 		}
 	}

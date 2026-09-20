@@ -92,8 +92,11 @@ func TestTaskRowPointerTargetKeepsOneKeyboardAccessibleNativeLink(t *testing.T) 
 			t.Fatalf("row became a duplicate control: %s", tag)
 		}
 	}
-	if strings.Count(row, "<a ") != 2 || strings.Count(row, `tabindex="-1"`) != 1 || !strings.Contains(row, `class="task-title" href="{{.URL}}" data-on:click="@navigate('inspector-host')"`) {
-		t.Fatal("row reference and title must retain native pointer links with one keyboard stop to the inspector")
+	if strings.Count(row, "<a ") != 3 || strings.Count(row, `tabindex="-1"`) != 1 || !strings.Contains(row, `class="task-title" href="{{.URL}}" data-on:click="@navigate('inspector-host')"`) {
+		t.Fatal("row reference and title retain one keyboard stop to the inspector, alongside a separate group details link")
+	}
+	if !strings.Contains(row, `title="Open group: {{.Group}}"`) || !strings.Contains(row, `@navigate('app-content')`) {
+		t.Fatal("group details must remain a distinct keyboard-accessible navigation link")
 	}
 	if !strings.Contains(row, `<summary aria-label="Actions for {{.Pellet.Reference}}">`) || !strings.Contains(row, `role="menu"`) {
 		t.Fatal("row actions must remain independently keyboard accessible")

@@ -269,3 +269,7 @@ func (w *WebWriter) EditGroupContext(ctx context.Context, p storage.Project, id,
 func (w *WebWriter) RenameGroup(ctx context.Context, p storage.Project, id, revision int64, name string) (storage.Group, error) {
 	return (&GroupRepository{db: w.db}).RenameGroup(ctx, p, id, revision, name)
 }
+
+func (w *WebWriter) CreateGroupWithContext(ctx context.Context, p storage.Project, name, markdown string) (storage.Group, error) {
+	return (&GroupRepository{db: w.db}).CreateGroupWithContext(ctx, p, name, markdown)
+}

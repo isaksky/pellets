@@ -56,15 +56,16 @@ export function rememberDescriptions(scope = document) {
 }
 function draw(host) {
   const saved = receipt(host), field = host.querySelector("textarea"), label = field.closest("label");
+  const titleText = host.dataset.descriptionLabel || "Description";
   let toolbar = host.querySelector(".description-toolbar"), view = host.querySelector(".markdown-body");
   if (!toolbar?.childElementCount) {
     toolbar ||= document.createElement("div");
     toolbar.className = "description-toolbar";
     toolbar.dataset.ignoreMorph = "";
     toolbar.setAttribute("role", "group");
-    toolbar.setAttribute("aria-label", "Description display");
+    toolbar.setAttribute("aria-label", titleText + " display");
     const title = document.createElement("span");
-    title.textContent = "Description";
+    title.textContent = titleText;
     toolbar.append(title);
     for (const mode of ["edit", "view"]) {
       const button = document.createElement("button");
@@ -83,7 +84,7 @@ function draw(host) {
   }
   view.tabIndex = 0;
   view.setAttribute("role", "region");
-  view.setAttribute("aria-label", "Description preview");
+  view.setAttribute("aria-label", titleText + " preview");
   if (!field.id) field.id = "description-source-" + key(host);
   view.id = "description-view-" + key(host);
   toolbar.querySelectorAll("[data-description-mode]").forEach(button => {
@@ -100,7 +101,7 @@ function draw(host) {
     if (!field.value.trim()) {
       const empty = document.createElement("p");
       empty.className = "description-empty";
-      empty.textContent = "No description yet. Choose Edit to add one.";
+      empty.textContent = host.dataset.descriptionEmpty || "No description yet. Choose Edit to add one.";
       view.append(empty);
     }
     rendered.set(view, field.value);

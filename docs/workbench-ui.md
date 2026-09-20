@@ -11,7 +11,7 @@ selection.
 ## Navigation and presentation
 
 The first breadcrumb selects the project. The second selects the shared Queue,
-Memories, or a registered workspace. Workspace links appear in the left sidebar.
+Memories, Groups, or a registered workspace. Workspace links appear in the left sidebar.
 A workspace queue uses `/projects/CODE/tasks?workspace=ID`; existing
 `/projects/CODE/workspaces/ID` links still open that workspace queue. The execution
 sidebar always has an explicit project-local workspace, including while browsing
@@ -46,6 +46,50 @@ text from the prototype to retain readable contrast.
 At phone widths, navigation becomes compact horizontal rows and the shared right
 panel opens over the available content area. Both stay independently collapsible. The status bar remains
 pinned, and the breadcrumb continues to navigate when the left sidebar is hidden.
+
+### Group details and shared context
+
+**Groups** in the project navigation and view switcher opens the project group
+catalog, including groups without member pellets. **Create group** adds an empty
+group using the shared group operation; duplicate exact names are rejected.
+Queue group names and **Open group details** in pellet dialogs open the same
+stable `/projects/CODE/groups/ID` route. Member links open pellet details; **Filter
+queue by this group** explicitly applies the group's current exact name. Group
+navigation retains the execution workspace. The Receives assignment chips and
+**Edit assignments** continue to open routing controls and never open details.
+
+Group details show the current raw Markdown context and all member pellets,
+including closed and deferred members. The context and identity survive the last
+member leaving. **Edit**, **View / Preview**, **Contents**, Mermaid and the diagram
+zoom/pan viewer reuse the description components below, with accessible **Shared
+context** labels. The source limit is 1 MiB of UTF-8; form transport accommodates
+URL-encoding expansion. Empty source is valid: delete it and **Save context** to
+clear it. Context is shared with every member pellet. Edits affect future runs;
+active and resumed runs retain their captured context version.
+
+**Rename group** is a separate guarded editor. It preserves group identity,
+context, membership and routing assignments. Both name and context mutations
+submit the stable group ID and exact positive `revision` through the shared group
+operations. Responses expose `data-group-id` and `data-group-revision`; the form
+retains its revision while dirty. A stale save does no write, keeps the editable
+draft and its selected mode, shows current saved fields, and requires an explicit
+reviewed retry. Navigation and Cancel use the existing dirty-discard guard.
+Live patches preserve drafts, focus, source selection, rendered scroll, and the
+Plan/Execution view; themes never save or replace source. Presentation receipts
+use project/group identity, so renaming does not reset reading state.
+
+`POST /projects/CODE/groups` accepts `_csrf,name`;
+`POST /projects/CODE/groups/ID/context` accepts `_csrf,revision,context`;
+`POST /projects/CODE/groups/ID/rename` accepts `_csrf,revision,name`.
+The normal local-origin, CSRF, field validation and Datastar revision contracts
+apply. Stored context is raw Markdown; local rendering uses the same safe offline
+renderer and diagram limits as pellet descriptions.
+
+Run `node scripts/test-web-groups-browser.cjs` and repeat with
+`PLAYWRIGHT_BROWSER=webkit`. Disposable fixtures cover creation, empty groups,
+members and last-member changes, raw context saving/clearing, 1 MiB documents,
+renaming, stale drafts, offline Markdown/Mermaid, contents, zoom, keyboard guards,
+live refresh, five themes, widths from 390 to 1280px, and distinct routing controls.
 
 ### Description reading and editing
 
@@ -117,7 +161,10 @@ choices become DOM; raw parser HTML is never inserted. Headings expose
 The license and
 package integrity are in `MARKED-LICENSE.txt` and `MARKED-NOTICE.txt`.
 `description.js` adds presentation around native fields and keeps bounded
-presentation receipts without storing a second copy of the source.
+presentation receipts without storing a second copy of the source. Optional
+`data-description-label` and `data-description-empty` customize the shared toolbar,
+preview/contents accessible labels, and empty-state copy for group context.
+The default remains Description; the native labeled textarea owns the source.
 
 Run `node scripts/test-web-description-browser.cjs` (with Playwright on
 `NODE_PATH`), and repeat with `PLAYWRIGHT_BROWSER=webkit`. It checks Markdown and
