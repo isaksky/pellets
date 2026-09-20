@@ -103,7 +103,9 @@ async function start(binary) {
     return {changes,stepped,submitted,selected,reset,opened,removedClosed,replaced,triggerCount,invalid,invalidFocused,validAgain,disabled,busy,restored,detachedPreserved,reconnectedClosed,guarded,dismissed};
   });
   assert.deepEqual(componentResult, {changes:1,stepped:'2',submitted:{title:'Edited',review:'yes',mode:'one',count:'2'},selected:'All',reset:'One',opened:true,removedClosed:true,replaced:'New options',triggerCount:1,invalid:true,invalidFocused:true,validAgain:true,disabled:true,busy:true,restored:true,detachedPreserved:true,reconnectedClosed:true,guarded:true,dismissed:true});
-  assert.deepEqual(await page.evaluate(() => Array.from(document.querySelectorAll('button, input:not([type=hidden]), textarea, select, dialog, details')).filter(control => !control.closest('pl-button, pl-field, pl-checkbox, pl-select, pl-number, pl-dialog, pl-menu, pl-disclosure')).map(control => control.outerHTML.slice(0,100))), [], 'Gallery controls must use the component library');
+  assert.deepEqual(await page.evaluate(() => Array.from(document.querySelectorAll('button, input:not([type=hidden]), textarea, select, dialog, details')).filter(control => !control.closest('pl-button, pl-field, pl-checkbox, pl-select, pl-number, pl-dialog, pl-menu, pl-disclosure, pl-diagram')).map(control => control.outerHTML.slice(0,100))), [], 'Gallery controls must use the component library or production diagram component');
+  await page.waitForFunction(() => document.querySelectorAll('#ds-diagrams pl-diagram[data-state=ready]').length === 3);
+  assert.equal(await page.locator('#ds-diagrams pl-diagram[data-state=error]').count(), 4);
 
   for (const value of ['gruvbox-dark', 'light', 'dark', 'icy', 'gruvbox-light']) {
     await page.locator('#theme-select-trigger').click();

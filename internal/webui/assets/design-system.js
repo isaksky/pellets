@@ -1,8 +1,27 @@
 import { refreshComponents } from "./components.js";
 import "./filters.js";
+import { renderMarkdown } from "./markdown.js";
 
 // Deliberately no app.js, settings transport, event stream, or database requests.
 const root = document.documentElement;
+const diagramExamples = [
+  "flowchart LR\n  Draft --> Review\n  Review --> Ready",
+  "sequenceDiagram\n  User->>Pellets: Save Mermaid source\n  Pellets-->>User: Render locally",
+  "stateDiagram-v2\n  [*] --> Open\n  Open --> Active\n  Active --> Closed",
+  "flowchart LR\n  A[unfinished",
+  '%%{init: {"securityLevel":"loose"}}%%\nflowchart LR\nA-->B',
+  'flowchart LR\nA-->B\nclick A "https://example.invalid"',
+  "flowchart LR\nA[" + "oversized ".repeat(500) + "]",
+];
+const diagramPreview = document.getElementById("ds-diagrams");
+function showDiagramExamples() {
+  diagramPreview.replaceChildren(renderMarkdown(diagramExamples.map(source => "```mermaid\n" + source + "\n```").join("\n\n")));
+}
+showDiagramExamples();
+document.getElementById("ds-diagram-fixtures").addEventListener("click", showDiagramExamples);
+document.getElementById("ds-diagram-preview").addEventListener("click", () => {
+  diagramPreview.replaceChildren(renderMarkdown("```mermaid\n" + document.getElementById("ds-diagram-source").value + "\n```"));
+});
 const theme = document.getElementById("theme-select");
 const notice = document.getElementById("ds-notice");
 let noticeTimer;

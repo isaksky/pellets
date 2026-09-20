@@ -79,7 +79,10 @@ const source = '# Delivery &amp; verification\n\nParagraph with **strong**, *emp
   assert.match(await view.locator('pre[data-language=unrecognized-language]').textContent(), /^<script>alert\("code"\)<\/script> & literal/);
   assert.equal(await view.locator('pre[data-language=unrecognized-language] .code-keyword').count(), 0);
   assert.equal(await view.locator('a').count(), 3);
-  assert.equal(await view.locator('script,img,svg,iframe,object,style,[onerror],[onload]').count(), 0);
+  await view.locator('pl-diagram[data-state=ready],pl-diagram[data-state=error]').waitFor();
+  assert.equal(await view.locator('pl-diagram').getAttribute('data-state'), 'ready', await view.locator('pl-diagram').innerText());
+  assert.equal(await view.locator('script,img,iframe,object,style,[onerror],[onload]').count(), 0);
+  assert.equal(await view.locator('svg').count(), 1);
   assert.equal(await page.evaluate(() => window.markdownExecuted), undefined);
   assert.equal(await view.locator('a[target=_blank][rel="noopener noreferrer"]').count(), 3);
   // Exercise the reusable renderer without CSP as a fallback safety mechanism.
@@ -206,6 +209,7 @@ const source = '# Delivery &amp; verification\n\nParagraph with **strong**, *emp
   await create.locator('[name=title]').fill('Created from Markdown');
   await create.locator('[name=description]').fill(source);
   await mode('view', createHost).click();
+  await createHost.locator('pl-diagram[data-state=ready]').waitFor();
   for (let i=0; i<3; i++) {
     cli('edit', plain.id, '--title', 'Creation refresh ' + i);
     await page.evaluate(() => document.dispatchEvent(new CustomEvent('pellets-refresh')));
@@ -241,6 +245,7 @@ const source = '# Delivery &amp; verification\n\nParagraph with **strong**, *emp
   await proposal.locator('[name=title]').fill('Markdown proposal');
   await proposal.locator('[name=description]').fill(source);
   await mode('view', proposalHost).click();
+  await proposalHost.locator('pl-diagram[data-state=ready]').waitFor();
   await until(async () => (await proposal.locator('.plan-editor-status').innerText()).includes('Changes saved automatically'), 'Proposal did not autosave');
   assert.equal(await proposalHost.locator('.markdown-body h1').innerText(), 'Delivery & verification');
   assert.equal(await proposalHost.locator('.markdown-task input').evaluateAll(inputs => inputs.every(input => {

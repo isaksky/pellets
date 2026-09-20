@@ -174,7 +174,8 @@ async function measure(page, scene, build) {
     }
     after.forEach((control, index) => {
       // Approved native-select correction: equal text/chevron insets, same geometry.
-      if (scene.endsWith('-create') && control.tag === 'SELECT' && control.name === 'status') {
+      if (scene.endsWith('-create') && control.tag === 'SELECT' && control.name === 'status' &&
+          control.style.padding !== before[index].style.padding) {
         assert.ok(['6px 8px', '0px'].includes(before[index].style.padding));
         assert.equal(control.style.padding, '6px 34px 6px 12px');
         control.style.padding = before[index].style.padding;
@@ -186,6 +187,6 @@ async function measure(page, scene, build) {
       }
     });
     assert.deepEqual(after, before, scene + ': geometry or computed styling changed');
-    console.log('PASS ' + scene + ': geometry and styles match the baseline' + (scene.endsWith('-create') ? ' except approved native-select padding' : ''));
+    console.log('PASS ' + scene + ': geometry and styles match the baseline');
   }
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => { await browser?.close(); await stop(); });

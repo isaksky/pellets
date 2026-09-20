@@ -49,12 +49,12 @@ func TestUIRevisionPageAndAssetGraph(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `data-ui-revision="`+uiRevision+`"`) || !strings.Contains(response.Body.String(), `name="pellets-ui-revision" content="`+uiRevision+`"`) {
 		t.Fatalf("page revision missing: %d %s", response.Code, response.Body.String())
 	}
-	for _, asset := range []string{"app.js", "app.css", "workbench.css", "theme-preflight.js"} {
+	for _, asset := range []string{"app.js", "app.css", "workbench.css", "theme-preflight.js", "diagrams.css"} {
 		if !strings.Contains(response.Body.String(), `/assets/`+uiRevision+`/`+asset) {
 			t.Fatalf("page asset lacks revision: %s", asset)
 		}
 	}
-	for _, asset := range []string{"app.js", "workbench.js", "dropdowns.js", "filters.js", "datastar-1.0.3.js", "app.css", "workbench.css", "theme-preflight.js"} {
+	for _, asset := range []string{"app.js", "workbench.js", "dropdowns.js", "filters.js", "datastar-1.0.3.js", "app.css", "workbench.css", "theme-preflight.js", "diagrams.js", "diagrams.css", "mermaid-11.17.2.js", "MERMAID-LICENSES.txt", "MERMAID-NOTICE.txt"} {
 		response := performRequest(f.handler, http.MethodGet, "/assets/"+uiRevision+"/"+asset, "", nil)
 		if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
 			t.Fatalf("versioned asset %s: %d %s", asset, response.Code, response.Body.String())

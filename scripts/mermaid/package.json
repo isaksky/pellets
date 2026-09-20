@@ -1,0 +1,9 @@
+{
+  "name": "pellets-mermaid-vendor",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "esbuild": "0.25.12",
+    "mermaid": "11.17.2"
+  }
+}

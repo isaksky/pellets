@@ -1,0 +1,12 @@
+.mermaid-diagram { display: block; min-width: 0; max-width: 100%; margin: 0 0 1em; padding: 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); }
+.mermaid-canvas { max-width: 100%; overflow: auto; overscroll-behavior: contain; }
+.mermaid-canvas > svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.mermaid-expanded .mermaid-canvas > svg { max-width: none; }
+.mermaid-diagram .mermaid-activate, .mermaid-diagram .mermaid-retry { display: block; margin: 8px 0; padding: 5px 9px; border: 1px solid var(--line); border-radius: 3px; background: var(--pane); color: var(--ink); font: inherit; font-size: 12px; cursor: pointer; }
+.mermaid-diagram [hidden] { display: none; }
+.mermaid-source > summary { cursor: pointer; color: var(--ink); font-size: 12px; }
+.mermaid-source > pre { margin: 8px 0 0; }
+.mermaid-status { font-size: 13px; white-space: pre-wrap; }
+.mermaid-canvas:focus-visible, .mermaid-activate:focus-visible, .mermaid-retry:focus-visible, .mermaid-source > summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+/* The native renderer measures text offscreen under the same local CSS/CSP. */
+.mermaid-stage { position: fixed; left: -30000px; top: 0; width: 1200px; pointer-events: none; font-family: Arial, sans-serif; }

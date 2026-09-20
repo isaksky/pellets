@@ -60,8 +60,9 @@ guard; accepting discard removes the draft.
 Headings, paragraphs, emphasis, links, nested lists, task lists, blockquotes,
 inline/fenced code, tables, and horizontal rules render locally in every theme.
 Code and wide tables scroll within the description. Supported code languages
-reuse the activity highlighter; unknown languages, including Mermaid, stay as
-readable code. Raw HTML displays as text. Unsafe link schemes are disabled,
+reuse the activity highlighter; unknown languages stay as readable code.
+Fences labeled `mermaid` render local diagrams (see below). Raw HTML displays as
+text. Unsafe link schemes are disabled,
 images display their alternative text without fetching resources, and links open
 separately so they do not navigate away from unsaved edits.
 
@@ -77,7 +78,7 @@ original Markdown, with no stored HTML or migration.
 from a pinned, locally bundled Marked lexer. Only explicit element/attribute
 choices become DOM; raw parser HTML is never inserted. Headings expose
 `data-markdown-heading`, and fences expose `data-language` for future consumers;
-heading navigation and Mermaid execution are not implemented. The license and
+heading navigation is not implemented. The license and
 package integrity are in `MARKED-LICENSE.txt` and `MARKED-NOTICE.txt`.
 `description.js` adds presentation around native fields and keeps bounded
 presentation receipts without storing a second copy of the source.
@@ -89,6 +90,73 @@ offline preview, refresh/conflict recovery, source and rendered selection,
 proposal autosave, and five themes at 1280, 1092 and 390 pixels. It saves real
 application screenshots; `PELLETS_DESCRIPTION_BASELINE=/path/to/old/pl` captures
 the original source-only dialog for comparison.
+
+### Mermaid diagrams
+
+Use a fenced `mermaid` block in a description. Record views, unsaved creation/edit
+previews and proposed-pellet previews share the renderer. Native source fields,
+CLI output, storage, search and agent context retain the original Markdown.
+
+````markdown
+```mermaid
+flowchart LR
+  Draft --> Review
+  Review --> Ready
+```
+````
+
+The locally bundled Mermaid **11.17.2** supports `flowchart` / `graph`,
+`sequenceDiagram` and `stateDiagram` / `stateDiagram-v2`, with plain labels,
+connections, groups and `accTitle` / `accDescr` accessibility text.
+Diagrams fit the description without changing aspect ratio. **View larger**
+expands to natural size inside a scrollable region; **Fit diagram** restores the
+fitted view. A separate zoom/pan viewer is not implemented. **Mermaid source**
+always exposes selectable/copyable text, including when rendering fails.
+All controls work with the keyboard.
+
+For untrusted content, configuration directives and YAML frontmatter, author
+CSS/classes, HTML/entities, Markdown/math labels, links/callbacks, icons/images,
+external resources and `&` connection expansion are unsupported. Unsupported or
+malformed input shows a bounded local diagnostic and opens its source. Other
+Markdown and diagrams continue to work. This policy is conservative: reserved
+words such as `style` and `click` also cannot appear inside labels.
+
+Work is bounded to eight rendered fences per description, 4,096 characters,
+80 newline/semicolon statements, 700 lexical tokens, 60 nodes and connections
+(or sequence messages), 12 groups, and four parent levels. Oversized/complex
+input shows a local source fallback. One queue yields between diagrams,
+coalesces pending changes and checks versions before installing output.
+At most 32 diagrams wait across surfaces; excess diagrams offer **Retry diagram**
+once the queue drains. This uses bounded native browser
+layout, not a worker or a claim that timers interrupt synchronous JavaScript.
+Disconnected content drops queued work/styles; theme changes invalidate pending
+results. Unchanged Datastar refreshes retain diagrams and source disclosures.
+
+`diagrams.js` owns `pl-diagram`, created by `createDiagram(source)`. Its native
+activation button emits the bubbling, cancelable `pellets-diagram-activate`
+event with `{source, svg, trigger}`. A larger viewer can prevent default inline
+expansion and call `createDiagram(source)` for a new surface with its own IDs and
+styles. The `svg` reference belongs to the existing surface; directly cloning it
+requires remapping both IDs and scoped CSS. No Mermaid click handlers are bound.
+Generated CSS is scoped and SVG is rebuilt through an allowlist with unique IDs.
+Source cannot enable HTML, scripts, resources or weaker Mermaid security.
+The application's CSP remains unchanged.
+
+The runtime, full license notices and reproducible build instructions are in
+`assets/MERMAID-NOTICE.txt`, `assets/MERMAID-LICENSES.txt` and
+`scripts/vendor-mermaid.mjs`. No CDN, remote fonts or Node installation is needed
+to build/run the Go application. Upstream references:
+[configuration](https://mermaid.js.org/config/usage.html) and
+[directives](https://mermaid.js.org/config/directives.html).
+
+The development-only `/dev/design-system` has editable Mermaid examples and
+malformed, unsafe and oversized source. Run
+`node scripts/test-web-mermaid-browser.cjs` and the description suite above with
+Playwright on `NODE_PATH`, repeating with `PLAYWRIGHT_BROWSER=webkit`. The Mermaid
+suite checks diagram families, local errors, limits, source alternatives, IDs,
+cleanup, rapid edits, offline rendering and zero application CSP violations,
+plus screenshots/contrast at 1280, 1092 and 390px in all five themes.
+The description suite covers save/reload/CLI round trips and proposal autosave.
 
 ## Planning chat
 

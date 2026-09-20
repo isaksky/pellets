@@ -1,0 +1,27 @@
+Mermaid 11.17.2 (MIT), https://github.com/mermaid-js/mermaid
+Source: https://registry.npmjs.org/mermaid/-/mermaid-11.17.2.tgz
+Exact dependency versions and npm integrity hashes: scripts/mermaid/package-lock.json
+Full bundled package licenses: MERMAID-LICENSES.txt
+
+Rebuild from the repository root:
+  npm ci --prefix scripts/mermaid --ignore-scripts
+  node scripts/vendor-mermaid.mjs
+
+The esbuild script bundles flowchart, sequence and state diagram registrations
+into one local ES module. Runtime fonts use Arial/sans-serif from the system;
+no remote chunks, fonts, icons or other assets are needed for supported syntax.
+Node/npm are only vendor build tools, not application build/runtime dependencies.
+
+CSP compatibility patches are asserted against this exact upstream version:
+- Use a temporary constructed stylesheet instead of an inline style element.
+  Return generated CSS and always remove the temporary sheet after rendering.
+- D3's trusted style assignments use the browser style API.
+- Convert inert inline SVG presentation properties to SVG attributes and remove
+  style attributes before SVG serialization and DOMPurify sanitization.
+
+The app rejects author configuration, styling, resources and active content
+before invoking strict Mermaid. diagrams.js rebuilds returned SVG through an
+element/attribute allowlist, removes HTML and styles, rewrites every ID/reference,
+and installs only the scoped generated stylesheet. No binding functions run.
+The application's CSP is unchanged. Upgrading requires repeating the Mermaid
+browser security, CSP, limit, refresh and theme fixtures in Chromium and WebKit.

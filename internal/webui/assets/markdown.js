@@ -1,5 +1,6 @@
 import { lexer } from "./marked-18.0.13.js";
 import { highlightCode } from "./code-highlight.js";
+import { createDiagram } from "./diagrams.js";
 
 const highlightedLanguages = new Set([
   "go", "golang", "js", "javascript", "jsx", "ts", "typescript", "tsx",
@@ -28,7 +29,7 @@ function safeLink(value) {
   } catch { return null; }
 }
 
-function appendTokens(parent, tokens, loose = false) {
+function appendTokens(parent, tokens, loose = false, budget = {diagrams: 0}) {
   for (const token of tokens || []) {
     let el;
     switch (token.type) {
@@ -37,11 +38,11 @@ function appendTokens(parent, tokens, loose = false) {
         el = node("h" + Math.min(6, Math.max(1, token.depth)));
         // Metadata for future heading navigation; no global IDs or navigation.
         el.dataset.markdownHeading = String(token.depth);
-        appendTokens(el, token.tokens);
+        appendTokens(el, token.tokens, false, budget);
         break;
       case "paragraph": case "strong": case "em": case "del": case "blockquote":
         el = node(token.type === "paragraph" ? "p" : token.type);
-        appendTokens(el, token.tokens);
+        appendTokens(el, token.tokens, false, budget);
         break;
       case "hr": case "br": el = node(token.type); break;
       case "codespan": el = node("code", token.text); break;
@@ -49,6 +50,10 @@ function appendTokens(parent, tokens, loose = false) {
         el = node("pre");
         el.tabIndex = 0;
         const language = (token.lang || "").trim().split(/\s+/)[0].toLowerCase();
+        if (language === "mermaid") {
+          el = createDiagram(token.text, ++budget.diagrams > 8);
+          break;
+        }
         el.dataset.language = language;
         el.setAttribute("aria-label", language ? language + " code" : "Code");
         const code = node("code");
@@ -68,7 +73,7 @@ function appendTokens(parent, tokens, loose = false) {
         for (const item of token.items) {
           const li = node("li");
           if (item.task) li.className = "markdown-task";
-          appendTokens(li, item.tokens, token.loose);
+          appendTokens(li, item.tokens, token.loose, budget);
           el.append(li);
         }
         break;
@@ -88,7 +93,7 @@ function appendTokens(parent, tokens, loose = false) {
           el.rel = "noopener noreferrer";
         }
         if (token.title) el.title = entities(token.title);
-        appendTokens(el, token.tokens);
+        appendTokens(el, token.tokens, false, budget);
         break;
       }
       case "table": {
@@ -104,7 +109,7 @@ function appendTokens(parent, tokens, loose = false) {
             const td = node(index === 0 ? "th" : "td");
             if (index === 0) td.scope = "col";
             if (["left", "center", "right"].includes(cell.align)) td.className = "align-" + cell.align;
-            appendTokens(td, cell.tokens);
+            appendTokens(td, cell.tokens, false, budget);
             row.append(td);
           }
           (index === 0 ? head : body).append(row);
@@ -117,8 +122,8 @@ function appendTokens(parent, tokens, loose = false) {
         if (token.tokens) {
           if (loose) {
             el = node("p");
-            appendTokens(el, token.tokens);
-          } else { appendTokens(parent, token.tokens); continue; }
+            appendTokens(el, token.tokens, false, budget);
+          } else { appendTokens(parent, token.tokens, false, budget); continue; }
         } else el = document.createTextNode(entities(token.text));
         break;
       // Images remain readable alt text without offline/network side effects.
@@ -132,7 +137,8 @@ function appendTokens(parent, tokens, loose = false) {
 }
 
 // Independent of forms/state. Original source stays with the caller. Unknown
-// languages (including Mermaid) retain escaped source and language metadata.
+// languages retain escaped source and language metadata. Mermaid presentation
+// owns its asynchronous lifecycle; it never rewrites the caller's source.
 export function renderMarkdown(source) {
   const fragment = document.createDocumentFragment();
   try { appendTokens(fragment, lexer(String(source), { gfm: true })); }
