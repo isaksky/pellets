@@ -720,6 +720,31 @@ function element(tag, className, text) {
   return el;
 }
 
+function updateCurrentOperation(panel) {
+  const status = panel?.closest(".run-workspace")?.querySelector(".execution-status");
+  if (!status) return;
+  const output = status.querySelector(".execution-operation"),
+    cache = activity.get(panel.dataset.activityUrl);
+  let text = "";
+  if (status.dataset.showOperation === "true" && cache?.available && cache.connected) {
+    const items = Array.from(cache.items.values());
+    // A turn ending invalidates any unfinished item snapshots from that turn.
+    const ended = Math.max(0, ...items.filter(item => item.kind === "turn").map(item => item.sequence));
+    const active = items.filter(item => item.status === "running" && item.sequence > ended &&
+      ["command", "file_read", "file_change", "tool"].includes(item.kind))
+      .sort((a, b) => b.sequence - a.sequence)[0];
+    if (active) {
+      const label = {command: "Running command", file_read: "Reading file", file_change: "Updating file", tool: "Using tool"}[active.kind];
+      const detail = (active.path || active.command || active.title || "").replace(/\s+/g, " ").trim();
+      text = label + (detail ? ": " + (detail.length > 180 ? detail.slice(0, 177) + "…" : detail) : "");
+    }
+  }
+  // Neither the operation nor the feed is a live region. Only state changes
+  // are announced; each completed message/output snapshot stays readable.
+  if (output.textContent !== text) output.textContent = text;
+  output.hidden = !text;
+}
+
 function renderActivity(panel, snapshot) {
   const events = panel.querySelector("[data-activity-events]");
   if (!events) return;
@@ -743,10 +768,12 @@ function renderActivity(panel, snapshot) {
     cache.items.clear();
   }
   cache.cursor = snapshot.cursor;
+  cache.available = snapshot.available;
+  cache.connected = snapshot.connected !== false;
   panel.querySelector(".activity-availability").textContent =
     snapshot.message ||
     (snapshot.available
-      ? "Reported by Codex"
+      ? "Reported activity; complete messages and output appear when available."
       : "Detailed activity is unavailable for this attempt.");
   for (const item of snapshot.items || []) {
     cache.items.set(item.id, item);
@@ -765,9 +792,12 @@ function renderActivity(panel, snapshot) {
     const summary = node.querySelector("summary"),
       body = node.querySelector(".event-body");
     summary.replaceChildren(
-      element("span", "event-title", item.title || item.kind),
-      element("small", "event-path", item.path || item.status || ""),
+      element("span", "event-title", item.kind === "message" ?
+        (item.title === "Agent response" ? "Agent response" : "Agent update") : item.title || item.kind),
     );
+    if (item.path) summary.append(element("small", "event-path", item.path));
+    if (item.kind !== "message") summary.append(element("small", "event-status",
+      ({running: "In progress", completed: "Completed", failed: "Failed", awaiting_input: "Waiting", resolved: "Resolved"})[item.status] || item.status || ""));
     body.replaceChildren();
     if (item.text) body.append(element("p", "", item.text));
     if (item.source) body.append(highlightCode(item.source));
@@ -799,6 +829,7 @@ function renderActivity(panel, snapshot) {
     expansions.delete(expansions.keys().next().value);
   panel.querySelector("[data-activity-count]").textContent =
     events.children.length + " events";
+  updateCurrentOperation(panel);
   if (following) panel.scrollTop = panel.scrollHeight;
   else panel.scrollTop = top;
 }
@@ -806,6 +837,7 @@ function connectActivity() {
   if (uiVersion.isOutdated()) return;
   const panel = document.querySelector(".activity-panel"),
     url = panel?.dataset.activityUrl || "";
+  updateCurrentOperation(panel);
   if (url === streamURL) return;
   if (stream) stream.close();
   stream = null;
@@ -820,7 +852,9 @@ function connectActivity() {
     renderActivity(panel, {
       cursor: cache.cursor,
       items: Array.from(cache.items.values()),
-      available: true,
+      available: cache.available,
+      connected: false,
+      message: "Reconnecting to reported activity…",
     });
     const saved = scrolls.get(panel.id);
     if (saved) panel.scrollTop = saved.top;
@@ -840,15 +874,22 @@ function connectActivity() {
     try {
       renderActivity(current, JSON.parse(event.data));
     } catch {
+      const cache = activity.get(url);
+      if (cache) cache.connected = false;
+      updateCurrentOperation(current);
       current.querySelector(".activity-availability").textContent =
         "Activity could not be read. Reconnect to retry.";
     }
   });
   stream.addEventListener("error", () => {
     const current = document.querySelector(".activity-panel");
-    if (current?.dataset.activityUrl === url)
+    if (current?.dataset.activityUrl === url) {
+      const cache = activity.get(url);
+      if (cache) cache.connected = false;
+      updateCurrentOperation(current);
       current.querySelector(".activity-availability").textContent =
         "Activity connection interrupted. Reconnecting…";
+    }
   });
 }
 document.addEventListener("pellets-ui-outdated", () => {

@@ -66,8 +66,7 @@
 
     {{if .RecoveryAttention}}<p class="run-notice warning">{{.RecoveryAttention}}</p>{{end}}
     {{if .Run}}<details class="run-details" id="run-details-{{$.Project.ID}}-{{.ID}}-{{.Run.ID}}"><summary>Run details</summary><dl class="run-facts"><div><dt>Pellet</dt><dd><code>{{.Run.Pellet}}</code></dd></div><div><dt>Mode</dt><dd>{{runStateLabel .Run.Mode}}</dd></div><div><dt>Access</dt><dd>{{.Run.Access}}</dd></div><div><dt>Model / effort</dt><dd>{{.Run.Model}} · {{.Run.Effort}}</dd></div><div><dt>Phase</dt><dd>{{runStateLabel .Run.Phase}}</dd></div><div><dt>State</dt><dd><span class="badge run-state {{.Run.State}}">{{runStateLabel .Run.State}}</span></dd></div><div><dt>Frozen filters</dt><dd>External ID: {{.Run.ExternalID}} · Group: {{.Run.Group}}</dd></div></dl>
-      {{if eq .Run.Mode "review_checkpoint"}}{{template "review-group-context" .Run}}{{else}}{{template "run-group-context" .Run}}{{end}}</details>
-      <p class="run-activity"><strong>Latest activity:</strong> {{.Run.Activity}}</p>
+      {{if eq .Run.Mode "review_checkpoint"}}{{template "review-group-context" .Run}}{{else}}{{template "run-group-context" .Run}}{{end}}<p class="run-activity"><strong>Latest reported status:</strong> {{.Run.Activity}}</p></details>
       {{if .Run.AutoReview}}<p class="run-notice">Automatic approval review is active; any remaining human decision is shown below.</p>{{end}}
       {{if .Run.Awaiting}}<p class="run-notice">Awaiting input for this exact run.</p>{{end}}
       {{if .Run.Interrupted}}<p class="run-notice warning">Run was interrupted. Nothing restarts automatically; Resume validates the saved workspace, conversation, and phase.</p>{{end}}
@@ -106,6 +105,11 @@
       </form>{{end}}
     </div>
     {{end}}
+  {{with .ExecutionStatus}}<section class="execution-status" aria-label="Current execution" data-working="{{.Working}}" data-show-operation="{{.ShowOperation}}">
+    <p class="execution-status-line"><span class="execution-indicator" aria-hidden="true"></span><strong class="execution-state-label" role="status">{{.Label}}</strong></p>
+    <p class="execution-phase">{{.Detail}}</p><p class="execution-operation" data-ignore-morph hidden></p>
+  </section>{{end}}
+  {{if .Schedule}}{{if .Schedule.StopAfter}}<p class="execution-stop-after">Will stop after this pellet.</p>{{end}}{{end}}
   <section id="activity-{{$.Project.ID}}-{{.ID}}-{{if .Run}}{{.Run.ID}}{{else}}none{{end}}" data-ignore-morph class="activity-panel" aria-label="Execution activity" data-activity-workspace="{{$.Project.Code}}:{{.ID}}" {{if .Run}}data-activity-url="/projects/{{$.Project.Code}}/runs/{{.Run.ID}}/activity" data-run-id="{{.Run.ID}}"{{end}}><div class="activity-heading"><h3>Activity</h3><span data-activity-count></span></div><p class="activity-availability">{{if .Run}}Loading reported activity…{{else}}No recorded activity. Start a pellet to begin.{{end}}</p><div class="activity-events" data-activity-events></div></section>
   </article>{{end}}{{end}}</div>
 </section>{{end}}

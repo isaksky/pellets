@@ -430,6 +430,20 @@ highlighting. Commands include output and exit codes when reported. Progress,
 questions, approvals, steering, stopping, and explicit Resume retain the existing
 application checks.
 
+**Current execution** stays visible beside the feed while reading older events.
+It shows Working, Waiting for input/approval, Stopping, Needs attention,
+Interrupted, or Finished from the authoritative record. Failed outcomes and
+ended attempts are distinguished; recovery without a live process does not
+look active. A working indicator continues between reported operations, with
+animation disabled for reduced motion. A concise active command/file operation
+appears when reported; otherwise the phase description explains the current
+work without inventing progress. Stop-after remains a separate schedule intent.
+Agent update/Agent response labels describe messages, never the run outcome.
+Activity disconnection and unavailable history appear separately from run state.
+Operation previews occupy at most two lines; their event retains the full
+reported excerpt. On phones, the answer/follow-up composer scrolls with the
+workspace so the persistent state and composer do not cover the activity controls.
+
 Datastar patches authoritative regions while protecting edited records. Activity
 uses stable event IDs and cursor updates without rebuilding forms. Workspace input
 drafts, focus, caret, disclosures, and scroll position survive live refreshes and
@@ -484,6 +498,12 @@ combinations, narrow layouts, activity, input preservation, stopping, and restar
 The separate runtime, recovery, and checkpoint browser suites preserve their
 execution and evidence scenarios. Go storage/application tests cover atomic claims,
 concurrency, project isolation, captured intent, and checkpoint generations.
+`test-web-execution-state-browser.cjs` adds real execution transitions and
+controlled activity delivery: completed history during active work, operation
+and turn completion, input/approval waits, both stop controls, terminal states,
+reconnection and restart, stale snapshots, drafts, all five themes at desktop,
+intermediate and phone widths, reduced motion, and summary accessibility. Run
+it in Chromium and WebKit; it saves screenshots of the actual execution panel.
 `test-web-upgrade-browser.cjs` builds two distinct embedded UIs and restarts them
 on the same origin and disposable database, testing existing tabs, asset graphs,
 draft reloads, stale conflicts, and the absence of automatic execution. It also

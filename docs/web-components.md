@@ -26,6 +26,7 @@ native buttons, text fields, or application dialogs.
 | Description contents | Feature-owned `pl-description-reader` in pellet and group dialogs | A document-local hierarchical navigation rail, with a collapsible list below 960px. It owns heading anchors and resize/listener cleanup; source fields still own edits. The dialog widens by the rail's width to preserve reading space. The gallery has a page-local outline fixture. See [description reading and editing](workbench-ui.md#description-reading-and-editing) for visibility and navigation rules. |
 | Planning tabs and sidebar resizing | Original implementations | Keep routing, draft preservation, narrow-screen behavior, geometry and saved preferences. |
 | Badges, notices and icons | Original native markup | Additional wrappers add no needed behavior here and can change child selectors or layout. |
+| Current execution | Feature-owned native status summary beside the activity feed | Intentionally adds a sticky state label, reduced-motion-aware working indicator, phase description and a two-line reported operation preview. On phones, the composer scrolls instead of covering the feed. State comes from authoritative records; only the state label is a live region. See [Live execution](workbench-ui.md#live-execution). |
 
 The Groups addition deliberately adds one 35px row and its 2px gap to desktop project navigation
 and one 19.5px group-details link below pellet metadata. The parity fixture

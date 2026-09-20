@@ -323,7 +323,9 @@ func Run() bool {
 			if mode == "schedule_activity" || mode == "schedule_activity_gate" {
 				writeActivityFixture(write)
 				if mode == "schedule_activity_gate" {
-					waitFile("fake-complete")
+					// Browser theme/viewport inspections deliberately hold this
+					// turn open longer than a process-readiness probe.
+					waitFileWithin("fake-complete", 2*time.Minute)
 				}
 			}
 			if mode == "schedule_gate" {
@@ -423,7 +425,11 @@ func spawn(role string) {
 }
 
 func waitFile(path string) {
-	deadline := time.Now().Add(10 * time.Second)
+	waitFileWithin(path, 10*time.Second)
+}
+
+func waitFileWithin(path string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
 	for {
 		if _, err := os.Stat(path); err == nil {
 			return

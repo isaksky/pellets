@@ -351,33 +351,34 @@ type noRunResumeView struct {
 }
 
 type runView struct {
-	GroupContext  storage.GroupContextSnapshot
-	Access        string
-	ID            int64
-	Revision      int64
-	Pellet        string
-	Mode          string
-	Model         string
-	Effort        string
-	Phase         string
-	State         string
-	Activity      string
-	Outcome       string
-	Commit        string
-	Error         string
-	ExternalID    string
-	Group         string
-	PelletNumber  int64
-	CanResume     bool
-	UnownedActive bool
-	ResumeMode    string
-	ResumeLimit   int
-	Awaiting      bool
-	AutoReview    bool
-	Interrupted   bool
-	Attention     bool
-	Active        bool
-	Interaction   *storage.RunInteraction
+	GroupContext     storage.GroupContextSnapshot
+	Access           string
+	ID               int64
+	Revision         int64
+	Pellet           string
+	Mode             string
+	Model            string
+	Effort           string
+	Phase            string
+	State            string
+	Activity         string
+	Outcome          string
+	Commit           string
+	Error            string
+	ExternalID       string
+	Group            string
+	PelletNumber     int64
+	CanResume        bool
+	UnownedActive    bool
+	ResumeMode       string
+	ResumeLimit      int
+	Awaiting         bool
+	AutoReview       bool
+	Interrupted      bool
+	Attention        bool
+	Active           bool
+	Interaction      *storage.RunInteraction
+	PendingOperation string
 
 	ReviewContextVersion int
 	ReviewContexts       []reviewGroupContextView
@@ -388,6 +389,7 @@ type scheduleView struct {
 	Mode       string
 	State      string
 	StopAfter  bool
+	Stopping   bool
 	ExternalID string
 	Group      string
 }
@@ -771,7 +773,7 @@ func (h *handler) runWorkspaceViews(request *http.Request, project storage.Proje
 		if h.application.Scheduler != nil {
 			view.RecoveryAttention = h.application.Scheduler.WorkspaceAttention(workspace.ID)
 			if schedule, ok := h.application.Scheduler.WorkspaceStatus(workspace.ID); ok {
-				view.Schedule = &scheduleView{ID: schedule.ID, Mode: schedule.Mode, State: schedule.State, StopAfter: schedule.StopAfterPellet, ExternalID: textOrDash(schedule.ExternalID), Group: textOrDash(schedule.Group)}
+				view.Schedule = &scheduleView{ID: schedule.ID, Mode: schedule.Mode, State: schedule.State, StopAfter: schedule.StopAfterPellet, Stopping: schedule.StopNowRequested, ExternalID: textOrDash(schedule.ExternalID), Group: textOrDash(schedule.Group)}
 				view.Busy = true
 			}
 		}
@@ -837,6 +839,7 @@ func makeRunView(run storage.ExecutionRun) runView {
 	activity = publicRunActivity(activity)
 	view := runView{ID: run.ID, Revision: run.Revision, Pellet: run.ProjectCode + "-" + strconv.FormatInt(run.PelletNumber, 10), PelletNumber: run.PelletNumber, Mode: run.Mode, Model: model, Effort: effort, Phase: run.Phase, State: run.State, Activity: activity, Commit: run.ResultCommit, Error: run.ErrorCode, ExternalID: textOrDash(run.ExternalID), Group: textOrDash(run.Group), Active: storage.RunActive(run.State), Interaction: run.Interaction}
 	view.Access = "Automatic approval"
+	view.PendingOperation = run.PendingOperation
 	view.GroupContext = run.GroupContext
 	view.ReviewContextVersion, view.ReviewContexts = makeReviewGroupContextViews(run)
 	if run.Settings.AccessMode == storage.AccessFull {
@@ -860,6 +863,14 @@ func publicRunActivity(activity string) string {
 	// diagnostic path as well.
 	if strings.HasPrefix(activity, "Git:") {
 		return "Repository verification needs attention; inspect the local server diagnostics."
+	}
+	switch activity {
+	case "Codex started the next workspace activity.":
+		return "The agent started an operation."
+	case "Codex completed an activity; validating the bound result.":
+		return "The agent reported an update."
+	case "Codex turn completed; validating the bound result.":
+		return "The agent finished a turn; checking its result."
 	}
 	return activity
 }

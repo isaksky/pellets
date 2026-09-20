@@ -32,21 +32,22 @@ type ScheduleRequest struct {
 }
 
 type ScheduleStatus struct {
-	ID              int64   `json:"id"`
-	WorkspaceID     int64   `json:"workspace_id"`
-	ProjectID       int64   `json:"project_id"`
-	Mode            string  `json:"mode"`
-	ExternalID      *string `json:"external_id"`
-	Group           *string `json:"group"`
-	Limit           int     `json:"limit"`
-	Started         int     `json:"started"`
-	Completed       int     `json:"completed"`
-	PelletNumber    int64   `json:"pellet_number,omitempty"`
-	RunID           int64   `json:"run_id,omitempty"`
-	State           string  `json:"state"`
-	Reason          string  `json:"reason,omitempty"`
-	Detail          string  `json:"detail,omitempty"`
-	StopAfterPellet bool    `json:"stop_after_pellet"`
+	ID               int64   `json:"id"`
+	WorkspaceID      int64   `json:"workspace_id"`
+	ProjectID        int64   `json:"project_id"`
+	Mode             string  `json:"mode"`
+	ExternalID       *string `json:"external_id"`
+	Group            *string `json:"group"`
+	Limit            int     `json:"limit"`
+	Started          int     `json:"started"`
+	Completed        int     `json:"completed"`
+	PelletNumber     int64   `json:"pellet_number,omitempty"`
+	RunID            int64   `json:"run_id,omitempty"`
+	State            string  `json:"state"`
+	Reason           string  `json:"reason,omitempty"`
+	Detail           string  `json:"detail,omitempty"`
+	StopAfterPellet  bool    `json:"stop_after_pellet"`
+	StopNowRequested bool    `json:"stop_now_requested"`
 }
 
 type SchedulerOptions struct {
@@ -277,6 +278,7 @@ func (h *ScheduleHandle) StopNow() {
 	h.cancel()
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.status.StopNowRequested = true
 	if h.execution != nil {
 		h.execution.Stop()
 	}

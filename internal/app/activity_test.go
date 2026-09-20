@@ -17,6 +17,24 @@ func activityFixtureEvent(method, thread, turn string, item map[string]any) code
 	return codex.Event{Method: method, Params: params}
 }
 
+func TestActivityMessagesAreUpdatesAndTurnCompletionIsSeparate(t *testing.T) {
+	for phase, title := range map[string]string{"commentary": "Agent update", "final_answer": "Agent response", "": "Agent update"} {
+		event := activityFixtureEvent("item/started", "thread", "turn", map[string]any{"id": "message", "type": "agentMessage", "phase": phase, "text": "Still working"})
+		if got := projectCodexActivity(event, "thread", "turn"); len(got) != 0 {
+			t.Fatal("unfinished message snapshot was exposed")
+		}
+		event.Method = "item/completed"
+		got := projectCodexActivity(event, "thread", "turn")
+		if len(got) != 1 || got[0].Kind != "message" || got[0].Title != title || got[0].Status != "completed" {
+			t.Fatalf("message presentation: %+v", got)
+		}
+	}
+	got := projectCodexActivity(codex.Event{Method: "turn/completed", Params: json.RawMessage(`{"threadId":"thread","turn":{"id":"turn","status":"completed"}}`)}, "thread", "turn")
+	if len(got) != 1 || got[0].Kind != "turn" || got[0].Status != "completed" {
+		t.Fatalf("missing turn boundary: %+v", got)
+	}
+}
+
 func TestActivityProjectsOnlyExactReportedItemsAndRedactsCompletePayloads(t *testing.T) {
 	event := activityFixtureEvent("item/completed", "thread", "turn", map[string]any{"id": "command", "type": "commandExecution", "command": "go test ./... --token private-flag", "aggregatedOutput": "ok first\nAuthorization: Bearer private-authorization\nAPI_KEY=private-api\nok last\n", "exitCode": 0, "environment": map[string]any{"secret": "NEVER COPY"}})
 	got := projectCodexActivity(event, "thread", "turn")

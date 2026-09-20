@@ -101,6 +101,19 @@ func awaitActiveRun(t *testing.T, s *Scheduler, interaction bool) storage.Execut
 	}
 }
 
+func TestStopNowReceiptRemainsVisibleUntilScheduleEnds(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	h := &ScheduleHandle{ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), status: ScheduleStatus{State: "running"}}
+	h.StopAfter()
+	if status := h.Status(); !status.StopAfterPellet || status.StopNowRequested {
+		t.Fatalf("stop-after must keep current work active: %+v", status)
+	}
+	h.StopNow()
+	if status := h.Status(); !status.StopNowRequested || ctx.Err() == nil {
+		t.Fatalf("missing authoritative stop request: %+v", status)
+	}
+}
+
 func TestConciseCodexActivityDoesNotExposeProtocolContent(t *testing.T) {
 	for method, want := range map[string]string{
 		"item/started":                          "Codex started the next workspace activity.",

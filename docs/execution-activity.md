@@ -7,6 +7,35 @@ Durable run state, optimistic interaction revisions, review snapshots, validated
 Git evidence and explicit recovery remain authoritative. Server restart never
 resumes a run, and it clears detailed activity.
 
+The sticky **Current execution** summary sits beside the scrolling feed. Its
+text and working indicator come from authoritative run/workspace records, never
+from an activity item's completion. Working includes startup, gaps between
+operations and the wait for complete sanitized snapshots. Only a working
+implementation/review can display a reported active operation. A completed
+operation or turn clears that operation description without ending the run.
+Turn boundaries use activity kind `turn`, separate from plan `progress`.
+
+Input/approval waits, stopping, interruption, attention and finished states have
+no animated working indicator. The foreground schedule's stop-now receipt
+remains visible through interruption and cleanup; a pending durable
+`turn/interrupt` also presents Stopping. Stop-after is a separate instruction:
+the current pellet can still be working or waiting for the user. An unowned
+active record presents recovery attention, not live work.
+
+Known execution phases have plain-language descriptions, such as checking the
+workspace, working on the pellet, checking the implementation result and saving
+verified changes. Detailed diagnostics remain under Run details. Commentary is
+**Agent update** and a final message is **Agent response**; neither carries a
+run-completion label. Individual commands and file operations keep their own
+reported status. Disconnection clears the active-operation description and
+shows a reconnect notice while retaining the last authoritative execution state.
+Unavailable/reset snapshots clear stale history; truncated history keeps its
+notice. Neither condition means the execution finished.
+
+Only the state label is a polite live region. Operation changes and feed updates
+do not repeatedly announce historical content. Reduced motion disables the
+working animation, retaining the indicator and explicit text.
+
 The implementation, checkpoint review and checkpoint triage drivers retain their
 single ordered event consumers. Each also projects recognized notifications after
 it knows the exact thread and turn identities. The projection never reads from

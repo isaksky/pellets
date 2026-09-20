@@ -290,7 +290,10 @@ func projectCodexActivity(event codex.Event, threadID, turnID string) []Activity
 				return nil
 			}
 			item.Kind = "message"
-			item.Title = "Codex"
+			item.Title = "Agent update"
+			if payload.Item.Phase == "final_answer" {
+				item.Title = "Agent response"
+			}
 			item.Text = payload.Item.Text
 		case "commandExecution":
 			item.Kind = "command"
@@ -366,7 +369,7 @@ func projectCodexActivity(event codex.Event, threadID, turnID string) []Activity
 		item.Title = "Reported turn diff"
 		item.Diff = payload.Diff
 	case "turn/completed":
-		item.Kind = "progress"
+		item.Kind = "turn"
 		item.Title = "Turn " + payload.Turn.Status
 		item.Status = payload.Turn.Status
 		if payload.Turn.Error != nil {

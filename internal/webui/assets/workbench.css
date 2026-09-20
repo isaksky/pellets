@@ -1365,6 +1365,66 @@ input[type="checkbox"] {
   overscroll-behavior: contain;
   padding-bottom: 12px;
 }
+.execution-status {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex-shrink: 0;
+  padding: 10px 0;
+  background: var(--panel);
+  border-block: 1px solid var(--line);
+  color: var(--text);
+}
+.execution-status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+.execution-indicator {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+}
+.execution-status[data-working="true"] .execution-indicator {
+  border-style: dotted;
+  animation: execution-working 1.5s linear infinite;
+}
+@keyframes execution-working {
+  to { transform: rotate(360deg); }
+}
+.execution-phase,
+.execution-operation,
+.execution-stop-after {
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.execution-stop-after {
+  margin-bottom: 8px;
+}
+.execution-operation {
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.execution-operation[hidden] {
+  display: none;
+}
+@media (max-width: 600px) {
+  /* The phone pane cannot pin the state, a feed and a full composer at once.
+     Keep inputs reachable in the workspace scroll instead of covering events. */
+  .run-workspace:has(.execution-status) > .run-follow-up,
+  .run-workspace:has(.execution-status) > .run-interaction {
+    position: static;
+  }
+}
 .activity-heading {
   display: flex;
   align-items: center;
