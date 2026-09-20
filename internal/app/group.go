@@ -10,8 +10,8 @@ import (
 
 type GroupRepositoryOpener func(context.Context, string) (storage.GroupRepository, error)
 
-// GroupManager uses the same logical project/worktree resolution as pellets and
-// memory. Callers edit by stable group ID and the last observed group revision.
+// GroupManager resolves the current logical project or an explicitly selected
+// registered project. Callers edit by stable ID and the observed group revision.
 type GroupManager struct {
 	Projects ProjectManager
 	Open     GroupRepositoryOpener
@@ -22,7 +22,13 @@ func withGroups[T any](ctx context.Context, m GroupManager, db Database, cwd, co
 	if m.Open == nil {
 		return zero, domain.NewError(domain.Unexpected, "internal_error", "group manager is not configured", nil)
 	}
-	selected, err := m.Projects.ResolveSelectedCurrentProject(ctx, db, cwd, code)
+	var selected storage.Project
+	var err error
+	if code == "" {
+		selected, err = m.Projects.ShowCurrent(ctx, db, cwd)
+	} else {
+		selected, err = m.Projects.ShowByCode(ctx, db, code)
+	}
 	if err != nil {
 		return zero, err
 	}
@@ -30,12 +36,19 @@ func withGroups[T any](ctx context.Context, m GroupManager, db Database, cwd, co
 	if err != nil {
 		return zero, err
 	}
-	value, operationErr := f(repository, selected.Project)
+	value, operationErr := f(repository, selected)
 	return value, errors.Join(operationErr, repository.Close())
 }
 func (m GroupManager) Create(ctx context.Context, db Database, cwd, code, name string) (storage.Group, error) {
 	return withGroups(ctx, m, db, cwd, code, func(r storage.GroupRepository, p storage.Project) (storage.Group, error) {
 		return r.CreateGroup(ctx, p, name)
+	})
+}
+
+// CreateWithContext creates an independent group, rejecting duplicate names.
+func (m GroupManager) CreateWithContext(ctx context.Context, db Database, cwd, code, name, markdown string) (storage.Group, error) {
+	return withGroups(ctx, m, db, cwd, code, func(r storage.GroupRepository, p storage.Project) (storage.Group, error) {
+		return r.CreateGroupWithContext(ctx, p, name, markdown)
 	})
 }
 func (m GroupManager) List(ctx context.Context, db Database, cwd, code string) ([]storage.Group, error) {

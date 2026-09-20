@@ -46,9 +46,11 @@ type Command struct {
 	// Aliases are accepted command spellings that dispatch to Name. They are
 	// deliberately omitted from the main help listing so help presents the
 	// canonical command surface while allowing a bounded compatibility window.
-	Aliases               []string
-	Summary               string
-	Usage                 string
+	Aliases []string
+	Summary string
+	Usage   string
+	// Subcommands permits family help via COMMAND SUBCOMMAND --help.
+	Subcommands           []string
 	SkipDatabaseDiscovery bool
 	// NeedsCurrentWorkspace marks commands whose valid operation is scoped to
 	// the current logical Git project/worktree. It is evaluated only after all
@@ -320,6 +322,13 @@ func (a *App) parse(args []string) (parsedInvocation, error) {
 			parsed.args = args[1:]
 			if len(parsed.args) == 1 && parsed.args[0] == "--help" {
 				parsed.action = actionCommandHelp
+			}
+			if len(parsed.args) == 2 && parsed.args[1] == "--help" {
+				for _, subcommand := range command.Subcommands {
+					if parsed.args[0] == subcommand {
+						parsed.action = actionCommandHelp
+					}
+				}
 			}
 			return parsed, validateFormats(parsed)
 		}

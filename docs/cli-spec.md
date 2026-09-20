@@ -14,10 +14,10 @@ pl [global-options] <command> [command-options] [arguments]
 - Mutating pellet commands accept a canonical or redirected reference such as `foo-123`; successful output canonicalizes it.
 - Parse a reference at its final hyphen: `foo-bar-123` means project `foo-bar`, pellet number `123`.
 - Pellet numbers are canonical unsigned decimal without leading zeros.
-- Bare numbers are rejected because one database may contain several projects.
+- Bare pellet numbers are rejected because one database may contain several projects. Group and memory commands use their own stable numeric IDs within the selected project.
 - Project codes are 1–12 lowercase letters, digits, or internal hyphens.
 - External IDs are optional, opaque, case-sensitive strings matched exactly by filters.
-- Groups are optional, opaque, case-sensitive strings. A pellet has at most one group, and group filters are exact and project-scoped.
+- Group names are opaque, case-sensitive strings. A pellet has at most one group, and group filters are exact and project-scoped. A group has stable identity and shared Markdown context independent of its members.
 - Dates accepted from the CLI use RFC 3339 or `YYYY-MM-DD`; stored dates use SQLite Julian `REAL` values.
 - Results and errors are human-readable text unless `--json` or `--pretty` is set; redirection never changes the selected format.
 - Unknown flags and positional arguments are errors; the parser never silently guesses.
@@ -33,7 +33,7 @@ pl [global-options] <command> [command-options] [arguments]
 | `--help` | Print help to stdout and exit successfully. |
 | `--version` | Print executable and JSON schema versions. |
 
-No mode adds color or terminal control codes, honoring `NO_COLOR`. Human results wrap to the terminal width without truncating content; redirected results are unwrapped. Help/version remain text in all modes. Format flags are global and precede the command, including when requesting JSON validation errors.
+No mode adds color or terminal control codes, honoring `NO_COLOR`. Human results wrap to the terminal width without truncating content; redirected results are unwrapped. Group context records retain their Markdown line layout even on narrow terminals. Human output escapes embedded control characters other than tabs/newlines; JSON preserves the exact context string. Help/version remain text in all modes. Format flags are global and precede the command, including when requesting JSON validation errors.
 
 ## Database and project selection
 
@@ -51,7 +51,7 @@ and workspace and publishes the binding before executing the requested operation
 First use is serialized through Git's common directory, so concurrent commands in
 separate worktrees share one queue. Existing installations acquire a binding on
 their first successful current-project bootstrap after upgrading. `add`,
-list/search/show/next and lifecycle commands, every `memory` operation, current
+list/search/show/next and lifecycle commands, every `memory` operation, current-project `group` operations, current
 `project show`, and `server` have this capability.
 
 Help/version, invalid invocations, `init-db`, and `skill install` do not use this
@@ -120,6 +120,92 @@ Renaming to the current canonical code is an idempotent success. Renaming to a r
 If `NEW_CODE` is a redirect owned by another project, JSON and every noninteractive invocation return `project_rename_confirmation_required` without reading stdin. Its details contain every conflicting `code` and `canonical_target`, the warning that deletion can break or reinterpret old pellet references, and the exact `retry_argv`. Automation may retry only with both `--delete-conflicting-redirects --yes`. Those flags must be supplied together. The rename transaction revalidates the complete displayed conflict set and deletes only those rules; a changed set returns `project_redirect_conflicts_changed` without writes.
 
 Default human mode prompts when both stdin and stdout are terminals. It lists every conflicting rule and target, repeats the warning, and asks `Delete only these redirect rules and rename OLD_CODE to NEW_CODE? [y/N]:`. Answering no, EOF, or interruption cancels without a write. Answering yes performs the same atomic conflict revalidation and rename. A failed rename leaves project and redirect state unchanged.
+
+### `pl group`
+
+Manage project groups and shared Markdown independently of queue membership.
+No extra group lookup is required after selecting or inspecting a pellet.
+
+```text
+pl [--project CODE] group create NAME [--context TEXT | --context-file PATH]
+pl [--project CODE] group list
+pl [--project CODE] group show GROUP_ID
+pl [--project CODE] group edit GROUP_ID
+    (--context TEXT | --context-file PATH | --clear-context) [--revision N]
+pl [--project CODE] group rename GROUP_ID NEW_NAME [--revision N]
+```
+
+Every operation selects the current logical project unless global `--project`
+selects a registered project in the discovered database. Explicit selection
+also works outside Git, honors project-code redirects, and never bootstraps
+another project. All linked worktrees share the same group records. Same-name
+groups in different projects remain independent. IDs are stable database-local
+positive canonical decimal integers, without leading zeros, and are always
+validated within the selected project. Use the ID returned by create/list/show.
+
+`create` atomically stores a new group and its initial context at revision 1.
+No context option means an empty document; a group needs no pellets. An existing
+exact name returns `group_name_conflict` (exit 4) without changing it, including
+groups implicitly created by pellet membership. Names are nonempty valid UTF-8,
+case-sensitive, and preserved exactly. Use `--` before positional arguments for
+names beginning with a dash.
+
+`--context` accepts literal Markdown. Use `--context='- item'` for text beginning
+with a dash. `--context-file PATH` reads a file relative to the working directory
+(or an absolute path). `--context-file -` explicitly reads stdin to EOF. Documents
+are valid UTF-8, limited to 1 MiB, and stored verbatim, including Mermaid fences,
+tabs, CRLF, and trailing newlines. Invalid documents return `invalid_group_context`
+(exit 2); unreadable files/stdin return `group_context_read_failed` (exit 1).
+An invalid payload never creates a group or changes existing context.
+
+`edit` replaces context only. `--context ''`, `--clear-context`, and an empty file
+or stdin payload deliberately clear it. Omission returns `missing_edit` (exit 2)
+without changing context; the three context options are mutually exclusive.
+`--revision N` on edit/rename compares a previously read revision atomically.
+Omission reads the current revision immediately before the operation and still
+detects intervening writes. A stale write returns `group_revision_conflict`
+(exit 4), with `group_id`, current `revision`, `expected_revision`, and
+`reload_argv`. Inspect that group, reconcile your change, and retry with the
+current revision; the CLI never silently overwrites after a conflict.
+
+`rename` retains stable identity, context, members, and current workspace routing
+through the shared atomic operation. It rejects a colliding name with
+`group_name_conflict` and never merges groups or rewrites saved execution filters
+or planning drafts. Renaming to the current name succeeds without incrementing
+the revision after checking it. Context saves and name changes increment the
+revision. A missing or foreign-project ID returns `group_not_found` (exit 3).
+
+All commands run directly without choices, confirmations, or implicit stdin
+reads. Human-readable output is the default, including when redirected.
+Global `--json`/`--pretty` select the standard non-interactive JSON v1 envelope;
+successes use stdout, errors use stderr with empty stdout. Command names are
+`group create`, `group list`, `group show`, `group edit`, and `group rename`.
+Single-group results include `id`, `project_id`, `name`, `revision`, complete
+`context`, `created_at`, and `updated_at`. Lists contain only `id`, `project_id`,
+`name`, and `revision`, sorted by exact binary name then ID; an empty list is `[]`.
+
+````sh
+pl group create empty
+pl group create design --context-file './group context.md'
+# Replace 7 with the returned ID and 3 with the revision you inspected.
+pl --json --project foo group show 7
+pl --json --project foo group edit 7 --context-file - --revision 3 <<'MARKDOWN'
+# Shared context
+
+```mermaid
+flowchart LR
+  A --> B
+```
+
+Preserve `backticks` and $literal text.
+MARKDOWN
+pl --json --project foo group edit 7 --context '' --revision 4
+````
+
+Use a file for portable multiline shell input, or a quoted heredoc delimiter in
+POSIX shells with its closing delimiter at column one. Never double-quote
+Markdown containing backticks or `$` substitutions. `pl group --help` and
+`pl group SUBCOMMAND --help` show the family syntax and examples without discovery.
 
 ### `pl add`
 
@@ -610,7 +696,7 @@ Never truncate titles or descriptions when stdout is not a terminal. Terminal ou
 
 ## stdin, stdout, and stderr
 
-- stdin is read only when an explicit option names `-`, such as `--description-file -` or `pl memory add --file -`, or by a documented default-human wizard or confirmation when both stdin and stdout are terminals.
+- stdin is read only when an explicit option names `-`, such as `--description-file -`, `pl group edit GROUP_ID --context-file -`, or `pl memory add --file -`, or by a documented default-human wizard or confirmation when both stdin and stdout are terminals.
 - JSON commands never read stdin implicitly; this prevents an agent invocation from hanging.
 - stdout contains the successful result, plus choices/previews/prompts only during terminal human interaction. For `pl server`, that result is the ready listener URL rather than JSON.
 - stderr contains readable errors and actionable details by default, or the stable JSON error envelope in machine mode. A non-fatal `pl server` browser-launch warning is the documented exception.
@@ -710,4 +796,6 @@ pl purge --project foo --closed-before 2026-01-01 --yes
 
 There are no `block`, `unblock`, `dependency`, `graph`, `ready`, `epic`, `tag`, `note`, `claim`, `assign`, `sync`, or vector/embedding commands. `next` is ordering-based, not graph-based; `start-next` is a worktree-scoped atomic lifecycle command, not an agent claim or lease.
 
-`--group` is intentionally singular. It is not a tag system: there is no repeated flag, many-to-many table, group entity, hierarchy, or group-specific behavior.
+`--group` is intentionally singular. Groups have stable identity and shared context,
+but do not form tags, hierarchies, dependencies, or epics. There is no repeated
+group flag or many-to-many pellet membership.

@@ -87,6 +87,23 @@ git(repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c',
 cli('init-db', cwd=root)
 project = cli('project', 'show')['data']
 
+# Group operations finish directly even on a terminal. Explicit stdin remains
+# a Markdown payload and is never read as a confirmation or wizard answer.
+text = Terminal('group', 'create', 'terminal-context').finish()
+assert 'revision=1' in text and '[y/N]' not in text
+group = next(g for g in cli('group', 'list')['data'] if g['name'] == 'terminal-context')
+group_id = str(group['id'])
+payload = 'yes\n# Context\n\n```mermaid\nflowchart LR\n  A --> B\n```\n'
+text = Terminal('group', 'edit', group_id, '--context-file', '-').send(payload).send('\x04').finish()
+assert '[y/N]' not in text
+assert cli('group', 'show', group_id)['data']['context'] == payload
+assert payload in Terminal('group', 'show', group_id, width=12).finish()
+assert 'group_revision_conflict' in Terminal('group', 'edit', group_id, '--context', 'lost', '--revision', '1').finish(4)
+assert 'group_name_conflict' in Terminal('group', 'create', 'terminal-context').finish(4)
+assert 'revision=3' in Terminal('group', 'edit', group_id, '--clear-context').finish()
+assert json.loads(Terminal('--pretty', 'group', 'show', group_id).finish())['data']['context'] == ''
+assert json.loads(Terminal('--json', 'group', 'rename', group_id, 'terminal-renamed').finish())['data']['name'] == 'terminal-renamed'
+
 # Plain installation collects choices and finishes in one invocation.
 install = Terminal('skill', 'install').expect('Scope:').send('1\n').expect('Agent:').send('1\n').expect('[y/N]:')
 assert str(repo / '.agents/skills/pellets/SKILL.md') in install.data.decode()

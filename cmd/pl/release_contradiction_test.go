@@ -66,7 +66,7 @@ func TestReleaseContradictionChecklist(t *testing.T) {
 		"rowid:INTEGER", "project_id:INTEGER", "workspace_id:INTEGER", "number:INTEGER", "title:TEXT",
 		"description:TEXT", "external_id:TEXT", "group_id:TEXT", "status:TEXT", "priority:INTEGER",
 		"created_at:REAL", "updated_at:REAL", "completed_at:REAL",
-		"kind:TEXT", "implementation_revision:INTEGER",
+		"kind:TEXT", "implementation_revision:INTEGER", "group_record_id:INTEGER",
 	}
 	wantMemoryColumns := []string{
 		"memory_id:INTEGER", "project_id:INTEGER", "text:TEXT", "created_by:TEXT", "approved_at:REAL",
@@ -108,7 +108,13 @@ func TestReleaseContradictionChecklist(t *testing.T) {
 		}
 	}
 
-	forbiddenTables := []string{"agents", "claims", "dependencies", "dependency_edges", "events", "groups", "heartbeats", "leases", "sessions", "tags", "vectors"}
+	// Shared group context is independent of queue membership and adds no
+	// hierarchy, status, dependencies, or many-to-many pellet membership.
+	wantGroupColumns := []string{"group_id:INTEGER", "project_id:INTEGER", "name:TEXT", "context:TEXT", "revision:INTEGER", "created_at:REAL", "updated_at:REAL"}
+	if columns := releaseTableColumns(t, database, "groups"); strings.Join(columns, ",") != strings.Join(wantGroupColumns, ",") {
+		t.Fatalf("group schema contradicts the release model: got %v, want %v", columns, wantGroupColumns)
+	}
+	forbiddenTables := []string{"agents", "claims", "dependencies", "dependency_edges", "events", "heartbeats", "leases", "sessions", "tags", "vectors"}
 	for _, table := range forbiddenTables {
 		assertFoundationQueryInt(t, database, "SELECT COUNT(*) FROM sqlite_schema WHERE lower(name) = ?", 0, table)
 	}

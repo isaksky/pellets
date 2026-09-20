@@ -381,6 +381,72 @@ request IDs. Resume preserves completed triage and finishes only the remaining
 findings; closure waits for every follow-up to be durably reconciled. Reviews
 and triage do not fix code, create commits, or create another checkpoint.
 
+## Manage shared group context
+
+A group has a stable ID, an exact case-sensitive name, and shared Markdown
+context within one logical project. Groups can exist without pellets. Their
+context survives removal of the last member. Manage this document independently
+of selecting or inspecting a pellet; agents do not need a separate `group show`
+after every `next`, `start-next`, or `show`.
+
+```sh
+pl group create parser-rollout
+pl group create design --context-file './group context.md'
+pl group list
+# Replace 7 with the ID returned by create or list.
+pl group show 7
+pl group edit 7 --context-file context.md
+pl group edit 7 --context ''       # Deliberately clear context.
+pl group edit 7 --clear-context   # Equivalent explicit clearing option.
+pl group rename 7 parser-v2
+```
+
+Creation without context creates an empty document. Editing requires an explicit
+context option; omission never clears it. An empty file also clears context.
+Creation rejects an existing exact name, including a group created by adding a
+pellet. Rename preserves the ID, context, members, and current workspace routing;
+it rejects collisions and never merges groups.
+
+Use global `--project` to select another registered project. Scripts and agents
+select `--json` or `--pretty` before the command and can pass the revision they
+previously read to prevent stale writes:
+
+```sh
+pl --json --project foo group show 7
+pl --json --project foo group edit 7 --context-file context.md --revision 3
+pl --json --project foo group rename 7 parser-v2 --revision 4
+```
+
+A stale revision returns `group_revision_conflict` without writing. Inspect the
+current document, reconcile the changes, and retry with its revision. Without
+`--revision`, the command reads the current revision and checks it when saving.
+All group commands complete without prompts, including redirected human output.
+`group list` shows concise metadata; `group show` includes the full context.
+
+For multiline Markdown and Mermaid, use a file or explicit stdin with a quoted
+heredoc delimiter in POSIX shells. Quoting the delimiter preserves backticks,
+dollar signs, and newlines without shell expansion; keep its closing delimiter
+at column one. Do not put multiline Markdown with backticks or `$` substitutions
+inside shell double quotes.
+
+````sh
+pl --json --project foo group edit 7 --context-file - --revision 5 <<'MARKDOWN'
+# Parser context
+
+```mermaid
+flowchart LR
+  Input --> Parser
+```
+
+Keep `parser_id` and $literal text unchanged.
+MARKDOWN
+````
+
+Context accepts valid UTF-8 up to 1 MiB and is stored verbatim. Use a Markdown
+file for portable multiline input across shells. For inline text starting with
+a dash, use `--context='- item'`. For names starting with a dash, put `--` before
+the positional arguments, for example `pl group create -- '-draft'`.
+
 ## Search tasks and operate memory
 
 Task search covers title, description, and external-ID text across every

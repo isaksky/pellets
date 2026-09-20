@@ -54,6 +54,12 @@ func main() {
 			return sqlite.OpenMemoryRepository(ctx, path)
 		},
 	}
+	groupManager := app.GroupManager{
+		Projects: projectManager,
+		Open: func(ctx context.Context, path string) (storage.GroupRepository, error) {
+			return sqlite.OpenGroupRepository(ctx, path)
+		},
+	}
 	webRunner := webui.Runner{
 		OpenScheduler: func(ctx context.Context, supervisor *app.ExecutionSupervisor, database app.Database, subscribe func() (<-chan struct{}, func())) *app.Scheduler {
 			openQueue := func(ctx context.Context, path string) (storage.SchedulerQueue, error) {
@@ -107,6 +113,7 @@ func main() {
 	commands := []cli.Command{
 		cli.InitDBCommand(initializer),
 		cli.ProjectCommand(projectManager),
+		cli.GroupCommand(groupManager),
 		cli.AddCommand(pelletManager),
 		cli.MoveCommand(pelletManager),
 		cli.ListCommand(pelletManager),

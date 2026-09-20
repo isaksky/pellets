@@ -1,0 +1,23 @@
+{"schema_version":1,"command":"group create","data":{"id":7,"project_id":2,"name":"parser Ω","revision":3,"context":"# Shared context\n\n```mermaid\nflowchart LR\n\tA --> B\n```\n","created_at":"2026-09-20T12:00:00Z","updated_at":"2026-09-20T13:00:00Z"}}
+{"schema_version":1,"command":"group show","data":{"id":7,"project_id":2,"name":"parser Ω","revision":3,"context":"# Shared context\n\n```mermaid\nflowchart LR\n\tA --> B\n```\n","created_at":"2026-09-20T12:00:00Z","updated_at":"2026-09-20T13:00:00Z"}}
+{"schema_version":1,"command":"group edit","data":{"id":7,"project_id":2,"name":"parser Ω","revision":3,"context":"# Shared context\n\n```mermaid\nflowchart LR\n\tA --> B\n```\n","created_at":"2026-09-20T12:00:00Z","updated_at":"2026-09-20T13:00:00Z"}}
+{"schema_version":1,"command":"group rename","data":{"id":7,"project_id":2,"name":"parser Ω","revision":3,"context":"# Shared context\n\n```mermaid\nflowchart LR\n\tA --> B\n```\n","created_at":"2026-09-20T12:00:00Z","updated_at":"2026-09-20T13:00:00Z"}}
+human:
+No groups.
+human:
+7  "parser Ω"  revision=3
+human:
+Group 7  "parser Ω"  revision=3  project-id=2
+Context:
+# Shared context
+
+```mermaid
+flowchart LR
+	A --> B
+```
+human:
+Group 8  "empty"  revision=1  project-id=2
+Context:
+(empty)
+{"schema_version":1,"command":"group list","data":[]}
+{"schema_version":1,"command":"group list","data":[{"id":7,"project_id":2,"name":"parser Ω","revision":3}]}

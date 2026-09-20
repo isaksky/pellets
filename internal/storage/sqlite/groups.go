@@ -112,6 +112,32 @@ func (r *GroupRepository) EditGroupContext(ctx context.Context, project storage.
 		return err
 	})
 }
+
+func (r *GroupRepository) CreateGroupWithContext(ctx context.Context, project storage.Project, name, markdown string) (storage.Group, error) {
+	if err := storage.ValidateGroupName(name); err != nil {
+		return storage.Group{}, err
+	}
+	if err := storage.ValidateGroupContext(markdown); err != nil {
+		return storage.Group{}, err
+	}
+	return r.write(ctx, func(conn *sql.Conn) (storage.Group, error) {
+		if err := ensureStoredProject(ctx, conn, project); err != nil {
+			return storage.Group{}, err
+		}
+		result, err := conn.ExecContext(ctx, `INSERT INTO groups(project_id,name,context,created_at,updated_at) VALUES(?,?,?,julianday('now'),julianday('now')) ON CONFLICT(project_id,name) DO NOTHING`, project.ID, name, markdown)
+		if err != nil {
+			return storage.Group{}, err
+		}
+		inserted, err := result.RowsAffected()
+		if err != nil {
+			return storage.Group{}, err
+		}
+		if inserted == 0 {
+			return storage.Group{}, domain.NewError(domain.Conflict, "group_name_conflict", "a group with that exact name already exists in this project", map[string]any{"name": name})
+		}
+		return scanGroup(conn.QueryRowContext(ctx, groupSelect+" WHERE project_id=? AND name=?", project.ID, name))
+	})
+}
 func (r *GroupRepository) RenameGroup(ctx context.Context, project storage.Project, id, revision int64, name string) (storage.Group, error) {
 	if err := storage.ValidateGroupName(name); err != nil {
 		return storage.Group{}, err

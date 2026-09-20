@@ -32,6 +32,55 @@ func mustGroup(t *testing.T, g *GroupRepository, p storage.Project, name string)
 	return result
 }
 
+func TestGroupExplicitCreationIsAtomicAndRejectsConcurrentDuplicates(t *testing.T) {
+	t.Parallel()
+	f, _, r := groupFixture(t)
+	ctx := context.Background()
+	const count = 6
+	errs := make(chan error, count)
+	var wg sync.WaitGroup
+	for range count {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := r.CreateGroupWithContext(ctx, f.main.Project, "explicit", "# Initial\n```mermaid\nflowchart LR\nA --> B\n```\n")
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	successes := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+		} else {
+			assertDomainErrorCode(t, err, "group_name_conflict")
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("successful creates: %d", successes)
+	}
+	g := mustGroup(t, r, f.main.Project, "explicit")
+	if g.Context == "" || g.Revision != 1 {
+		t.Fatalf("partial create: %+v", g)
+	}
+	_, err := r.CreateGroupWithContext(ctx, f.main.Project, "explicit", "replacement")
+	assertDomainErrorCode(t, err, "group_name_conflict")
+	if got := mustGroup(t, r, f.main.Project, "explicit"); got != g {
+		t.Fatalf("duplicate wrote context: %+v", got)
+	}
+	_, err = r.CreateGroupWithContext(ctx, f.main.Project, "invalid", string([]byte{0xff}))
+	assertDomainErrorCode(t, err, "invalid_group_context")
+	groups, err := r.ListGroups(ctx, f.main.Project)
+	if err != nil || len(groups) != 1 {
+		t.Fatalf("invalid payload left a group: %+v %v", groups, err)
+	}
+	foreign, err := r.CreateGroupWithContext(ctx, f.other.Project, "explicit", "foreign")
+	if err != nil || foreign.ID == g.ID || foreign.Context != "foreign" {
+		t.Fatalf("foreign create: %+v %v", foreign, err)
+	}
+}
+
 func TestGroupsIdentityContextValidationAndStaleEdits(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

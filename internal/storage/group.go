@@ -51,5 +51,8 @@ type GroupWriter interface {
 type GroupRepository interface {
 	GroupReader
 	GroupWriter
+	// CreateGroupWithContext atomically creates a new group and its initial
+	// context. Unlike implicit creation, an existing exact name is a conflict.
+	CreateGroupWithContext(context.Context, Project, string, string) (Group, error)
 	Close() error
 }

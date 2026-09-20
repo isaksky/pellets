@@ -10,7 +10,7 @@ import (
 	"pellets/internal/storage/sqlite"
 )
 
-func TestGroupManagerKeepsCurrentWorktreeProjectSelection(t *testing.T) {
+func TestGroupManagerCurrentAndExplicitProjectSelection(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "groups.db")
 	db, err := sqlite.OpenProjectDatabase(ctx, path)
@@ -49,7 +49,7 @@ func TestGroupManagerKeepsCurrentWorktreeProjectSelection(t *testing.T) {
 		t.Fatalf("list: %+v %v", list, err)
 	}
 	_, err = manager.Create(ctx, database, "/working", "foreign", "wrong project")
-	if err == nil || domain.PublicError(err).Code != "project_selection_mismatch" {
+	if err == nil || domain.PublicError(err).Code != "project_not_registered" {
 		t.Fatalf("foreign selection: %v", err)
 	}
 }
