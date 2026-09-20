@@ -149,6 +149,9 @@ func (recorder ExecutionRecorder) CallCodex(ctx context.Context, database Databa
 	if session == nil {
 		return run, nil, storage.InvalidExecutionRun("Codex session is required")
 	}
+	if err := validateExecutionRequestSize(run.Settings.Codex.Limits.MaxMessageBytes, operation, params); err != nil {
+		return run, nil, err
+	}
 	progress := run.RunProgress
 	progress.Summary = ""
 	switch operation {

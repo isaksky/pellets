@@ -102,11 +102,16 @@ func (s *Scheduler) drive(ctx context.Context, execution *WorkspaceExecution) er
 	if baselineChanged {
 		prompt = "Commits landed since your previous attempt. This attempt starts at the current starting_head below. Preserve and reassess the unfinished edits already in the worktree. Re-read the current code and reassess what remains; do not assume the previous implementation or verification still applies.\n\n" + prompt
 	}
-	if newConversation {
-		if run.ResumeFrom != nil {
+	// A saved thread can exist without any turn (for example after a local
+	// size rejection). Recovery verifies its history is empty in that case.
+	if newConversation || run.TurnID == "" {
+		if newConversation && run.ResumeFrom != nil {
 			prompt = "The user chose a fresh conversation for this existing pellet. Preserve the unfinished edits, reassess the code, and finish the authorized work without asking again about that choice.\n\n" + prompt
 		}
-		prompt = run.PromptPrefix.Text + prompt
+		prompt, err = newExecutionPrompt(run, prompt)
+		if err != nil {
+			return err
+		}
 	}
 	params, err = execution.TurnStartParams(run.ThreadID, []any{map[string]any{"type": "text", "text": prompt}})
 	if err != nil {

@@ -73,18 +73,15 @@ func TestProjectGroupsMigrationPreservesNamesMembershipAndHistoricalEvidence(t *
  VALUES(1,'old-chat',printf('%064d',0),1,'{"drafts":[{"id":"draft","title":"Saved draft","group":"draft-only"}]}',2460000,2460000);
  INSERT INTO planning_draft_creations VALUES(1,1,'created',3,'{"group":"Case"}','{"Group":"Case"}');
  INSERT INTO pellets_fts(rowid,title,description,external_id) SELECT rowid,title,description,external_id FROM pellets;`)
-	database := &ProjectDatabase{db: db}
 	capture := runCapture(1, 1, 2)
 	group := "Case"
 	capture.Group = &group
 	capture.WorkspaceSelection = &storage.WorkspaceSelection{Enabled: true, Mode: "explicit", Groups: []string{group}}
-	if _, err = database.CreateExecutionRun(ctx, capture); err != nil {
-		t.Fatal(err)
-	}
+	insertLegacyContextRun(t, db, capture)
 	// Snapshot every old pellet column and every populated immutable record.
 	queries := []string{
 		`SELECT project_id,number,group_id,status,workspace_id,priority,created_at,updated_at,completed_at,implementation_revision FROM pellets ORDER BY project_id,number`,
-		`SELECT * FROM execution_runs`, `SELECT * FROM execution_run_activity`, `SELECT * FROM review_checkpoint_targets`,
+		legacyExecutionProjection(t, db), `SELECT * FROM execution_run_activity`, `SELECT * FROM review_checkpoint_targets`,
 		`SELECT * FROM pellet_add_requests`, `SELECT * FROM planning_chats`, `SELECT * FROM planning_draft_creations`,
 		`SELECT * FROM workspace_group_assignments`,
 	}

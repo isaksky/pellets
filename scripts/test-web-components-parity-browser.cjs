@@ -98,7 +98,9 @@ async function measure(page, scene, build) {
   execFileSync('go', ['build', '-o', current, './cmd/pl'], {cwd: repository});
   fs.mkdirSync(fixture);
   execFileSync('git', ['init', '-q'], {cwd: fixture});
-  const cli = (...args) => JSON.parse(execFileSync(current, ['--json', ...args], {cwd: fixture, encoding: 'utf8'})).data;
+  // Seed the older schema first. The current build may migrate it after the
+  // baseline measurements; an older binary cannot read a newer schema.
+  const cli = (...args) => JSON.parse(execFileSync(baseline, ['--json', ...args], {cwd: fixture, encoding: 'utf8'})).data;
   const first = cli('add', 'Preserve the existing interface', '--group', 'Interface');
   cli('add', 'Keep interactions predictable', '--group', 'Runtime');
   cli('add', 'Review interface work', '--review-targets', first.id);

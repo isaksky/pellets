@@ -77,7 +77,7 @@ type RunCapture struct {
 	ResumeFrom                     *int64               `json:"resume_from,omitempty"`
 	Mode                           string               `json:"mode"`
 	ExternalID                     *string              `json:"external_id"`
-	Group                          *string              `json:"group"`
+	Group                          *string              `json:"group"` // Exact schedule filter, not the pellet's actual group context.
 	Settings                       EffectiveRunSettings `json:"settings"`
 	StartingHead                   string               `json:"starting_head"`
 	StartingRef                    string               `json:"starting_ref"`
@@ -225,15 +225,16 @@ type RunActivity struct {
 }
 
 type ExecutionRun struct {
-	ImplementationRevision int64             `json:"implementation_revision"`
-	CheckpointScope        *ReviewCheckpoint `json:"checkpoint_scope,omitempty"`
-	CheckpointTriage       *CheckpointTriage `json:"checkpoint_triage,omitempty"`
-	ID                     int64             `json:"id"`
-	Attempt                int64             `json:"attempt"`
-	Revision               int64             `json:"revision"`
-	PendingOperation       string            `json:"pending_operation,omitempty"`
-	PendingRevision        int64             `json:"pending_revision,omitempty"`
-	PendingTurnID          string            `json:"-"`
+	GroupContext           GroupContextSnapshot `json:"group_context"`
+	ImplementationRevision int64                `json:"implementation_revision"`
+	CheckpointScope        *ReviewCheckpoint    `json:"checkpoint_scope,omitempty"`
+	CheckpointTriage       *CheckpointTriage    `json:"checkpoint_triage,omitempty"`
+	ID                     int64                `json:"id"`
+	Attempt                int64                `json:"attempt"`
+	Revision               int64                `json:"revision"`
+	PendingOperation       string               `json:"pending_operation,omitempty"`
+	PendingRevision        int64                `json:"pending_revision,omitempty"`
+	PendingTurnID          string               `json:"-"`
 	RunCapture
 	RunProgress
 	ProjectCode       string           `json:"project_code"`

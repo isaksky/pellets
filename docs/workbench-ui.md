@@ -381,6 +381,20 @@ review outcomes. See [checkpoint management](checkpoint-management.md).
 
 ## Live execution
 
+Run details includes **Captured group context**, the immutable document supplied
+when this execution was admitted. It shows the original group name, stable ID,
+revision, and a keyboard-accessible **Captured Markdown source** disclosure. This
+is historical, read-only source, separate from the group's current editable
+context; Mermaid and HTML in it are displayed as text. Empty group documents,
+ungrouped executions, and legacy attempts without a captured document have
+distinct explanations. Resume retains this snapshot, including when a fresh
+conversation is explicitly chosen.
+
+`test-web-run-context-browser.cjs` verifies this source view, safe escaping,
+empty/ungrouped states, live refresh, restart, and fresh-conversation recovery
+with a disposable production server. It captures all five themes at desktop,
+intermediate, and phone widths in Chromium and WebKit.
+
 Editing an ordinary pellet during implementation updates its running
 conversation. A fresh, separate `gpt-5.6-terra` agent at `max` reasoning compares
 the exact old and new title, description, group, and external ID. It is read-only

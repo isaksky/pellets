@@ -1223,6 +1223,19 @@ input[type="checkbox"] {
   font-size: 10px;
   cursor: pointer;
 }
+.run-group-context pre {
+  font-size: 12px;
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 8px;
+  background: var(--theme-code-bg);
+  color: var(--theme-code-ink);
+}
+.run-group-context pre code {
+  font-size: inherit;
+}
 .run-facts {
   display: grid;
   grid-template-columns: 1fr 1fr;

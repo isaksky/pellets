@@ -253,11 +253,12 @@ a fresh preflight result rather than silently reusing an old snapshot.
 
 For a new Codex thread, the scheduler prepends one deterministic
 `pellets-codex-prefix-v1` layer: snapshot identity, skill, CLI help, then the
-small stable workflow. Only after that layer does it append phase-specific
-instructions and variable task context. Fresh detached checkpoint reviews and
-each fresh finding-assessment thread receive that same captured prefix once,
-followed by their read-only role restrictions and exact snapshot/finding/queue
-context. The prefix stays outside the review snapshot and its clean-marker
+small stable workflow. After that layer it supplies the captured group context,
+then phase-specific instructions and variable task context. Fresh detached
+checkpoint reviews and each fresh finding-assessment thread receive that same
+captured prefix once, followed by the same captured group document, their
+read-only role restrictions, and exact snapshot/finding/queue context. The prefix
+stays outside the review snapshot and its clean-marker
 digest. The exact prefix and template version are retained with the durable
 execution attempt. A resumed thread uses
 its existing conversation context and does not append the full prefix again.
@@ -268,6 +269,44 @@ This deliberately complements—rather than replaces—the installed runtime's
 system prompt, user instructions, `AGENTS.md` discovery, tools, and settings.
 If a terminal runtime event reports cached input tokens, the attempt exposes
 that observed telemetry; Pellets does not promise provider cache hits.
+
+### Immutable group context
+
+Run admission captures `group_context` in the same SQLite write transaction as
+the selected pellet's ownership, generation, and exact-filter checks. Version 1
+records `state: captured` with the actual membership's stable group ID, name,
+revision, and full raw Markdown. The lookup is scoped to the pellet's project
+and stable group identity; schedule filters and workspace assignments are not
+membership evidence. `state: ungrouped` has a null group, while a real group with
+an empty document retains its identity and empty context. Migrated attempts use
+`state: legacy` with a null group: no historical text is inferred from current data.
+
+The new-conversation prompt places a labeled, delimited source section between
+the stable skill/help prefix and the selected task. Markdown and Mermaid remain
+raw source, with no execution or scope expansion. Group context does not override
+repository instructions or the implementation, review, and finalization policies.
+Drain and Watch capture separately at every new pellet admission, so edits made
+during one pellet are available to later pellets. Once admitted, a snapshot is
+immutable, even after group rename, clearing, or membership edits. Existing
+generation and exact-filter checks still apply to those edits.
+
+Active turns, follow-ups, continuation, and explicit Resume retain the original
+snapshot without fetching current context or appending it again to an existing
+thread. If recovery verifies that a saved thread has no turns, its first turn
+still receives the captured layer. Pre-thread retries, explicitly chosen fresh-conversation recovery, and
+finalization recovery copy the original snapshot too. Fresh checkpoint review
+and unfinished-finding assessment conversations receive their captured context
+once alongside their stricter read-only roles. The group document remains outside
+the review scope and clean-marker digest.
+
+Raw context is limited to 1 MiB of UTF-8 and captured group names to 4096 bytes.
+The stored JSON allows worst-case escaping (6 MiB plus 32 KiB of metadata).
+Assembled new-conversation prompts are limited to 8 MiB, and complete encoded
+turn/review requests must also fit the configured `MaxMessageBytes`. Overflow
+returns a useful error before turn/review-call intent is recorded; text is never
+silently truncated. An existing snapshot cannot be replaced to fit a smaller
+limit. Execution details expose the captured name, ID, revision, and escaped
+Markdown source, explicitly labeled as historical rather than the current editor.
 
 `app.Scheduler` owns Run one (`run_one`), Drain (`drain`), and Watch (`watch`)
 for an explicitly chosen existing registered workspace. Requests copy their

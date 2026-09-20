@@ -1584,6 +1584,7 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 	assertObjectNames(t, db, "table", wantTables)
 	assertObjectNames(t, db, "index", wantIndexes)
 	assertObjectNames(t, db, "trigger", []string{
+		"execution_group_context_immutable",
 		"groups_project_immutable",
 		"groups_rename_members",
 		"pellets_group_identity_update",

@@ -351,6 +351,7 @@ type noRunResumeView struct {
 }
 
 type runView struct {
+	GroupContext  storage.GroupContextSnapshot
 	Access        string
 	ID            int64
 	Revision      int64
@@ -833,6 +834,7 @@ func makeRunView(run storage.ExecutionRun) runView {
 	activity = publicRunActivity(activity)
 	view := runView{ID: run.ID, Revision: run.Revision, Pellet: run.ProjectCode + "-" + strconv.FormatInt(run.PelletNumber, 10), PelletNumber: run.PelletNumber, Mode: run.Mode, Model: model, Effort: effort, Phase: run.Phase, State: run.State, Activity: activity, Commit: run.ResultCommit, Error: run.ErrorCode, ExternalID: textOrDash(run.ExternalID), Group: textOrDash(run.Group), Active: storage.RunActive(run.State), Interaction: run.Interaction}
 	view.Access = "Automatic approval"
+	view.GroupContext = run.GroupContext
 	if run.Settings.AccessMode == storage.AccessFull {
 		view.Access = "Full access"
 	}

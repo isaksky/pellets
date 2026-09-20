@@ -176,6 +176,9 @@ func Run() bool {
 			if mode == "schedule_missing_history" {
 				result = map[string]any{}
 			}
+			if mode == "schedule_empty_history" {
+				result = map[string]any{"thread": map[string]any{"id": "thread", "cwd": cwd, "status": map[string]any{"type": "notLoaded"}, "turns": []any{}}}
+			}
 			if mode == "schedule_active_history" {
 				result = map[string]any{"thread": map[string]any{"id": "thread", "cwd": cwd, "status": map[string]any{"type": "active"}, "turns": []any{}}}
 			}

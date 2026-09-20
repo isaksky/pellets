@@ -51,8 +51,9 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 		var title, description, status string
 		var workspace sql.NullInt64
 		var externalID, group sql.NullString
+		var groupID sql.NullInt64
 		var pellet storage.Pellet
-		err := conn.QueryRowContext(ctx, `SELECT title, description, status, workspace_id, external_id, group_id, kind, implementation_revision FROM pellets WHERE project_id = ? AND number = ?`, c.ProjectID, c.PelletNumber).Scan(&title, &description, &status, &workspace, &externalID, &group, &pellet.Kind, &pellet.ImplementationRevision)
+		err := conn.QueryRowContext(ctx, `SELECT title, description, status, workspace_id, external_id, group_id, group_record_id, kind, implementation_revision FROM pellets WHERE project_id = ? AND number = ?`, c.ProjectID, c.PelletNumber).Scan(&title, &description, &status, &workspace, &externalID, &group, &groupID, &pellet.Kind, &pellet.ImplementationRevision)
 		if errors.Is(err, sql.ErrNoRows) {
 			return storage.InvalidExecutionRun("the exact pellet no longer exists")
 		}
@@ -111,11 +112,15 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 		turnID, finalization, reviewSnapshot, reviewResult, phase := "", "null", "null", "null", "preflight"
 		resultCommit := ""
 		var verifiedStamp *string
+		groupContext := storage.GroupContextSnapshot{Version: 1, State: "ungrouped"}
 		if c.ResumeFrom != nil {
 			previous, err := readExecutionRun(ctx, conn, *c.ResumeFrom)
 			if err != nil {
 				return err
 			}
+			// Even pre-thread and fresh-conversation recovery retain the original
+			// admission snapshot. Never infer legacy context from live groups.
+			groupContext = previous.GroupContext
 			implementationReceipt := previous.State == "completed" && resumingClosed && previous.Finalization != nil && previous.ResultCommit != "" && previous.Phase == "finalization"
 			reviewReceipt := false
 			if resumingClosed {
@@ -209,6 +214,27 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 				// append them to this existing thread.
 				c.PromptPrefix = previous.PromptPrefix
 			}
+		} else if groupID.Valid {
+			g := &storage.GroupContext{}
+			if err := conn.QueryRowContext(ctx, `SELECT group_id, name, revision, context FROM groups WHERE project_id=? AND group_id=?`, c.ProjectID, groupID.Int64).Scan(&g.ID, &g.Name, &g.Revision, &g.Context); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return storage.InvalidExecutionRun("the selected pellet's actual group context is unavailable")
+				}
+				return err
+			}
+			if !group.Valid || g.Name != group.String {
+				return storage.InvalidExecutionRun("the selected pellet's group membership is inconsistent")
+			}
+			groupContext.State, groupContext.Group = "captured", g
+		} else if group.Valid {
+			return storage.InvalidExecutionRun("the selected pellet's group identity is missing")
+		}
+		if err := storage.ValidateGroupContextSnapshot(groupContext); err != nil {
+			return err
+		}
+		groupContextJSON, err := json.Marshal(groupContext)
+		if err != nil {
+			return err
 		}
 		if c.ScheduleMode == "" {
 			c.ScheduleMode = c.Mode
@@ -230,11 +256,11 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 		now := time.Now().UTC().Format(runTimeFormat)
 		result, err := conn.ExecContext(ctx, `INSERT INTO execution_runs(
 			project_id, workspace_id, pellet_number, attempt, resume_from, mode, external_id, group_id,
-			settings_json, prompt_prefix_json, starting_head, pellet_title, pellet_description, thread_id, turn_id, finalization_json, review_snapshot_json, review_result_json, result_commit, commit_verified_at, phase, state, revision, created_at, updated_at)
+			settings_json, prompt_prefix_json, starting_head, pellet_title, pellet_description, thread_id, turn_id, finalization_json, review_snapshot_json, review_result_json, result_commit, commit_verified_at, phase, state, revision, created_at, updated_at, group_context_json)
 			VALUES (?, ?, ?, (SELECT COALESCE(MAX(attempt), 0) + 1 FROM execution_runs WHERE project_id = ? AND pellet_number = ?),
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', 1, ?, ?)`,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', 1, ?, ?, ?)`,
 			c.ProjectID, c.WorkspaceID, c.PelletNumber, c.ProjectID, c.PelletNumber, c.ResumeFrom,
-			c.Mode, c.ExternalID, c.Group, string(encoded), string(prefix), c.StartingHead, title, description, threadID, turnID, finalization, reviewSnapshot, reviewResult, resultCommit, verifiedStamp, phase, now, now)
+			c.Mode, c.ExternalID, c.Group, string(encoded), string(prefix), c.StartingHead, title, description, threadID, turnID, finalization, reviewSnapshot, reviewResult, resultCommit, verifiedStamp, phase, now, now, string(groupContextJSON))
 		if err != nil {
 			return err
 		}
@@ -776,21 +802,21 @@ type runQuery interface {
 }
 
 func readExecutionRun(ctx context.Context, q runQuery, id int64) (run storage.ExecutionRun, err error) {
-	var settings, promptPrefix, finalization, interaction, reviewSnapshot, reviewResult, created, updated, checkpointScope, workspaceSelection string
+	var settings, promptPrefix, finalization, interaction, reviewSnapshot, reviewResult, created, updated, checkpointScope, workspaceSelection, groupContext string
 	var finished, verified sql.NullString
 	err = q.QueryRowContext(ctx, `SELECT r.run_id, r.attempt, r.revision, r.project_id, r.workspace_id, r.pellet_number,
 		r.resume_from, r.mode, r.external_id, r.group_id, r.settings_json, r.prompt_prefix_json, r.starting_head, r.pellet_title, r.pellet_description,
 		r.phase, r.state, r.thread_id, r.turn_id, r.outcome, r.error_code, r.summary, r.cached_input_tokens, r.finalization_json, r.result_commit,
 		r.interaction_json, r.review_snapshot_json, r.review_result_json, r.commit_verified_at, r.created_at, r.updated_at, r.finished_at, r.activity_pruned, p.code, r.pending_operation, r.pending_revision, r.pending_turn_id,
 		EXISTS(SELECT 1 FROM pellets WHERE project_id=r.project_id AND number=r.pellet_number),
-		w.root_path, w.root_path_relative, w.git_dir, w.git_dir_relative, p.git_common_dir, p.git_common_dir_relative, r.starting_ref, r.schedule_mode, r.schedule_remaining, r.implementation_revision, r.checkpoint_scope_json, r.workspace_selection_json
+		w.root_path, w.root_path_relative, w.git_dir, w.git_dir_relative, p.git_common_dir, p.git_common_dir_relative, r.starting_ref, r.schedule_mode, r.schedule_remaining, r.implementation_revision, r.checkpoint_scope_json, r.workspace_selection_json, r.group_context_json
 		FROM execution_runs r JOIN projects p ON p.project_id=r.project_id
 		JOIN project_workspaces w ON w.workspace_id=r.workspace_id WHERE r.run_id=?`, id).Scan(
 		&run.ID, &run.Attempt, &run.Revision, &run.ProjectID, &run.WorkspaceID, &run.PelletNumber,
 		&run.ResumeFrom, &run.Mode, &run.ExternalID, &run.Group, &settings, &promptPrefix, &run.StartingHead, &run.PelletTitle, &run.PelletDescription,
 		&run.Phase, &run.State, &run.ThreadID, &run.TurnID, &run.Outcome, &run.ErrorCode, &run.Summary, &run.CachedInputTokens, &finalization, &run.ResultCommit,
 		&interaction, &reviewSnapshot, &reviewResult, &verified, &created, &updated, &finished, &run.ActivityPruned, &run.ProjectCode, &run.PendingOperation, &run.PendingRevision, &run.PendingTurnID, &run.PelletPresent,
-		&run.WorkspaceRoot.Value, &run.WorkspaceRoot.Relative, &run.WorkspaceGitDir.Value, &run.WorkspaceGitDir.Relative, &run.GitCommonDir.Value, &run.GitCommonDir.Relative, &run.StartingRef, &run.ScheduleMode, &run.ScheduleRemaining, &run.ImplementationRevision, &checkpointScope, &workspaceSelection)
+		&run.WorkspaceRoot.Value, &run.WorkspaceRoot.Relative, &run.WorkspaceGitDir.Value, &run.WorkspaceGitDir.Relative, &run.GitCommonDir.Value, &run.GitCommonDir.Relative, &run.StartingRef, &run.ScheduleMode, &run.ScheduleRemaining, &run.ImplementationRevision, &checkpointScope, &workspaceSelection, &groupContext)
 	if errors.Is(err, sql.ErrNoRows) {
 		return run, storage.ExecutionRunNotFound(id)
 	}
@@ -807,6 +833,12 @@ func readExecutionRun(ctx context.Context, q runQuery, id int64) (run storage.Ex
 		return run, err
 	}
 	if err := json.Unmarshal([]byte(promptPrefix), &run.PromptPrefix); err != nil {
+		return run, err
+	}
+	if err := json.Unmarshal([]byte(groupContext), &run.GroupContext); err != nil {
+		return run, err
+	}
+	if err := storage.ValidateGroupContextSnapshot(run.GroupContext); err != nil {
 		return run, err
 	}
 	if err := json.Unmarshal([]byte(finalization), &run.Finalization); err != nil {

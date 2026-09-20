@@ -203,7 +203,7 @@ func TestCheckpointReviewerUsesFreshDetachedContextAndExactCommitSet(t *testing.
 
 func assertCapturedCheckpointPrefix(t *testing.T, prompt, prefix, role string) {
 	t.Helper()
-	if prefix == "" || !strings.HasPrefix(prompt, prefix+role) || strings.Count(prompt, prefix) != 1 {
+	if prefix == "" || !strings.HasPrefix(prompt, prefix+"CAPTURED GROUP CONTEXT v1\n") || strings.Index(prompt, role) <= len(prefix) || strings.Count(prompt, prefix) != 1 {
 		t.Fatal("fresh checkpoint conversation must start with exactly one captured prefix followed by its role restrictions")
 	}
 }
