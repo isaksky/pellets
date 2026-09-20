@@ -257,6 +257,14 @@ func assertCompiledPortableSkill(t *testing.T, path string) {
 	if !strings.HasPrefix(text, "---\nname: pellets\ndescription: ") || !strings.Contains(text, "\n---\n\n# Pellets\n") {
 		t.Fatalf("compiled installed skill %q is not portable: %q", path, text)
 	}
+	for _, contract := range []string{"`commit_subject`/`commit_body`", "standalone subject", "server-bound `Pellet:` trailer", "Legacy subject-only receipts"} {
+		if !strings.Contains(text, contract) {
+			t.Fatalf("installed skill lacks commit contract: %s", contract)
+		}
+	}
+	if strings.Contains(text, "pellet-ID commit") {
+		t.Fatal("installed obsolete commit contract")
+	}
 }
 
 func runDiscoveryGitForCompiledSkill(t *testing.T, directory string, args ...string) {

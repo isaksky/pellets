@@ -734,12 +734,14 @@ previous revision does not prevent this recovery or supply the new conversation.
 
 Ordinary runs preserve existing edits. Codex implements and verifies the exact
 pellet, then returns a structured result. The server checks the reported files,
-stages only those paths, creates one pellet-ID commit, verifies it, and closes
+stages only those paths, creates one commit with a standalone subject and
+proportionate body proposed from the verified result, verifies it, and closes
 the pellet. Codex's implementation phase cannot commit, close, release, defer,
 select more work, or create follow-ups. Explicit finalization recovery reuses
-the persisted tree and existing commit without repeating implementation or
-tests. Verified already-satisfied work closes without a new commit. Unrelated
-staged and unstaged edits remain intact and do not block completion.
+the persisted tree, exact full message, and existing commit without repeating
+implementation or tests. The server adds a secondary `Pellet:` trailer for local traceability.
+Legacy subject-only recovery remains supported. Verified already-satisfied
+work closes without a new commit. Unrelated staged and unstaged edits remain intact and do not block completion.
 
 Press Ctrl+C to stop (SIGTERM also requests orderly shutdown). Pellets immediately acknowledges the interrupt on stderr,
 closes live-update streams, and allows ordinary requests up to five seconds to

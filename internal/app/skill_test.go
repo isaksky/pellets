@@ -63,12 +63,15 @@ func TestPelletsSkillGoldenPortableContract(t *testing.T) {
 		"on-request", "approvals_reviewer=auto_review", "managed restrictions", "bound database",
 		"deterministic versioned Pellets skill/help prefix", "never a promise or inference of a cache hit",
 		"Keep planning in Pellets", "without resending it",
+		"`commit_subject`/`commit_body`", "standalone subject", "scope adjustments",
+		"240 bytes", "16384 UTF-8 bytes", "full message", "server-bound `Pellet:` trailer",
+		"Legacy subject-only receipts", "without regeneration", "already-satisfied work requires no message",
 	} {
 		if !strings.Contains(body, required) {
 			t.Errorf("skill body does not contain %q", required)
 		}
 	}
-	for _, forbidden := range []string{"Codex should", "Claude should", "MCP", "plugin.json", "AGENTS.md", "CLAUDE.md"} {
+	for _, forbidden := range []string{"Codex should", "Claude should", "MCP", "plugin.json", "AGENTS.md", "CLAUDE.md", "pellet-ID commit", "implement pellet"} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("portable instruction body contains forbidden agent-specific/extra artifact text %q", forbidden)
 		}

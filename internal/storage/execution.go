@@ -219,10 +219,12 @@ type InteractionOption struct {
 }
 
 type FinalizationEvidence struct {
-	NoChanges bool     `json:"no_changes,omitempty"`
-	Files     []string `json:"files"`
-	Tree      string   `json:"tree"`
-	Subject   string   `json:"subject"`
+	NoChanges      bool     `json:"no_changes,omitempty"`
+	Files          []string `json:"files"`
+	Tree           string   `json:"tree"`
+	Subject        string   `json:"subject"`
+	MessageVersion int      `json:"message_version,omitempty"`
+	Message        string   `json:"message,omitempty"`
 }
 
 type RunActivity struct {
@@ -396,8 +398,11 @@ func ValidateRunProgress(p RunProgress) error {
 	}
 	if p.Finalization != nil {
 		f := p.Finalization
-		if !IsFullCommitID(f.Tree) || (len(f.Files) == 0 && !f.NoChanges) || (f.NoChanges && len(f.Files) != 0) || len(f.Files) > 10000 || len(f.Subject) == 0 || len(f.Subject) > 240 || strings.ContainsAny(f.Subject, "\x00\r\n") {
+		if !IsFullCommitID(f.Tree) || (len(f.Files) == 0 && !f.NoChanges) || (f.NoChanges && len(f.Files) != 0) || len(f.Files) > 10000 {
 			return InvalidExecutionRun("invalid finalization evidence")
+		}
+		if err := validateFinalizationMessage(f); err != nil {
+			return err
 		}
 		for _, file := range f.Files {
 			if file == "" || len(file) > 4096 || strings.ContainsRune(file, 0) || !utf8.ValidString(file) {

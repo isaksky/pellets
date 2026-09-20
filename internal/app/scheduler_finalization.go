@@ -121,7 +121,19 @@ func implementationTree(ctx context.Context, root, head string, files []string) 
 	return git("write-tree")
 }
 
-func (s *Scheduler) prepareFinalization(ctx context.Context, execution *WorkspaceExecution, run storage.ExecutionRun, files []string) error {
+func (s *Scheduler) prepareFinalization(ctx context.Context, execution *WorkspaceExecution, run storage.ExecutionRun, result implementationResult) error {
+	files := result.Files
+	f := &storage.FinalizationEvidence{NoChanges: len(files) == 0, Files: slices.Clone(files), MessageVersion: storage.FinalizationMessageVersion}
+	if !f.NoChanges {
+		if result.CommitSubject == nil || result.CommitBody == nil {
+			return scheduleError("implementation_message_invalid", "ready requires commit_subject and commit_body strings (body may be empty); supply a standalone message describing the verified change on Resume")
+		}
+		message, err := storage.BuildFinalizationMessage(*result.CommitSubject, *result.CommitBody, runReference(run))
+		if err != nil {
+			return scheduleError("implementation_message_invalid", err.Error()+"; correct the structured result on Resume before finalization")
+		}
+		f.Subject, f.Message = *result.CommitSubject, message
+	}
 	if err := s.requireOwnership(ctx, run); err != nil {
 		return err
 	}
@@ -152,7 +164,8 @@ func (s *Scheduler) prepareFinalization(ctx context.Context, execution *Workspac
 	progress := run.RunProgress
 	progress.Phase = "verification"
 	progress.Summary = "Structured implementation result and exact changed files verified."
-	progress.Finalization = &storage.FinalizationEvidence{NoChanges: len(files) == 0, Files: slices.Clone(files), Tree: tree, Subject: runReference(run) + ": implement pellet"}
+	f.Tree = tree
+	progress.Finalization = f
 	run, err = execution.Save(ctx, progress, run.Revision)
 	if err != nil {
 		return err
@@ -165,6 +178,9 @@ func (s *Scheduler) finalize(ctx context.Context, execution *WorkspaceExecution,
 	f := run.Finalization
 	if f == nil || run.ThreadID == "" || run.TurnID == "" {
 		return missingRunEvidence("finalization_evidence_missing")
+	}
+	if err := storage.ValidateRunProgress(run.RunProgress); err != nil {
+		return err
 	}
 	if err := validateImplementationFiles(f.Files); err != nil {
 		return err
@@ -209,7 +225,7 @@ func (s *Scheduler) finalize(ctx context.Context, execution *WorkspaceExecution,
 		if err := s.requireOwnership(ctx, run); err != nil {
 			return err
 		}
-		if _, err = executionGit(ctx, root, append([]string{"--literal-pathspecs", "commit", "--only", "-m", f.Subject, "--"}, f.Files...)...); err != nil {
+		if err = commitFinalization(ctx, root, f); err != nil {
 			return errors.Join(scheduleError("finalization_commit_unconfirmed", "commit failed or its result is uncertain; preserve the index and reconcile this attempt"), err)
 		}
 		head, err = executionGit(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
@@ -271,6 +287,21 @@ func (s *Scheduler) finalize(ctx context.Context, execution *WorkspaceExecution,
 	return err
 }
 
+func commitFinalization(ctx context.Context, root string, f *storage.FinalizationEvidence) error {
+	if f.MessageVersion == 0 {
+		// Existing receipts keep the original subject-only Git cleanup policy.
+		_, err := executionGit(ctx, root, append([]string{"--literal-pathspecs", "commit", "--only", "-m", f.Subject, "--"}, f.Files...)...)
+		return err
+	}
+	command := exec.Command("git", append([]string{"--no-replace-objects", "--literal-pathspecs", "-C", root, "commit", "--only", "--cleanup=verbatim", "-F", "-", "--"}, f.Files...)...)
+	command.Stdin = strings.NewReader(f.Message)
+	_, diagnostic, err := codex.RunOwnedCommand(ctx, command)
+	if err != nil {
+		return newExecutionGitFailure(err, diagnostic)
+	}
+	return nil
+}
+
 func validateFinalizationCommit(ctx context.Context, root string, run storage.ExecutionRun, commit string) error {
 	if run.Finalization != nil && run.Finalization.NoChanges {
 		tree, err := executionGit(ctx, root, "rev-parse", commit+"^{tree}")
@@ -289,6 +320,16 @@ func validateFinalizationCommit(ctx context.Context, root string, run storage.Ex
 	tree, err := executionGit(ctx, root, "rev-parse", commit+"^{tree}")
 	if err != nil || tree != run.Finalization.Tree {
 		return errors.Join(missingRunEvidence("finalization_tree_changed"), err)
+	}
+	if run.Finalization.MessageVersion != 0 {
+		// Read raw commit bytes: pretty formats may recode Unicode, trim text,
+		// or append delimiters. Hooks must preserve the approved full message.
+		object, err := executionGitRaw(ctx, root, "cat-file", "commit", commit)
+		_, message, ok := strings.Cut(object, "\n\n")
+		if err != nil || !ok || message != run.Finalization.Message {
+			return errors.Join(scheduleError("finalization_message_changed", "the commit message differs from saved evidence (including body/trailer); inspect Git hooks and reconcile the exact commit without regenerating or recommitting"), err)
+		}
+		return nil
 	}
 	subject, err := executionGit(ctx, root, "show", "-s", "--format=%s", commit)
 	if err != nil || subject != run.Finalization.Subject {

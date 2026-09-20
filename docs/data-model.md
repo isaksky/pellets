@@ -309,8 +309,17 @@ Migration 7 adds `execution_runs` and `execution_run_activity`; its
 [SQL](../internal/storage/sqlite/migrations/0007_execution_runs.sql) is the
 normative table and constraint contract. These records do not participate in
 queue selection, priorities, pellet lifecycle, or assignment history.
-Migrations 8 and 9 add immutable prompt provenance and finalization evidence;
-migration 10 adds the bounded `interaction_json` snapshot used to reconnect a
+Migrations 8 and 9 add immutable prompt provenance and finalization evidence.
+Finalization JSON now also carries `message_version: 1` and the exact canonical
+full `message` alongside `subject`, files, and tree. This additive record needs
+no migration: updates and Resume preserve the entire immutable JSON evidence.
+New changed-work receipts validate the bounded subject/body and server-derived
+trailer before persistence; no-change receipts omit the message. Version-absent
+legacy subject-only records retain their original validation and recovery
+contract. See [message normalization and recovery](codex-app-server.md) for the
+byte-exact Git contract.
+
+Migration 10 adds the bounded `interaction_json` snapshot used to reconnect a
 browser to one pending app-server request.
 
 Each run is one numbered attempt against stable `project_id`, `workspace_id`,

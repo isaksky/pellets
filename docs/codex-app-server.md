@@ -361,8 +361,10 @@ The agent reports only the files belonging to the authorized pellet.
 The new thread is persisted (`ephemeral: false`) and receives the complete
 captured description plus the starting HEAD. `turn/start.outputSchema` requires
 an exact reference and starting HEAD, `ready`, `already_satisfied`, or `needs_attention`, exact file
-identities, and a verification account. The driver accepts only the bound
-`item/completed` final `agentMessage` and the exact successful terminal turn.
+identities, a verification account, and nullable `commit_subject`/`commit_body` fields.
+A `ready` report requires both message fields as strings; an empty body is
+valid for a simple change. Already-satisfied work has no message requirement.
+The driver accepts only the bound `item/completed` final `agentMessage` and the exact successful terminal turn.
 The implementation prompt directs Codex to resolve routine choices and fix
 necessary test/tooling failures before returning. Related edits from earlier
 attempts or collaborators, including test-harness repairs in the same file,
@@ -376,18 +378,59 @@ Migration 15 makes these verified existing-HEAD results eligible for review
 checkpoints; the review examines the existing behavior rather than attributing
 an earlier commit diff to the pellet.
 Verification details remain in Codex's transcript; Pellets stores its bounded
-orchestration evidence, not arbitrary model output.
+orchestration evidence, not arbitrary model output. The approved commit message
+is retained separately as immutable finalization evidence, never copied into
+activity summaries.
 
 Finalization rechecks live scope/ownership, unchanged HEAD, and that every
 reported file is changed. Other changed files are left alone. A private Git
 index computes the complete expected tree without staging the workspace.
-Migration 9 records that immutable tree, literal file identities, and concise
-pellet-ID subject before staging. The server stages only those paths, rechecks
-ownership, and uses a path-limited Git commit to preserve other staged edits. Existing Git
-hooks and signing configuration remain effective. Before close it verifies
+The migration 9 JSON record stores that immutable tree, literal file identities,
+and the exact approved full commit message before staging. The server stages
+only those paths, rechecks ownership, and uses a path-limited Git commit to
+preserve other staged edits. Existing Git hooks and signing configuration remain effective. Before close it verifies
 the commit is HEAD with exactly the captured starting parent, expected tree,
-and expected subject. Unrelated worktree edits remain intact. `.pellets` and Git metadata
-paths cannot be finalized. No pathspec globs, reset, amend, push, or PR is used.
+and expected full message. Unrelated worktree edits remain intact. `.pellets`
+and Git metadata paths cannot be finalized. No pathspec globs, reset, amend, push, or PR is used.
+
+The implementation agent proposes the message from the verified result, including
+scope adjustments, with the pellet title/description as context. It follows
+applicable repository commit conventions and leads with a concise, specific
+standalone description of the change. The body explains motivation and resulting
+behavior, with significant tradeoffs or actual verification when useful. It may
+be empty for simple changes. Readers need no local queue to understand it.
+Descriptions, prompts, transcripts, tool output, secrets, boilerplate, and
+unperformed checks must not be pasted into messages. The server appends exactly
+one `Pellet: <bound reference>` trailer; the agent cannot supply that metadata.
+
+Message policy version 1 bounds the subject to 240 UTF-8 bytes (the prompt aims
+for 72 characters) and the body to 16384 UTF-8 bytes before normalization. The
+subject must contain descriptive text, be nonempty and already trimmed, and
+contain no control characters
+or Unicode line/paragraph separators. Generic placeholders and pellet-ID
+prefixes are rejected. The body permits LF, CRLF, and tabs, with no other
+controls. CRLF becomes LF; outer empty LF lines are removed and a whitespace-only
+body becomes empty. Interior whitespace, comment lines, Unicode, quotes,
+backticks, and dollar signs are preserved. Subject/body and the server trailer
+are separated by one empty line, with exactly one final LF. The complete
+message is bounded to 17136 bytes. Invalid proposals stop with
+`implementation_message_invalid` before private-index computation, staging,
+commit, or closure; diagnostics explain how to correct the fields without
+echoing proposed content. Explicit Resume lets the same conversation supply a
+corrected result while preserving its edits. Malformed result JSON uses
+`implementation_report_invalid`.
+
+New receipts store `message_version: 1`, `subject`, and the exact canonical
+`message` in the existing bounded JSON evidence; no SQL migration is needed.
+The server sends that message on stdin to `git commit --only --cleanup=verbatim
+-F -`, with literal file arguments and no shell interpolation. Validation reads
+the raw commit object and compares the complete message bytes, avoiding Git
+pretty-format encoding conversion or whitespace cleanup. A hook that changes
+any subject, body, trailer, or whitespace produces `finalization_message_changed`.
+The commit and saved evidence remain available for explicit reconciliation;
+Resume neither approves the changed message nor creates another commit. Hooks
+are never bypassed automatically, and existing diagnostic sanitization and
+process custody still apply.
 
 Ordinary dispatch, finalization evidence, commit verification, and completion
 are bound to the run's captured implementation revision. Closing checks that
@@ -426,7 +469,13 @@ Branch, ownership, and stopped-conversation checks still apply. The new baseline
 is rechecked before dispatch and finalization.
 
 Once finalization has begun, explicit Resume preserves the original starting
-HEAD and immutable finalization record. If HEAD still matches the starting commit, the unchanged expected work
+HEAD and immutable finalization record, including the saved message bytes.
+The message is never regenerated during finalization recovery, even after a
+project rename or changed runtime/prompt. Legacy receipts with no message
+version and no full message retain their captured subject-only cleanup and subject
+verification policy; new requirements do not invalidate old attempts. Existing
+history is never rewritten. Already-satisfied receipts store no message.
+If HEAD still matches the starting commit, the unchanged expected work
 can be finalized. If the exact expected commit already exists, the server
 records/reuses it and proceeds to close without another model turn, test run,
 or commit. This also covers a commit that succeeded before its evidence save.

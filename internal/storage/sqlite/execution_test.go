@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -262,25 +263,45 @@ func TestOrdinaryRunRejectsReplacementGenerationAtDurableBoundaries(t *testing.T
 }
 
 func TestFinalizationEvidenceIsImmutableAndInheritedExactly(t *testing.T) {
-	db, run, _ := createTestRun(t)
-	progress := storage.RunProgress{Phase: "close", State: "running", ThreadID: "thread", TurnID: "turn", Finalization: &storage.FinalizationEvidence{Files: []string{"source.go"}, Tree: strings.Repeat("c", 40), Subject: "demo-1: implement"}}
-	run = updateRun(t, db, run, progress, strings.Repeat("b", 40))
-	changed := progress
-	changed.Finalization = &storage.FinalizationEvidence{Files: []string{"unrelated.go"}, Tree: progress.Finalization.Tree, Subject: progress.Finalization.Subject}
-	if _, err := db.UpdateExecutionRun(context.Background(), storage.UpdateExecutionRun{ID: run.ID, ExpectedRevision: run.Revision, Progress: changed}); domain.PublicError(err).Code != "execution_run_conflict" {
-		t.Fatalf("changed finalization accepted: %v", err)
-	}
-	progress.State, progress.Outcome = "interrupted", "unknown"
-	stopped := updateRun(t, db, run, progress, "")
-	capture := stopped.RunCapture
-	capture.ResumeFrom = &stopped.ID
-	capture.StartingHead = strings.Repeat("d", 40)
-	resumed, err := db.CreateExecutionRun(context.Background(), capture)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resumed.StartingHead != stopped.StartingHead || resumed.ResultCommit != stopped.ResultCommit || resumed.TurnID != stopped.TurnID || resumed.Phase != "close" || !reflect.DeepEqual(resumed.Finalization, stopped.Finalization) || !reflect.DeepEqual(resumed.CommitVerifiedAt, stopped.CommitVerifiedAt) {
-		t.Fatalf("resume replaced finalization evidence: %+v", resumed)
+	for _, version := range []int{0, storage.FinalizationMessageVersion} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			db, run, _ := createTestRun(t)
+			progress := storage.RunProgress{Phase: "close", State: "running", ThreadID: "thread", TurnID: "turn", Finalization: &storage.FinalizationEvidence{Files: []string{"source.go"}, Tree: strings.Repeat("c", 40), Subject: "demo-1: implement"}}
+			if version != 0 {
+				progress.Finalization.Subject = "Preserve parser whitespace"
+				progress.Finalization.MessageVersion = version
+				message, err := storage.BuildFinalizationMessage(progress.Finalization.Subject, "Keep intentional indentation.\n\nVerified parser cases.", "demo-1")
+				if err != nil {
+					t.Fatal(err)
+				}
+				progress.Finalization.Message = message
+			}
+			run = updateRun(t, db, run, progress, strings.Repeat("b", 40))
+			changed := progress
+			changedEvidence := *progress.Finalization
+			changed.Finalization = &changedEvidence
+			if version == 0 {
+				changed.Finalization.Files = []string{"unrelated.go"}
+			} else {
+				changed.Finalization.Message = strings.ReplaceAll(changed.Finalization.Message, "intentional indentation", "all indentation")
+			}
+			if _, err := db.UpdateExecutionRun(context.Background(), storage.UpdateExecutionRun{ID: run.ID, ExpectedRevision: run.Revision, Progress: changed}); domain.PublicError(err).Code != "execution_run_conflict" {
+				t.Fatalf("changed finalization accepted: %v", err)
+			}
+			progress.State, progress.Outcome = "interrupted", "unknown"
+			stopped := updateRun(t, db, run, progress, "")
+			capture := stopped.RunCapture
+			capture.ResumeFrom = &stopped.ID
+			capture.StartingHead = strings.Repeat("d", 40)
+			resumed, err := db.CreateExecutionRun(context.Background(), capture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resumed.StartingHead != stopped.StartingHead || resumed.ResultCommit != stopped.ResultCommit || resumed.TurnID != stopped.TurnID || resumed.Phase != "close" || !reflect.DeepEqual(resumed.Finalization, stopped.Finalization) || !reflect.DeepEqual(resumed.CommitVerifiedAt, stopped.CommitVerifiedAt) {
+				t.Fatalf("resume replaced finalization evidence: %+v", resumed)
+			}
+
+		})
 	}
 }
 

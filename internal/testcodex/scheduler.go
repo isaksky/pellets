@@ -23,9 +23,18 @@ func completeScheduled(mode string, params json.RawMessage) string {
 	ref, err := domain.ParsePelletReference(target.Reference)
 	must(err)
 	files := []string{}
+	proposal := map[string]any{"commit_subject": "Record the verified implementation result", "commit_body": "Keep the implementation result in a repository file so it remains visible\nwithout access to the local task queue.\n\nVerified the exact file content in the disposable integration repository."}
+	var delivery map[string]any
+	if data, err := os.ReadFile("fake-commit-message.json"); err == nil {
+		must(json.Unmarshal(data, &delivery))
+		proposal = delivery
+	}
 	if mode == "schedule_activity" || mode == "schedule_activity_gate" || mode == "schedule_success" || mode == "schedule_gate" || mode == "schedule_reimplementation" || mode == "schedule_wrong_report" || mode == "schedule_unreported_file" || mode == "schedule_staged" || mode == "schedule_input_live" || mode == "schedule_approval_live" || mode == "schedule_followup_live" {
 		file := target.Reference + ".txt"
 		content := "Implemented " + target.Reference + "\n"
+		if path, ok := delivery["path"].(string); ok {
+			file, content = path, delivery["content"].(string)
+		}
 		if mode == "schedule_reimplementation" {
 			content = "Reimplemented " + target.Reference + " from " + target.StartingHead + "\n"
 		}
@@ -66,7 +75,15 @@ func completeScheduled(mode string, params json.RawMessage) string {
 		outcome = "needs_attention"
 		verification = "Outside-click checks passed; browser test failed on a hidden table cell.\nToken=private-attention-token\n<script>window.codexErrorInjected=true</script>"
 	}
-	result, err := json.Marshal(map[string]any{"reference": target.Reference, "starting_head": target.StartingHead, "outcome": outcome, "files": files, "verification": verification})
+	report := map[string]any{"reference": target.Reference, "starting_head": target.StartingHead, "outcome": outcome, "files": files, "verification": verification}
+	if outcome == "ready" {
+		for _, key := range []string{"commit_subject", "commit_body"} {
+			if value, ok := proposal[key]; ok {
+				report[key] = value
+			}
+		}
+	}
+	result, err := json.Marshal(report)
 	must(err)
 	return string(result)
 }

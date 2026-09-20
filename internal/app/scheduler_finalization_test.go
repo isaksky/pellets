@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -234,6 +235,10 @@ func TestSchedulerFinalizationRecoveryNeverReimplementsOrRecommits(t *testing.T)
 			if previous.ResultCommit != "" && resumed.ResultCommit != previous.ResultCommit {
 				t.Fatal("recovery substituted verified commit identity")
 			}
+			if previous.Finalization.MessageVersion != storage.FinalizationMessageVersion || previous.Finalization.Message == "" || !reflect.DeepEqual(previous.Finalization, resumed.Finalization) {
+				t.Fatal("recovery did not reuse the immutable full message")
+			}
+			assertRawCommitMessage(t, s.options.Database.Root, previous.Finalization.Message)
 			if count := gitForExecutionTest(t, s.options.Database.Root, "rev-list", "--count", previous.StartingHead+"..HEAD"); count != "1" {
 				t.Fatalf("commit count = %s", count)
 			}
@@ -477,6 +482,7 @@ func TestFinalizationCommitHookFailurePreservesStageAndRecoversOnce(t *testing.T
 	if count := gitForExecutionTest(t, s.options.Database.Root, "rev-list", "--count", previous.StartingHead+"..HEAD"); count != "1" {
 		t.Fatalf("commit count = %s", count)
 	}
+	assertRawCommitMessage(t, s.options.Database.Root, previous.Finalization.Message)
 	evidence, err := s.options.Supervisor.options.Recorder.InspectEvidence(context.Background(), s.options.Database, previous.ID, nil)
 	if err != nil || evidence.Run.Summary != previous.Summary {
 		t.Fatalf("recovery inspection lost failure diagnostic: %+v %v", evidence, err)
@@ -523,6 +529,9 @@ func TestAutomationCompletesWithoutOwningEveryEdit(t *testing.T) {
 			}
 			if mode == "schedule_noop" && (run.ResultCommit != before || !run.Finalization.NoChanges) {
 				t.Fatalf("no-op created a commit: %+v", run)
+			}
+			if mode == "schedule_noop" && (run.Finalization.Subject != "" || run.Finalization.Message != "" || run.Finalization.MessageVersion != storage.FinalizationMessageVersion) {
+				t.Fatal("already-satisfied work manufactured a message")
 			}
 			if got := gitForExecutionTest(t, root, "diff", "--cached", "--name-only"); got != "other.txt" {
 				t.Fatalf("lost staged work: %s", got)

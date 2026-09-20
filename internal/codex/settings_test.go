@@ -151,6 +151,14 @@ func TestPelletsPromptPrefixSnapshotsStableBytesAndRefreshes(t *testing.T) {
 	if strings.Count(first.Text, "INSTALLED PELLETS SKILL\n---\n"+skill+"---\n\n") != 1 || first.SkillSHA256 != digest([]byte(skill)) {
 		t.Fatal("prefix does not retain the exact canonical skill and its digest")
 	}
+	for _, contract := range []string{"`commit_subject`/`commit_body`", "standalone subject", "server-bound `Pellet:` trailer", "Legacy subject-only receipts"} {
+		if !strings.Contains(first.Text, contract) {
+			t.Fatalf("captured skill lacks commit contract: %s", contract)
+		}
+	}
+	if strings.Contains(first.Text, "pellet-ID commit") {
+		t.Fatal("prefix retained obsolete commit contract")
+	}
 	// Capture only read-only help, including all group operations through their
 	// shared help page. Live group documents must not enter this stable layer.
 	wantHelp := []string{"--help", "next --help", "start-next --help", "start --help", "show --help", "list --help", "close --help", "add --help", "project --help", "group --help"}
