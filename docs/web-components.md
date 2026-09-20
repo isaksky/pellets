@@ -43,6 +43,46 @@ dialogs. The modal navigation drawer is a proposal; the real app keeps its
 existing responsive navigation. Preview availability is not evidence of parity
 or permission to replace an application pattern.
 
+## Native semantics and app styling
+
+Controls should feel like part of the app while retaining dependable native form
+behavior. Use shared theme tokens and component styles for the visible surface.
+Retaining an `input` or `select` does not require leaving its browser-default
+decoration in place. Scope appearance overrides to the component; preserve a
+visible focus indicator and a usable forced-colors treatment.
+
+| Example | Native behavior retained | App styling and implementation choice |
+| --- | --- | --- |
+| Numeric stepper: `pl-number.number-control` | The `input[type="number"]` owns the value, `min`, `max`, `step`, validation, keyboard editing, and form submission. | The shared `.number-control` styles suppress browser spinner decoration and provide themed decrease/increase buttons, borders, icons, and focus treatment. Buttons use `type="button"` and `data-number-step="down\|up"`, have accessible names, and call the input's native `stepDown()`/`stepUp()`. A changed value emits one input/change event pair. Disabled and read-only inputs cannot be stepped. |
+| Custom dropdown: `pl-select` | The child `select` owns options, selected value, required/disabled state, reset, and submitted data. | The existing controller renders the themed trigger and listbox, including its chevron, option spacing, selection mark, and popup surface. Reuse its labeling, keyboard/typeahead, focus, validation, and dismissal behavior; do not hand-build another trigger/listbox around the same field. |
+| Styled native dropdown: `pl-select native` | The actual select stays visible and opens the browser's picker with its native interaction. | For single selects without `size`, scoped `appearance: none` replaces the closed control's browser arrow with the shared decorative chevron. Text and chevron have matching 12px visible insets; extra end padding reserves room for the icon. The icon does not intercept clicks. Forced colors restore the browser arrow. The open picker remains platform-native. |
+
+Use these choices deliberately:
+
+- For bounded numeric stepping, reuse `pl-number` and the existing number-control
+  markup/styles. Keep the number input and give step buttons accessible names;
+  adding a plain number input beside themed controls can reintroduce mismatched
+  browser spinners.
+- For selectors matching the app's existing custom dropdowns, reuse `pl-select`.
+  Verify the actual feature's change events and focus behavior as well as its
+  appearance.
+- For an existing native picker, start by styling its closed control with
+  `pl-select native`. Use native mode for multi-selects and list controls too;
+  their browser rendering is intentionally retained. Changing a picker to a
+  custom listbox is an interaction change, beyond correcting an arrow or inset.
+
+The creation Status control illustrates the last rule: its uneven arrow spacing
+was corrected without replacing the native picker. The documented macOS WebKit
+height normalization is an intentional visual deviation. Verify shared changes
+in Chromium and WebKit, all five themes, and narrow panes; inspect both closed
+and expanded states. Keep platform differences explicit instead of assuming the
+two rendering engines supply identical control decoration.
+
+Implementation references: [component behavior](../internal/webui/assets/components.js),
+[dropdown controller](../internal/webui/assets/dropdowns.js),
+[native-select styling](../internal/webui/assets/components.css), and
+[number-control and dropdown styling](../internal/webui/assets/workbench.css).
+
 ## Authoring
 
 Components use **light DOM** and retain native controls as children. Put `id`,
