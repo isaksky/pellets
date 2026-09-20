@@ -1,0 +1,7 @@
+Marked 18.0.13 (MIT), https://github.com/markedjs/marked
+Source: https://registry.npmjs.org/marked/-/marked-18.0.13.tgz
+Integrity: sha512-xTxVzZsBFwunP6HDmtBkabUQEYArnP7/rMDGmPj9SlrKlQ4i8MdYVow+nJL0eOqwpUqhzBoTBRADGN6uYwPyOw==
+
+The standalone ES module has no runtime dependencies. Only its source-map
+reference was removed. Pellets uses the lexer only; markdown.js constructs an
+allowlisted DOM and never inserts parser-generated HTML. See MARKED-LICENSE.txt.

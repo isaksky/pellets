@@ -185,6 +185,7 @@ async function reloadWithDrafts(page, revision) {
   const descriptionDraft = 'Unfinished description\nwith another line.';
   const memoryDraft = 'Unfinished human memory\nkept across the server upgrade.';
   await pelletForm.locator('[name=title]').fill(titleDraft);
+  await pelletForm.locator('[data-description-mode=edit]').click();
   await pelletForm.locator('[name=description]').fill(descriptionDraft);
   await pelletForm.locator('[name=description]').press('ArrowLeft');
   const caret = await pelletForm.locator('[name=description]').evaluate(el => el.selectionStart);

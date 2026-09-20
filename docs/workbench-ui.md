@@ -21,7 +21,8 @@ remain independent from scheduler selection.
 
 Queue rows are 37 pixels high with reference, lifecycle status, title, group, and
 owner. Narrow layouts prioritize reference, status, and title; full metadata stays
-in the dialog. Pellet and memory dialogs open directly in edit mode and close on a backdrop
+in the dialog. Pellet dialogs open with a formatted Markdown description; title and metadata
+remain editable. Memory dialogs open directly in edit mode. Both close on a backdrop
 click or Escape. Unsaved edits retain the discard guard. A fixed dialog footer places Cancel and
 the primary save action on the right. More actions on the left contains lifecycle
 operations and memory approval; queue and scope controls stay beside their fields. They support optimistic conflicts,
@@ -45,6 +46,49 @@ text from the prototype to retain readable contrast.
 At phone widths, navigation becomes compact horizontal rows and the shared right
 panel opens over the available content area. Both stay independently collapsible. The status bar remains
 pinned, and the breadcrumb continues to navigate when the left sidebar is hidden.
+
+### Description reading and editing
+
+Existing pellet descriptions open in **View / Preview**. Choose **Edit** to work
+on the original Markdown source, then **View / Preview** to inspect unsaved
+changes. New-pellet forms and proposed-pellet dialogs start in **Edit** and offer
+**Preview**. Switching modes never saves or changes source. Use **Save changes**
+for a pellet, **Create pellet** for a new record, or the proposal editor’s existing
+autosave and explicit Create action. Cancel and navigation retain the dirty-discard
+guard; accepting discard removes the draft.
+
+Headings, paragraphs, emphasis, links, nested lists, task lists, blockquotes,
+inline/fenced code, tables, and horizontal rules render locally in every theme.
+Code and wide tables scroll within the description. Supported code languages
+reuse the activity highlighter; unknown languages, including Mermaid, stay as
+readable code. Raw HTML displays as text. Unsafe link schemes are disabled,
+images display their alternative text without fetching resources, and links open
+separately so they do not navigate away from unsaved edits.
+
+The selected mode, source selection, focus, and scroll positions survive live
+updates and reopening a record in the same browser tab. Native source fields and
+optimistic versions still own submission. If a pellet edit conflicts, its unsaved
+fields remain editable and the dialog shows both submitted and current saved
+fields for comparison. Review them before saving again; nothing is retried
+automatically. CLI output, JSON, search and agent context continue to use the
+original Markdown, with no stored HTML or migration.
+
+`assets/markdown.js` exports `renderMarkdown(source)`, returning a DOM fragment
+from a pinned, locally bundled Marked lexer. Only explicit element/attribute
+choices become DOM; raw parser HTML is never inserted. Headings expose
+`data-markdown-heading`, and fences expose `data-language` for future consumers;
+heading navigation and Mermaid execution are not implemented. The license and
+package integrity are in `MARKED-LICENSE.txt` and `MARKED-NOTICE.txt`.
+`description.js` adds presentation around native fields and keeps bounded
+presentation receipts without storing a second copy of the source.
+
+Run `node scripts/test-web-description-browser.cjs` (with Playwright on
+`NODE_PATH`), and repeat with `PLAYWRIGHT_BROWSER=webkit`. It checks Markdown and
+plain text, exact create/edit/save/reload/CLI source retrieval, malicious content,
+offline preview, refresh/conflict recovery, source and rendered selection,
+proposal autosave, and five themes at 1280, 1092 and 390 pixels. It saves real
+application screenshots; `PELLETS_DESCRIPTION_BASELINE=/path/to/old/pl` captures
+the original source-only dialog for comparison.
 
 ## Planning chat
 

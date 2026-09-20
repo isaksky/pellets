@@ -516,6 +516,11 @@ async function stop() {
     /Unfinished human edit/,
   );
   assert.equal(cli("show", a.id).title, "Authoritative concurrent title");
+  assert.equal(await title.inputValue(), "Unfinished human edit");
+  page.once("dialog", dialog => {
+    assert.match(dialog.message(), /Discard unsaved inspector changes/);
+    dialog.accept();
+  });
   await closeDialog(page);
   // Keyboard menus, all palettes and independent panels keep drafts and geometry.
   await page.locator("#view-switcher summary").focus();

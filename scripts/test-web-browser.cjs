@@ -52,7 +52,8 @@ const until = async (predicate, message) => {
   async function editRecord() {
     const form=page.locator('#inspector-host form.dirty-track');
     await form.waitFor({state: 'visible'});
-    assert.equal(await page.locator('[data-edit-record]').count(), 0, 'Records must open directly in their editor');
+    const edit = form.locator('[data-description-mode=edit]');
+    if (await edit.count()) await edit.click();
   }
   async function moreActions() {
     const menu = page.locator('[data-inspector] details.record-actions');
@@ -298,7 +299,7 @@ const until = async (predicate, message) => {
   await page.evaluate(() => document.dispatchEvent(new CustomEvent('pellets-refresh')));
   await page.waitForTimeout(250);
   assert.equal(await page.locator('.conflict-state').count(), 1);
-  assert.equal(await page.locator('#inspector-host form.dirty-track input[name=title]').inputValue(), 'Changed elsewhere');
+  assert.equal(await page.locator('#inspector-host form.dirty-track input[name=title]').inputValue(), 'Unsaved draft');
   assert.ok((await page.evaluate(() => window.results)).includes(409));
 
   await editRecord();

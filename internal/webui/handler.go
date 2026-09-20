@@ -442,6 +442,9 @@ type conflictView struct {
 	Kind    string
 	Current string
 	Draft   map[string]string
+	// Pellet edit conflicts keep native source fields editable while exposing
+	// the complete current values for an explicit, reviewed retry.
+	CurrentFields map[string]string
 }
 
 type lifecycleFormView struct {

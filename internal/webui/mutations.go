@@ -447,6 +447,12 @@ func (h *handler) renderMutationError(response http.ResponseWriter, err error, d
 			}
 			data.Conflict.Kind = "pellet"
 			data.Conflict.Current = fmt.Sprintf("%s · %s · updated %s", conflict.Pellet.Reference, conflict.Pellet.Title, formatTime(conflict.Pellet.UpdatedAt))
+			if _, editing := draft["description"]; editing {
+				data.Conflict.CurrentFields = map[string]string{
+					"title": conflict.Pellet.Title, "description": conflict.Pellet.Description,
+					"external_id": nullableText(conflict.Pellet.ExternalID), "group": nullableText(conflict.Pellet.Group),
+				}
+			}
 		} else if conflict.Memory != nil {
 			views := makeMemoryViews([]storage.Memory{*conflict.Memory}, conflict.Memory.ProjectCode, conflict.Memory.ID)
 			data.SelectedMemory = &views[0]

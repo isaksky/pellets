@@ -1,3 +1,5 @@
+import { highlightCode } from "./code-highlight.js";
+import { rememberDescriptions, refreshDescriptions } from "./description.js";
 import { refreshComponents } from "./components.js";
 import { saveSetting } from "./settings.js";
 import { syncQueueFilters } from "./filters.js";
@@ -78,6 +80,7 @@ function formKey(form) {
   return form.getAttribute("action") + "|" + workspace + "|" + req + "|" + (form.id || "");
 }
 function remember() {
+  rememberDescriptions();
   document
     .querySelectorAll(
       "#execution form, #main .create-popover form, .assignment-form, .recipient-form",
@@ -181,6 +184,7 @@ function restore() {
   // restored. Focus is independent of draft state: a clean control can be
   // keyboard-focused when an authoritative update arrives.
   refreshComponents();
+  refreshDescriptions();
   if (focusReceipt) {
     const form = forms.find(
       (candidate) => formKey(candidate) === focusReceipt.key,
@@ -259,6 +263,7 @@ function afterPatch() {
   initialize();
 }
 function initialize() {
+  refreshDescriptions();
   applyTheme(root.dataset.themeChoice);
   panels();
   syncDialog();
@@ -714,48 +719,7 @@ function element(tag, className, text) {
   if (text !== undefined) el.textContent = text;
   return el;
 }
-function highlightCode(text, diff = false) {
-  const pre = element("pre");
-  pre.tabIndex = 0;
-  const keywords =
-    /\b(?:func|package|import|return|if|else|for|range|var|const|let|type|struct|interface|select|case|switch|break|continue|go|defer|async|await|function|class|new|throw|try|catch|export|from|true|false|nil|null|undefined)\b/;
-  for (const line of String(text).split("\n")) {
-    const row = element(
-      "span",
-      "source-line" +
-        (diff && line.startsWith("+") && !line.startsWith("+++")
-          ? " diff-added"
-          : diff && line.startsWith("-") && !line.startsWith("---")
-            ? " diff-removed"
-            : ""),
-    );
-    const pattern =
-      /(\/\/.*$|#.*$|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`[^`]*`|\b\d+(?:\.\d+)?\b|\b[A-Za-z_$][\w$]*\b)/g;
-    let last = 0;
-    for (const match of line.matchAll(pattern)) {
-      row.append(document.createTextNode(line.slice(last, match.index)));
-      const value = match[0],
-        kind = /^(\/\/|#)/.test(value)
-          ? "comment"
-          : /^["'`]/.test(value)
-            ? "string"
-            : /^\d/.test(value)
-              ? "number"
-              : keywords.test(value)
-                ? "keyword"
-                : "";
-      row.append(
-        kind
-          ? element("span", "code-" + kind, value)
-          : document.createTextNode(value),
-      );
-      last = match.index + value.length;
-    }
-    row.append(document.createTextNode(line.slice(last)));
-    pre.append(row);
-  }
-  return pre;
-}
+
 function renderActivity(panel, snapshot) {
   const events = panel.querySelector("[data-activity-events]");
   if (!events) return;
