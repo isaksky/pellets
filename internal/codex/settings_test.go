@@ -151,6 +151,16 @@ func TestPelletsPromptPrefixSnapshotsStableBytesAndRefreshes(t *testing.T) {
 	if strings.Count(first.Text, "INSTALLED PELLETS SKILL\n---\n"+skill+"---\n\n") != 1 || first.SkillSHA256 != digest([]byte(skill)) {
 		t.Fatal("prefix does not retain the exact canonical skill and its digest")
 	}
+	// Capture only read-only help, including all group operations through their
+	// shared help page. Live group documents must not enter this stable layer.
+	wantHelp := []string{"--help", "next --help", "start-next --help", "start --help", "show --help", "list --help", "close --help", "add --help", "project --help", "group --help"}
+	var expectedHelp strings.Builder
+	for _, command := range wantHelp {
+		expectedHelp.WriteString("$ pl " + command + "\nUsage: pl " + strings.TrimSpace(strings.TrimSuffix(command, "--help")) + "\n")
+	}
+	if first.HelpSHA256 != digest([]byte(expectedHelp.String())) || !strings.Contains(first.Text, "REQUIRED INSTALLED PELLETS CLI HELP\n---\n"+expectedHelp.String()+"---\n\n") {
+		t.Fatal("prefix must capture the focused command help exactly once")
+	}
 	second, err := preparePelletsPromptPrefix(context.Background(), workspace)
 	if err != nil || second != first {
 		t.Fatalf("cached prefix = %#v, %v; want %#v", second, err, first)
@@ -159,8 +169,9 @@ func TestPelletsPromptPrefixSnapshotsStableBytesAndRefreshes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Count(strings.TrimSpace(string(lines)), "\n") + 1; got != 10 { // first snapshot's 9 calls plus the cache key's version probe
-		t.Fatalf("tool calls after cache = %d, want 10: %q", got, lines)
+	wantCalls := "--version\n" + strings.Join(wantHelp, "\n") + "\n--version\n"
+	if string(lines) != wantCalls {
+		t.Fatalf("tool calls after cache = %q, want %q", lines, wantCalls)
 	}
 	if err := os.WriteFile(skillPath, []byte("---\nname: pellets\n---\nRefreshed skill.\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -173,8 +184,9 @@ func TestPelletsPromptPrefixSnapshotsStableBytesAndRefreshes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Count(strings.TrimSpace(string(lines)), "\n") + 1; got != 19 { // a source change reruns the complete help snapshot
-		t.Fatalf("tool calls after refresh = %d, want 19: %q", got, lines)
+	wantCalls += "--version\n" + strings.Join(wantHelp, "\n") + "\n"
+	if string(lines) != wantCalls {
+		t.Fatalf("tool calls after refresh = %q, want %q", lines, wantCalls)
 	}
 }
 

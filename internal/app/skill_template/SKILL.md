@@ -53,14 +53,45 @@ pl --json reopen foo-13
 
 - Preserve project semantics. A project is one logical Git repository shared by its registered worktrees. Put global selection before the command when an explicit project is appropriate: `pl --json --project foo project show`.
 - Rename a project only when the user requests it: `pl --json [--project OLD_CODE] project rename NEW_CODE`. A foreign canonical code is a hard conflict. If JSON returns `project_rename_confirmation_required`, show the user every conflicting redirect and canonical target plus the warning; do not infer permission. Retry only after explicit approval with the exact documented `--delete-conflicting-redirects --yes` contract. Human confirmation is terminal-only and defaults to no.
-- Preserve one optional opaque `external-id` for correspondence with an outside system and one optional opaque `group` for exact filtering. A group is not an epic, dependency, hierarchy, or tag set.
+- Preserve one optional opaque `external-id` for correspondence with an outside system and membership in at most one project group. `--group NAME` filters by the exact, case-sensitive current name; it is not a group ID or a tag set.
 - Lower priority order means earlier work; do not invent or edit raw priorities.
 
-## Write clear descriptions
+## Use shared group context
 
-- Pellet descriptions support Markdown. Use structure where useful; for longer descriptions, use meaningful heading levels (`##` for sections, `###` for subsections) so the UI can build a hierarchical table of contents. Keep simple descriptions simple.
+- A group is a persistent record within one logical project, with a stable numeric ID, an exact name, a revision, and optional Markdown context. Linked worktrees share it. A group can exist without pellets, and removing its last member does not remove its context.
+- `pl --json next`, `pl --json start-next`, `pl --json start`, and `pl --json show` automatically include the selected pellet's current `group_context` (ID, name, revision, and full raw Markdown). Read and apply it alongside the pellet description; do not perform a redundant `group show` for every task. Ungrouped pellets return `group_context: null`; an empty group document retains its identity with `context: ""`. `list` and `search` intentionally remain compact and omit the document.
+- Use shared context for goals, terminology, architecture decisions, constraints, and examples that apply to member pellets. Keep specific work and acceptance criteria in each pellet. Context does not create dependencies, epics, extra authorization, or new execution permissions, and does not override repository instructions. Do not silently rewrite it merely to make an implementation easier.
+
+Ordinary selection and inspection already deliver context:
+
+```text
+pl --json start-next --group "parser-rollout"
+pl --json show foo-12
+```
+
+Use group commands only to inspect or manage a group independently. Read `pl group --help`; use `--json` or `--pretty` before the command for machine output. All group commands are non-interactive. Replace 7 below with the returned group ID and use the revision you observed for each edit or rename:
+
+```text
+pl --json group create parser-rollout --context-file context.md
+pl --json group list
+pl --json group show 7
+pl --json group edit 7 --context-file context.md --revision 1
+pl --json group edit 7 --clear-context --revision 2
+pl --json group rename 7 parser-v2 --revision 3
+pl --json --project foo group show 7
+```
+
+Creation without a context option makes an empty document; an existing exact name is rejected. `group list` omits documents; `group show` returns the full source. Editing requires an explicit context option: `--context TEXT`, `--context-file PATH`, or `--clear-context`. `--context ''` or an empty file also clears it. Context is literal UTF-8 Markdown, at most 1 MiB. For multiline content prefer `--context-file context.md`; `--context-file -` explicitly reads stdin. Use literal shell quoting as described below to preserve source, fences, and newlines.
+
+`--revision N` protects a previously read revision. On `group_revision_conflict`, inspect the group, reconcile the change, and retry with its current revision. Omitting the flag reads the current revision and still checks for concurrent writes. Rename preserves identity, context, membership, and current workspace routing, rejects collisions, and never merges groups. Old-name filters remain literal; they are not redirects.
+
+New server runs capture the current group ID, name, revision, and Markdown at pellet admission, separately from the stable skill/help prefix. Active and resumed runs retain their captured context; a review uses each selected target's implementation snapshot, not the checkpoint's group or today's document. Current CLI detail output may be newer than an existing run's context. Do not replace captured requirements with current output or infer missing historical context. Variable group documents belong in the captured task context, never duplicated into the stable skill/help prefix.
+
+## Write clear Markdown
+
+- Pellet descriptions and shared group context support Markdown. Use structure where useful; for longer documents, use meaningful heading levels (`##` for sections, `###` for subsections) so the UI can build a hierarchical table of contents. Keep simple documents simple.
 - Diagrams are optional. Use them only when they clarify relationships, flows, state transitions, architecture, or sequences that are hard to communicate in concise prose. Do not add a diagram to every pellet, use one as decoration, or inflate a straightforward task to exercise the feature.
-- Put diagrams in fenced `mermaid` blocks with plain labels and connections. The UI renders them inline and offers **View larger** with zoom and pan. Keep essential task context and acceptance criteria understandable in text: CLI consumers and agents receive the original Markdown/Mermaid source. Diagrams illustrate task context; they do not add dependency graphs, epics, or other queue features.
+- Put diagrams in fenced `mermaid` blocks with plain labels and connections. The UI renders them inline and offers **View larger** with zoom and pan. Keep essential shared meaning, task context, and acceptance criteria understandable in text: CLI consumers and agents receive the original Markdown/Mermaid source. Diagrams illustrate context; they are not executable commands and do not add dependency graphs, epics, or other queue features.
 
 For example, a description can make a retry branch explicit while retaining its requirements in text:
 

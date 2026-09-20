@@ -490,7 +490,7 @@ There is no package or boundary for:
 
 - dependencies or graphs;
 - tags or task notes;
-- a group entity, hierarchy, or many-to-many label system;
+- group hierarchy or a many-to-many label system;
 - task events/history;
 - vector search or embeddings;
 - agent accounts, PID/session ownership, leases, heartbeats, expiry, or assignment history (the workspace foreign key is only worktree-scoped coordination);
@@ -511,7 +511,9 @@ assignment. Its optimistic version also includes registered workspace IDs so
 registration invalidates an editor that saw a different assignment universe.
 The same short `BEGIN IMMEDIATE` transaction checks that version, validates
 project/workspace identity, applies the mutation, and advances the revision.
-There is no assignment history, group entity, or new ownership relationship.
+There is no assignment history or new ownership relationship. Persistent project
+groups supply stable identity and shared Markdown context; routing still uses
+exact names. See [persistent project groups](data-model.md#persistent-project-groups).
 
 Web scheduling enables assignment selection at the application boundary. The
 scheduler asks storage to resolve current routing and claim the next eligible

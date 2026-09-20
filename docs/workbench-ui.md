@@ -292,7 +292,8 @@ editing. Add, remove, split, combine, select, and refinement controls operate on
 drafts. Creation is an explicit action: selected drafts become ordinary open
 pellets atomically, with stable references preventing duplicate creation on retry.
 Creation never claims work or starts execution. Group routing uses the current
-project assignments; groups retain their existing opaque exact-value semantics.
+project assignments; groups have stable identity and shared Markdown context,
+while filters still use their exact, case-sensitive names.
 
 Sending a message uses the configured Codex runtime in a separate ephemeral
 session with bounded conversation and draft context. Model choices come from
@@ -388,7 +389,11 @@ is historical, read-only source, separate from the group's current editable
 context; Mermaid and HTML in it are displayed as text. Empty group documents,
 ungrouped executions, and legacy attempts without a captured document have
 distinct explanations. Resume retains this snapshot, including when a fresh
-conversation is explicitly chosen.
+conversation is explicitly chosen. New pellet admissions capture the then-current
+document; current CLI detail commands may show a newer version. Reviews retain
+each selected target's implementation context instead of using the checkpoint's
+group or the current editor's document. Shared context confers no extra
+authorization or execution permissions.
 
 `test-web-run-context-browser.cjs` verifies this source view, safe escaping,
 empty/ungrouped states, live refresh, restart, and fresh-conversation recovery

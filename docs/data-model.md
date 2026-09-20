@@ -249,6 +249,13 @@ when ungrouped pellets exist.
 Context is raw Markdown, including an empty string, with a **1 MiB (1,048,576
 UTF-8 bytes)** maximum. Writes reject invalid UTF-8 and oversized values; they do
 not truncate, render, normalize line endings, or sanitize the stored source.
+
+Use it for shared goals, terminology, architecture decisions, constraints, and
+examples; specific work and acceptance criteria stay in each pellet. Markdown
+headings help organize long documents. Mermaid fences are optional illustrations,
+with essential meaning retained in text, and confer no execution permissions.
+Shared context adds no dependency, epic, or authorization mechanism.
+
 Context edits and renames require the last observed positive group revision.
 Stale writes return `group_revision_conflict`, including the current revision.
 Successful context saves and name changes increment it; a rename to the same
@@ -261,8 +268,19 @@ including unavailable workspaces and disabled routing. It advances the routing
 version so stale preference editors conflict. Renames that exceed existing
 assignment/selection bounds roll back completely. Context edits do not rewrite
 pellets or their implementation revisions and do not retroactively supply
-context to conversations. Consumers that capture context must capture its
-revision explicitly.
+context to conversations. CLI `next`, `start-next`, `start`, and `show` deliver
+the current group ID, name, revision, and full context automatically with the
+pellet; `list` and `search` intentionally omit documents. Independent group
+inspection and management use `pl --json group` commands.
+
+Execution admission captures the current group ID, name, revision, and Markdown
+in an immutable `group_context` snapshot (migration 22), outside the stable
+skill/help prefix. Active and resumed runs retain that capture. Checkpoint
+review snapshots pair each selected target with its successful implementation's
+group context, so targets may carry different revisions of the same group.
+Live CLI detail output can be newer and must not replace historical requirements.
+Empty captured documents, ungrouped executions, and legacy runs without captured
+context remain distinct. See [immutable group context](codex-app-server.md#immutable-group-context).
 
 ### Compatibility with captured names
 

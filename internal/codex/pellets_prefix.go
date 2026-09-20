@@ -33,11 +33,13 @@ var pelletsHelpCommands = [][]string{
 	{"--help"},
 	{"next", "--help"},
 	{"start-next", "--help"},
+	{"start", "--help"},
 	{"show", "--help"},
 	{"list", "--help"},
 	{"close", "--help"},
 	{"add", "--help"},
 	{"project", "--help"},
+	{"group", "--help"},
 }
 
 var pelletsPrefixCache = struct {

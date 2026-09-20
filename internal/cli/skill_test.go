@@ -305,6 +305,7 @@ func TestPelletsSkillReferencedCommandAndFlagContract(t *testing.T) {
 	commands := []Command{
 		AddCommand(app.PelletManager{}), MoveCommand(app.PelletManager{}),
 		ListCommand(app.PelletManager{}), StartNextCommand(app.PelletManager{}),
+		ShowCommand(app.PelletManager{}), GroupCommand(app.GroupManager{}),
 		ReleaseCommand(app.PelletManager{}), CloseCommand(app.PelletManager{}),
 		DeferCommand(app.PelletManager{}), ReopenCommand(app.PelletManager{}),
 		MemoryCommand(app.MemoryManager{}), ProjectCommand(app.ProjectManager{}),
@@ -356,6 +357,7 @@ func TestPelletsSkillReferencedCommandAndFlagContract(t *testing.T) {
 		"--port": true, "--no-open": true,
 		"--review-targets": true, "--maybe-later": true,
 		"--description-file": true,
+		"--context":          true, "--context-file": true, "--clear-context": true, "--revision": true,
 	}
 	for _, flag := range flagPattern.FindAllString(app.PelletsSkillContent(), -1) {
 		if !supportedFlags[flag] {

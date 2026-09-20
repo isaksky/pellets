@@ -124,15 +124,18 @@ Default human mode prompts when both stdin and stdout are terminals. It lists ev
 ### `pl group`
 
 Manage project groups and shared Markdown independently of queue membership.
-No extra group lookup is required after selecting or inspecting a pellet.
+`next`, `start-next`, `start`, and `show` automatically deliver context with the
+pellet; read and apply it without an extra group lookup. Use group management
+when inspecting or changing a group independently. Agents must use explicit
+global `--json` (or `--pretty`), never parse default human output.
 
 ```text
-pl [--project CODE] group create NAME [--context TEXT | --context-file PATH]
-pl [--project CODE] group list
-pl [--project CODE] group show GROUP_ID
-pl [--project CODE] group edit GROUP_ID
+pl --json [--project CODE] group create NAME [--context TEXT | --context-file PATH]
+pl --json [--project CODE] group list
+pl --json [--project CODE] group show GROUP_ID
+pl --json [--project CODE] group edit GROUP_ID
     (--context TEXT | --context-file PATH | --clear-context) [--revision N]
-pl [--project CODE] group rename GROUP_ID NEW_NAME [--revision N]
+pl --json [--project CODE] group rename GROUP_ID NEW_NAME [--revision N]
 ```
 
 Every operation selects the current logical project unless global `--project`
@@ -142,6 +145,13 @@ another project. All linked worktrees share the same group records. Same-name
 groups in different projects remain independent. IDs are stable database-local
 positive canonical decimal integers, without leading zeros, and are always
 validated within the selected project. Use the ID returned by create/list/show.
+
+Shared context holds goals, terminology, architecture decisions, constraints,
+and examples for member pellets. Keep specific work and acceptance criteria in
+the pellet. Use headings for long Markdown documents; Mermaid fenced diagrams
+are optional and must leave essential meaning available in text. This context
+adds no dependencies, epics, extra authorization, or execution permissions.
+Agents must not silently rewrite it to make an implementation easier.
 
 `create` atomically stores a new group and its initial context at revision 1.
 No context option means an empty document; a group needs no pellets. An existing
@@ -185,12 +195,16 @@ Single-group results include `id`, `project_id`, `name`, `revision`, complete
 `name`, and `revision`, sorted by exact binary name then ID; an empty list is `[]`.
 
 ````sh
-pl group create empty
-pl group create design --context-file './group context.md'
+pl --json group create empty
+pl --json group create design --context-file './group context.md'
 # Replace 7 with the returned ID and 3 with the revision you inspected.
 pl --json --project foo group show 7
 pl --json --project foo group edit 7 --context-file - --revision 3 <<'MARKDOWN'
 # Shared context
+
+## Architecture
+
+A sends input to B. Keep this relationship understandable without the diagram.
 
 ```mermaid
 flowchart LR
@@ -371,7 +385,10 @@ Context belongs to the actual selected pellet, including when current ownership
 overrides the supplied exact filters; workspace routing does not choose it.
 `next` remains read-only and starts retain atomic ownership assignment. Later
 calls reflect context edits, renames, and membership changes. These live CLI
-observations do not replace any previously captured server execution snapshot.
+observations may be newer than an existing run's captured context and do not
+replace it. Read and apply the automatically supplied context for ordinary CLI
+work without a redundant `group show`; a server-delegated run uses its captured
+requirements, including during Resume and review.
 
 Default human output and `--human` show a labeled **Group context** section next
 to the pellet description, distinguishing `(ungrouped)` from `(empty)`.
@@ -660,9 +677,14 @@ responses, receipt expiry, closure failures, and explicit Resume. Review and
 triage never fix code, push, create a PR, or automatically create another
 checkpoint.
 
-New conversations receive a deterministic, versioned Pellets prefix before the
-variable task. Resume retains the captured conversation and does not resend the
-full prefix. Reported cached-input-token counts are telemetry only: the stable
+New conversations receive a deterministic, versioned Pellets skill/help prefix,
+then captured group context, then the variable task. The focused help includes
+`start --help` and the single `group --help` page for all management operations;
+full variable group documents are never part of that stable prefix.
+Each new pellet admission captures current context; active/resumed runs and
+reviews retain the relevant implementation snapshots. Resume retains the
+captured conversation and does not resend the full prefix. Reported
+cached-input-token counts are telemetry only: the stable
 layout is intended to permit caching but never promises or infers a cache hit.
 Runs and checkpoints are execution evidence; planning remains in Pellets and no
 parallel Markdown plan or server backlog is created.

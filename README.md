@@ -278,7 +278,7 @@ short-lived command writes one versioned object and a newline to stdout. For
 example, `pl --json next` returns this shape:
 
 ```json
-{"schema_version":1,"command":"next","data":{"selection_reason":"next_open","pellet":{"id":"demo-1","project":"demo","number":1,"title":"Implement parser","description":"Reject malformed input.","external_id":"github:acme/demo#84","group":"parser","status":"open","priority":1024,"workspace":null,"created_at":"2026-08-29T20:00:00Z","updated_at":"2026-08-29T20:00:00Z","completed_at":null}}}
+{"schema_version":1,"command":"next","data":{"selection_reason":"next_open","pellet":{"id":"demo-1","project":"demo","number":1,"title":"Implement parser","description":"Reject malformed input.","external_id":"github:acme/demo#84","group":"parser","status":"open","priority":1024,"workspace":null,"created_at":"2026-08-29T20:00:00Z","updated_at":"2026-08-29T20:00:00Z","completed_at":null,"group_context":{"id":7,"name":"parser","revision":1,"context":""}}}}
 ```
 
 `next`, list/search/show reads, and dry runs do not change operation state once
@@ -383,22 +383,43 @@ and triage do not fix code, create commits, or create another checkpoint.
 
 ## Manage shared group context
 
-A group has a stable ID, an exact case-sensitive name, and shared Markdown
+A group has a stable ID, an exact case-sensitive name, and optional shared Markdown
 context within one logical project. Groups can exist without pellets. Their
-context survives removal of the last member. Manage this document independently
-of selecting or inspecting a pellet; agents do not need a separate `group show`
-after every `next`, `start-next`, or `show`.
+context survives removal of the last member. A pellet belongs to at most one
+group; `--group NAME` remains an exact-name filter.
+
+`pl --json next`, `pl --json start-next`, `pl --json start`, and `pl --json show`
+automatically return the current `group_context` with the pellet: stable ID,
+name, revision, and complete raw Markdown. Read and apply that context alongside
+the pellet description; no separate `group show` is needed for each task.
+`list` and `search` intentionally omit group documents to stay compact.
 
 ```sh
-pl group create parser-rollout
-pl group create design --context-file './group context.md'
-pl group list
+pl --json start-next --group parser-rollout
+pl --json show foo-12
+```
+
+Shared context can hold goals, terminology, architecture decisions, constraints,
+and examples that apply to member pellets. Keep specific work and acceptance
+criteria in each pellet. Context creates no dependencies, epics, extra
+authorization, or execution permissions and does not override repository
+instructions. Agents must not silently rewrite it to make their implementation
+easier.
+
+Use the separate group commands when inspecting or managing a group independently.
+Agents and scripts must select `--json` or `--pretty`; default human output is
+not a machine interface:
+
+```sh
+pl --json group create parser-rollout
+pl --json group create design --context-file './group context.md'
+pl --json group list
 # Replace 7 with the ID returned by create or list.
-pl group show 7
-pl group edit 7 --context-file context.md
-pl group edit 7 --context ''       # Deliberately clear context.
-pl group edit 7 --clear-context   # Equivalent explicit clearing option.
-pl group rename 7 parser-v2
+pl --json group show 7
+pl --json group edit 7 --context-file context.md
+pl --json group edit 7 --context ''       # Deliberately clear context.
+pl --json group edit 7 --clear-context   # Equivalent explicit clearing option.
+pl --json group rename 7 parser-v2
 ```
 
 Creation without context creates an empty document. Editing requires an explicit
@@ -423,15 +444,22 @@ current document, reconcile the changes, and retry with its revision. Without
 All group commands complete without prompts, including redirected human output.
 `group list` shows concise metadata; `group show` includes the full context.
 
-For multiline Markdown and Mermaid, use a file or explicit stdin with a quoted
-heredoc delimiter in POSIX shells. Quoting the delimiter preserves backticks,
-dollar signs, and newlines without shell expansion; keep its closing delimiter
+Use meaningful Markdown headings for long documents. Mermaid fenced diagrams
+are optional: include them only when they improve understanding, and keep all
+essential meaning in text. For multiline Markdown and Mermaid, use a file or
+explicit stdin with a quoted heredoc delimiter in POSIX shells. Quoting the
+delimiter preserves backticks, dollar signs, and newlines without shell expansion;
+keep its closing delimiter
 at column one. Do not put multiline Markdown with backticks or `$` substitutions
 inside shell double quotes.
 
 ````sh
 pl --json --project foo group edit 7 --context-file - --revision 5 <<'MARKDOWN'
 # Parser context
+
+## Architecture
+
+Input flows into the parser. Preserve identifiers through parsing.
 
 ```mermaid
 flowchart LR
@@ -445,7 +473,14 @@ MARKDOWN
 Context accepts valid UTF-8 up to 1 MiB and is stored verbatim. Use a Markdown
 file for portable multiline input across shells. For inline text starting with
 a dash, use `--context='- item'`. For names starting with a dash, put `--` before
-the positional arguments, for example `pl group create -- '-draft'`.
+the positional arguments, for example `pl --json group create -- '-draft'`.
+
+New server runs capture current group context when each pellet is admitted.
+Active and resumed runs retain that snapshot, and checkpoint reviews use each
+selected target's captured implementation context. Current CLI detail output
+may be newer than an existing run's context; it must not silently replace that
+run's requirements. The variable document follows the stable skill/help prefix
+and is not duplicated into it.
 
 ## Search tasks and operate memory
 
@@ -460,7 +495,7 @@ pl search parser --status closed --limit 20
 
 Search treats ordinary input as safe FTS5 terms rather than raw FTS syntax.
 External-ID and group filters are separate exact, case-sensitive filters. A
-pellet has at most one opaque group; a group is not a tag or epic.
+pellet belongs to at most one persistent project group; a group is not a tag or epic.
 
 Memory is independent, project-scoped knowledge. It has no pellet foreign key,
 status, priority, group, or automatic relationship to queue lifecycle. An
@@ -540,8 +575,10 @@ The installed skill activates implicitly only when a prompt explicitly names
 `pl` or Pellet/Pellets. Generic task, issue, backlog, project-management, or
 memory requests are deliberately excluded.
 
-The skill includes guidance for Markdown descriptions: use meaningful heading
-levels in longer descriptions for the UI's hierarchical **Contents** navigation.
+Both installers write the canonical embedded skill, including automatic group
+context delivery and independent `pl --json group` management. Its Markdown
+guidance applies to pellet descriptions and shared context: use meaningful
+heading levels in longer documents for the UI's hierarchical **Contents** navigation.
 Mermaid diagrams are optional; use them only when relationships, flows, states,
 architecture, or sequences are hard to explain in concise prose. Keep simple
 tasks simple, and keep essential context and acceptance criteria in text because
@@ -622,8 +659,10 @@ open-ended model ID, supported reasoning effort, and
 bounded transport limits; normal Codex defaults remain valid. This does not
 introduce a second model runtime or make normal Pellets use depend on Codex.
 
-New conversations receive a deterministic Pellets workflow prefix before the
-selected task. Pellets reuses the captured conversation on Resume instead of
+New conversations receive a deterministic Pellets skill/help prefix, followed by
+captured group context and the selected task. The focused help includes `start`
+and `group --help`, which covers all group-management operations without fetching
+any live documents. Pellets reuses the captured conversation on Resume instead of
 resending that prefix, and exposes cached-input-token telemetry only when Codex
 reports it. This stable-prefix layout is intended to make provider caching
 possible; it does not promise a cache hit or infer one when telemetry is absent.

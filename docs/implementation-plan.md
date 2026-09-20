@@ -92,7 +92,7 @@ Acceptance criteria:
 - Numbers are independent across projects in one database.
 - Default list returns only open/in-progress records in priority order.
 - `--all`, status, exact external-ID, and exact group filters behave as specified.
-- A pellet has at most one group; groups are opaque project-scoped strings with no separate table.
+- A pellet belongs to at most one persistent project group with stable identity and optional Markdown context; filters use its exact current name.
 - Editing cannot change project, number, status, or priority.
 - `next` resumes only the current workspace's in-progress pellet, otherwise returns the lowest-priority matching open pellet, and does not mutate operation state. Its first valid invocation may perform the one-time project/workspace bootstrap; after registration it is wholly write-free.
 - Empty list and next results are successful typed empty values.
@@ -407,7 +407,7 @@ Because hands-on Windows testing is unavailable, Windows-specific integration te
 | Database is accidentally committed. | Use local Git exclude, check tracking during `init-db` and bootstrap, document local-only storage. |
 | FTS derived rows drift. | Explicit same-transaction maintenance plus a tested rebuild command/path. |
 | Project code changes invalidate textual references. | Preserve former codes as direct stable-project redirects, resolve them everywhere, and emit the current canonical code. |
-| Group grows into an epic or tag subsystem. | Keep it a single nullable exact-filter string with no table, metadata, hierarchy, or behavior. |
+| Group grows into an epic or tag subsystem. | Keep one optional membership per pellet and exact-name filters. Shared Markdown context does not add hierarchy, dependencies, or execution permissions. |
 | Julian floating-point timestamps surprise API users. | Keep storage internal and render stable UTC RFC 3339 timestamps. |
 | Scope expands toward Beads. | Require a decision record for new core concepts and enforce explicit non-goals. |
 
@@ -419,7 +419,7 @@ Because hands-on Windows testing is unavailable, Windows-specific integration te
   server-run records and supervision described in milestones 8b–8d are not
   this category;
 - tags, separate notes, and automatic task history;
-- multiple groups per pellet or a group entity;
+- multiple groups per pellet or group hierarchy;
 - archive state and arbitrary task deletion;
 - semantic/vector memory and embedding providers;
 - memory automation, categories, and task links;

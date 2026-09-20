@@ -20,7 +20,7 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 
 1. Split one long-running issue into a priority-ordered list of pellets.
 2. Give all pellets for that issue the same opaque external ID, then filter work to that ID.
-3. Give pellets from several external issues one optional group identifier, then focus work to that group.
+3. Give pellets from several external issues one optional project group with shared Markdown context, then focus work by its exact name.
 4. Resume the current workspace's in-progress pellet after an agent turn or context boundary.
 5. Atomically select and start the highest-priority eligible open pellet when the current workspace has no work in progress.
 6. Add newly discovered work without rewriting the surrounding plan.
@@ -40,6 +40,7 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 - Make `pl start-next` atomically resume or claim eligible work so concurrent worktrees cannot both act on one read-only selection.
 - Preserve closed pellets by default and make destructive cleanup explicit.
 - Support exact filtering by project, optional external ID, and optional group.
+- Keep groups stable across renames, with optional shared context delivered automatically by pellet detail/selection commands and captured for execution and review.
 - Let humans route foreground web execution by workspace group assignments while retaining the shared project queue and unchanged CLI exact-group selection.
 - Bind each logical repository to one database through Git’s common directory, using ancestor and linked-worktree discovery before first binding.
 - Let an ordinary current-project command automatically create/register local Pellets metadata on first use, without a prerequisite project-initialization command or interactive code prompt.
@@ -61,7 +62,7 @@ The operating assumption is **at most one active worker in one Git worktree**. A
 - A separate persistent worker, automatic worktree creation, automatic restart, or automatic resume of Codex work. The foreground server owns only the execution it starts.
 - A general dependency graph, plugin framework, full Git UI, push/PR workflow, or Claude execution integration.
 - Tags, separate task notes, or an automatic task event/history log.
-- Multiple groups per pellet, group identities or hierarchy, or group-specific workflows. Workspace assignments are an explicit foreground scheduling preference over existing opaque group values.
+- Multiple groups per pellet, group hierarchy, or group-specific workflows. Persistent groups supply shared context; workspace assignments remain an explicit foreground scheduling preference over exact group names.
 - Custom workflows or custom statuses in the first release.
 - Semantic/vector retrieval, embedding models, or embedding providers.
 - Plugins or a general extension framework.

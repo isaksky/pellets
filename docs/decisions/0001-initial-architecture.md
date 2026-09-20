@@ -7,6 +7,11 @@
 
 ## Context
 
+The original scalar-only group decision is superseded by
+[persistent project groups](../data-model.md#persistent-project-groups): stable
+identity and optional shared Markdown context, with one group per pellet and
+exact-name filters. This does not introduce group hierarchy or dependencies.
+
 Coding agents need to split long-running work into a durable, trackable sequence. Markdown task lists work, but repeatedly locating, parsing, and editing them consumes tokens and makes concurrent or partial updates fragile.
 
 Beads-like systems demonstrate the value of structured local work, but dependency graphs, epics, agent coordination, daemons, and synchronization add concepts that make agent behavior harder to predict. Pellets needs a deliberately narrower model.
@@ -21,8 +26,8 @@ The product is named Pellets and the executable is `pl`.
 - Worktree-scoped worker coordination is defined by ADR 0002; it adds no agent identity or orchestration.
 - A database may contain several Git projects.
 - A project has a unique code of at most 12 characters and project-local pellet numbers. Public references look like `foo-123`.
-- Pellets have title, description, optional opaque external ID, one optional opaque group, status, nullable priority, and timestamps.
-- A group is a project-scoped exact-filter value that can span several external IDs. It has no table, hierarchy, metadata, or effect on priority.
+- Pellets have title, description, optional opaque external ID, one optional project group, status, nullable priority, and timestamps.
+- A group can span several external IDs. The original scalar-only representation is superseded by persistent groups with stable identity and shared Markdown context. Exact-name filters remain; groups have no hierarchy or effect on priority.
 - Statuses are `open`, `in_progress`, `closed`, and `maybe_later`.
 - Each registered workspace has at most one in-progress pellet; several workspaces may progress independently in one project.
 - `pl next` is read-only. It returns the current workspace's in-progress pellet first, otherwise the highest-priority eligible open pellet.
@@ -71,7 +76,7 @@ Do not implement:
 
 - dependencies, edges, blocking, graphs, epics, subtasks, or milestones;
 - multi-agent assignment, PID ownership, claiming, leases, or orchestration;
-- tags, multiple groups, a group entity or hierarchy, task notes, or an automatic task event/history table;
+- tags, multiple groups per pellet, group hierarchy, task notes, or an automatic task event/history table;
 - a daemon, account, network requirement, cloud synchronization, or automatic Git synchronization; a foreground loopback server and optional Codex supervision are governed narrowly by ADR 0005;
 - committing the database to Git;
 - plugins or custom workflow machinery.
@@ -118,9 +123,12 @@ Rejected because the product needs a linear priority queue. Graph semantics and 
 
 Rejected because two ordering mechanisms create ambiguous `next` behavior. A unique integer priority for each actionable pellet is sufficient; non-actionable pellets need no queue position.
 
-### Many-to-many tags or first-class groups
+### Many-to-many tags
 
-Rejected because the required behavior is one exact filter that may span several external issues. A single nullable group string provides that without a join table, hierarchy, lifecycle, metadata, or another ordering mechanism.
+Rejected because the required behavior is one exact group-name filter that may
+span several external issues. The original rejection of a group entity is
+superseded by persistent shared context; many-to-many membership, hierarchy,
+and another ordering mechanism remain excluded.
 
 ### PID-based claiming or leases
 

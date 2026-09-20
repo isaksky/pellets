@@ -251,14 +251,20 @@ normalized to LF and cached only while the skill content and executable bytes /
 version remain unchanged; a changed source or failed help syntax check produces
 a fresh preflight result rather than silently reusing an old snapshot.
 
+The focused help set includes `next`, `start-next`, `start`, `show`, and the
+single `group --help` page covering create/list/show/edit/rename. It probes only
+help, never live group documents; those variable documents remain outside the
+stable prefix. Installed Codex and Claude skills share the canonical embedded
+template; the server captures the installed Codex copy without updating it.
+
 For a new Codex thread, the scheduler prepends one deterministic
 `pellets-codex-prefix-v1` layer: snapshot identity, skill, CLI help, then the
 small stable workflow. After that layer it supplies the captured group context,
 then phase-specific instructions and variable task context. Fresh detached
 checkpoint reviews and each fresh finding-assessment thread receive that same
-captured prefix once, followed by the same captured group document, their
-read-only role restrictions, and exact snapshot/finding/queue context. The prefix
-stays outside the review snapshot and its clean-marker
+captured prefix once, followed by read-only role restrictions and exact
+snapshot/finding/queue context, including each target's captured implementation
+group document. The prefix stays outside the review snapshot and its clean-marker
 digest. The exact prefix and template version are retained with the durable
 execution attempt. A resumed thread uses
 its existing conversation context and does not append the full prefix again.
@@ -292,12 +298,18 @@ generation and exact-filter checks still apply to those edits.
 
 Active turns, follow-ups, continuation, and explicit Resume retain the original
 snapshot without fetching current context or appending it again to an existing
-thread. If recovery verifies that a saved thread has no turns, its first turn
+thread. CLI `next`, `start-next`, `start`, and `show` automatically return current
+context, which may now be newer; it must not replace a run's captured requirements.
+Agents must not silently rewrite shared context to make an implementation easier.
+If recovery verifies that a saved thread has no turns, its first turn
 still receives the captured layer. Pre-thread retries, explicitly chosen fresh-conversation recovery, and
 finalization recovery copy the original snapshot too. Fresh checkpoint review
-and unfinished-finding assessment conversations receive their captured context
-once alongside their stricter read-only roles. The group document remains outside
-the review scope and clean-marker digest.
+and unfinished-finding assessment conversations receive each selected target's
+successful implementation context, paired by project, pellet number, and run ID
+in the version 2 review snapshot. They never substitute the checkpoint's group,
+merge documents by group name, or fetch today's context as historical evidence.
+Those per-target documents are part of the review snapshot and its clean-marker
+digest; the stable skill/help prefix remains outside it.
 
 Raw context is limited to 1 MiB of UTF-8 and captured group names to 4096 bytes.
 The stored JSON allows worst-case escaping (6 MiB plus 32 KiB of metadata).
