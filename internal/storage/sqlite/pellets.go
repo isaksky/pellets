@@ -16,7 +16,7 @@ import (
 
 const pelletSelect = `
 	SELECT p.project_id, project.code, p.number,
-	       p.title, p.description, p.external_id, p.group_id,
+	       p.title, p.description, p.external_id, p.group_id, p.group_record_id,
 	       p.status, p.priority,
 	       strftime('%Y-%m-%dT%H:%M:%fZ', p.created_at),
 	       strftime('%Y-%m-%dT%H:%M:%fZ', p.updated_at),
@@ -416,7 +416,7 @@ func (repository *PelletRepository) SearchPellets(ctx context.Context, project s
 
 	query := `
 		SELECT p.project_id, project.code, p.number,
-		       p.title, p.description, p.external_id, p.group_id,
+		       p.title, p.description, p.external_id, p.group_id, p.group_record_id,
 		       p.status, p.priority,
 		       strftime('%Y-%m-%dT%H:%M:%fZ', p.created_at),
 		       strftime('%Y-%m-%dT%H:%M:%fZ', p.updated_at),
@@ -1662,7 +1662,7 @@ func scanPellet(scanner pelletScanner) (storage.Pellet, error) {
 	var checkpointJSON string
 	if err := scanner.Scan(
 		&pellet.ProjectID, &projectCode, &pellet.Reference.Number,
-		&pellet.Title, &pellet.Description, &externalID, &group,
+		&pellet.Title, &pellet.Description, &externalID, &group, &pellet.GroupID,
 		&status, &priority, &createdAt, &updatedAt, &completedAt,
 		&workspaceID, &workspaceProjectID, &rootPath, &rootRelative,
 		&gitDir, &gitDirRelative, &workspaceCreatedAt, &workspaceUpdatedAt,
@@ -1923,6 +1923,9 @@ func validatePelletChanges(changes storage.PelletChanges) error {
 }
 
 func validateNullablePelletText(field string, value *string) error {
+	if field == "group" && value != nil && *value != "" {
+		return storage.ValidateGroupName(*value)
+	}
 	if value != nil && *value == "" {
 		return invalidPelletField(field, "optional pellet fields must be NULL or non-empty")
 	}

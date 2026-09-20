@@ -19,6 +19,7 @@ type Pellet struct {
 	Description            string
 	ExternalID             *string
 	Group                  *string
+	GroupID                *int64 `json:",omitempty"`
 	Status                 domain.PelletStatus
 	Priority               *int64
 	Workspace              *Workspace

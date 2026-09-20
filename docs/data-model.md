@@ -1,8 +1,8 @@
 # Data Model
 
-SQLite is authoritative for logical projects, their registered workspaces, credential-free run settings, durable execution evidence, pellets, memories, and planning chats. FTS5 tables are derived indexes and can always be rebuilt.
+SQLite is authoritative for logical projects, their registered workspaces, credential-free run settings, durable execution evidence, pellets, project groups, memories, and planning chats. FTS5 tables are derived indexes and can always be rebuilt.
 
-This model intentionally contains no dependency, edge, epic, tag, group, task-note, task-event, agent, PID, session, claim, lease, heartbeat, expiry, assignment-history, or vector table. A workspace row is a Git worktree coordination identity, not an agent or security principal. Group is a nullable scalar on a pellet, not an entity. Memory is documented separately in [memory.md](memory.md); CLI behavior is in [cli-spec.md](cli-spec.md).
+This model intentionally contains no dependency, edge, epic, tag, task-note, task-event, agent, PID, session, claim, lease, heartbeat, expiry, assignment-history, or vector table. A workspace row is a Git worktree coordination identity, not an agent or security principal. Groups hold shared Markdown context and optional pellet membership; they are not epics or a dependency mechanism. Memory is documented separately in [memory.md](memory.md); CLI behavior is in [cli-spec.md](cli-spec.md).
 
 ## Terminology and identity
 
@@ -16,7 +16,7 @@ This model intentionally contains no dependency, edge, epic, tag, group, task-no
 - A **pellet number** is a positive integer allocated monotonically within one project.
 - A **pellet reference** combines them, for example `foo-123`.
 - A **priority** is an actionable pellet’s unique integer order within its project. Lower comes first. Closed and deferred pellets have no priority.
-- A **group** is one optional opaque string used to filter related pellets across external IDs within the same project.
+- A **group** is a persistent project record with stable identity, a unique case-sensitive name, and revisioned raw Markdown context. A pellet optionally belongs to one group; existing filters and JSON fields retain the exact group name.
 
 References split at the final hyphen, so `foo-bar-123` means project code `foo-bar` and pellet number `123`. Numbers use canonical decimal without leading zeros. A reference may use either the current canonical code or one of that project's direct redirects. Successful output always uses the current canonical code, so after renaming `foo` to `bar`, both `foo-123` and `bar-123` resolve to and emit `bar-123`. Purged pellet numbers are never reused.
 
@@ -119,6 +119,17 @@ CREATE TABLE workspace_run_settings (
     CHECK (updated_at >= created_at)
 ) STRICT;
 
+CREATE TABLE groups (
+    group_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(project_id) ON DELETE RESTRICT,
+    name TEXT NOT NULL COLLATE BINARY CHECK(length(CAST(name AS BLOB)) > 0),
+    context TEXT NOT NULL DEFAULT '' CHECK(length(CAST(context AS BLOB)) <= 1048576),
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL CHECK(updated_at >= created_at),
+    UNIQUE(project_id, name)
+) STRICT;
+
 CREATE TABLE pellets (
     rowid        INTEGER PRIMARY KEY,
     project_id   INTEGER NOT NULL REFERENCES projects(project_id) ON DELETE RESTRICT,
@@ -127,7 +138,8 @@ CREATE TABLE pellets (
     title        TEXT NOT NULL,
     description  TEXT NOT NULL DEFAULT '',
     external_id  TEXT,
-    group_id     TEXT,
+    group_id     TEXT, -- synchronized current name for existing consumers
+    group_record_id INTEGER REFERENCES groups(group_id) ON DELETE RESTRICT,
     status       TEXT NOT NULL DEFAULT 'open',
     priority     INTEGER,
     created_at   REAL NOT NULL,
@@ -198,7 +210,80 @@ CREATE INDEX memories_project_approval_idx
 
 `pellets.rowid` is a database-internal surrogate used by SQLite and FTS. It is never shown as the public pellet ID.
 
-`memories.memory_id` is a database-local, user-visible identity for a removable record. Under [SQLite's `AUTOINCREMENT` allocation rules](https://sqlite.org/autoinc.html), an automatically allocated ID from a committed row is never assigned to a different memory after removal. SQLite may leave gaps, and an allocation rolled back before commit may be reused. `execution_runs.run_id` uses the same guarantee so an exact review target can never identify another attempt. Internal `pellets.rowid` and unrelated keys remain plain `INTEGER PRIMARY KEY` columns.
+`memories.memory_id` is a database-local, user-visible identity for a removable record. Under [SQLite's `AUTOINCREMENT` allocation rules](https://sqlite.org/autoinc.html), an automatically allocated ID from a committed row is never assigned to a different memory after removal. SQLite may leave gaps, and an allocation rolled back before commit may be reused. `groups.group_id` and `execution_runs.run_id` use the same non-reuse guarantee for stable group and review-evidence identities. Internal `pellets.rowid` and unrelated keys remain plain `INTEGER PRIMARY KEY` columns.
+
+## Persistent project groups
+
+[Migration 21](../internal/storage/sqlite/migrations/0021_project_groups.sql)
+is the normative group schema and synchronization contract. `groups.group_id`
+is a stable database identity; the same name in two projects identifies two
+different records. Names use binary, case-sensitive equality, with no trimming,
+case folding, or Unicode normalization. New names must be nonempty valid UTF-8.
+There is no new name-size restriction on existing pellet workflows; workspace
+assignment and execution-capture limits still apply at their existing boundaries.
+
+`pellets.group_record_id` is the nullable foreign key for membership. The older,
+misnamed `pellets.group_id` TEXT column is a synchronized projection of the
+current name, retained for exact filters, JSON names, and existing scope guards.
+Database triggers materialize a group for every name-based pellet create/edit
+and assignment save, and check that membership IDs match both project and name.
+Rename uses the stable ID to update that projection. Ungrouped means both
+columns are NULL; no group row represents it. Membership changes, pellet lifecycle
+changes, and purging the last member never delete a group or its context.
+
+Migration imports all distinct names from every pellet status and saved workspace
+assignment, including routing-only names. It preserves exact name bytes, pellet
+revisions and timestamps, and all old evidence. Imported groups start at revision
+1 with empty context; their timestamps span the observed membership timestamps
+(and the migration time for routing-only observations). No group is inferred from
+an immutable execution/checkpoint capture, request receipt, or uncreated draft.
+
+The shared `GroupManager`, web application methods, and storage `GroupRepository`
+provide create, list, read by ID, context edit, and rename. Create is idempotent
+by exact project/name, returns existing context unchanged, and permits an empty
+group before any pellet is added. Unique constraints plus the writer transaction
+make concurrent explicit and implicit creators converge. The web group list
+includes persistent empty and routing-only groups, with an ungrouped option only
+when ungrouped pellets exist.
+
+Context is raw Markdown, including an empty string, with a **1 MiB (1,048,576
+UTF-8 bytes)** maximum. Writes reject invalid UTF-8 and oversized values; they do
+not truncate, render, normalize line endings, or sanitize the stored source.
+Context edits and renames require the last observed positive group revision.
+Stale writes return `group_revision_conflict`, including the current revision.
+Successful context saves and name changes increment it; a rename to the same
+name is a checked no-op. Creation time stays fixed and update time never moves
+backwards. A name collision returns `group_name_conflict`; groups never merge.
+
+Rename atomically preserves identity, context, status, ownership, priority, and
+membership, while updating all saved workspace preferences in that project,
+including unavailable workspaces and disabled routing. It advances the routing
+version so stale preference editors conflict. Renames that exceed existing
+assignment/selection bounds roll back completely. Context edits do not rewrite
+pellets or their implementation revisions and do not retroactively supply
+context to conversations. Consumers that capture context must capture its
+revision explicitly.
+
+### Compatibility with captured names
+
+Names remain exact values, not redirects. Existing CLI filters, browser URLs,
+saved planning drafts, and frozen schedule filters retain their literal name.
+After a rename an old-name filter no longer selects the renamed group. A new
+explicit create/edit or saved draft using that old name can create a separate
+empty-context group; draft contents and creation receipts are never silently
+retargeted to the renamed identity. Add-request replay returns its original
+snapshot (older receipts may omit `GroupID`); read the pellet for current state.
+
+Rename preserves historical execution filters, workspace-selection captures,
+checkpoint target snapshots and scope history, review evidence, and request and
+planning receipts byte for byte. Updating a member's current name deliberately
+uses the existing implementation-revision trigger: active work gets the normal
+scope-change journal, stale finalization/resume fails its revision or exact-filter
+check, and a checkpoint with the old selected name reports `scope_changed`.
+A renamed closed pellet does not pretend its old implementation evidence used
+the new name. Ownership never transfers. Exact Resume retains its captured
+policy for its single owned pellet; subsequent scheduler claims resolve current
+routing preferences as before. No capture is broadened or changed into an alias.
 
 ## Durable execution evidence
 
@@ -331,7 +416,7 @@ Project-code allocation occurs in the same immediate transaction as logical-proj
 
 Canonical codes owned by another project are hard conflicts and cannot be deleted by rename. A foreign redirect remains reserved unless the caller confirms the exact displayed conflict set; if that set changes before the transaction obtains the lock, the rename fails write-free. Renaming to the existing canonical code is idempotent, while renaming to a redirect already owned by the project safely swaps which code is canonical. Deleting a project is prevented while its restricted child records exist; once those records are removed and the project row can be deleted, `ON DELETE CASCADE` removes its redirects rather than leaving dangling rows. Purging closed pellets never deletes projects or redirects.
 
-`pellets.group_id` is not a foreign key. There is no groups table: each pellet has zero or one case-sensitive group string, and the same value may appear under several external IDs in that project. Group equality has no meaning across projects.
+`pellets.group_record_id` is the optional stable group relation. The synchronized `pellets.group_id` name remains available to existing consumers; the same group may contain pellets with different external IDs. Group names have no identity across projects. See [persistent project groups](#persistent-project-groups) for rename and historical-capture compatibility.
 
 Only `open` and `in_progress` pellets participate in the shared project queue and therefore have positive project-unique priority. Exactly `in_progress` pellets have a workspace owner. `open`, `closed`, and `maybe_later` pellets have `NULL` workspace ownership; `closed` and `maybe_later` also have `NULL` priority. There is no temporary negative-priority or stale-owner state.
 
@@ -398,7 +483,7 @@ This gives every statement in a logical mutation one captured timestamp rather t
 
 ## Optimistic server editing
 
-The web interface adds no version column, trigger, event table, or timestamp-only comparison. A response derives an opaque token from the complete materialized authoritative row. For pellets this includes project/reference identity, title, description, nullable external ID/group, status, nullable priority, complete nullable workspace ownership, creation/update/completion timestamps, and all joined workspace values. For memories it includes memory/project identity, text, provenance, creation/update timestamps, and nullable approval timestamp.
+For pellet and memory edits, the web interface adds no version column, trigger, event table, or timestamp-only comparison. Group edits use their explicit shared revision contract above. A response derives an opaque token from the complete materialized authoritative row. For pellets this includes project/reference identity, title, description, nullable external ID/group, status, nullable priority, complete nullable workspace ownership, creation/update/completion timestamps, and all joined workspace values. For memories it includes memory/project identity, text, provenance, creation/update timestamps, and nullable approval timestamp.
 
 Every edit, reorder, lifecycle action, memory text replacement, and memory approval requires that token. After all request parsing and domain validation, storage acquires the normal bounded `BEGIN IMMEDIATE` writer lock, reloads the complete row, derives its token, and compares it with the submitted value. A mismatch rolls back without capturing a timestamp or changing authoritative/derived data. The HTTP layer renders 409 from the materialized current row after storage releases the connection and preserves the user's submitted draft separately. Creation has no existing row and therefore no row token.
 

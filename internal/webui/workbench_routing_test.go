@@ -415,3 +415,43 @@ func TestCategoryRecipientSavePreservesViewAndAllowsAutomaticPlacement(t *testin
 		t.Fatal("missing automatic placement")
 	}
 }
+
+func TestWorkbenchListsEmptyPersistentGroupsAndKeepsRenamedRouting(t *testing.T) {
+	f, p, _, linked := workbenchFixture(t)
+	ctx := context.Background()
+	name := " empty <Ω> group "
+	group, err := f.application.CreateGroup(ctx, p, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	group, err = f.application.EditGroupContext(ctx, p, group.ID, group.Revision, "# Shared Markdown")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignWorkbench(t, f, p, linked, "explicit", []string{name}, false)
+	page := "/projects/project1/tasks?workspace=" + strconv.FormatInt(linked, 10)
+	response := performRequest(f.handler, http.MethodGet, page, "", nil)
+	if response.Code != 200 || !strings.Contains(response.Body.String(), `name="groups" value="`+encodeGroup(&name)+`"`) {
+		t.Fatalf("empty group missing from assignments: %d", response.Code)
+	}
+	renamed, err := f.application.RenameGroup(ctx, p, group.ID, group.Revision, "renamed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := f.application.ReadGroup(ctx, p, group.ID)
+	if err != nil || current != renamed || current.Context != group.Context {
+		t.Fatalf("group read: %+v %v", current, err)
+	}
+	all, err := f.application.ListGroups(ctx, p)
+	if err != nil || len(all) == 0 {
+		t.Fatalf("groups: %+v %v", all, err)
+	}
+	response = performRequest(f.handler, http.MethodGet, page, "", nil)
+	if response.Code != 200 || strings.Contains(response.Body.String(), `name="groups" value="`+encodeGroup(&name)+`"`) || !strings.Contains(response.Body.String(), `name="groups" value="`+encodeGroup(&renamed.Name)+`"`) {
+		t.Fatal("assignment choices did not refresh after rename")
+	}
+	routing, err := f.application.Routing(ctx, p)
+	if err != nil || !slices.Equal(routing.Assignment(linked).Groups, []string{renamed.Name}) {
+		t.Fatalf("renamed routing: %+v %v", routing, err)
+	}
+}

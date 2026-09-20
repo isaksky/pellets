@@ -282,10 +282,10 @@ func (reader *WebReader) ListWebGroups(ctx context.Context, project storage.Proj
 		return nil, err
 	}
 	rows, err := reader.db.QueryContext(ctx, `
-		SELECT DISTINCT group_id
-		FROM pellets
-		WHERE project_id = ?
-		ORDER BY group_id IS NOT NULL, group_id`, project.ID)
+		SELECT name FROM (
+		 SELECT name FROM groups WHERE project_id = ?
+		 UNION ALL SELECT NULL WHERE EXISTS(SELECT 1 FROM pellets WHERE project_id = ? AND group_record_id IS NULL)
+		) ORDER BY name IS NOT NULL, name COLLATE BINARY`, project.ID, project.ID)
 	if err != nil {
 		return nil, pelletStorageError("list web pellet groups", err)
 	}

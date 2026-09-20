@@ -268,8 +268,8 @@ func TestMemoryIDsAreNeverReusedAfterRemoval(t *testing.T) {
 		FROM (SELECT name FROM sqlite_sequence ORDER BY name)`).Scan(&sequenceTables); err != nil {
 		t.Fatal(err)
 	}
-	if sequenceTables != "memories" {
-		t.Fatalf("AUTOINCREMENT sequence tables = %q, want only memories", sequenceTables)
+	if sequenceTables != "groups,memories" {
+		t.Fatalf("AUTOINCREMENT sequence tables = %q, want groups,memories", sequenceTables)
 	}
 
 	var autoincrementTables string
@@ -283,8 +283,8 @@ func TestMemoryIDsAreNeverReusedAfterRemoval(t *testing.T) {
 		)`).Scan(&autoincrementTables); err != nil {
 		t.Fatal(err)
 	}
-	if autoincrementTables != "execution_runs,memories,planning_chats" {
-		t.Fatalf("tables declared AUTOINCREMENT = %q, want execution_runs,memories,planning_chats", autoincrementTables)
+	if autoincrementTables != "execution_runs,groups,memories,planning_chats" {
+		t.Fatalf("tables declared AUTOINCREMENT = %q, want execution_runs,groups,memories,planning_chats", autoincrementTables)
 	}
 }
 
@@ -1540,6 +1540,7 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 		"execution_changes",
 		"execution_run_activity",
 		"execution_runs",
+		"groups",
 		"memories",
 		"memories_fts",
 		"memories_fts_config",
@@ -1575,6 +1576,7 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 		"pellet_add_requests_created_idx",
 		"pellets_active_priority_idx",
 		"pellets_closed_completed_idx",
+		"pellets_group_record_idx",
 		"pellets_workspace_in_progress_idx",
 		"planning_chats_project_recent_idx",
 		"project_code_redirects_project_idx",
@@ -1582,6 +1584,11 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 	assertObjectNames(t, db, "table", wantTables)
 	assertObjectNames(t, db, "index", wantIndexes)
 	assertObjectNames(t, db, "trigger", []string{
+		"groups_project_immutable",
+		"groups_rename_members",
+		"pellets_group_identity_update",
+		"pellets_group_insert",
+		"pellets_group_name_update",
 		"pellets_implementation_revision",
 		"pellets_kind_immutable",
 		"planning_draft_creation_immutable",
@@ -1595,6 +1602,8 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 		"review_checkpoint_removal_restored",
 		"review_checkpoint_target_kind",
 		"review_checkpoint_targets_immutable",
+		"workspace_groups_insert",
+		"workspace_groups_update",
 	})
 }
 
@@ -1627,7 +1636,7 @@ func assertObjectNames(t *testing.T, db *sql.DB, objectType string, want []strin
 
 func assertStrictTables(t *testing.T, db *sql.DB) {
 	t.Helper()
-	want := []string{"application_metadata", "checkpoint_finding_assessments", "checkpoint_triage", "execution_run_activity", "execution_runs", "memories", "pellet_add_requests", "pellets", "planning_chats", "planning_draft_creations", "project_code_redirects", "project_group_routing", "project_workspaces", "projects", "review_checkpoint_removals", "review_checkpoint_scope_history", "review_checkpoint_targets", "settings", "workspace_group_assignments", "workspace_run_settings"}
+	want := []string{"application_metadata", "checkpoint_finding_assessments", "checkpoint_triage", "execution_run_activity", "execution_runs", "groups", "memories", "pellet_add_requests", "pellets", "planning_chats", "planning_draft_creations", "project_code_redirects", "project_group_routing", "project_workspaces", "projects", "review_checkpoint_removals", "review_checkpoint_scope_history", "review_checkpoint_targets", "settings", "workspace_group_assignments", "workspace_run_settings"}
 	rows, err := db.Query("PRAGMA table_list")
 	if err != nil {
 		t.Fatal(err)

@@ -396,8 +396,13 @@ func TestPlanningMigrationPreservesExistingQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo := PelletRepository{db: legacy}
-	pellet, err := repo.CreatePellet(ctx, storage.ResolvedProject{Project: project, Workspace: project.Workspaces[0]}, storage.NewPellet{Title: "existing work", Description: "migration preserves this"})
+	// Seed the released schema directly; the current repository requires the
+	// current schema and must not be used to manufacture historical fixtures.
+	mustExec(t, legacy, `INSERT INTO pellets(project_id,number,title,description,priority,created_at,updated_at)
+	 VALUES(1,1,'existing work','migration preserves this',1024,2460000,2460000);
+	 INSERT INTO pellets_fts(rowid,title,description,external_id) SELECT rowid,title,description,external_id FROM pellets;
+	 UPDATE projects SET next_pellet_number=2 WHERE project_id=1`)
+	pellet, err := scanPellet(legacy.QueryRowContext(ctx, strings.ReplaceAll(pelletSelect, "p.group_record_id", "NULL")+" WHERE p.project_id=? AND p.number=1", project.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
