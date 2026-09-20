@@ -319,8 +319,9 @@ stale or post-restart responses fail closed. Follow-ups use expected-turn
 steering and start a new turn only after the prior turn is known idle.
 
 Ordinary server-supervised work follows test → commit → close. A review
-checkpoint freezes exact selected commits and applicable committed repository
-instructions, then runs `review/start` detached from a new empty read-only seed
+checkpoint freezes exact selected commits, applicable committed repository
+instructions, and each evidenced implementation's captured group context, then
+runs `review/start` detached from a new empty read-only seed
 thread. App-server's native rendered review text is normalized into a durable
 structured clean/findings result, Git/worktree side effects are rejected, and
 successful evidence plus checkpoint closure are atomic. Clean output requires
@@ -328,6 +329,12 @@ the scope-bound marker because arbitrary headerless app-server review prose is
 not proof of a parsed structured result. A crash receipt left after that atomic
 transaction can be explicitly reconciled without repeating the review or close;
 interrupted descendants must retain an exact bounded lineage to that receipt.
+Version 2 review snapshots pair context by exact project/target/run identity;
+the clean marker and new triage receipts digest the complete snapshot. Independent
+assessors use these historic requirements while inspecting current code. Legacy
+snapshots remain explicit absence, never inferred current context; missing or
+corrupt required evidence fails validation. See
+[historical implementation requirements](checkpoint-management.md#historical-implementation-requirements).
 Deduplicated focused follow-up creation is a separate phase; review does not
 create a general dependency graph, generic event stream, Git UI, push/PR
 operation, or plugin framework.

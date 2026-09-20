@@ -1,7 +1,19 @@
 {{define "run-group-context"}}<section class="run-group-context" aria-label="Captured group context">
         <p><strong>Captured group context</strong> · Historical snapshot for this execution, separate from the group's current editable context.</p>
+        {{template "group-context-document" .}}
+      </section>{{end}}
+
+{{define "group-context-document"}}
         {{if eq .GroupContext.State "captured"}}{{with .GroupContext.Group}}
         <dl class="run-facts"><div><dt>Group at capture</dt><dd>{{.Name}}</dd></div><div><dt>Group ID / revision</dt><dd>{{.ID}} / {{.Revision}}</dd></div></dl>
         {{if .Context}}<details id="run-group-source-{{$.ID}}"><summary>Captured Markdown source</summary><pre tabindex="0" aria-label="Captured Markdown source"><code>{{.Context}}</code></pre></details>{{else}}<p>The captured group document was empty.</p>{{end}}
         {{end}}{{else if eq .GroupContext.State "ungrouped"}}<p>Ungrouped at admission. No group document was supplied.</p>{{else}}<p>Legacy execution: no group context was captured. Historical context is unavailable.</p>{{end}}
+{{end}}
+
+{{define "review-group-context"}}<section class="run-group-context" aria-label="Reviewed implementation context">
+        <p><strong>Reviewed implementation context</strong> · Historical requirements captured by each selected implementation.</p>
+        {{if eq .ReviewContextVersion 2}}{{range .ReviewContexts}}
+        <div>{{range .Targets}}<p><code>{{.Reference}}</code> · Implementation run {{.RunID}}</p>{{end}}
+        {{template "group-context-document" .}}</div>
+        {{end}}{{else if eq .ReviewContextVersion 1}}<p>Legacy review: implementation group context was not captured in this review snapshot. Current group documents are not substituted.</p>{{else}}<p>Implementation context has not been captured for review yet.</p>{{end}}
       </section>{{end}}

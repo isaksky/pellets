@@ -22,6 +22,10 @@ import (
 )
 
 func preparedReviewCheckpoint(t *testing.T, executable, reviewMode string) (*Scheduler, ScheduleRequest, storage.Pellet, []storage.ExecutionRun) {
+	return preparedReviewCheckpointWithSetup(t, executable, reviewMode, nil)
+}
+
+func preparedReviewCheckpointWithSetup(t *testing.T, executable, reviewMode string, setup func(*Scheduler, ScheduleRequest, *sqlite.PelletRepository, int)) (*Scheduler, ScheduleRequest, storage.Pellet, []storage.ExecutionRun) {
 	t.Helper()
 	s, request, queue := schedulerFixture(t, executable, "schedule_success")
 	if err := os.WriteFile(filepath.Join(s.options.Database.Root, "AGENTS.md"), []byte("Review changes for correctness and exact scope.\n"), 0600); err != nil {
@@ -36,6 +40,9 @@ func preparedReviewCheckpoint(t *testing.T, executable, reviewMode string) (*Sch
 	}
 	var runs []storage.ExecutionRun
 	for i := 0; i < 3; i++ {
+		if setup != nil {
+			setup(s, request, queue, i)
+		}
 		status := awaitSchedule(t, startSchedule(t, s, request))
 		if status.State != "completed" {
 			t.Fatalf("implementation %d: %+v", i, status)
@@ -203,7 +210,7 @@ func TestCheckpointReviewerUsesFreshDetachedContextAndExactCommitSet(t *testing.
 
 func assertCapturedCheckpointPrefix(t *testing.T, prompt, prefix, role string) {
 	t.Helper()
-	if prefix == "" || !strings.HasPrefix(prompt, prefix+"CAPTURED GROUP CONTEXT v1\n") || strings.Index(prompt, role) <= len(prefix) || strings.Count(prompt, prefix) != 1 {
+	if prefix == "" || !strings.HasPrefix(prompt, prefix+"Historical implementation requirements:") || strings.Index(prompt, role) <= len(prefix) || strings.Count(prompt, prefix) != 1 {
 		t.Fatal("fresh checkpoint conversation must start with exactly one captured prefix followed by its role restrictions")
 	}
 }
@@ -539,7 +546,7 @@ func TestCheckpointReviewerStopsBeforeCodexWhenRecordedCommitObjectIsMissing(t *
 
 func TestCheckpointReviewerCancellationResumesDurableResultWithoutRepeatingReview(t *testing.T) {
 	executable := installSupervisorPeer(t)
-	s, request, _, _ := preparedReviewCheckpoint(t, executable, "review_result_gate")
+	s, request, _, implementations, groups, group := preparedContextReviewCheckpoint(t, executable, "review_result_gate", true)
 	h := startSchedule(t, s, request)
 	var first storage.ExecutionRun
 	deadline := time.Now().Add(15 * time.Second)
@@ -563,6 +570,9 @@ func TestCheckpointReviewerCancellationResumesDurableResultWithoutRepeatingRevie
 	if first.Settings.Codex.ReasoningEffort != "high" {
 		t.Fatalf("cancelled review lost its selected effort: %+v", first.Settings.Codex)
 	}
+	if _, err := groups.EditGroupContext(context.Background(), request.Selected.Project, group.ID, group.Revision, "LIVE CONTEXT MUST NOT APPEAR after cancellation"); err != nil {
+		t.Fatal(err)
+	}
 	initialTurns := 0
 	for _, event := range readPeerEvents(t, s.options.Database.Root) {
 		if event.Method == string(codex.TurnStart) {
@@ -582,6 +592,8 @@ func TestCheckpointReviewerCancellationResumesDurableResultWithoutRepeatingRevie
 	if err != nil || resumed.Settings.Codex.ReasoningEffort != first.Settings.Codex.ReasoningEffort {
 		t.Fatalf("resume changed captured review effort: %+v %v", resumed.Settings.Codex, err)
 	}
+	assertReviewContexts(t, resumed.ReviewSnapshot, implementations)
+	assertCheckpointContextPrompts(t, s, resumed, implementations)
 	count, turns, seeds := 0, 0, 0
 	for _, event := range readPeerEvents(t, s.options.Database.Root) {
 		if event.Method == string(codex.ThreadStart) {

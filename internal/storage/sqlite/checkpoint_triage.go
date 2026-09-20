@@ -25,9 +25,9 @@ func triageRun(ctx context.Context, q runQuery, id int64) (storage.ExecutionRun,
 }
 
 func readCheckpointTriage(ctx context.Context, q runQuery, r storage.ExecutionRun) (*storage.CheckpointTriage, error) {
-	var encoded string
+	var encoded, snapshotDigest string
 	t := &storage.CheckpointTriage{Assessments: []storage.FindingAssessment{}}
-	err := q.QueryRowContext(ctx, `SELECT review_result_json,review_thread_id,review_turn_id FROM checkpoint_triage WHERE project_id=? AND checkpoint_number=? AND implementation_revision=?`, r.ProjectID, r.PelletNumber, r.ImplementationRevision).Scan(&encoded, &t.ReviewThreadID, &t.ReviewTurnID)
+	err := q.QueryRowContext(ctx, `SELECT review_result_json,review_thread_id,review_turn_id,review_snapshot_sha256 FROM checkpoint_triage WHERE project_id=? AND checkpoint_number=? AND implementation_revision=?`, r.ProjectID, r.PelletNumber, r.ImplementationRevision).Scan(&encoded, &t.ReviewThreadID, &t.ReviewTurnID, &snapshotDigest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -35,7 +35,9 @@ func readCheckpointTriage(ctx context.Context, q runQuery, r storage.ExecutionRu
 		return nil, err
 	}
 	want, _ := json.Marshal(r.ReviewResult)
-	if encoded != string(want) || t.ReviewThreadID != r.ThreadID || t.ReviewTurnID != r.TurnID {
+	snapshot, _ := json.Marshal(r.ReviewSnapshot)
+	if encoded != string(want) || t.ReviewThreadID != r.ThreadID || t.ReviewTurnID != r.TurnID ||
+		(snapshotDigest != "" || r.ReviewSnapshot != nil && r.ReviewSnapshot.Version >= 2) && snapshotDigest != fmt.Sprintf("%x", sha256.Sum256(snapshot)) {
 		return nil, storage.ExecutionRunConflict(r.ID)
 	}
 	rows, err := q.QueryContext(ctx, `SELECT assessment_json FROM checkpoint_finding_assessments WHERE project_id=? AND checkpoint_number=? AND implementation_revision=? ORDER BY ordinal`, r.ProjectID, r.PelletNumber, r.ImplementationRevision)
@@ -80,7 +82,9 @@ func (db *ProjectDatabase) BeginCheckpointTriage(ctx context.Context, id, revisi
 			return e
 		}
 		encoded, _ := json.Marshal(r.ReviewResult)
-		_, e = conn.ExecContext(ctx, `INSERT INTO checkpoint_triage(project_id,checkpoint_number,implementation_revision,review_result_json,review_thread_id,review_turn_id) VALUES(?,?,?,?,?,?)`, r.ProjectID, r.PelletNumber, r.ImplementationRevision, string(encoded), r.ThreadID, r.TurnID)
+		snapshot, _ := json.Marshal(r.ReviewSnapshot)
+		digest := fmt.Sprintf("%x", sha256.Sum256(snapshot))
+		_, e = conn.ExecContext(ctx, `INSERT INTO checkpoint_triage(project_id,checkpoint_number,implementation_revision,review_result_json,review_thread_id,review_turn_id,review_snapshot_sha256) VALUES(?,?,?,?,?,?,?)`, r.ProjectID, r.PelletNumber, r.ImplementationRevision, string(encoded), r.ThreadID, r.TurnID, digest)
 		if e != nil {
 			return e
 		}

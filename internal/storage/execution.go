@@ -130,6 +130,16 @@ type ReviewSnapshot struct {
 	Targets                []ReviewTarget      `json:"targets"`
 	Commits                []ReviewCommit      `json:"commits"`
 	Instructions           []ReviewInstruction `json:"instructions"`
+	// Version 2 pairs each target with its retained implementation context.
+	// Version 1 predates this capture and must never be hydrated from live data.
+	GroupContexts []ReviewGroupContext `json:"group_contexts,omitempty"`
+}
+
+type ReviewGroupContext struct {
+	ProjectID int64                `json:"project_id"`
+	Number    int64                `json:"number"`
+	RunID     int64                `json:"run_id"`
+	Snapshot  GroupContextSnapshot `json:"snapshot"`
 }
 
 // ReviewRefContext attributes ordinary branch advances to another worktree.
@@ -267,6 +277,7 @@ type ExecutionRunDatabase interface {
 	CheckpointTriageDatabase
 	CreateExecutionRun(context.Context, RunCapture) (ExecutionRun, error)
 	ReadExecutionRun(context.Context, int64) (ExecutionRun, error)
+	ReadReviewTargetGroupContext(context.Context, ReviewTarget) (GroupContextSnapshot, error)
 	ListWorkspaceRuns(context.Context, int64, int64, int) ([]ExecutionRun, error)
 	UpdateExecutionRun(context.Context, UpdateExecutionRun) (ExecutionRun, error)
 	InterruptExecutionRun(context.Context, int64, int64, string) (ExecutionRun, error)
@@ -454,8 +465,11 @@ func ValidateReviewSnapshot(snapshot *ReviewSnapshot) error {
 	if snapshot == nil {
 		return nil
 	}
-	if snapshot.Version != 1 || !IsFullCommitID(snapshot.RepositoryHead) || !hexDigest.MatchString(snapshot.RepositoryStatusSHA256) || !hexDigest.MatchString(snapshot.RepositoryRefsSHA256) || len(snapshot.Targets) == 0 || len(snapshot.Targets) > 1000 || len(snapshot.Commits) != len(snapshot.Targets) {
+	if (snapshot.Version != 1 && snapshot.Version != 2) || !IsFullCommitID(snapshot.RepositoryHead) || !hexDigest.MatchString(snapshot.RepositoryStatusSHA256) || !hexDigest.MatchString(snapshot.RepositoryRefsSHA256) || len(snapshot.Targets) == 0 || len(snapshot.Targets) > 1000 || len(snapshot.Commits) != len(snapshot.Targets) {
 		return InvalidExecutionRun("invalid immutable review snapshot")
+	}
+	if snapshot.Version == 1 && len(snapshot.GroupContexts) != 0 || snapshot.Version == 2 && len(snapshot.GroupContexts) != len(snapshot.Targets) {
+		return InvalidExecutionRun("review group context must match the snapshot version and exact target set")
 	}
 	if refs := snapshot.RepositoryRefContext; refs != nil {
 		if refs.HeadReference != "HEAD" && !strings.HasPrefix(refs.HeadReference, "refs/heads/") {
@@ -470,12 +484,24 @@ func ValidateReviewSnapshot(snapshot *ReviewSnapshot) error {
 		}
 	}
 	resultCommits := make(map[string]bool, len(snapshot.Commits))
+	seenTargets := make(map[[2]int64]bool, len(snapshot.Targets))
 	for i, commit := range snapshot.Commits {
 		target := snapshot.Targets[i]
 		if target.Reason != "ready" || target.Status == nil || *target.Status != domain.PelletClosed || target.ImplementationRevision == nil || *target.ImplementationRevision < 1 || target.Evidence == nil ||
 			commit.Reference == "" || commit.WorkspaceID < 1 || !IsFullCommitID(commit.StartingHead) || !IsFullCommitID(commit.ResultCommit) || (len(commit.Files) == 0 && commit.StartingHead != commit.ResultCommit) || len(commit.Files) > 10000 ||
 			commit.Reference != target.Reference || commit.WorkspaceID != target.Evidence.WorkspaceID || commit.StartingHead != target.Evidence.StartingHead || commit.ResultCommit != target.Evidence.ResultCommit {
 			return InvalidExecutionRun("invalid immutable review commit scope")
+		}
+		if snapshot.Version == 2 {
+			key := [2]int64{target.ProjectID, target.Number}
+			g := snapshot.GroupContexts[i]
+			if target.ProjectID < 1 || target.Number < 1 || seenTargets[key] || g.ProjectID != target.ProjectID || g.Number != target.Number || g.RunID < 1 || g.RunID != target.Evidence.RunID {
+				return InvalidExecutionRun("review group context is not paired with its exact target and implementation run")
+			}
+			seenTargets[key] = true
+			if err := ValidateGroupContextSnapshot(g.Snapshot); err != nil {
+				return err
+			}
 		}
 		resultCommits[commit.ResultCommit] = true
 		for j, file := range commit.Files {

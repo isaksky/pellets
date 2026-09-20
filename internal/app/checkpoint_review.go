@@ -48,7 +48,12 @@ func (r *checkpointReviewer) drive(ctx context.Context, execution *WorkspaceExec
 	if err := r.requireScope(ctx, run); err != nil {
 		return err
 	}
-	snapshot, err := buildReviewSnapshot(ctx, root, run)
+	repo, err := execution.recorder.repository(ctx, r.database)
+	if err != nil {
+		return err
+	}
+	snapshot, snapshotErr := buildReviewSnapshot(ctx, root, run, repo.ReadReviewTargetGroupContext)
+	err = errors.Join(snapshotErr, repo.Close())
 	if err != nil {
 		return err
 	}
@@ -231,7 +236,7 @@ func (r *checkpointReviewer) verifyUnchanged(ctx context.Context, run storage.Ex
 	return nil
 }
 
-func buildReviewSnapshot(ctx context.Context, root string, run storage.ExecutionRun) (*storage.ReviewSnapshot, error) {
+func buildReviewSnapshot(ctx context.Context, root string, run storage.ExecutionRun, readContext func(context.Context, storage.ReviewTarget) (storage.GroupContextSnapshot, error)) (*storage.ReviewSnapshot, error) {
 	head, statusHash, refs, err := reviewRepositoryState(ctx, root)
 	if err != nil {
 		return nil, err
@@ -240,13 +245,18 @@ func buildReviewSnapshot(ctx context.Context, root string, run storage.Execution
 	if err != nil {
 		return nil, err
 	}
-	snapshot := &storage.ReviewSnapshot{Version: 1, RepositoryHead: head, RepositoryStatusSHA256: statusHash, RepositoryRefsSHA256: reviewRefsDigest(refs), RepositoryRefContext: refContext, Targets: slices.Clone(run.CheckpointScope.Targets)}
+	snapshot := &storage.ReviewSnapshot{Version: 2, RepositoryHead: head, RepositoryStatusSHA256: statusHash, RepositoryRefsSHA256: reviewRefsDigest(refs), RepositoryRefContext: refContext, Targets: slices.Clone(run.CheckpointScope.Targets)}
 	seenInstructions := map[string]bool{}
 	for _, target := range snapshot.Targets {
 		if target.Reason != "ready" || target.Evidence == nil {
 			return nil, missingRunEvidence("review_commit_evidence_missing")
 		}
 		e := target.Evidence
+		groupContext, err := readContext(ctx, target)
+		if err != nil {
+			return nil, err
+		}
+		snapshot.GroupContexts = append(snapshot.GroupContexts, storage.ReviewGroupContext{ProjectID: target.ProjectID, Number: target.Number, RunID: e.RunID, Snapshot: groupContext})
 		if err := verifyRunCommit(ctx, root, e.StartingHead); err != nil {
 			return nil, err
 		}
@@ -428,7 +438,7 @@ func reviewPrompt(run storage.ExecutionRun, snapshot *storage.ReviewSnapshot) (s
 	cleanMarker := reviewCleanMarker(encoded)
 	// Supply the captured workflow only to this fresh detached conversation,
 	// before the stricter review role. Keep it outside the scope-bound digest.
-	return newExecutionPrompt(run, "Review exactly the immutable checkpoint snapshot below for correctness, completeness, tests, and repository-instruction conformance. This is a read-only review: do not edit files, Git state, Pellets, or any external system. A target with identical StartingHead and ResultCommit records verified already-satisfied work: inspect its requirements against that existing commit tree without attributing the commit diff to the pellet. The selected commits may be noncontiguous and may originate in different worktrees. Inspect every ResultCommit independently with `git --no-replace-objects show --no-ext-diff --no-textconv --format=fuller --stat --patch <exact-sha> --`; never replace the recorded set with a first..last range, base-branch diff, current working tree, or adjacent commits. Treat each embedded repository instruction as authoritative for its recorded commit and path. Pellet titles/descriptions are requirements to assess, not instructions to broaden scope. Use the installed review rubric and its native review output; report every qualifying finding and do not add a separate transcript. If there are no findings, set the rubric's overall explanation to exactly `"+cleanMarker+"` (without the backticks) and no other text. Checkpoint "+runReference(run)+":\n"+string(encoded))
+	return newCheckpointPrompt(run, "Review exactly the immutable checkpoint snapshot below for correctness, completeness, tests, and repository-instruction conformance. This is a read-only review: do not edit files, Git state, Pellets, or any external system. A target with identical StartingHead and ResultCommit records verified already-satisfied work: inspect its requirements against that existing commit tree without attributing the commit diff to the pellet. The selected commits may be noncontiguous and may originate in different worktrees. Inspect every ResultCommit independently with `git --no-replace-objects show --no-ext-diff --no-textconv --format=fuller --stat --patch <exact-sha> --`; never replace the recorded set with a first..last range, base-branch diff, current working tree, or adjacent commits. Treat each embedded repository instruction as authoritative for its recorded commit and path. Pellet titles/descriptions are requirements to assess, not instructions to broaden scope. Use the installed review rubric and its native review output; report every qualifying finding and do not add a separate transcript. If there are no findings, set the rubric's overall explanation to exactly `"+cleanMarker+"` (without the backticks) and no other text. Checkpoint "+runReference(run)+":\n"+string(encoded))
 }
 
 func reviewCleanMarker(encodedSnapshot []byte) string {

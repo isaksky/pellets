@@ -66,7 +66,7 @@ func TestExecutionPromptBoundsFailBeforeExternalIntent(t *testing.T) {
 	}
 }
 
-func TestCheckpointPromptsUseCapturedGroupBeforeReadOnlyRole(t *testing.T) {
+func TestCheckpointPromptsExcludeCheckpointGroupRequirements(t *testing.T) {
 	run := storage.ExecutionRun{RunCapture: storage.RunCapture{PromptPrefix: storage.PromptPrefix{Text: "stable\n"}}, GroupContext: storage.GroupContextSnapshot{Version: 1, State: "captured", Group: &storage.GroupContext{ID: 1, Name: "review group", Revision: 4, Context: "# Original checkpoint context\n"}}}
 	review, err := reviewPrompt(run, &storage.ReviewSnapshot{Version: 1})
 	if err != nil {
@@ -77,7 +77,7 @@ func TestCheckpointPromptsUseCapturedGroupBeforeReadOnlyRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	for role, prompt := range map[string]string{"Review exactly": review, "Independently triage exactly": triage} {
-		if !strings.HasPrefix(prompt, "stable\nCAPTURED GROUP CONTEXT v1\n") || strings.Count(prompt, run.GroupContext.Group.Context) != 1 || strings.Index(prompt, "END GROUP MARKDOWN") >= strings.Index(prompt, role) || !strings.Contains(strings.ToLower(prompt), "do not edit files") {
+		if !strings.HasPrefix(prompt, "stable\nHistorical implementation requirements:") || strings.Contains(prompt, run.GroupContext.Group.Context) || strings.Index(prompt, role) <= len("stable\n") || !strings.Contains(strings.ToLower(prompt), "do not edit files") {
 			t.Fatalf("checkpoint group context ordering or role changed: %s", prompt)
 		}
 	}

@@ -8,6 +8,43 @@ and the separate checkpoint review/triage execution policy remain authoritative.
 The queue's Closed label describes lifecycle status; the dialog's review outcome
 separately records whether a review succeeded and its findings.
 
+## Historical implementation requirements
+
+New review snapshots use version 2. Each `group_contexts` entry pairs a stable
+project ID, target number, and exact successful implementation run ID with that
+run's captured group context. The reviewer assesses the target's description and
+that historical Markdown alongside its exact commit, paths, and committed
+repository instructions. Different groups and revisions remain distinct, even
+when they share a name. Current group documents, checkpoint membership,
+scheduling filters, and queue adjacency never supply historical requirements or
+expand the selected target set.
+
+The detached reviewer and each independent finding assessor receive this same
+snapshot. Assessors distinguish the original requirements from current code,
+current repository instructions, and the active queue. The checkpoint's exact
+group and external ID still determine follow-up inheritance; implementation
+group context does not change it.
+
+A captured empty document, explicit ungrouped admission, and a legacy execution
+that predates context capture remain separate states. Version 1 review snapshots
+also predate this association and resume unchanged without backfilling context.
+Missing or corrupt required version 2 evidence requires attention. Group edits
+cannot change retained source; renames and other membership changes still obey
+the existing scope, generation, and readiness checks.
+
+The clean-result digest includes the captured context. Migration 23 also binds
+new triage receipts to a SHA-256 digest of the complete review snapshot. Explicit
+Resume preserves that snapshot, completed assessments, and permanent finding
+receipts, and retries only unfinished assessments. It never substitutes newer
+requirements or creates duplicate follow-ups. Existing snapshot and transport
+size limits remain enforced: oversized evidence requires attention and is never
+silently truncated.
+
+The workspace's Run details shows reviewed implementation context with each
+target and implementation run. Captured Markdown is escaped, read-only source in
+a disclosure. Identical snapshots share one displayed document with multiple
+target/run labels; different revisions retain separate documents.
+
 ## Inserting a checkpoint
 
 The browser can insert before or after an active queue record. It submits that

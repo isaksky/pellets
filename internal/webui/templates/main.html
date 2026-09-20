@@ -66,7 +66,7 @@
 
     {{if .RecoveryAttention}}<p class="run-notice warning">{{.RecoveryAttention}}</p>{{end}}
     {{if .Run}}<details class="run-details" id="run-details-{{$.Project.ID}}-{{.ID}}-{{.Run.ID}}"><summary>Run details</summary><dl class="run-facts"><div><dt>Pellet</dt><dd><code>{{.Run.Pellet}}</code></dd></div><div><dt>Mode</dt><dd>{{runStateLabel .Run.Mode}}</dd></div><div><dt>Access</dt><dd>{{.Run.Access}}</dd></div><div><dt>Model / effort</dt><dd>{{.Run.Model}} · {{.Run.Effort}}</dd></div><div><dt>Phase</dt><dd>{{runStateLabel .Run.Phase}}</dd></div><div><dt>State</dt><dd><span class="badge run-state {{.Run.State}}">{{runStateLabel .Run.State}}</span></dd></div><div><dt>Frozen filters</dt><dd>External ID: {{.Run.ExternalID}} · Group: {{.Run.Group}}</dd></div></dl>
-      {{template "run-group-context" .Run}}</details>
+      {{if eq .Run.Mode "review_checkpoint"}}{{template "review-group-context" .Run}}{{else}}{{template "run-group-context" .Run}}{{end}}</details>
       <p class="run-activity"><strong>Latest activity:</strong> {{.Run.Activity}}</p>
       {{if .Run.AutoReview}}<p class="run-notice">Automatic approval review is active; any remaining human decision is shown below.</p>{{end}}
       {{if .Run.Awaiting}}<p class="run-notice">Awaiting input for this exact run.</p>{{end}}

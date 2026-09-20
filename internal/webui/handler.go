@@ -378,6 +378,9 @@ type runView struct {
 	Attention     bool
 	Active        bool
 	Interaction   *storage.RunInteraction
+
+	ReviewContextVersion int
+	ReviewContexts       []reviewGroupContextView
 }
 
 type scheduleView struct {
@@ -835,6 +838,7 @@ func makeRunView(run storage.ExecutionRun) runView {
 	view := runView{ID: run.ID, Revision: run.Revision, Pellet: run.ProjectCode + "-" + strconv.FormatInt(run.PelletNumber, 10), PelletNumber: run.PelletNumber, Mode: run.Mode, Model: model, Effort: effort, Phase: run.Phase, State: run.State, Activity: activity, Commit: run.ResultCommit, Error: run.ErrorCode, ExternalID: textOrDash(run.ExternalID), Group: textOrDash(run.Group), Active: storage.RunActive(run.State), Interaction: run.Interaction}
 	view.Access = "Automatic approval"
 	view.GroupContext = run.GroupContext
+	view.ReviewContextVersion, view.ReviewContexts = makeReviewGroupContextViews(run)
 	if run.Settings.AccessMode == storage.AccessFull {
 		view.Access = "Full access"
 	}

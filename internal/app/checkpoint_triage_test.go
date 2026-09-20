@@ -63,7 +63,7 @@ func TestCheckpointTriageFailuresKeepFindingsAndCheckpointOpen(t *testing.T) {
 }
 
 func TestCheckpointTriageResumePreservesPartialResultsAndOnlyAssessesUnfinished(t *testing.T) {
-	s, request, checkpoint, _ := preparedReviewCheckpoint(t, installSupervisorPeer(t), "review_findings_partial")
+	s, request, checkpoint, implementations, groups, group := preparedContextReviewCheckpoint(t, installSupervisorPeer(t), "review_findings_partial", true)
 	first := awaitSchedule(t, startSchedule(t, s, request))
 	if first.State != "needs_attention" {
 		t.Fatalf("partial triage: %+v", first)
@@ -76,6 +76,9 @@ func TestCheckpointTriageResumePreservesPartialResultsAndOnlyAssessesUnfinished(
 		t.Fatalf("partial results: %+v", run.CheckpointTriage)
 	}
 	firstNumber := run.CheckpointTriage.Assessments[0].PelletNumber
+	if _, err := groups.EditGroupContext(context.Background(), request.Selected.Project, group.ID, group.Revision, "LIVE CONTEXT MUST NOT APPEAR after interruption"); err != nil {
+		t.Fatal(err)
+	}
 	// Preflight sees changed sources, but fresh assessments in the resumed run
 	// must retain the original conversation's exact captured skill/help layer.
 	if err = os.WriteFile(filepath.Join(s.options.Database.Root, ".agents", "skills", "pellets", "SKILL.md"), []byte("---\nname: pellets\n---\nChanged before triage resume.\n"), 0600); err != nil {
@@ -102,6 +105,8 @@ func TestCheckpointTriageResumePreservesPartialResultsAndOnlyAssessesUnfinished(
 	if completed.PromptPrefix != run.PromptPrefix {
 		t.Fatal("triage resume replaced the captured prefix with changed preflight sources")
 	}
+	assertReviewContexts(t, completed.ReviewSnapshot, implementations)
+	assertCheckpointContextPrompts(t, s, completed, implementations)
 	if completed.Settings.Codex.Model != run.Settings.Codex.Model || completed.Settings.Codex.ReasoningEffort != "high" {
 		t.Fatalf("triage resume relabeled the original review settings: %+v", completed.Settings.Codex)
 	}
@@ -156,5 +161,10 @@ func TestCheckpointTriageResumePreservesPartialResultsAndOnlyAssessesUnfinished(
 	active, err := db.ListPellets(context.Background(), request.Selected, storage.PelletListOptions{})
 	if err != nil || len(active) != 2 {
 		t.Fatalf("duplicate/missing followups: %+v %v", active, err)
+	}
+	for _, followup := range active {
+		if followup.Group == nil || *followup.Group != *checkpoint.Group || followup.ExternalID == nil || *followup.ExternalID != *checkpoint.ExternalID {
+			t.Fatal("implementation context changed checkpoint follow-up inheritance")
+		}
 	}
 }

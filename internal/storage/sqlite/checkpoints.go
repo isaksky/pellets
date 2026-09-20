@@ -5,11 +5,65 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"sort"
 
 	"pellets/internal/domain"
 	"pellets/internal/storage"
 )
+
+// Read only the exact successful execution selected by readiness. Neither the
+// current group nor a schedule filter can supply historical requirements.
+func (db *ProjectDatabase) ReadReviewTargetGroupContext(ctx context.Context, target storage.ReviewTarget) (storage.GroupContextSnapshot, error) {
+	return readReviewTargetGroupContext(ctx, db.db, target)
+}
+
+func readReviewTargetGroupContext(ctx context.Context, q runQuery, target storage.ReviewTarget) (snapshot storage.GroupContextSnapshot, err error) {
+	e := target.Evidence
+	if e == nil || target.ImplementationRevision == nil || target.Reason != "ready" {
+		return snapshot, storage.InvalidExecutionRun("review target lacks successful implementation evidence")
+	}
+	var encoded string
+	err = q.QueryRowContext(ctx, `SELECT group_context_json FROM execution_runs
+ WHERE run_id=? AND project_id=? AND pellet_number=? AND workspace_id=?
+ AND implementation_revision=? AND pellet_title=? AND pellet_description=?
+ AND starting_head=? AND result_commit=? AND mode<>'review_checkpoint'
+ AND state='completed' AND outcome='succeeded' AND pending_operation=''
+ AND commit_verified_at IS NOT NULL AND thread_id<>'' AND turn_id<>'' AND finalization_json<>'null'`,
+		e.RunID, target.ProjectID, target.Number, e.WorkspaceID, *target.ImplementationRevision,
+		target.Title, target.Description, e.StartingHead, e.ResultCommit).Scan(&encoded)
+	if errors.Is(err, sql.ErrNoRows) {
+		return snapshot, storage.ExecutionRunConflict(e.RunID)
+	}
+	if err != nil {
+		return snapshot, err
+	}
+	return storage.DecodeGroupContextSnapshot([]byte(encoded))
+}
+
+// Recheck on durable writes and reads, including Resume and triage. A valid
+// legacy review remains unchanged; missing v2 context is never legacy absence.
+func validateReviewGroupContexts(ctx context.Context, q runQuery, scope *storage.ReviewCheckpoint, snapshot *storage.ReviewSnapshot) error {
+	if err := storage.ValidateReviewSnapshot(snapshot); err != nil {
+		return err
+	}
+	if snapshot == nil || snapshot.Version == 1 {
+		return nil
+	}
+	if scope == nil || !storage.SameReviewScope(scope, &storage.ReviewCheckpoint{Version: scope.Version, Ready: scope.Ready, Targets: snapshot.Targets}) {
+		return storage.InvalidExecutionRun("review snapshot differs from its selected checkpoint scope")
+	}
+	for i, target := range snapshot.Targets {
+		captured, err := readReviewTargetGroupContext(ctx, q, target)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(captured, snapshot.GroupContexts[i].Snapshot) {
+			return storage.ExecutionRunConflict(target.Evidence.RunID)
+		}
+	}
+	return nil
+}
 
 // Both selection and the materialized JSON use the same relational readiness
 // rule in the same SQLite snapshot. There is no cached readiness flag.

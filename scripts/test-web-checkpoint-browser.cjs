@@ -10,10 +10,14 @@ const {chromium, webkit} = require('playwright');
 
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-checkpoint-browser-'));
+const artifacts = process.env.PELLETS_BROWSER_ARTIFACTS;
+if (artifacts) fs.mkdirSync(artifacts, {recursive: true});
 const binary = path.join(temporary, process.platform === 'win32' ? 'pl.exe' : 'pl');
 const peer = path.join(temporary, process.platform === 'win32' ? 'codex.exe' : 'codex');
 const environment = {...process.env, PATH: temporary + path.delimiter + process.env.PATH,
   PELLETS_CODEX_EXECUTABLE: peer, PELLETS_SUPERVISOR_PEER: '1', GORACE: 'atexit_sleep_ms=0'};
+const capturedSource = '# Original implementation requirements\n\n<script>window.contextInjected=true</script>\n' +
+  '```mermaid\nflowchart LR\n A --> B\n```\n' + 'Captured shared requirements. '.repeat(400);
 let browser, server;
 const until = async (predicate, message) => {
   const deadline = Date.now() + 20000;
@@ -62,7 +66,10 @@ async function startServer(root) {
     git('config', 'commit.gpgSign', 'false');
     git('commit', '--allow-empty', '-m', 'initial');
     fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '\n/fake-*\n/.agents/\n');
-    const target = cli('add', 'selected implementation');
+    const target = cli('add', 'selected implementation', '--group', 'Implementation <group>');
+    const group = cli('group', 'list')[0];
+    const source = mode === 'review_findings_invalid' ? '' : capturedSource;
+    cli('group', 'edit', String(group.id), '--context', source);
     cli('skill', 'install', '--scope', 'repo', '--agent', 'codex', '--yes');
     setMode('schedule_success');
     let origin = await startServer(root);
@@ -90,6 +97,7 @@ async function startServer(root) {
       return state;
     }
     assert.equal((await schedule(controls.locator('form[data-schedule]:has(select[name=mode]) button[type=submit]').first())).completed, 1);
+    cli('group', 'edit', String(group.id), '--context', 'Current document must not replace implementation evidence');
     const checkpoint = cli('add', 'Review selected implementation', '--review-targets', target.id);
     const inspectorPath = `/projects/${target.project}/tasks/${checkpoint.id}`;
     await page.goto(origin + inspectorPath);
@@ -133,6 +141,44 @@ async function startServer(root) {
       await outcome.waitFor();
     }
     assert.equal(cli('show', checkpoint.id).status, 'closed');
+    await controls.reload();
+    const details = controls.locator('.run-details');
+    await details.locator(':scope > summary').focus(); await controls.keyboard.press('Enter');
+    const context = controls.getByRole('region', {name: 'Reviewed implementation context', exact: true});
+    assert.match(await context.innerText(), /Historical requirements captured by each selected implementation/);
+    assert.ok((await context.innerText()).includes(target.id));
+    assert.match(await context.innerText(), /Implementation run 1/);
+    assert.match(await context.innerText(), /Implementation <group>/);
+    assert.equal(await context.locator('script, img, pl-diagram').count(), 0);
+    assert.equal(await controls.evaluate(() => window.contextInjected), undefined);
+    if (source) {
+      const disclosure = context.locator('details');
+      await disclosure.locator('summary').focus(); await controls.keyboard.press('Enter');
+      const raw = context.getByLabel('Captured Markdown source', {exact: true});
+      assert.equal(await raw.textContent(), source);
+      await raw.focus(); await controls.keyboard.press('End');
+      await until(() => raw.evaluate(el => el.scrollTop > 0), 'Captured source cannot be scrolled by keyboard');
+      await controls.evaluate(() => document.dispatchEvent(new CustomEvent('pellets-refresh')));
+      await controls.waitForTimeout(300);
+      assert.equal(await disclosure.evaluate(el => el.open), true, 'Refresh collapsed captured source');
+      if (mode === 'review_clean') {
+        for (const theme of ['gruvbox-light', 'gruvbox-dark', 'light', 'dark', 'icy']) {
+          await controls.evaluate(theme => window.Workbench.applyTheme(theme), theme);
+          for (const width of [1280, 1092, 390]) {
+            await controls.setViewportSize({width, height: 900});
+            await raw.scrollIntoViewIfNeeded();
+            const box = await raw.boundingBox();
+            assert.ok(box.width > 100 && box.x >= 0 && box.x + box.width <= width + 1, 'Review source overflows its pane');
+            assert.ok(box.height <= 281, 'Long review source is not bounded');
+            if (artifacts) await controls.screenshot({path: path.join(artifacts, `review-context-${theme}-${width}.png`)});
+          }
+        }
+        await controls.setViewportSize({width: 1280, height: 900});
+      }
+    } else {
+      assert.match(await context.innerText(), /captured group document was empty/);
+      assert.equal(await context.locator('pre').count(), 0);
+    }
     text = await outcome.textContent();
     await page.reload();
     assert.equal(await outcome.textContent(), text, 'Reconnect lost the closed result');
@@ -157,7 +203,7 @@ async function startServer(root) {
     assert.deepEqual(errors, []);
     await controls.close();
     await page.close(); await stopServer();
-    console.log(`Checkpoint browser passed: ${mode}, durable reconnect, later run, narrow layout, exact generation.`);
+    console.log(`Checkpoint browser passed: ${mode}, captured context, durable reconnect, later run, narrow layout, exact generation.${artifacts ? ` Artifacts: ${artifacts}` : ''}`);
   }
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   if (browser) await browser.close();

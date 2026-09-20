@@ -17,6 +17,31 @@ type GroupContextSnapshot struct {
 // Allow the worst-case JSON escaping of a 1 MiB document, plus bounded metadata.
 const MaxGroupContextSnapshotBytes = 6*MaxGroupContextBytes + (32 << 10)
 
+// DecodeGroupContextSnapshot preserves the difference between an explicitly
+// captured empty document and a missing/null document in damaged evidence.
+func DecodeGroupContextSnapshot(data []byte) (snapshot GroupContextSnapshot, err error) {
+	var record struct {
+		Version *int            `json:"version"`
+		State   *string         `json:"state"`
+		Group   json.RawMessage `json:"group"`
+	}
+	if len(data) > MaxGroupContextSnapshotBytes || json.Unmarshal(data, &record) != nil || record.Version == nil || record.State == nil || len(record.Group) == 0 {
+		return snapshot, InvalidExecutionRun("captured group context is missing required evidence or is corrupt")
+	}
+	if *record.State == "captured" {
+		var group struct {
+			Context *string `json:"context"`
+		}
+		if json.Unmarshal(record.Group, &group) != nil || group.Context == nil {
+			return snapshot, InvalidExecutionRun("captured group document is missing; an empty document must be explicit")
+		}
+	}
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return snapshot, InvalidExecutionRun("captured group context is corrupt")
+	}
+	return snapshot, ValidateGroupContextSnapshot(snapshot)
+}
+
 func ValidateGroupContextSnapshot(snapshot GroupContextSnapshot) error {
 	if snapshot.Version != 1 {
 		return InvalidExecutionRun("unsupported captured group context version")

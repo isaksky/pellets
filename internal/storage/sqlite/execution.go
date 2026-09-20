@@ -367,6 +367,9 @@ func (db *ProjectDatabase) UpdateExecutionRun(ctx context.Context, request stora
 			return storage.ExecutionRunConflict(current.ID)
 		}
 		p := request.Progress
+		if err := validateReviewGroupContexts(ctx, conn, current.CheckpointScope, p.ReviewSnapshot); err != nil {
+			return err
+		}
 		// Terminal failure/cancellation recording must remain possible after a
 		// lifecycle change. Success and durable finalization evidence, however,
 		// belong only to the implementation generation captured by this run.
@@ -835,10 +838,8 @@ func readExecutionRun(ctx context.Context, q runQuery, id int64) (run storage.Ex
 	if err := json.Unmarshal([]byte(promptPrefix), &run.PromptPrefix); err != nil {
 		return run, err
 	}
-	if err := json.Unmarshal([]byte(groupContext), &run.GroupContext); err != nil {
-		return run, err
-	}
-	if err := storage.ValidateGroupContextSnapshot(run.GroupContext); err != nil {
+	run.GroupContext, err = storage.DecodeGroupContextSnapshot([]byte(groupContext))
+	if err != nil {
 		return run, err
 	}
 	if err := json.Unmarshal([]byte(finalization), &run.Finalization); err != nil {
@@ -848,6 +849,9 @@ func readExecutionRun(ctx context.Context, q runQuery, id int64) (run storage.Ex
 		return run, err
 	}
 	if err := json.Unmarshal([]byte(reviewSnapshot), &run.ReviewSnapshot); err != nil {
+		return run, err
+	}
+	if err := validateReviewGroupContexts(ctx, q, run.CheckpointScope, run.ReviewSnapshot); err != nil {
 		return run, err
 	}
 	if err := json.Unmarshal([]byte(reviewResult), &run.ReviewResult); err != nil {

@@ -2,6 +2,7 @@ package webui
 
 import (
 	"bytes"
+	"fmt"
 	"html"
 	"html/template"
 	"strings"
@@ -51,5 +52,56 @@ func TestRunDetailsDistinguishHistoricalGroupContextAndEscapeSource(t *testing.T
 				t.Fatal("source cannot be focused for scrolling")
 			}
 		})
+	}
+}
+
+func TestReviewDetailsPairTargetsWithHistoricalSourceWithoutDuplication(t *testing.T) {
+	templates, err := template.ParseFS(embeddedFiles, "templates/run_context.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := "# Original\r\n<script>never execute</script>"
+	contexts := []storage.GroupContextSnapshot{
+		{Version: 1, State: "captured", Group: &storage.GroupContext{ID: 42, Name: "Original <group>", Revision: 7, Context: doc}},
+		{Version: 1, State: "captured", Group: &storage.GroupContext{ID: 42, Name: "Original <group>", Revision: 8, Context: "Second revision"}},
+		{Version: 1, State: "captured", Group: &storage.GroupContext{ID: 43, Name: "Empty", Revision: 1}},
+		{Version: 1, State: "ungrouped"}, {Version: 1, State: "legacy"},
+	}
+	contexts = append(contexts, contexts[0])
+	run := storage.ExecutionRun{ID: 19}
+	run.Mode = "review_checkpoint"
+	run.ReviewSnapshot = &storage.ReviewSnapshot{Version: 2}
+	for i, context := range contexts {
+		reference := fmt.Sprintf("project-%d", i+1)
+		run.ReviewSnapshot.Targets = append(run.ReviewSnapshot.Targets, storage.ReviewTarget{Reference: reference})
+		run.ReviewSnapshot.GroupContexts = append(run.ReviewSnapshot.GroupContexts, storage.ReviewGroupContext{RunID: int64(i + 10), Snapshot: context})
+	}
+	view := makeRunView(run)
+	var rendered bytes.Buffer
+	if err := templates.ExecuteTemplate(&rendered, "review-group-context", view); err != nil {
+		t.Fatal(err)
+	}
+	body := rendered.String()
+	if len(view.ReviewContexts) != 5 || strings.Count(body, html.EscapeString(doc)) != 1 || strings.Contains(body, "<script>") {
+		t.Fatalf("duplicated or unsafe source: %s", body)
+	}
+	for _, want := range []string{"project-1", "project-6", "Implementation run 10", "Implementation run 15", "42 / 7", "42 / 8", "Second revision", "The captured group document was empty", "Ungrouped at admission", "Legacy execution", `id="run-group-source-review-19-0"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %s", want)
+		}
+	}
+	for _, version := range []int{0, 1} {
+		run.ReviewSnapshot = &storage.ReviewSnapshot{Version: version}
+		rendered.Reset()
+		if err := templates.ExecuteTemplate(&rendered, "review-group-context", makeRunView(run)); err != nil {
+			t.Fatal(err)
+		}
+		want := "Legacy review: implementation group context was not captured"
+		if version == 0 {
+			want = "Implementation context has not been captured for review yet"
+		}
+		if !strings.Contains(rendered.String(), want) {
+			t.Fatal("legacy and uncaptured review conflated")
+		}
 	}
 }
