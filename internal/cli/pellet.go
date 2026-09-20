@@ -177,7 +177,7 @@ func PurgeCommand(manager app.PelletManager) Command {
 					return nil, err
 				}
 				for _, pellet := range plan {
-					if _, err := fmt.Fprintf(invocation.Stdout, "  %s  %s\n", pellet.Reference, pellet.Title); err != nil {
+					if err := output.WriteHuman(invocation.Stdout, fmt.Sprintf("  %s  %s\n", pellet.Reference, pellet.Title)); err != nil {
 						return nil, err
 					}
 				}
@@ -367,8 +367,8 @@ func pelletLifecycleCommand(manager app.PelletManager, operation storage.PelletL
 				if err != nil {
 					return nil, err
 				}
-				if _, err := fmt.Fprintf(invocation.Stdout, "%s %s (%s), recovering recorded workspace %d at %s (Git directory %s).\nRecovery coordinates worktrees; it does not authenticate an agent.\n",
-					operation, pellet.Reference, pellet.Title, pellet.Workspace.ID, root, gitDir); err != nil {
+				if err := output.WriteHuman(invocation.Stdout, fmt.Sprintf("%s %s (%s), recovering recorded workspace %d at %s (Git directory %s).\nRecovery coordinates worktrees; it does not authenticate an agent.\n",
+					operation, pellet.Reference, pellet.Title, pellet.Workspace.ID, root, gitDir)); err != nil {
 					return nil, err
 				}
 				confirmed, err := newInteraction(invocation.Stdin, invocation.Stdout).confirm("Apply this workspace recovery? [y/N]: ")

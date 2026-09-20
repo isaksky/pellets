@@ -95,7 +95,7 @@ func MemoryCommand(manager app.MemoryManager) Command {
 					if err != nil {
 						return nil, err
 					}
-					if _, err := fmt.Fprintf(invocation.Stdout, "Remove memory %d from %s (%s):\n%s\n", memory.ID, memory.ProjectCode, memory.CreatedBy, memory.Text); err != nil {
+					if err := output.WriteHuman(invocation.Stdout, fmt.Sprintf("Remove memory %d from %s (%s):\n%s\n", memory.ID, memory.ProjectCode, memory.CreatedBy, memory.Text)); err != nil {
 						return nil, err
 					}
 					confirmed, err := newInteraction(invocation.Stdin, invocation.Stdout).confirm("Permanently remove this memory? [y/N]: ")

@@ -82,10 +82,22 @@ class Terminal:
         if getattr(self, 'fd', None) is not None:
             self.close()
 
+def assert_preview(prompt, *expected):
+    # PTYs translate output newlines to CRLF; any remaining CR is record data.
+    text = prompt.data.decode().replace('\r\n', '\n')
+    assert not any(control in text for control in ('\x1b', '\r', '\b')), repr(text)
+    for fragment in expected:
+        assert fragment in text, (fragment, repr(text))
+
+# Erasure, cursor movement, carriage return and backspace must stay visible as
+# escaped text, never hide a preceding record or overwrite its identity.
+controls = '\x1b[2J\x1b[H\rreplaced\b!'
+escaped_controls = r'\u001b[2J\u001b[H\u000dreplaced\u0008!'
+
 git(repo, 'init', '-q')
 git(repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'fixture')
 cli('init-db', cwd=root)
-project = cli('project', 'show')['data']
+cli('project', 'show')
 
 # Group operations finish directly even on a terminal. Explicit stdin remains
 # a Markdown payload and is never read as a confirmation or wizard answer.
@@ -143,47 +155,96 @@ assert json.loads(Terminal('--json', 'show', pellet['id']).finish())['data']['id
 
 # Every consequential action handles decline, terminal EOF and SIGINT cleanly.
 cli('close', pellet['id'])
-memory = cli('memory', 'add', '--text', 'knowledge to retain')['data']
-for action, check in [
-    (('purge', '--project', 'demo'), lambda: cli('show', pellet['id'])),
-    (('memory', 'remove', str(memory['id'])), lambda: cli('memory', 'show', str(memory['id']))),
+unsafe_title = 'later record ' + controls
+unsafe = cli('add', unsafe_title)['data']
+cli('close', unsafe['id'])
+memory_text = 'knowledge to retain\n' + controls + '\nlast line\tend'
+memory = cli('memory', 'add', '--text', memory_text)['data']
+assert unsafe['title'] == unsafe_title and memory['text'] == memory_text
+purge_rows = [f"  {pellet['id']}  {pellet['title']}\n", f"  {unsafe['id']}  later record {escaped_controls}\n"]
+memory_preview = f"Remove memory {memory['id']} from demo (agent):\nknowledge to retain\n{escaped_controls}\nlast line\tend\n"
+for action, preview in [
+    (('purge', '--project', 'demo'), purge_rows),
+    (('memory', 'remove', str(memory['id'])), [memory_preview]),
 ]:
     for answer in ('no\n', '\x04', '\x03'):
         prompt = Terminal(*action).expect('[y/N]:')
+        assert_preview(prompt, *preview)
         assert 'Cancelled' in prompt.send(answer).finish()
-        check()
+        assert cli('show', pellet['id'])['data']['title'] == pellet['title']
+        assert cli('show', unsafe['id'])['data']['title'] == unsafe_title
+        assert cli('memory', 'show', str(memory['id']))['data']['text'] == memory_text
 # Memory changes during confirmation are not silently deleted.
 prompt = Terminal('memory', 'remove', str(memory['id'])).expect('[y/N]:')
+assert_preview(prompt, memory_preview)
 cli('memory', 'approve', str(memory['id']))
 assert 'confirmation_changed' in prompt.send('yes\n').finish(4)
-cli('memory', 'show', str(memory['id']))
-assert 'Removed memory' in Terminal('memory', 'remove', str(memory['id'])).expect('[y/N]:').send('yes\n').finish()
+assert cli('memory', 'show', str(memory['id']))['data']['text'] == memory_text
+prompt = Terminal('memory', 'remove', str(memory['id'])).expect('[y/N]:')
+assert_preview(prompt, memory_preview)
+assert 'Removed memory' in prompt.send('yes\n').finish()
 cli('memory', 'show', str(memory['id']), code=3)
 # New eligible records invalidate the whole purge, not just the added record.
 prompt = Terminal('purge', '--project', 'demo').expect('[y/N]:')
+assert_preview(prompt, *purge_rows)
 other = cli('add', 'closed during prompt')['data']
 cli('close', other['id'])
 assert 'confirmation_changed' in prompt.send('yes\n').finish(4)
 cli('show', pellet['id'])
+assert cli('show', unsafe['id'])['data']['title'] == unsafe_title
 cli('show', other['id'])
-assert 'Purged 2 closed pellets' in Terminal('purge', '--project', 'demo').expect('[y/N]:').send('yes\n').finish()
+prompt = Terminal('purge', '--project', 'demo').expect('[y/N]:')
+assert_preview(prompt, *purge_rows, f"  {other['id']}  {other['title']}\n")
+assert 'Purged 3 closed pellets' in prompt.send('yes\n').finish()
+for record in (pellet, unsafe, other):
+    cli('show', record['id'], code=3)
 
 # Explicit cross-workspace recovery displays and revalidates the stored owner.
+# Put controls in both the worktree root and Git directory without changing the
+# project code, which is derived from the final directory component.
+recovery_repo = root / ('workspace ' + controls) / 'recovery'
+recovery_repo.mkdir(parents=True)
+git(recovery_repo, 'init', '-q')
+git(recovery_repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'fixture')
+recovery_project = cli('project', 'show', cwd=recovery_repo)['data']
 linked = root / 'linked'
-git(repo, 'worktree', 'add', '-q', '--detach', str(linked), 'HEAD')
+git(recovery_repo, 'worktree', 'add', '-q', '--detach', str(linked), 'HEAD')
 cli('project', 'show', cwd=linked)
-owned = cli('add', 'owned work')['data']
-cli('start', owned['id'])
-workspace = str(project['workspaces'][0]['id'])
+owned_title = 'owned work ' + controls
+owned = cli('add', owned_title, cwd=recovery_repo)['data']
+cli('start', owned['id'], cwd=recovery_repo)
+owner = recovery_project['workspaces'][0]
+workspace = str(owner['id'])
+def escaped_workspace_path(field):
+    # Use the registered path: discovery resolves symlinks and filesystem case.
+    path = Path(owner[field])
+    if owner[field + '_relative']:
+        path = root.resolve() / path
+    text = str(path)
+    assert all(control in text for control in ('\x1b', '\r', '\b')), repr(text)
+    return text.replace('\x1b', r'\u001b').replace('\r', r'\u000d').replace('\b', r'\u0008')
+escaped_root = escaped_workspace_path('root_path')
+escaped_git_dir = escaped_workspace_path('git_dir')
+def recovery_preview(title):
+    return f"release {owned['id']} ({title}), recovering recorded workspace {workspace} at {escaped_root} (Git directory {escaped_git_dir}).\n"
 for answer in ('no\n', '\x04', '\x03'):
     prompt = Terminal('release', owned['id'], '--recover-workspace', workspace, cwd=linked).expect('[y/N]:')
-    assert str(repo) in prompt.data.decode()
+    assert_preview(prompt, recovery_preview('owned work ' + escaped_controls))
     assert 'Cancelled' in prompt.send(answer).finish()
-    assert cli('show', owned['id'])['data']['status'] == 'in_progress'
+    unchanged = cli('show', owned['id'], cwd=recovery_repo)['data']
+    assert unchanged['status'] == 'in_progress' and unchanged['title'] == owned_title
+    assert unchanged['workspace']['root_path'] == owner['root_path']
+    assert unchanged['workspace']['git_dir'] == owner['git_dir']
 prompt = Terminal('release', owned['id'], '--recover-workspace', workspace, cwd=linked).expect('[y/N]:')
-cli('edit', owned['id'], '--title', 'changed owner record')
+assert_preview(prompt, recovery_preview('owned work ' + escaped_controls))
+changed_title = 'changed owner record ' + controls
+cli('edit', owned['id'], '--title', changed_title, cwd=recovery_repo)
 assert 'confirmation_changed' in prompt.send('yes\n').finish(4)
-assert 'Recovered workspace' in Terminal('release', owned['id'], '--recover-workspace', workspace, cwd=linked).expect('[y/N]:').send('yes\n').finish()
+prompt = Terminal('release', owned['id'], '--recover-workspace', workspace, cwd=linked).expect('[y/N]:')
+assert_preview(prompt, recovery_preview('changed owner record ' + escaped_controls))
+assert 'Recovered workspace' in prompt.send('yes\n').finish()
+recovered = cli('show', owned['id'], cwd=recovery_repo)['data']
+assert recovered['status'] == 'open' and recovered['title'] == changed_title and recovered['workspace'] is None
 
 # Redirect-conflict rename performs the originally requested command after yes.
 foreign = root / 'foreign'

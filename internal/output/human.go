@@ -27,6 +27,12 @@ func plainHuman(s string) string {
 	return b.String()
 }
 
+// WriteHuman writes text with terminal controls escaped, preserving newlines
+// and tabs. Use it for human output that is not a rendered command result.
+func WriteHuman(w io.Writer, text string) error {
+	return write(w, []byte(plainHuman(text)))
+}
+
 func wrapHuman(s string, width int) string {
 	s = plainHuman(s)
 	if width <= 0 {

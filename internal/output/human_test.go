@@ -2,9 +2,26 @@ package output
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 )
+
+func TestWriteHuman(t *testing.T) {
+	text := "record 界\x1b[2J\x1b[H\rchanged\b\x00\x7f\u009b2J\nnext\tcolumn\n"
+	want := "record 界\\u001b[2J\\u001b[H\\u000dchanged\\u0008\\u0000\\u007f\\u009b2J\nnext\tcolumn\n"
+	var b bytes.Buffer
+	if err := WriteHuman(&b, text); err != nil {
+		t.Fatal(err)
+	}
+	if b.String() != want {
+		t.Fatalf("WriteHuman() = %q, want %q", b.String(), want)
+	}
+	if err := WriteHuman(failingWriter{}, text); !IsWriteFailure(err) || !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("WriteHuman() error = %v, want a closed-pipe write failure", err)
+	}
+}
 
 func TestHumanWrappingAndControlSafety(t *testing.T) {
 	text := "abcdefghijklmnopqrstuvwxyz 界界界\n" + "tail\tend\x1b[31m\r\x00\n"

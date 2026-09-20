@@ -62,7 +62,7 @@ func (r HumanRenderer) Render(w io.Writer, command string, data any) error {
 		return err
 	}
 	if layout, ok := data.(interface{ PreserveHumanLayout() bool }); ok && layout.PreserveHumanLayout() {
-		return write(w, []byte(plainHuman(buffer.String())))
+		return WriteHuman(w, buffer.String())
 	}
 	return write(w, []byte(wrapHuman(buffer.String(), r.Width)))
 }
