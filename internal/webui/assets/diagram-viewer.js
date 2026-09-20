@@ -81,7 +81,9 @@ export function openDiagramViewer(host, trigger) {
     // marker and scoped CSS selector. Never rerender or move the inline SVG.
     const copy = svg.cloneNode(true), ids = new Map();
     const nodes = [copy, ...copy.querySelectorAll("*")];
-    for (const node of nodes) if (node.id) ids.set(node.id, id + "-svg-" + ids.size);
+    // Inline IDs are already safe. Prefix them again so Mermaid's suffix-based
+    // marker color selectors also keep matching in the isolated viewer copy.
+    for (const node of nodes) if (node.id) ids.set(node.id, id + "-svg-" + ids.size + "-" + node.id);
     for (const node of nodes) for (const attr of [...node.attributes]) {
       let value = attr.value;
       if (attr.name === "id") value = ids.get(value);

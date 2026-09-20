@@ -99,12 +99,15 @@ const source = examples.map(fence).join('\n\n') + '\n\n```js\nconst ordinary = t
     await page.waitForFunction(count => (window.liveRefreshFinished || 0) > count, completed);
   };
   await noDuplicateIDs();
+  await require('./web-diagram-marker-contract.cjs')({page, view, fresh, ready, screenshot, noDuplicateIDs, source, fence});
   // Defense at the SVG boundary does not rely on CSP or Mermaid's sanitizer.
   await page.evaluate(async () => {
     const {diagramSVG} = await import(document.querySelector('script[type=module]').src.replace('app.js','diagrams.js'));
     const {svg} = diagramSVG('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><script>alert(1)</script><foreignObject><p>HTML</p></foreignObject><image href="https://example.invalid/pixel"/><a href="javascript:alert(1)"><text>Link</text></a><rect id="shape" width="10" height="10" fill="url(https://example.invalid/fill)" onclick="alert(1)"/><text>Safe text</text></svg>', 'boundary-test');
     if (svg.querySelector('script,foreignObject,image,a,[href],[onclick],[style],[fill]')) throw Error('Unsafe SVG escaped allowlist');
-    if (svg.querySelector('rect').id !== 'boundary-test-0' || !svg.textContent.includes('Safe text')) throw Error('SVG source alternative/ID remapping failed');
+    if (svg.querySelector('rect').id !== 'boundary-test-0-shape' || !svg.textContent.includes('Safe text')) throw Error('SVG source alternative/ID remapping failed');
+    const unusual = diagramSVG('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect id="unsafe id:shape"/><rect id="shape"/></svg>', 'unusual-test').svg;
+    if (unusual.querySelector('rect').id !== 'unusual-test-0' || unusual.querySelectorAll('[id]').length !== 2) throw Error('Unsafe ID characters must retain isolated numeric IDs');
     let rejected = false;
     try { diagramSVG('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" style="filter:url(https://example.invalid/filter)"/>', 'style-test'); }
     catch { rejected = true; }
@@ -169,7 +172,7 @@ const source = examples.map(fence).join('\n\n') + '\n\n```js\nconst ordinary = t
         assert.equal(await modal.locator('svg svg text').first().evaluate(node => getComputedStyle(node).fill),
           await diagram.locator('svg text').first().evaluate(node => getComputedStyle(node).fill));
         assert.ok(await modal.evaluate(node => node.scrollWidth <= node.clientWidth && node.scrollHeight <= node.clientHeight));
-        if (index === 0) await screenshot(`viewer-${theme}-${width}.png`);
+        await screenshot(`viewer-${theme}-${width}-${index}.png`);
         await page.keyboard.press('Escape');
         assert.equal(await diagram.locator('.mermaid-canvas').evaluate(node => node === document.activeElement), true);
       }

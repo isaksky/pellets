@@ -247,6 +247,8 @@ SVG IDs, ARIA/marker references and scoped CSS without parsing source again.
 The `svg` reference still belongs to the inline surface. No Mermaid click
 handlers are bound.
 Generated CSS is scoped and SVG is rebuilt through an allowlist with unique IDs.
+Both inline and viewer IDs retain safe Mermaid suffixes so marker fill/stroke
+rules keep their theme colors, including when the open viewer changes theme.
 Source cannot enable HTML, scripts, resources or weaker Mermaid security.
 The application's CSP remains unchanged.
 
@@ -267,6 +269,9 @@ plus screenshots/contrast at 1280, 1092 and 390px in all five themes. Its
 `web-diagram-viewer-contract.cjs` checks click/keyboard opening, nested Escape,
 focus containment/return, anchored zoom, limits, pan bounds, fit/reset, resizing,
 drafts, repeated live updates, source removal, theme changes and touch input.
+`web-diagram-marker-contract.cjs` verifies computed sequence/state marker colors,
+scoped styles and local marker references with repeated diagrams in all five
+themes, including theme changes while each viewer stays open.
 The description suite covers save/reload/CLI round trips and proposal autosave.
 
 ## Planning chat

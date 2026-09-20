@@ -48,7 +48,11 @@ export function diagramSVG(markup, prefix) {
   if (parsed.querySelector("parsererror") || parsed.documentElement.localName !== "svg") throw Error("The diagram could not be rendered.");
   const tags = new Set(["svg", "g", "defs", "marker", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text", "tspan", "title", "desc", "clipPath"]);
   const attributes = new Set(["id", "class", "viewBox", "width", "height", "x", "y", "x1", "x2", "y1", "y2", "dx", "dy", "cx", "cy", "r", "rx", "ry", "d", "points", "transform", "fill", "fill-opacity", "stroke", "stroke-width", "stroke-dasharray", "stroke-linecap", "stroke-linejoin", "stroke-opacity", "opacity", "text-anchor", "dominant-baseline", "font-size", "font-weight", "marker-start", "marker-mid", "marker-end", "markerWidth", "markerHeight", "markerUnits", "refX", "refY", "orient", "clip-path", "preserveAspectRatio", "role", "aria-roledescription", "aria-labelledby", "aria-describedby"]);
-  const ids = new Map([...parsed.querySelectorAll("[id]")].map((node, i) => [node.id, `${prefix}-${i}`]));
+  // Mermaid colors markers with suffix selectors such as [id$="-arrowhead"].
+  // Keep safe original IDs after the unique prefix/index so those rules still
+  // match, without carrying arbitrary source characters into CSS references.
+  const ids = new Map([...parsed.querySelectorAll("[id]")].map((node, i) =>
+    [node.id, `${prefix}-${i}${/^[\w-]+$/.test(node.id) ? "-" + node.id : ""}`]));
   function copy(node) {
     if (node.nodeType === Node.TEXT_NODE) return document.createTextNode(node.textContent);
     if (node.nodeType !== Node.ELEMENT_NODE || !tags.has(node.localName)) return null;
