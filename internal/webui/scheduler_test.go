@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"pellets/internal/app"
 	"pellets/internal/storage"
@@ -97,6 +98,37 @@ func TestScheduleHTTPExplicitWorkspaceExactFieldsAndSecurity(t *testing.T) {
 		response = performMutation(f.handler, path, mismatch, testOrigin, true, "application/x-www-form-urlencoded")
 		if response.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("accepted mismatched group scope: %d %s", response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestWaitingScheduleWithoutRunRendering(t *testing.T) {
+	f, _ := recoveryHandlerFixture(t)
+	schedule := startHTTPSchedule(t, f, url.Values{"_csrf": {testCSRF}, "workspace_id": {"1"}, "mode": {"watch"}})
+	deadline := time.Now().Add(5 * time.Second)
+	for schedule.Status().State != "waiting" {
+		if time.Now().After(deadline) {
+			t.Fatalf("empty Watch schedule did not wait: %+v", schedule.Status())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// A schedule admitted before any run retains its own mode disclosure in
+	// both initial HTML and live fragments.
+	for _, live := range []bool{false, true} {
+		headers := make(http.Header)
+		if live {
+			headers.Set("Datastar-Request", "true")
+			headers.Set("Pellets-Target", "live")
+		}
+		response := performRequest(f.handler, http.MethodGet, "/projects/project1/workspaces/1", "", headers)
+		body := response.Body.String()
+		for _, want := range []string{"<summary>Schedule · Watch</summary>", "Schedule #1 · Waiting — waiting for a matching queue target", "No recorded run for this workspace."} {
+			if response.Code != http.StatusOK || !strings.Contains(body, want) {
+				t.Fatalf("schedule without a run (live=%t) missing %q: %d %s", live, want, response.Code, body)
+			}
+		}
+		if strings.Contains(body, `class="run-details"`) {
+			t.Fatalf("schedule without a run rendered Run details (live=%t)", live)
 		}
 	}
 }

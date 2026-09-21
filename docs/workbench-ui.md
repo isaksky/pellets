@@ -474,11 +474,13 @@ Pending messages wait for a complete sanitized snapshot instead of suggesting
 that an empty message or a completed item ends the run.
 Activity disconnection and unavailable history appear separately from run state.
 Operation previews occupy at most two lines; their event retains the full
-reported excerpt. Run details collects the workspace path/ID, schedule state and
-frozen filters, runtime settings and routine automatic-review explanation. A
-schedule without a run has its own native details control. Task identity, stop
-controls and actual questions/approvals stay outside these disclosures. The
-routine activity explanation has its own **About reported activity** disclosure;
+reported excerpt. Run details collects the workspace path/ID, live schedule mode
+and state, frozen filters, runtime settings and routine automatic-review explanation.
+The schedule mode (Run one, Drain, or Watch) stays separate from the run's mode,
+including Review checkpoint. A schedule without a run has its own native details
+control. Task identity, stop controls and actual questions/approvals stay outside
+these disclosures. The routine activity explanation has its own
+**About reported activity** disclosure;
 unavailable/truncated history and reconnect warnings stay visible.
 
 On phones and in windows at most 600px tall, the answer/follow-up composer scrolls

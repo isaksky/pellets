@@ -54,8 +54,12 @@ async function startServer(root) {
   execFileSync('go', ['test', '-c', '-o', peer, './internal/app'], {cwd: repository});
   const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
   browser = await engine.launch({headless: true, ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}), ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});
-  for (const mode of ['review_clean', 'review_findings_partial', 'review_findings_invalid']) {
-    const root = path.join(temporary, mode);
+  const scenarios = [
+    ...['run_one', 'drain', 'watch'].map(scheduleMode => ({mode: 'review_clean', scheduleMode})),
+    ...['review_findings_partial', 'review_findings_invalid'].map(mode => ({mode, scheduleMode: 'run_one'})),
+  ];
+  for (const {mode, scheduleMode} of scenarios) {
+    const root = path.join(temporary, `${mode}-${scheduleMode}`);
     fs.mkdirSync(root);
     const git = (...args) => execFileSync('git', args, {cwd: root, encoding: 'utf8'});
     const cli = (...args) => JSON.parse(execFileSync(binary, ['--json', ...args], {cwd: root, env: environment, encoding: 'utf8'})).data;
@@ -82,17 +86,18 @@ async function startServer(root) {
     await controls.goto(origin + `/projects/${target.project}/workspaces/1`);
     const endpoint = `/projects/${target.project}/schedules`;
     let scheduleID = 0;
-    async function schedule(button) {
+    async function schedule(button, inspectLive) {
       const accepted = controls.waitForResponse(response => response.url() === origin + endpoint && response.request().method() === 'POST' && response.status() === 202);
       await button.click();
       await accepted;
       // The app intentionally consumes only response headers. Read the exact
       // disposable server's sequential receipt from its status endpoint.
       const id = ++scheduleID;
+      if (inspectLive) await inspectLive(id);
       let state;
       await until(async () => {
         state = await (await page.request.get(origin + endpoint + '/' + id)).json();
-        return ['completed', 'needs_attention', 'interrupted'].includes(state.state);
+        return ['completed', 'stopped', 'needs_attention', 'interrupted'].includes(state.state);
       }, 'Schedule did not finish');
       return state;
     }
@@ -105,8 +110,44 @@ async function startServer(root) {
     const outcome = page.locator('[data-checkpoint-outcome]').first();
     assert.match(await outcome.textContent(), /Pending separate review/);
     await page.evaluate(() => { window.checkpointInspector = document.querySelector('[data-inspector]'); });
-    setMode(mode);
-    const reviewed = await schedule(controls.locator('form[data-schedule]:has(select[name=mode]) button[type=submit]').first());
+    setMode(mode === 'review_clean' ? 'review_result_gate' : mode);
+    await controls.getByRole('combobox', {name: 'Execution intention'}).click();
+    await controls.getByRole('option', {name: {
+      run_one: /^One pellet/, drain: /^Through matching queue/, watch: /^Wait for matching work/,
+    }[scheduleMode]}).click();
+    const reviewed = await schedule(controls.locator('form[data-schedule]:has(select[name=mode]) button[type=submit]').first(), mode === 'review_clean' ? async id => {
+      const details = controls.locator('.run-details');
+      const scheduleLabel = {run_one: 'Run one', drain: 'Drain', watch: 'Watch'}[scheduleMode];
+      await until(async () => /Review checkpoint/.test(await details.locator(':scope > .run-facts').textContent()), 'Checkpoint run did not refresh');
+      await details.locator(':scope > summary').focus(); await controls.keyboard.press('Enter');
+      const expectModes = async () => {
+        assert.equal(await details.evaluate(el => el.open), true, 'Refresh collapsed Run details');
+        assert.match(await details.locator(':scope > .run-facts').innerText(), /Mode\s+Review checkpoint/);
+        assert.match(await details.locator('.schedule-state').innerText(), new RegExp(`Schedule #${id} · ${scheduleLabel} · Running`));
+      };
+      if (artifacts) await controls.screenshot({path: path.join(artifacts, `schedule-${scheduleMode}-live.png`)});
+      await expectModes();
+      // Check server-rendered HTML as well as the live update that introduced
+      // this checkpoint; reloading must retain the independent schedule mode.
+      const html = await (await controls.request.get(controls.url())).text();
+      assert.ok(html.includes(`Schedule #${id} · ${scheduleLabel} · Running`));
+      await controls.reload();
+      await details.locator(':scope > summary').focus(); await controls.keyboard.press('Enter');
+      await expectModes();
+      await controls.getByRole('button', {name: 'Stop after', exact: true}).click();
+      await until(() => details.locator('.schedule-state').textContent().then(text => text.includes('stopping after current pellet')), 'Stop-after intent did not refresh');
+      await expectModes();
+      assert.equal(await controls.getByRole('button', {name: 'Stop after', exact: true}).isDisabled(), true);
+      for (const width of [1280, 1092, 390]) {
+        await controls.setViewportSize({width, height: 900});
+        await details.locator('.schedule-state').scrollIntoViewIfNeeded();
+        const box = await details.locator('.schedule-state').boundingBox();
+        assert.ok(box.x >= 0 && box.x + box.width <= width + 1, 'Schedule mode overflows its pane');
+        if (artifacts) await controls.screenshot({path: path.join(artifacts, `schedule-${scheduleMode}-${width}.png`)});
+      }
+      await controls.setViewportSize({width: 1280, height: 900});
+      fs.writeFileSync(path.join(root, 'fake-complete'), 'complete');
+    } : undefined);
     await until(async () => /Review outcome: (Clean|Findings)/.test(await outcome.textContent()), 'Live review completion retained a placeholder');
     assert.equal(await page.evaluate(() => window.checkpointInspector === document.querySelector('[data-inspector]')), true, 'Live outcome replaced the inspector instead of morphing it');
     // Review findings can reach the live inspector before the final triage
@@ -114,6 +155,10 @@ async function startServer(root) {
     if (mode === 'review_findings_invalid') await until(async () => /Complete.*1 of 1/s.test(await outcome.textContent()), 'Completed invalid-finding triage stayed partial');
     let text = await outcome.textContent();
     if (mode === 'review_clean') {
+      assert.equal(reviewed.mode, scheduleMode);
+      assert.equal(reviewed.state, 'stopped');
+      assert.equal(reviewed.reason, 'stop_after_pellet');
+      assert.equal(reviewed.completed, 1);
       assert.match(text, /Clean/); assert.match(text, /0 of 0/); assert.match(text, /0 created/);
     } else if (mode === 'review_findings_invalid') {
       assert.match(text, /Findings/); assert.match(text, /1 of 1/); assert.match(text, /Invalid finding/); assert.match(text, /0 created/);
@@ -161,7 +206,7 @@ async function startServer(root) {
       await controls.evaluate(() => document.dispatchEvent(new CustomEvent('pellets-refresh')));
       await controls.waitForTimeout(300);
       assert.equal(await disclosure.evaluate(el => el.open), true, 'Refresh collapsed captured source');
-      if (mode === 'review_clean') {
+      if (mode === 'review_clean' && scheduleMode === 'run_one') {
         for (const theme of ['gruvbox-light', 'gruvbox-dark', 'light', 'dark', 'icy']) {
           await controls.evaluate(theme => window.Workbench.applyTheme(theme), theme);
           for (const width of [1280, 1092, 390]) {
@@ -185,6 +230,8 @@ async function startServer(root) {
     // A later ordinary run changes the workspace dashboard, not this receipt.
     cli('add', 'later ordinary task');
     setMode('schedule_success');
+    await controls.getByRole('combobox', {name: 'Execution intention'}).click();
+    await controls.getByRole('option', {name: /^One pellet/}).click();
     assert.equal((await schedule(controls.locator('form[data-schedule]:has(select[name=mode]) button[type=submit]').first())).completed, 1);
     await page.evaluate(() => document.dispatchEvent(new CustomEvent('pellets-refresh')));
     await page.waitForTimeout(500);
@@ -203,7 +250,7 @@ async function startServer(root) {
     assert.deepEqual(errors, []);
     await controls.close();
     await page.close(); await stopServer();
-    console.log(`Checkpoint browser passed: ${mode}, captured context, durable reconnect, later run, narrow layout, exact generation.${artifacts ? ` Artifacts: ${artifacts}` : ''}`);
+    console.log(`Checkpoint browser passed: ${mode}, ${scheduleMode}, captured context, durable reconnect, later run, narrow layout, exact generation.${artifacts ? ` Artifacts: ${artifacts}` : ''}`);
   }
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   if (browser) await browser.close();
