@@ -168,7 +168,7 @@ input:hover, textarea:hover, select:hover { border-color: color-mix(in srgb, var
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
 .form-help { color: var(--text-muted); font-size: .76rem; margin: -.25rem 0 0; }
 .filters { display: grid; grid-template-columns: minmax(210px, 2fr) repeat(3, minmax(120px, 1fr)) auto; gap: .65rem; align-items: end; margin-bottom: .8rem; padding: .7rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
-.quiet-button { height: 37px; font-size: .76rem; }
+.quiet-button { display: inline-flex; align-items: center; justify-content: center; height: 37px; font-size: 12px; line-height: 1.4; }
 
 .table-frame { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .checkpoint-composer { display: grid; grid-template-columns: minmax(12rem, .75fr) minmax(18rem, 1.25fr); gap: .45rem 1rem; padding: .85rem; border-bottom: 1px solid var(--border); background: var(--accent-soft); }

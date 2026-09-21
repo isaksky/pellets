@@ -2842,3 +2842,15 @@ pl-description-reader [data-markdown-heading]:focus-visible { outline: 2px solid
 [id^="inspector-group-"] h2 { overflow-wrap: anywhere; }
 
 #groups-area .form-help, [id^="inspector-group-"] .form-help { font-size: 12px; line-height: 1.5; }
+
+.group-heading { flex: 1; min-width: 0; }
+.group-title-editor { margin: 0; }
+.group-title-input {
+  width: calc(100% + 12px); min-width: 0; height: 28px; box-sizing: border-box;
+  margin: -2px -6px; padding: 2px 6px; border: 0; border-radius: 4px; background: transparent;
+  font-family: inherit; font-size: 15px; font-weight: 650; line-height: 24px;
+  color: var(--ink);
+}
+.group-title-input:hover { background: var(--theme-quiet-hover); }
+.group-title-input:focus { background: transparent; }
+#group-name-error { margin: 4px 0 0; }

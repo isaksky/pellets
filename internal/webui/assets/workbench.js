@@ -244,6 +244,7 @@ function syncDialog() {
       )
       ?.focus({ preventScroll: true });
   } else if (!content && dialog.open) dialog.close();
+
 }
 function closeRecord() {
   const close = document.querySelector(
@@ -1059,3 +1060,78 @@ function assignmentMode() {
 document.addEventListener("change", (e) => {
   if (e.target.matches('.assignment-form [name="mode"]')) assignmentMode();
 });
+
+// Title saves update only identity/revisions, never replace the context draft.
+function clearTitleDirty(form) {
+  delete form.dataset.dirty;
+  const inspector = form.closest('[data-inspector]');
+  if (!inspector.querySelector('form[data-dirty="true"]')) inspector.classList.remove('is-dirty');
+}
+document.addEventListener('keydown', event => {
+  const field = event.target.closest?.('.group-title-input');
+  if (!field || event.isComposing) return;
+  if (event.key === 'Escape') {
+    event.preventDefault(); event.stopImmediatePropagation();
+    if (field.form.dataset.pending) return;
+    field.value = field.defaultValue;
+    field.form.querySelector('[role=alert]').hidden = true;
+    clearTitleDirty(field.form);
+    field.blur();
+  } else if (event.key === 'Enter') {
+    event.preventDefault(); field.form.requestSubmit();
+  }
+}, true);
+document.addEventListener('focusout', event => {
+  const field = event.target.closest?.('.group-title-input');
+  if (field && field.value !== field.defaultValue && !field.form.dataset.failed) field.form.requestSubmit();
+});
+document.addEventListener('input', event => {
+  if (event.target.matches?.('.group-title-input')) delete event.target.form.dataset.failed;
+});
+document.addEventListener('submit', async event => {
+  const form = event.target;
+  if (!form.matches?.('.group-title-editor')) return;
+  event.preventDefault(); event.stopImmediatePropagation();
+  if (form.dataset.pending || uiVersion.isOutdated()) return;
+  const field = form.elements.name, error = form.querySelector('[role=alert]');
+  if (field.value === field.defaultValue) { clearTitleDirty(form); return; }
+  const revision = form.elements.revision.value;
+  const inspector = form.closest('[data-inspector]');
+  const saveContext = inspector.querySelector('.dialog-footer button[type=submit]');
+  form.dataset.pending = 'true';
+  field.readOnly = true;
+  saveContext.disabled = true;
+  error.hidden = true;
+  uiVersion.beginRequest();
+  try {
+    const response = await fetch(form.action, {method:'POST', credentials:'same-origin',
+      headers:uiVersion.headers({'Content-Type':'application/x-www-form-urlencoded'}),
+      body:new URLSearchParams(new FormData(form))});
+    if (!uiVersion.inspectResponse(response)) return;
+    const content = new DOMParser().parseFromString(await response.text(), 'text/html');
+    const updated = content.querySelector('[data-group-revision][data-inspector]');
+    if (!response.ok) {
+      if (updated) form.elements.revision.value = updated.dataset.groupRevision;
+      throw Error(content.querySelector('.conflict-state > p')?.textContent || 'Name could not be saved. Try again.');
+    }
+    const name = content.querySelector('.group-title-input')?.value;
+    if (!updated || name === undefined) throw Error('Save could not be confirmed. Reload before retrying.');
+    field.value = field.defaultValue = name;
+    inspector.querySelector('#inspector-title').textContent = name;
+    inspector.dataset.groupRevision = updated.dataset.groupRevision;
+    inspector.querySelectorAll('input[name=revision]').forEach(input => {
+      if (input.value === revision) input.value = updated.dataset.groupRevision;
+    });
+    clearTitleDirty(form);
+    delete form.dataset.failed;
+  } catch (failure) {
+    form.dataset.failed = 'true';
+    error.textContent = failure.message;
+    error.hidden = false;
+  } finally {
+    delete form.dataset.pending;
+    field.readOnly = false;
+    saveContext.disabled = uiVersion.isOutdated();
+    uiVersion.endRequest();
+  }
+}, true);

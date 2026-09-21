@@ -60,14 +60,18 @@ navigation retains the execution workspace. The Receives assignment chips and
 
 Group details show the current raw Markdown context and all member pellets,
 including closed and deferred members. The context and identity survive the last
-member leaving. **Edit**, **View / Preview**, **Contents**, Mermaid and the diagram
+member leaving. Shared context starts in **Edit**, ready to type; **Preview** shows
+unsaved Markdown, and an explicitly selected mode is retained. **Edit**, **Preview**,
+**Contents**, Mermaid and the diagram
 zoom/pan viewer reuse the description components below, with accessible **Shared
 context** labels. The source limit is 1 MiB of UTF-8; form transport accommodates
 URL-encoding expansion. Empty source is valid: delete it and **Save context** to
 clear it. Context is shared with every member pellet. Edits affect future runs;
 active and resumed runs retain their captured context version.
 
-**Rename group** is a separate guarded editor. It preserves group identity,
+The group title is directly editable without changing the header layout. Enter
+or blur saves the name; Escape restores it. Context remains editable and its
+unsaved draft survives a title save. Errors appear directly below the title. It preserves group identity,
 context, membership and routing assignments. Both name and context mutations
 submit the stable group ID and exact positive `revision` through the shared group
 operations. Responses expose `data-group-id` and `data-group-revision`; the form
