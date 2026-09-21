@@ -1,5 +1,5 @@
 {{define "groups-area"}}<section id="groups-area" class="tasks-area" aria-labelledby="groups-title">
- <div class="section-heading"><div><h1 id="groups-title">Groups</h1><p class="form-help">Shared Markdown context for member pellets. Empty groups stay here, ready for future work.</p></div><a class="quiet-button" data-group-create href="/projects/{{.Project.Code}}/groups/new?execution={{.ExecutionWorkspace}}" data-on:click="@navigate('inspector-host')">Create group</a></div>
+ <div class="section-heading"><div><h1 id="groups-title">Groups</h1><p class="form-help">Shared Markdown context for member pellets. Empty groups stay here, ready for future work.</p></div><a class="group-add-link" aria-label="Add group" data-group-create href="/projects/{{.Project.Code}}/groups/new?execution={{.ExecutionWorkspace}}" data-on:click="@navigate('inspector-host')"><span aria-hidden="true">+</span> Add</a></div>
  {{template "group-list" .}}
 </section>{{end}}
 

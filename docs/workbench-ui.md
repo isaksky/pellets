@@ -50,7 +50,7 @@ pinned, and the breadcrumb continues to navigate when the left sidebar is hidden
 ### Group details and shared context
 
 **Groups** in the project navigation and view switcher opens the project group
-catalog, including groups without member pellets. **Create group** adds an empty
+catalog, including groups without member pellets. **+ Add** adds an empty
 group using the shared group operation; duplicate exact names are rejected.
 Queue group names and **Open group details** in pellet dialogs open the same
 stable `/projects/CODE/groups/ID` route. Member links open pellet details; **Filter

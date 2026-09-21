@@ -2838,7 +2838,9 @@ pl-description-reader [data-markdown-heading]:focus-visible { outline: 2px solid
 .group-members li { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .group-members li a { min-width: 0; flex: 1 1 200px; }
 #groups-area .section-heading { flex-wrap: wrap; }
+.group-add-link { align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 #groups-area .section-heading > div { min-width: 0; flex: 1 1 200px; }
+#groups-area .section-heading .form-help { margin-top: 6px; }
 [id^="inspector-group-"] h2 { overflow-wrap: anywhere; }
 
 #groups-area .form-help, [id^="inspector-group-"] .form-help { font-size: 12px; line-height: 1.5; }
