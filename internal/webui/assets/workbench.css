@@ -2830,9 +2830,12 @@ pl-description-reader [data-markdown-heading]:focus-visible { outline: 2px solid
 
 /* Groups share record dialogs and Markdown controls; routing chips stay separate. */
 .group-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 12px; }
-.group-card { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 4px; background: var(--pane); overflow-wrap: anywhere; }
-.group-card > a { display: block; margin-bottom: 8px; color: var(--ink); }
-.group-card > span { font-size: 12px; color: var(--muted); }
+.group-card { min-width: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--pane); overflow-wrap: anywhere; }
+.group-card > a { display: block; height: 100%; padding: 16px; border-radius: inherit; color: var(--ink); }
+.group-card > a:hover { background: var(--theme-hover); }
+.group-card > a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.group-card > a > strong { display: block; margin-bottom: 8px; }
+.group-card > a > span { font-size: 12px; color: var(--muted); }
 .group-card p { margin-bottom: 0; }
 .group-members ul { list-style: none; padding: 0; }
 .group-members li { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }

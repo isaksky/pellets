@@ -4,7 +4,7 @@
 </section>{{end}}
 
 {{define "group-list"}}<div id="group-list" class="group-list">
- {{range .GroupRecords}}<article class="group-card" data-group-id="{{.Group.ID}}" data-group-revision="{{.Group.Revision}}"><a href="{{.URL}}" data-on:click="@navigate('inspector-host')"><strong>{{.Group.Name}}</strong></a><span>{{len .Members}} member pellets</span><p class="form-help">{{if .Group.Context}}Shared context available{{else}}No shared context yet{{end}}</p></article>{{else}}<div class="empty-state"><h3>No groups yet</h3><p>Create a group to keep shared context, even before adding pellets.</p></div>{{end}}
+ {{range .GroupRecords}}<article class="group-card" data-group-id="{{.Group.ID}}" data-group-revision="{{.Group.Revision}}"><a href="{{.URL}}" aria-label="{{.Group.Name}}" data-on:click="@navigate('inspector-host')"><strong>{{.Group.Name}}</strong><span>{{len .Members}} member pellets</span><p class="form-help">{{if .Group.Context}}Shared context available{{else}}No shared context yet{{end}}</p></a></article>{{else}}<div class="empty-state"><h3>No groups yet</h3><p>Create a group to keep shared context, even before adding pellets.</p></div>{{end}}
 </div>{{end}}
 
 {{define "group-inspector"}}<aside id="inspector-group-{{if .SelectedGroup}}{{.SelectedGroup.Group.ID}}{{else}}new{{end}}" class="inspector live-fragment{{if .Conflict}} is-dirty{{end}}" role="dialog" aria-modal="true" aria-labelledby="inspector-title" data-inspector data-protect-dirty{{if .SelectedGroup}} data-group-id="{{.SelectedGroup.Group.ID}}" data-group-revision="{{.SelectedGroup.Group.Revision}}"{{end}}>

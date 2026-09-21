@@ -49,6 +49,9 @@ pinned, and the breadcrumb continues to navigate when the left sidebar is hidden
 
 ### Group details and shared context
 
+Each group card is one native link, including its metadata and padding. Hover
+and keyboard focus highlight the full card; its accessible name is the group name.
+
 **Groups** in the project navigation and view switcher opens the project group
 catalog, including groups without member pellets. **+ Add** adds an empty
 group using the shared group operation; duplicate exact names are rejected.
