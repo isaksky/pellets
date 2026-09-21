@@ -102,6 +102,12 @@ func (p *activityProjection) publish(key activeExecutionKey, item ActivityItem) 
 	run.cursor++
 	item.Sequence = run.cursor
 	item.Timestamp = time.Now().UTC()
+	if item.Kind == "error" {
+		// Runtime notifications are separate observations, even when their
+		// scoped fallback ID and message match. Allocate once under the run
+		// lock; snapshots replay the retained ID without allocating another.
+		item.ID = activityID(item.ID + "\x00error:" + strconv.FormatUint(run.cursor, 10))
+	}
 	size := activityItemBytes(item)
 	if size > activityMaxItemBytes {
 		return

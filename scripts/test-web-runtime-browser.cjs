@@ -42,7 +42,7 @@ async function until(check, message) {
   execFileSync('go', ['test', '-c', '-o', peer, './internal/app'], {cwd: repository});
   const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
   browser = await engine.launch({headless: true, ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}), ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});
-  const cases = [...(process.platform === 'win32' ? [] : ['runtime_probe_gate']), 'runtime_old', 'schedule_runtime_error', 'schedule_rpc_error', 'schedule_unfinished', 'schedule_fresh_choice', 'schedule_noop', 'stop_after_pellet', 'watch_waiting'];
+  const cases = [...(process.platform === 'win32' ? [] : ['runtime_probe_gate']), 'runtime_old', 'schedule_runtime_error', 'schedule_activity_errors_gate', 'schedule_rpc_error', 'schedule_unfinished', 'schedule_fresh_choice', 'schedule_noop', 'stop_after_pellet', 'watch_waiting'];
   const selectedCase = process.env.PELLETS_RUNTIME_BROWSER_CASE;
   assert.ok(!selectedCase || cases.includes(selectedCase), 'Unknown PELLETS_RUNTIME_BROWSER_CASE');
   for (const mode of cases.filter(mode => !selectedCase || selectedCase === mode)) {
@@ -74,6 +74,13 @@ async function until(check, message) {
     await page.getByRole('option', {name: mode === 'stop_after_pellet' ? /^Through matching queue/ : mode === 'watch_waiting' ? /^Wait for matching work/ : /^One pellet/}).click();
     assert.equal(await startForm.locator('select[name=mode]').inputValue(), mode === 'stop_after_pellet' ? 'drain' : mode === 'watch_waiting' ? 'watch' : 'run_one');
     await startForm.getByRole('button', {name: /Start next/}).click();
+    if (mode === 'schedule_activity_errors_gate') {
+      await require('./web-runtime-errors-contract.cjs')({page, root, origin, until});
+      assert.deepEqual(errors, []);
+      await page.close(); await stop();
+      console.log('PASS runtime error chronology, repeated messages, item completion and reconnect');
+      continue;
+    }
     if (mode === 'watch_waiting') {
       const artifacts = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-watch-state-'));
       console.log('Watch visual artifacts: ' + artifacts);

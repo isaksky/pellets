@@ -118,7 +118,10 @@ authoritative run state from this reported activity.
 Exact-turn runtime `error` notifications expose only the sanitized message and
 explicit `willRetry` flag: **Retry reported**, **No retry planned (reported)**,
 or unknown impact if the flag is missing. These historical reports stay separate
-from commands, since they have no command identity. The protocol provides no
+from commands, since they have no command identity. Each received notification,
+including an identical repeated message, retains a distinct ID and its
+chronological position. Snapshot replay preserves those IDs, so errors continue
+to separate command groups across reconnects. The protocol provides no
 operation-level recovery relationship; agent statements about recovery remain
 clearly labeled, expanded **Agent update** prose and do not resolve failed rows.
 A failed turn says that the turn ended with an error and directs the reader to
@@ -187,3 +190,9 @@ unknown failure impact, failed turns and independent input requests. It checks
 collapsed summaries and expanded evidence in Chromium/WebKit across all five
 themes at desktop, intermediate and phone widths. The containing runner retains
 its short-window, keyboard, live-update, wait/stop and explicit-recovery checks.
+
+The `schedule_activity_errors_gate` case in `test-web-runtime-browser.cjs` uses
+gated protocol notifications to check runtime-error chronology, identical
+repeated errors and command completion through live updates, native SSE
+reconnection and full snapshot replay in Chromium/WebKit. Select it with
+`PELLETS_RUNTIME_BROWSER_CASE=schedule_activity_errors_gate`.

@@ -330,6 +330,10 @@ func Run() bool {
 			if mode == "schedule_followup_live" {
 				continue
 			}
+			if mode == "schedule_activity_errors_gate" {
+				writeRuntimeErrorActivityFixture(write)
+				continue
+			}
 			if mode == "schedule_activity" || mode == "schedule_activity_gate" {
 				writeActivityFixture(write)
 				if mode == "schedule_activity_gate" {
@@ -472,4 +476,28 @@ func writeActivityFixture(write func(any)) {
 	send("item/completed", map[string]any{"id": "check", "type": "commandExecution", "command": "go test ./...", "aggregatedOutput": "ok fixture\ntoken=private-activity-value\n", "exitCode": 0})
 	send("item/completed", map[string]any{"id": "commentary", "type": "agentMessage", "phase": "commentary", "text": "The change is ready for verification."})
 	write(map[string]any{"method": "turn/plan/updated", "params": map[string]any{"threadId": "thread", "turnId": "turn", "plan": []any{map[string]any{"step": "Inspect the selected work", "status": "completed"}, map[string]any{"step": "Verify the change", "status": "inProgress"}}}})
+}
+
+func writeRuntimeErrorActivityFixture(write func(any)) {
+	runtimeError := func(message string, retry bool) {
+		write(map[string]any{"method": "error", "params": map[string]any{"threadId": "thread", "turnId": "turn", "error": map[string]any{"message": message}, "willRetry": retry}})
+	}
+	command := func(method, id string) {
+		item := map[string]any{"id": id, "type": "commandExecution", "command": "go test ./" + id}
+		if method == "item/completed" {
+			item["exitCode"] = 0
+			item["aggregatedOutput"] = "ok " + id
+		}
+		write(map[string]any{"method": method, "params": map[string]any{"threadId": "thread", "turnId": "turn", "item": item}})
+	}
+	runtimeError("Connection lost; token=private-activity-value", true)
+	command("item/started", "first")
+	waitFileWithin("fake-activity-next", 30*time.Second)
+	runtimeError("Retry exhausted", false)
+	command("item/started", "second")
+	waitFileWithin("fake-activity-complete-commands", 30*time.Second)
+	command("item/completed", "first")
+	command("item/completed", "second")
+	waitFileWithin("fake-activity-repeat-error", 30*time.Second)
+	runtimeError("Retry exhausted", false)
 }

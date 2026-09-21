@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -79,6 +80,113 @@ func TestActivityRuntimeRetryIsExplicitScopedAndBounded(t *testing.T) {
 	item := sanitizeActivityItem(ActivityItem{Error: strings.Repeat("error ", activityMaxFieldBytes)})
 	if !item.Truncated || len(item.Error) > activityMaxFieldBytes || activityItemBytes(item) > activityMaxItemBytes {
 		t.Fatalf("error field escaped bounds: %d", len(item.Error))
+	}
+}
+
+func TestActivityRuntimeErrorsKeepObservationOrderAndReplayIdentity(t *testing.T) {
+	for _, repeated := range []bool{false, true} {
+		t.Run(fmt.Sprintf("identical=%t", repeated), func(t *testing.T) {
+			projection := newActivityProjection()
+			key := activeExecutionKey{databasePath: "db", runID: 1}
+			projection.begin(key)
+			execution := WorkspaceExecution{activity: projection, database: Database{Path: key.databasePath}, id: key.runID}
+			firstError := codex.Event{Method: "error", Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","error":{"message":"Connection lost; token=private-value"},"willRetry":true}`)}
+			secondError := codex.Event{Method: "error", Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","error":{"message":"Retry exhausted"},"willRetry":false}`)}
+			if repeated {
+				secondError = firstError
+			}
+			command := func(method, id string) codex.Event {
+				return activityFixtureEvent(method, "thread", "turn", map[string]any{"id": id, "type": "commandExecution", "command": "go test ./..."})
+			}
+			execution.ProjectActivity(firstError, "thread", "turn")
+			execution.ProjectActivity(command("item/started", "first"), "thread", "turn")
+			before := projection.snapshot(key, 0)
+			for _, scope := range [][2]string{{"other", "turn"}, {"thread", "other"}, {"", "turn"}, {"thread", ""}} {
+				execution.ProjectActivity(secondError, scope[0], scope[1])
+			}
+			execution.ProjectActivity(secondError, "thread", "turn")
+			execution.ProjectActivity(command("item/started", "second"), "thread", "turn")
+			snapshot := projection.snapshot(key, 0)
+			if snapshot.Cursor != 4 || len(snapshot.Items) != 4 {
+				t.Fatalf("lost or unrelated events: %+v", snapshot)
+			}
+			ids := map[string]bool{}
+			for i, kind := range []string{"error", "command", "error", "command"} {
+				item := snapshot.Items[i]
+				if item.Kind != kind || item.Sequence != uint64(i+1) || item.ID == "" || ids[item.ID] {
+					t.Fatalf("observation order/identity: %+v", snapshot.Items)
+				}
+				ids[item.ID] = true
+			}
+			if !reflect.DeepEqual(snapshot.Items[:2], before.Items) {
+				t.Fatal("later error changed earlier activity")
+			}
+			if snapshot.Items[0].Status != "retrying" || snapshot.Items[0].Error != "Connection lost; [redacted]" {
+				t.Fatalf("first error lost status or sanitization: %+v", snapshot.Items[0])
+			}
+			if repeated {
+				if snapshot.Items[2].Error != snapshot.Items[0].Error || snapshot.Items[2].Status != snapshot.Items[0].Status {
+					t.Fatal("identical error changed")
+				}
+			} else if snapshot.Items[2].Status != "not_retrying" || snapshot.Items[2].Error != "Retry exhausted" {
+				t.Fatalf("second error lost context: %+v", snapshot.Items[2])
+			}
+			delta := projection.snapshot(key, before.Cursor)
+			if delta.Reset || !reflect.DeepEqual(delta.Items, snapshot.Items[2:]) {
+				t.Fatalf("incremental replay lost order/identity: %+v", delta)
+			}
+			if replay := projection.snapshot(key, 0); !reflect.DeepEqual(replay, snapshot) {
+				t.Fatal("snapshot replay changed retained error identities")
+			}
+			// A real item completion still replaces its original position, even
+			// when a later error and command have already been observed.
+			execution.ProjectActivity(command("item/completed", "first"), "thread", "turn")
+			completed := projection.snapshot(key, 0)
+			if len(completed.Items) != 4 || completed.Items[1].Status != "completed" {
+				t.Fatalf("command completion failed to replace: %+v", completed)
+			}
+			for i, item := range completed.Items {
+				if item.ID != snapshot.Items[i].ID || i != 1 && !reflect.DeepEqual(item, snapshot.Items[i]) {
+					t.Fatal("command completion moved or replaced unrelated activity")
+				}
+			}
+			if update := projection.snapshot(key, snapshot.Cursor); update.Reset || len(update.Items) != 1 || update.Items[0] != completed.Items[1] {
+				t.Fatalf("completion delta: %+v", update)
+			}
+			if caughtUp := projection.snapshot(key, completed.Cursor); caughtUp.Reset || len(caughtUp.Items) != 0 {
+				t.Fatal("caught-up replay duplicated events")
+			}
+		})
+	}
+}
+
+func TestActivityRepeatedRuntimeErrorsStayBounded(t *testing.T) {
+	projection := newActivityProjection()
+	key := activeExecutionKey{databasePath: "db", runID: 1}
+	projection.begin(key)
+	execution := WorkspaceExecution{activity: projection, database: Database{Path: key.databasePath}, id: key.runID}
+	event := codex.Event{Method: "error", Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","error":{"message":"Repeated failure"},"willRetry":true}`)}
+	ids := map[string]bool{}
+	for i := 0; i < activityMaxItems+20; i++ {
+		execution.ProjectActivity(event, "thread", "turn")
+		snapshot := projection.snapshot(key, 0)
+		latest := snapshot.Items[len(snapshot.Items)-1]
+		if ids[latest.ID] {
+			t.Fatal("a separately received error reused an ID")
+		}
+		ids[latest.ID] = true
+	}
+	replay := projection.snapshot(key, 1)
+	if !replay.Reset || !replay.Truncated || len(replay.Items) != activityMaxItems || projection.bytes > activityMaxTotalBytes || projection.runs[key].bytes > activityMaxRunBytes {
+		t.Fatalf("error retention exceeded bounds: %+v", replay)
+	}
+	for i, item := range replay.Items {
+		if item.Sequence != uint64(i+21) {
+			t.Fatal("error retention lost chronological order")
+		}
+	}
+	if snapshot := projection.snapshot(key, 0); !reflect.DeepEqual(snapshot.Items, replay.Items) {
+		t.Fatal("retention reset changed surviving identities")
 	}
 }
 
