@@ -34,10 +34,30 @@ func assertRawCommitMessage(t *testing.T, root, want string) {
 	}
 }
 
+func assertUTF8CommitMessage(t *testing.T, root, want string) {
+	t.Helper()
+	assertRawCommitMessage(t, root, want)
+	object, err := executionGitRaw(context.Background(), root, "cat-file", "commit", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	headers, _, _ := strings.Cut(object, "\n\n")
+	if strings.Contains(headers, "\nencoding ") {
+		t.Fatalf("UTF-8 commit has an unexpected encoding header: %s", headers)
+	}
+	shown, err := executionGitRaw(context.Background(), root, "show", "-s", "--encoding=UTF-8", "--format=format:%B", "HEAD")
+	if err != nil || shown != want {
+		t.Fatalf("UTF-8 display = %q, want %q: %v", shown, want, err)
+	}
+	if got := gitForExecutionTest(t, root, "config", "--local", "--get", "i18n.commitEncoding"); got != "ISO-8859-1" {
+		t.Fatalf("repository commit encoding changed: %q", got)
+	}
+}
+
 func TestSchedulerStandaloneCommitMessages(t *testing.T) {
 	executable := installSupervisorPeer(t)
 	for _, test := range []struct{ subject, body, path, content, canonicalBody string }{
-		{"Document literal shell syntax for café paths", "\r\nShell examples previously omitted Unicode paths and literal metacharacters.\r\nKeep \"quotes\", `backticks`, $HOME, and $(touch fake-expanded) visible.  \r\n\r\n# Example\r\n\tUse the documented literal syntax.\r\n", "shell-examples.md", "Literal café path: \"$HOME\" `backticks`\n", "Shell examples previously omitted Unicode paths and literal metacharacters.\nKeep \"quotes\", `backticks`, $HOME, and $(touch fake-expanded) visible.  \n\n# Example\n\tUse the documented literal syntax."},
+		{"Document literal shell syntax for café paths", "\r\nShell examples previously omitted café paths and literal metacharacters.\r\nKeep \"quotes\", `backticks`, $HOME, and $(touch fake-expanded) visible.  \r\n\r\n# Example\r\n\tUse the documented literal syntax.\r\n", "shell-examples.md", "Literal café path: \"$HOME\" `backticks`\n", "Shell examples previously omitted café paths and literal metacharacters.\nKeep \"quotes\", `backticks`, $HOME, and $(touch fake-expanded) visible.  \n\n# Example\n\tUse the documented literal syntax."},
 		{"fix(config): disable caching for local previews", "Preview content could remain stale after edits.\nDisable the preview cache so changes appear on reload.", "preview.json", "{\"cache\": false}\n", "Preview content could remain stale after edits.\nDisable the preview cache so changes appear on reload."},
 		{"Correct the preview command example", "", "preview.md", "Run preview with --no-open.\n", ""},
 	} {
@@ -47,6 +67,7 @@ func TestSchedulerStandaloneCommitMessages(t *testing.T) {
 			// Repository cleanup/encoding preferences cannot silently rewrite
 			// literal proposed bytes; conventional subjects are accepted as-is.
 			gitForExecutionTest(t, root, "config", "commit.cleanup", "strip")
+			gitForExecutionTest(t, root, "config", "i18n.commitEncoding", "ISO-8859-1")
 			gitForExecutionTest(t, root, "config", "i18n.logOutputEncoding", "ISO-8859-1")
 			writeMessageFixture(t, root, map[string]any{"commit_subject": test.subject, "commit_body": test.body, "path": test.path, "content": test.content})
 			status := awaitSchedule(t, startSchedule(t, s, request))
@@ -65,7 +86,7 @@ func TestSchedulerStandaloneCommitMessages(t *testing.T) {
 			if run.Finalization.MessageVersion != 1 || run.Finalization.Message != want || run.Finalization.Subject != test.subject || run.PelletTitle == test.subject {
 				t.Fatalf("delivered result replaced by task title or lost: %+v", run.Finalization)
 			}
-			assertRawCommitMessage(t, root, want)
+			assertUTF8CommitMessage(t, root, want)
 			if content, err := os.ReadFile(filepath.Join(root, test.path)); err != nil || string(content) != test.content {
 				t.Fatalf("delivered file: %q %v", content, err)
 			}
@@ -220,6 +241,8 @@ func TestLegacySubjectOnlyFinalizationRecovery(t *testing.T) {
 	for _, boundary := range []string{"before_staging", "after_commit"} {
 		t.Run(boundary, func(t *testing.T) {
 			s, request, _ := schedulerFixture(t, installSupervisorPeer(t), "schedule_success")
+			root := s.options.Database.Root
+			gitForExecutionTest(t, root, "config", "i18n.commitEncoding", "ISO-8859-1")
 			open := s.options.Supervisor.options.Recorder.Open
 			var failed atomic.Bool
 			s.options.Supervisor.options.Recorder.Open = func(ctx context.Context, path string) (storage.ExecutionRunDatabase, error) {
@@ -250,6 +273,13 @@ func TestLegacySubjectOnlyFinalizationRecovery(t *testing.T) {
 				t.Fatal("legacy evidence replaced", err)
 			}
 			assertRawCommitMessage(t, s.options.Database.Root, "demo-1: implement pellet\n")
+			object, err := executionGitRaw(context.Background(), root, "cat-file", "commit", "HEAD")
+			if err != nil || !strings.Contains(object, "\nencoding ISO-8859-1\n") {
+				t.Fatalf("legacy commit encoding policy changed: %q %v", object, err)
+			}
+			if got := gitForExecutionTest(t, root, "config", "--local", "--get", "i18n.commitEncoding"); got != "ISO-8859-1" {
+				t.Fatalf("legacy repository commit encoding changed: %q", got)
+			}
 			if count := gitForExecutionTest(t, s.options.Database.Root, "rev-list", "--count", previous.StartingHead+"..HEAD"); count != "1" {
 				t.Fatal("legacy recommitted", count)
 			}

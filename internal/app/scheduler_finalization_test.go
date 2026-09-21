@@ -188,6 +188,9 @@ func TestSchedulerFinalizationRecoveryNeverReimplementsOrRecommits(t *testing.T)
 	for _, boundary := range []string{"before_staging", "after_commit", "before_close", "after_close"} {
 		t.Run(boundary, func(t *testing.T) {
 			s, request, q := schedulerFixture(t, executable, "schedule_success")
+			root := s.options.Database.Root
+			gitForExecutionTest(t, root, "config", "i18n.commitEncoding", "ISO-8859-1")
+			writeMessageFixture(t, root, map[string]any{"commit_subject": "Document café paths", "commit_body": "Preserve café and 日本語 examples."})
 			originalOpen := s.options.Supervisor.options.Recorder.Open
 			var failed atomic.Bool
 			s.options.Supervisor.options.Recorder.Open = func(ctx context.Context, path string) (storage.ExecutionRunDatabase, error) {
@@ -238,7 +241,7 @@ func TestSchedulerFinalizationRecoveryNeverReimplementsOrRecommits(t *testing.T)
 			if previous.Finalization.MessageVersion != storage.FinalizationMessageVersion || previous.Finalization.Message == "" || !reflect.DeepEqual(previous.Finalization, resumed.Finalization) {
 				t.Fatal("recovery did not reuse the immutable full message")
 			}
-			assertRawCommitMessage(t, s.options.Database.Root, previous.Finalization.Message)
+			assertUTF8CommitMessage(t, root, previous.Finalization.Message)
 			if count := gitForExecutionTest(t, s.options.Database.Root, "rev-list", "--count", previous.StartingHead+"..HEAD"); count != "1" {
 				t.Fatalf("commit count = %s", count)
 			}

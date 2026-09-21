@@ -293,7 +293,9 @@ func commitFinalization(ctx context.Context, root string, f *storage.Finalizatio
 		_, err := executionGit(ctx, root, append([]string{"--literal-pathspecs", "commit", "--only", "-m", f.Subject, "--"}, f.Files...)...)
 		return err
 	}
-	command := exec.Command("git", append([]string{"--no-replace-objects", "--literal-pathspecs", "-C", root, "commit", "--only", "--cleanup=verbatim", "-F", "-", "--"}, f.Files...)...)
+	// Saved messages are UTF-8; repository preferences must not label them
+	// with a legacy encoding that causes readers to transcode their bytes.
+	command := exec.Command("git", append([]string{"--no-replace-objects", "--literal-pathspecs", "-C", root, "-c", "i18n.commitEncoding=UTF-8", "commit", "--only", "--cleanup=verbatim", "-F", "-", "--"}, f.Files...)...)
 	command.Stdin = strings.NewReader(f.Message)
 	_, diagnostic, err := codex.RunOwnedCommand(ctx, command)
 	if err != nil {
