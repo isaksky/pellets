@@ -377,12 +377,27 @@ captured by its prior attempt or preflight receipt. A continuing schedule reads
 current assignments again for subsequent new claims. CLI exact-group behavior is
 unchanged. See [the data model](data-model.md) for persistence and captured intent.
 
-## Review dividers
+## Review queue rows
 
-Each divider represents an actual checkpoint. Brackets derive from explicit target
-identities, with separate lanes for overlaps and dashed segments across unrelated
-rows. Hover and keyboard focus highlight exact visible members. Counts show hidden
-members, while the dialog includes the entire scope and evidence.
+Each review has a readable title/editor link, explicit readiness/activity/result
+label, native **Review · N pellets** disclosure and standard actions menu. The
+disclosure lists the entire exact selected set with titles, statuses, links and
+blocking reasons, including filter-hidden or unavailable members. Large scopes
+scroll within the row. Optional focus/hover highlighting identifies visible
+members; there are no brackets, scope lanes or implied contiguous ranges.
+
+Ownership alone shows **Not running**. Active review and finding checks require
+an authoritative live attempt; interrupted or incomplete attempts need attention.
+Completed rows expose their generation/attempt, durable outcome, created follow-up
+links and other dispositions. Only newly created follow-ups count toward the
+result label. Reopened generations show their current readiness and link to
+historical results in the detail view.
+
+Navigation and footer count all project records in open or in-progress state,
+including reviews. The footer labels this **N active in project**. The list heading
+labels the filtered **Queue results** or workspace results and gives the explicit
+**N pellets · M reviews** composition. All states includes deferred/removed
+reviews; browsing filters do not change the project total or review membership.
 
 A row action menu or context menu inserts a checkpoint before or after an active
 pellet. The initial scope comes from the authoritative queue since the preceding
@@ -392,7 +407,7 @@ versions. A checkpoint needs explicit scope; adjacency never becomes evidence.
 
 Open, unowned checkpoints can change scope or be removed. Removal defers the
 checkpoint and retains a restore operation; it does not purge data or record a
-successful review. Deferred checkpoints remain discoverable using Maybe later.
+successful review. Deferred checkpoints remain discoverable using Maybe later and All states.
 Scope changes create a new generation and preserve earlier captured evidence and
 review outcomes. See [checkpoint management](checkpoint-management.md).
 

@@ -63,8 +63,16 @@ func designSystemFixtures() designSystemData {
 	checkpointPellet.Reference.Number = 43
 	checkpointPellet.Title = "Review interface changes"
 	checkpointPellet.Kind = domain.PelletReviewCheckpoint
-	checkpointPellet.Checkpoint = &storage.ReviewCheckpoint{Version: 1, Targets: []storage.ReviewTarget{{Number: 42, Reference: "demo-42", Title: pellet.Title, Reason: "Waiting for implementation"}}}
+	checkpointPellet.ImplementationRevision = 1
+	checkpointPellet.Checkpoint = &storage.ReviewCheckpoint{Version: 1, Targets: []storage.ReviewTarget{{Number: 42, Reference: "demo-42", Title: pellet.Title, Reason: "target_incomplete"}}}
 	checkpoint.SelectedPellet = &pelletView{Pellet: checkpointPellet, Priority: "2048", Version: "preview", CheckpointManagement: &checkpointManagementView{Choices: []checkpointScopeChoice{{Pellet: pellet, Version: "preview", Selected: true}}}}
+	checkpoint.SelectedPellet.URL = "#dialogs"
+	checkpoint.SelectedPellet.ScopeRefs, checkpoint.SelectedPellet.ScopeTotal = "demo-42", 1
+	checkpoint.SelectedPellet.Group = group
+	checkpoint.SelectedPellet.ReviewStatus = "Waiting for 1 pellet"
+	checkpoint.SelectedPellet.ReviewHelp = "Expand the scope for each target’s readiness and blocking reason."
+	checkpoint.SelectedPellet.ScopeTargets = []checkpointTargetView{{Reference: "demo-42", Title: pellet.Title, Status: "Open", Reason: "Waiting for completion", URL: "#dialogs"}}
+	checkpoint.SelectedPellet.CheckpointOutcome = makeCheckpointOutcomeView(storage.CheckpointOutcome{ImplementationRevision: 1, Status: "pending", Triage: "not_started"}, "demo", nil, storage.WebPelletSort{})
 	conflict := page
 	conflict.Conflict = &conflictView{Current: "Title: Make everyday work feel simple", Draft: map[string]string{"title": "An earlier draft of this title"}}
 	return designSystemData{UIRevision: uiRevision, Tokens: []string{"bg", "pane", "lift", "line", "ink", "muted", "accent", "green", "amber", "red", "blue", "purple"}, Pellet: page, Memory: memory, Checkpoint: checkpoint, Conflict: conflict}

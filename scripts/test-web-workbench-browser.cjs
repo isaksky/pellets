@@ -361,14 +361,7 @@ async function stop() {
   });
   await page.goto(origin);
   await page.locator(".task-title").first().waitFor();
-  await until(
-    () =>
-      page
-        .locator(".scope-brackets g")
-        .count()
-        .then((n) => n === 2),
-    "scope lanes",
-  );
+  assert.equal(await page.locator(".scope-brackets").count(), 0, "Reviews must not imply contiguous ranges");
   assert.equal(await page.locator(".task-row").count(), 4);
   assert.equal(await page.locator(".checkpoint-row").count(), 2);
   const heights = await page
@@ -483,7 +476,7 @@ async function stop() {
   assert.deepEqual(errors, []);
   console.log("PASS direct editing, fixed action footer, Save/live editability, Cancel/backdrop guards, approval receipt, insertion backdrop, desktop and narrow");
   if (process.env.PELLETS_WORKBENCH_BROWSER_CASE === "dialogs") return;
-  // Exact/noncontiguous/overlapping bracket ticks derive from explicit records.
+  // Exact/noncontiguous/overlapping highlights derive from explicit records.
   await page.locator("#task-" + cp.id + " .checkpoint-open").focus();
   assert.deepEqual(
     await page
@@ -679,6 +672,7 @@ async function stop() {
     .locator(".queue-rows>[data-row-id]")
     .evaluateAll((xs) => xs.map((x) => x.dataset.rowId));
   assert.equal(order.indexOf(inserted) + 1, order.indexOf(b.id));
+  await page.locator("#task-" + inserted + " .row-menu summary").click();
   await page
     .locator("#task-" + inserted + " [data-checkpoint-remove] button")
     .click();

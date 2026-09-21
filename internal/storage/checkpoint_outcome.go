@@ -1,5 +1,12 @@
 package storage
 
+// CheckpointIdentity selects one exact review generation for a batched read.
+type CheckpointIdentity struct {
+	ProjectID              int64
+	Number                 int64
+	ImplementationRevision int64
+}
+
 // CheckpointOutcome is a concise durable read for one exact checkpoint
 // generation. It deliberately excludes reviewer prose, assessment reasons,
 // prompts, commands, snapshots and conversation content.
@@ -8,6 +15,8 @@ type CheckpointOutcome struct {
 	CheckpointNumber       int64
 	ImplementationRevision int64
 	RunID                  int64
+	RunState               string
+	RunPhase               string
 	Status                 string
 	NeedsAttention         bool
 	ReviewCompleted        bool

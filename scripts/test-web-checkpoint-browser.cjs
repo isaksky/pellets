@@ -104,10 +104,19 @@ async function startServer(root) {
     assert.equal((await schedule(controls.locator('form[data-schedule]:has(select[name=mode]) button[type=submit]').first())).completed, 1);
     cli('group', 'edit', String(group.id), '--context', 'Current document must not replace implementation evidence');
     const checkpoint = cli('add', 'Review selected implementation', '--review-targets', target.id);
-    const inspectorPath = `/projects/${target.project}/tasks/${checkpoint.id}`;
+    // Ready evidence permits claiming, but ownership alone is never running.
+    await page.goto(origin + `/projects/${target.project}/tasks?status=all`);
+    const reviewRow = page.locator('#task-' + checkpoint.id);
+    const reviewStatus = reviewRow.locator('.review-status');
+    await until(async () => await reviewStatus.innerText() === 'Ready', 'Ready review missing');
+    cli('start', checkpoint.id);
+    await until(async () => await reviewStatus.innerText() === 'Not running', 'Idle claim presented as running');
+    cli('release', checkpoint.id);
+    await until(async () => await reviewStatus.innerText() === 'Ready', 'Released review not ready');
+    const inspectorPath = `/projects/${target.project}/tasks/${checkpoint.id}?status=all`;
     await page.goto(origin + inspectorPath);
     await page.waitForFunction(() => !document.documentElement.hasAttribute('data-nonce'));
-    const outcome = page.locator('[data-checkpoint-outcome]').first();
+    const outcome = page.locator('[data-inspector] [data-checkpoint-outcome]').first();
     assert.match(await outcome.textContent(), /Pending separate review/);
     await page.evaluate(() => { window.checkpointInspector = document.querySelector('[data-inspector]'); });
     setMode(mode === 'review_clean' ? 'review_result_gate' : mode);
@@ -116,6 +125,7 @@ async function startServer(root) {
       run_one: /^One pellet/, drain: /^Through matching queue/, watch: /^Wait for matching work/,
     }[scheduleMode]}).click();
     const reviewed = await schedule(controls.locator('form[data-schedule]:has(select[name=mode]) button[type=submit]').first(), mode === 'review_clean' ? async id => {
+      await until(async () => await reviewStatus.innerText() === 'Reviewing', 'Live review not labeled Reviewing');
       const details = controls.locator('.run-details');
       const scheduleLabel = {run_one: 'Run one', drain: 'Drain', watch: 'Watch'}[scheduleMode];
       await until(async () => /Review checkpoint/.test(await details.locator(':scope > .run-facts').textContent()), 'Checkpoint run did not refresh');
@@ -166,6 +176,7 @@ async function startServer(root) {
       assert.equal(reviewed.state, 'needs_attention');
       await until(async () => /Needs attention/.test(await outcome.textContent()), 'Partial failure not shown');
       text = await outcome.textContent();
+      assert.equal(await reviewStatus.innerText(), 'Needs attention');
       assert.match(text, /Partial/); assert.match(text, /1 of 2/);
       assert.equal(await outcome.locator('a').count(), 1);
       const firstFollowup = await outcome.locator('a').textContent();
@@ -186,6 +197,19 @@ async function startServer(root) {
       await outcome.waitFor();
     }
     assert.equal(cli('show', checkpoint.id).status, 'closed');
+    await until(async () => (await reviewStatus.innerText()).startsWith('Reviewed with '), 'Completed row missing result');
+    await reviewRow.locator('.review-disclosure').evaluate(el => el.open = true);
+    const rowOutcome = reviewRow.locator('[data-checkpoint-outcome]');
+    assert.equal(await rowOutcome.textContent(), await outcome.textContent(), 'Row and inspector disagree about durable outcome');
+    const resultsPage = await browser.newPage({viewport: {width: 1280, height: 900}});
+    await resultsPage.goto(origin + `/projects/${target.project}/tasks?status=all`);
+    const completedRow = resultsPage.locator('#task-' + checkpoint.id);
+    await completedRow.locator('.review-disclosure > summary').click();
+    assert.equal(await completedRow.locator('[data-checkpoint-outcome]').textContent(), await outcome.textContent());
+    const expectedStatus = mode === 'review_clean' ? 'Reviewed with no issues' : mode === 'review_findings_partial' ? 'Reviewed with 2 follow-ups' : 'Reviewed with 0 follow-ups';
+    assert.equal(await completedRow.locator('.review-status').innerText(), expectedStatus);
+    if (artifacts) await resultsPage.screenshot({path: path.join(artifacts, `${mode}-${scheduleMode}-row-result.png`)});
+    await resultsPage.close();
     await controls.reload();
     const details = controls.locator('.run-details');
     await details.locator(':scope > summary').focus(); await controls.keyboard.press('Enter');
@@ -239,9 +263,10 @@ async function startServer(root) {
     await page.setViewportSize({width: 390, height: 844});
     assert.equal(await outcome.evaluate(el => el.scrollWidth <= el.clientWidth), true, 'Outcome overflows narrow inspector');
     assert.equal(await page.locator('[data-inspector]').getAttribute('aria-modal'), 'true');
+    const completedGeneration = await outcome.getAttribute('data-checkpoint-generation');
     cli('reopen', checkpoint.id);
     await page.reload();
-    assert.equal(await outcome.getAttribute('data-checkpoint-generation'), '2');
+    assert.notEqual(await outcome.getAttribute('data-checkpoint-generation'), completedGeneration);
     assert.match(await outcome.textContent(), /Pending separate review/);
     assert.equal(await outcome.locator('a').count(), 0, 'New generation inherited old follow-ups');
     const history = page.locator('.checkpoint-history');

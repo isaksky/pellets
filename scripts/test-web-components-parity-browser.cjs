@@ -10,7 +10,7 @@ const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-ui-parity-'));
 const fixture = path.join(temporary, 'parity'), current = path.join(temporary, 'pl-current');
 const baseline = process.env.PELLETS_UI_BASELINE ? path.resolve(process.env.PELLETS_UI_BASELINE) : path.join(temporary, 'pl-baseline');
-const results = {}, groupAdditions = {};
+const results = {}, groupAdditions = {}, reviewLayouts = {};
 let server, browser;
 
 async function start(binary) {
@@ -65,15 +65,30 @@ async function measure(page, scene, build) {
     const details = document.querySelector('[data-group-details-link]');
     return {navigation: navigation?.getBoundingClientRect().height || 0, details: details?.getBoundingClientRect().height || 0};
   });
+  reviewLayouts[build][scene] = await page.evaluate(() => {
+    const queue = document.querySelector('#queue-rows');
+    return {indent: queue ? parseFloat(getComputedStyle(queue).paddingLeft) : 0,
+      brackets: document.querySelectorAll('.scope-brackets').length,
+      rows: [...document.querySelectorAll('.checkpoint-row')].map(row => ({
+        id: row.id, height: row.getBoundingClientRect().height,
+        titleSize: getComputedStyle(row.querySelector('.checkpoint-open')).fontSize,
+        disclosure: !!row.querySelector('.review-disclosure > summary'),
+        menu: !!row.querySelector('.row-menu > summary'),
+        targets: row.dataset.scope,
+      }))};
+  });
   results[build][scene] = await page.evaluate(() => {
     const closed = Array.from(document.querySelectorAll('details:not([open])'));
     const selectors = 'button, input:not([type=hidden]):not(.select-native), textarea, select:not(.select-native), label, summary, dialog[open], .task-row, .checkpoint-row, .memory-card, .section-heading, #main, #right-panel, #project-drawer, .plan-tabs, .create-popover[open] > form, .filter-fields:popover-open, .select-popover, .select-value, .select-chevron, .inspector > header, .dialog-footer';
     return Array.from(document.querySelectorAll(selectors))
-      .filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden' &&
+      .filter(el => !el.closest('.checkpoint-row') && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden' &&
         !closed.some(details => details.contains(el) && !details.querySelector('summary')?.contains(el)))
       .map(el => {
         const bounds = el.getBoundingClientRect(), style = getComputedStyle(el);
+        const row = el.closest('.task-row');
+        const precedingReviews = row ? [...row.parentElement.children].slice(0, [...row.parentElement.children].indexOf(row)).filter(el => el.matches('.checkpoint-row')).reduce((height, el) => height + el.getBoundingClientRect().height, 0) : 0;
         return {
+          queueRow: row?.id || '', rowBox: el === row, precedingReviews,
           tag: el.tagName, id: el.id.replace(/workbench-select-\d+/g, 'generated-select'),
           name: el.getAttribute('name'), label: el.getAttribute('aria-label'),
           bounds: [bounds.x, bounds.y, bounds.width, bounds.height].map(value => Math.round(value * 100) / 100),
@@ -110,7 +125,7 @@ async function measure(page, scene, build) {
     ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}),
     ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});
   for (const [build, binary] of [['before', baseline], ['after', current]]) {
-    results[build] = {}; groupAdditions[build] = {};
+    results[build] = {}; groupAdditions[build] = {}; reviewLayouts[build] = {};
     const origin = await start(binary), page = await browser.newPage({viewport: {width: 1280, height: 900}});
     page.setDefaultTimeout(12000);
     const tasksURL = origin + '/projects/' + first.project + '/tasks?workspace=1';
@@ -175,11 +190,40 @@ async function measure(page, scene, build) {
     await stop();
   }
   fs.writeFileSync(path.join(temporary, 'measurements.json'), JSON.stringify(results, null, 2));
+  fs.writeFileSync(path.join(temporary, 'review-layouts.json'), JSON.stringify(reviewLayouts, null, 2));
   fs.writeFileSync(path.join(temporary, 'group-additions.json'), JSON.stringify(groupAdditions, null, 2));
   console.log('Visual artifacts: ' + temporary);
   const labels = {status: ['Status'], sort: ['Sort'], direction: ['Direction', 'Move'], group: ['Group'], target: ['Task'], workspace_id: ['Workspace']};
   for (const scene of Object.keys(results.before)) {
-    const before = results.before[scene], after = structuredClone(results.after[scene]);
+    const before = structuredClone(results.before[scene]), after = structuredClone(results.after[scene]);
+    // Review rows deliberately replace 42px dividers and their bracket gutters.
+    // Check this exact adoption separately, then account only for its measured
+    // displacement of ordinary rows and their existing controls.
+    const oldReview = reviewLayouts.before[scene], newReview = reviewLayouts.after[scene];
+    assert.equal(newReview.brackets, 0, scene + ': bracket geometry returned');
+    assert.equal(newReview.indent, 0, scene + ': queue retained bracket indentation');
+    assert.equal(newReview.rows.length, oldReview.rows.length);
+    newReview.rows.forEach((row, i) => {
+      assert.equal(row.id, oldReview.rows[i].id);
+      assert.equal(row.targets, oldReview.rows[i].targets);
+      assert.equal(row.titleSize, '13px');
+      assert.ok(row.disclosure && row.menu, scene + ': review lost disclosure/actions');
+      assert.ok(row.height >= 60 && row.height <= 120, scene + ': collapsed review height');
+    });
+    assert.equal(after.length, before.length, scene + ': original control count changed');
+    after.forEach((control, i) => {
+      assert.equal(control.queueRow, before[i].queueRow);
+      assert.equal(control.rowBox, before[i].rowBox);
+      if (control.queueRow) {
+        control.bounds[1] = Math.round((control.bounds[1] - control.precedingReviews + before[i].precedingReviews) * 100) / 100;
+        if (control.rowBox) {
+          const gutter = oldReview.indent - newReview.indent;
+          control.bounds[0] += gutter;
+          control.bounds[2] -= gutter;
+        }
+      }
+      for (const key of ['queueRow', 'rowBox', 'precedingReviews']) { delete control[key]; delete before[i][key]; }
+    });
     assert.equal(after.length, before.length, scene + ': visible control count changed');
     // Group details intentionally add one project-navigation row and one
     // 19.5px link below pellet metadata. Account only for their measured layout
@@ -247,6 +291,6 @@ async function measure(page, scene, build) {
       }
     });
     assert.deepEqual(after, before, scene + ': geometry or computed styling changed');
-    console.log('PASS ' + scene + ': original controls match baseline with documented group additions');
+    console.log('PASS ' + scene + ': original controls match baseline with documented review rows and group additions');
   }
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => { await browser?.close(); await stop(); });

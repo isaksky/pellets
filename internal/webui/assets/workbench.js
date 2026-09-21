@@ -16,6 +16,7 @@ const drafts = new Map(),
   expansions = new Map(),
   activity = new Map();
 let focusReceipt = null,
+  restoredReviewFocus = null,
   pendingRestore = false,
   stream = null,
   streamURL = "",
@@ -104,7 +105,7 @@ function remember() {
       while (drafts.size > 64) drafts.delete(drafts.keys().next().value);
     });
   document
-    .querySelectorAll("#main,.run-workspace,.activity-panel")
+    .querySelectorAll("#main,.run-workspace,.activity-panel,.review-content")
     .forEach((el) => {
       scrolls.set(scrollKey(el), {
         top: el.scrollTop,
@@ -135,6 +136,8 @@ function remember() {
       end: field.selectionEnd,
       direction: field.selectionDirection,
     };
+  } else if (active?.closest(".checkpoint-row") && active.id) {
+    focusReceipt = {id: active.id};
   } else focusReceipt = null;
 }
 function scrollKey(el) {
@@ -172,25 +175,23 @@ function restore() {
     }
   }
   document
-    .querySelectorAll("#main,.run-workspace,.activity-panel")
-    .forEach((el) => {
-      const saved = scrolls.get(scrollKey(el));
-      if (saved) {
-        el.scrollTop = saved.top;
-        el.scrollLeft = saved.left;
-      }
-    });
-  document
     .querySelectorAll("#execution details[id],#main details[id]")
     .forEach((el) => {
       if (expansions.has(el.id)) el.open = expansions.get(el.id);
     });
+  document.querySelectorAll("#main,.run-workspace,.activity-panel,.review-content").forEach(el => {
+    const saved = scrolls.get(scrollKey(el));
+    if (saved) { el.scrollTop = saved.top; el.scrollLeft = saved.left; }
+  });
   // Recreate/synchronize custom controls after values and disclosures are
   // restored. Focus is independent of draft state: a clean control can be
   // keyboard-focused when an authoritative update arrives.
   refreshComponents();
   refreshDescriptions();
-  if (focusReceipt) {
+  if (focusReceipt?.id) {
+    const target = document.getElementById(focusReceipt.id);
+    if (target?.getClientRects().length) target.focus({preventScroll: true});
+  } else if (focusReceipt) {
     const form = forms.find(
       (candidate) => formKey(candidate) === focusReceipt.key,
     );
@@ -272,11 +273,19 @@ function initialize() {
   applyTheme(root.dataset.themeChoice);
   panels();
   syncDialog();
-  brackets();
   connectActivity();
   assignmentMode();
   syncQueueFilters();
   positionRecipients();
+  if (restoredReviewFocus) {
+    // Keep focus on the restored row once its authoritative patch arrives.
+    // A filtered-out row leaves focus on Search; never steal a later user focus.
+    if (document.activeElement !== document.getElementById("search")) restoredReviewFocus = null;
+    else {
+      const target = document.getElementById(restoredReviewFocus);
+      if (target) { target.focus({preventScroll: true}); restoredReviewFocus = null; }
+    }
+  }
 }
 
 function positionRecipients() {
@@ -343,7 +352,6 @@ document.addEventListener("click", (event) => {
       );
     } catch {}
     panels();
-    requestAnimationFrame(brackets);
   }
   if (event.target.closest("[data-open-execution]")) {
     window.Planner?.selectExecution();
@@ -380,11 +388,11 @@ document.addEventListener("click", (event) => {
   const insert = event.target.closest("[data-insert-checkpoint]");
   if (insert)
     insertCheckpoint(
-      insert.closest(".task-row"),
+      insert.closest(".task-row,.checkpoint-row"),
       insert.dataset.insertCheckpoint,
     );
   const move = event.target.closest("[data-move-row]");
-  if (move) moveRow(move.closest(".task-row"), move.dataset.moveRow);
+  if (move) moveRow(move.closest(".task-row,.checkpoint-row"), move.dataset.moveRow);
   document
     .querySelectorAll(
       ".switcher[open],.row-menu[open],.assignment-popover[open],.record-actions[open]",
@@ -453,7 +461,7 @@ document.addEventListener(
 );
 document.addEventListener("keydown", (event) => {
   if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
-    const row = event.target.closest(".task-row");
+    const row = event.target.closest(".task-row,.checkpoint-row");
     if (row) {
       event.preventDefault();
       const menu = row.querySelector(".row-menu");
@@ -463,7 +471,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 document.addEventListener("contextmenu", (event) => {
-  const row = event.target.closest(".task-row");
+  const row = event.target.closest(".task-row,.checkpoint-row");
   if (!row) return;
   event.preventDefault();
   const menu = row.querySelector(".row-menu");
@@ -481,7 +489,7 @@ function insertCheckpoint(row, direction) {
   const dialog = document.getElementById("insert-dialog"),
     source = document.querySelector("[data-checkpoint-form]");
   if (!row || !source || !row.dataset.checkpointPriority) return;
-  row.querySelector("details").open = false;
+  row.querySelector(".row-menu").open = false;
   const form = document.createElement("form");
   form.id = "insert-checkpoint-form";
   form.className = "insert-form";
@@ -589,6 +597,9 @@ function moveRow(row, direction) {
     index = rows.indexOf(row),
     target = rows[index + (direction === "before" ? -1 : 1)];
   if (!target) return;
+  const menu = row.querySelector(".row-menu");
+  menu.open = false;
+  menu.querySelector("summary").focus({preventScroll: true});
   const form = document.createElement("form");
   form.action =
     document.querySelector("[data-checkpoint-form]").action +
@@ -607,82 +618,6 @@ function moveRow(row, direction) {
   document.body.append(form);
   requestAnimationFrame(() => form.requestSubmit());
 }
-function brackets() {
-  const rows = document.getElementById("queue-rows");
-  if (!rows) return;
-  rows.querySelector(".scope-brackets")?.remove();
-  const items = Array.from(rows.children).filter((x) => x.dataset.rowId),
-    byRef = new Map(items.map((x, i) => [x.dataset.rowId, i])),
-    spans = [];
-  items.forEach((row, index) => {
-    if (!row.dataset.scope) return;
-    const refs = new Set(row.dataset.scope.split(" ")),
-      members = items
-        .map((x, i) =>
-          refs.has(x.dataset.rowId) && !x.classList.contains("checkpoint-row")
-            ? i
-            : -1,
-        )
-        .filter((x) => x >= 0);
-    const count = row.querySelector(".scope-count");
-    if (count)
-      count.textContent =
-        members.length === refs.size
-          ? String(refs.size)
-          : members.length
-            ? members.length + " of " + refs.size
-            : refs.size + " hidden";
-    if (members.length)
-      spans.push({
-        row,
-        index,
-        refs,
-        members,
-        first: Math.min(index, ...members),
-        last: Math.max(index, ...members),
-      });
-  });
-  spans.sort((a, b) => a.first - b.first || a.last - b.last);
-  const lanes = [];
-  spans.forEach((s) => {
-    let lane = lanes.findIndex((end) => end < s.first);
-    if (lane < 0) lane = lanes.length;
-    lanes[lane] = s.last;
-    s.lane = lane;
-  });
-  rows.style.paddingLeft = Math.max(10, lanes.length * 7 + 4) + "px";
-  const ns = "http://www.w3.org/2000/svg",
-    svg = document.createElementNS(ns, "svg");
-  svg.classList.add("scope-brackets");
-  svg.setAttribute("aria-hidden", "true");
-  const box = rows.getBoundingClientRect();
-  for (const span of spans) {
-    const x = 3 + span.lane * 7;
-    const y = (i) => {
-      const b = items[i].getBoundingClientRect();
-      return b.top - box.top + b.height / 2;
-    };
-    const g = document.createElementNS(ns, "g");
-    g.dataset.checkpoint = span.row.dataset.rowId;
-    for (let i = span.first; i < span.last; i++) {
-      const path = document.createElementNS(ns, "path");
-      path.setAttribute("d", `M ${x} ${y(i)} V ${y(i + 1)}`);
-      if (!span.members.includes(i) || !span.members.includes(i + 1))
-        path.classList.add("scope-muted");
-      g.append(path);
-    }
-    for (const i of [...span.members, span.index]) {
-      const path = document.createElementNS(ns, "path");
-      path.setAttribute(
-        "d",
-        `M ${x} ${y(i)} H ${x + (i === span.index ? 12 : 5)}`,
-      );
-      g.append(path);
-    }
-    svg.append(g);
-  }
-  rows.prepend(svg);
-}
 function highlight(row, enabled) {
   if (!row) return;
   const refs = new Set((row.dataset.scope || "").split(" "));
@@ -694,18 +629,7 @@ function highlight(row, enabled) {
         enabled && refs.has(el.dataset.rowId),
       ),
     );
-  document
-    .querySelectorAll(".scope-brackets g")
-    .forEach((g) =>
-      g
-        .querySelectorAll("path")
-        .forEach((p) =>
-          p.classList.toggle(
-            "scope-active",
-            enabled && g.dataset.checkpoint === row.dataset.rowId,
-          ),
-        ),
-    );
+
 }
 for (const [type, enabled] of [
   ["mouseover", true],
@@ -717,7 +641,7 @@ for (const [type, enabled] of [
     const row = e.target.closest(".checkpoint-row");
     if (row && !row.contains(e.relatedTarget)) highlight(row, enabled);
   });
-window.addEventListener("resize", brackets);
+
 function element(tag, className, text) {
   const el = document.createElement(tag);
   if (className) el.className = className;
@@ -1039,6 +963,9 @@ document.addEventListener(
   "submit",
   async (event) => {
     const form = event.target;
+    // A completed row action must not leave its menu blocking related patches.
+    const menu = form.closest?.(".row-menu");
+    if (menu && !form.matches("[data-checkpoint-remove-inline]")) menu.open = false;
     if (
       !form.matches?.("[data-checkpoint-remove-inline],[data-checkpoint-undo]")
     )
@@ -1049,6 +976,7 @@ document.addEventListener(
     if (form.dataset.pending) return;
     form.dataset.pending = "true";
     const button = form.querySelector("button");
+    const submittedWithFocus = form.contains(document.activeElement);
     button.disabled = true;
     uiVersion.beginRequest();
     try {
@@ -1070,7 +998,12 @@ document.addEventListener(
         "text/html",
       );
       if (form.matches("[data-checkpoint-undo]")) {
+        const returnFocus = submittedWithFocus && (document.activeElement === document.body || form.contains(document.activeElement));
         document.getElementById("checkpoint-undo")?.remove();
+        if (returnFocus) {
+          restoredReviewFocus = form.dataset.restoreFocus || null;
+          document.getElementById("search")?.focus({preventScroll: true});
+        }
       } else {
         const restore = content.querySelector("form[data-checkpoint-restore]");
         if (!restore)
@@ -1084,6 +1017,7 @@ document.addEventListener(
         undo.action = restore.getAttribute("action");
         undo.method = "post";
         undo.dataset.checkpointUndo = "";
+        undo.dataset.restoreFocus = "review-actions-" + form.closest("[data-row-id]").dataset.rowId;
         for (const el of restore.querySelectorAll("input[type=hidden]"))
           undo.append(input(el.name, el.value));
         const restoreButton = element("button", "", "Undo");
@@ -1096,6 +1030,9 @@ document.addEventListener(
         dismiss.onclick = () => toast.remove();
         toast.append(dismiss);
         document.body.append(toast);
+        const menu = form.closest(".row-menu");
+        if (menu) menu.open = false;
+        restoreButton.focus({preventScroll: true});
       }
       document.dispatchEvent(new CustomEvent("pellets-refresh"));
     } catch (error) {

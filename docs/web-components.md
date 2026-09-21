@@ -26,6 +26,7 @@ native buttons, text fields, or application dialogs.
 | Description contents | Feature-owned `pl-description-reader` in pellet and group dialogs | A document-local hierarchical navigation rail, with a collapsible list below 960px. It owns heading anchors and resize/listener cleanup; source fields still own edits. The dialog widens by the rail's width to preserve reading space. The gallery has a page-local outline fixture. See [description reading and editing](workbench-ui.md#description-reading-and-editing) for visibility and navigation rules. |
 | Planning tabs and sidebar resizing | Original implementations | Keep routing, draft preservation, narrow-screen behavior, geometry and saved preferences. |
 | Badges, notices and icons | Original native markup | Additional wrappers add no needed behavior here and can change child selectors or layout. |
+| Review queue rows | Feature-owned native row, `details` scope disclosure and existing `.row-menu` | Replaces 42px, 11px-title dividers and bracket gutters with readable 13px titles and 12px statuses/target counts. Title/editor navigation is separate from scope expansion. Complete explicit scope and generation-bound outcomes share a bounded scroll region; no layout nesting or inferred contiguous range. Counts include reviews in the project’s active total and label the filtered composition. Native controls retain feature-specific refresh, focus, selection, draft, removal/Undo and history behavior. Generic disclosure/menu adoption remains deferred. The gallery uses the production row with local-only fixture actions. |
 | Current execution | Feature-owned native status summary, message articles and tool/group disclosures | The authoritative state label, working indicator, phase and two-line operation preview remain. Commentary is expanded 14px prose using the shared safe Markdown renderer. Adjacent compatible tools share a native details/summary with operation/path counts, reported outcomes and a current/latest preview; original child disclosures remain available. Tool rows use two-line command/path previews, visible reported exits and failure impact, and complete safe paths in their expanded evidence. Groups retain the last failure alongside the current/latest operation. Grouping is feature-owned, not adoption of the preview composite. Run details collects secondary workspace/schedule/runtime information; the feed explanation has a native disclosure while history/connection warnings remain visible. The composer scrolls on phones and in windows at most 600px tall; in short windows the state summary also scrolls to leave room for content. Only the state label is a live region. See [Live execution](workbench-ui.md#live-execution) and [grouping semantics](execution-activity.md). |
 
 The Groups addition deliberately adds one 35px row and its 2px gap to desktop project navigation
@@ -219,7 +220,14 @@ and 390px widths. It saves screenshots and geometry/style measurements for
 creation, filters and options, record actions, checkpoint scope, assignments,
 memories, and planning. Set `PELLETS_UI_BASELINE=/path/to/pl` to use an explicit
 baseline executable. Expected accessible-label improvements and the documented
-native-select correction are checked separately; other differences fail.
+native-select correction are checked separately. Review rows are an intentional
+presentation change: the comparison verifies the new disclosure/menu and 13px
+title, unchanged explicit membership, zero bracket gutter, and only the measured
+vertical displacement from taller reviews plus reclaimed gutter width on ordinary
+rows. Every original control retains the remaining geometry and styles; other
+differences fail. The dedicated review-row suite captures all five themes at
+1280, 1092, 800 and 390px and verifies complete scope, status/count semantics and
+refresh stability in both engines.
 
 Run the gallery and application suites in both engines with
 `PLAYWRIGHT_BROWSER=webkit` for the second run. Install matching browsers with

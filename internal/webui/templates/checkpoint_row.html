@@ -1,0 +1,21 @@
+{{define "checkpoint-row"}}<article id="task-{{.Pellet.Reference}}" class="checkpoint-row {{if .Selected}}selected{{end}}" data-checkpoint-priority="{{if .Pellet.Priority}}{{.Pellet.Priority}}{{end}}" data-row-id="{{.Pellet.Reference}}" data-row-version="{{.Version}}" data-scope="{{.ScopeRefs}}" data-scope-total="{{.ScopeTotal}}" aria-label="Review {{.Pellet.Title}}">
+  <header class="checkpoint-heading"><a id="review-title-{{.Pellet.Reference}}" class="checkpoint-open row-link" href="{{.URL}}" data-on:click="@navigate('inspector-host')">{{.Pellet.Title}}</a><span class="review-status">{{.ReviewStatus}}</span></header>
+  <details class="review-disclosure" id="review-scope-{{.Pellet.Reference}}">
+    <summary id="review-toggle-{{.Pellet.Reference}}" aria-label="Scope and result for {{.Pellet.Title}}"><span class="review-identity">Review</span> · <span class="scope-count">{{.ScopeTotal}} {{if eq .ScopeTotal 1}}pellet{{else}}pellets{{end}}</span>{{if .Pellet.Group}} <span class="review-group">· {{.Group}}</span>{{end}}</summary>
+    <div id="review-content-{{.Pellet.Reference}}" class="review-content" tabindex="0" role="region" aria-label="Selected pellets and review result for {{.Pellet.Reference}}">
+      <p>{{.ReviewHelp}}</p>
+      {{if .CheckpointOutcome.RunID}}{{template "checkpoint-outcome" .CheckpointOutcome}}{{end}}
+      <p class="form-help">Exact selected scope · {{.ScopeTotal}} {{if eq .ScopeTotal 1}}pellet{{else}}pellets{{end}}. Queue order and filters do not change membership.{{if .ScopeHidden}} <strong>{{.ScopeHidden}} not shown by current filters.</strong>{{end}}</p>
+      <ul class="review-targets">{{range .ScopeTargets}}<li>{{if .URL}}<a id="review-target-{{$.Pellet.Reference}}-{{.Reference}}" href="{{.URL}}" data-on:click="@navigate('inspector-host')">{{.Title}}</a>{{else}}<strong>{{.Title}}</strong>{{end}}<span class="review-target-meta"><code>{{.Reference}}</code> · {{.Status}}{{if .Hidden}} · Not shown by current filters{{end}}</span><span class="review-target-reason">{{.Reason}}</span></li>{{end}}</ul>
+      {{if not .CheckpointOutcome.RunID}}<p class="form-help">Generation {{.Pellet.ImplementationRevision}} · Findings are checked before follow-ups are created.</p>{{end}}
+      <a href="{{.URL}}" data-on:click="@navigate('inspector-host')">Open review details and earlier generations</a>
+    </div>
+  </details>
+  <details class="row-menu" id="row-menu-{{.Pellet.Reference}}"><summary id="review-actions-{{.Pellet.Reference}}" aria-label="Actions for {{.Pellet.Reference}}">···</summary><div class="row-popover" role="menu">
+    <a role="menuitem" href="{{.URL}}" data-on:click="@navigate('inspector-host')">Open review details{{if eqStatus .Pellet.Status "open"}} / edit scope{{end}}</a>
+    <button type="button" role="menuitem" data-insert-checkpoint="before" {{if not .Pellet.Priority}}disabled{{end}}>Insert checkpoint before</button><button type="button" role="menuitem" data-insert-checkpoint="after" {{if not .Pellet.Priority}}disabled{{end}}>Insert checkpoint after</button>
+    <button type="button" role="menuitem" data-move-row="before" {{if not .Pellet.Priority}}disabled{{end}}>Move review up</button><button type="button" role="menuitem" data-move-row="after" {{if not .Pellet.Priority}}disabled{{end}}>Move review down</button>
+    {{if .Pellet.Checkpoint.Removed}}<form action="/projects/{{.Pellet.Reference.ProjectCode}}/checkpoints/{{.Pellet.Reference}}/restore" method="post" data-on:submit="@submit()"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.Version}}"><button type="submit" role="menuitem">Restore review</button></form>
+    {{else if eqStatus .Pellet.Status "open"}}<form class="checkpoint-remove-form" action="/projects/{{.Pellet.Reference.ProjectCode}}/checkpoints/{{.Pellet.Reference}}/remove" method="post" data-checkpoint-remove data-checkpoint-remove-inline><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="version" value="{{.Version}}"><button type="submit" role="menuitem" aria-label="Remove checkpoint {{.Pellet.Reference}}">Remove review</button></form>{{end}}
+  </div></details>
+</article>{{end}}

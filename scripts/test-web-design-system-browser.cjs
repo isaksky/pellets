@@ -43,6 +43,13 @@ async function start(binary) {
   await page.goto(origin + '/dev/design-system');
   await page.locator('#theme-select-trigger').waitFor();
   assert.equal(await page.title(), 'Design system · Pellets');
+  const review = page.locator('[data-gallery-review]');
+  await review.locator('.review-disclosure > summary').focus(); await page.keyboard.press('Enter');
+  assert.equal(await review.locator('.review-disclosure').evaluate(el => el.open), true);
+  assert.match(await review.locator('.review-targets').innerText(), /demo-42.*Open/s);
+  await review.locator('.row-menu > summary').click();
+  await review.getByRole('menuitem', {name: 'Remove checkpoint demo-43'}).click();
+  assert.match(await page.locator('#ds-notice').innerText(), /preview only/);
   const contents = page.locator('#contents');
   await contents.getByRole('navigation', {name:'Description contents'}).waitFor();
   assert.equal(await contents.locator('nav a').count(), 5);
@@ -110,7 +117,7 @@ async function start(binary) {
     return {changes,stepped,submitted,selected,reset,opened,removedClosed,replaced,triggerCount,invalid,invalidFocused,validAgain,disabled,busy,restored,detachedPreserved,reconnectedClosed,guarded,dismissed};
   });
   assert.deepEqual(componentResult, {changes:1,stepped:'2',submitted:{title:'Edited',review:'yes',mode:'one',count:'2'},selected:'All',reset:'One',opened:true,removedClosed:true,replaced:'New options',triggerCount:1,invalid:true,invalidFocused:true,validAgain:true,disabled:true,busy:true,restored:true,detachedPreserved:true,reconnectedClosed:true,guarded:true,dismissed:true});
-  assert.deepEqual(await page.evaluate(() => Array.from(document.querySelectorAll('button, input:not([type=hidden]), textarea, select, dialog, details')).filter(control => !control.closest('pl-button, pl-field, pl-checkbox, pl-select, pl-number, pl-dialog, pl-menu, pl-disclosure, pl-diagram') && !control.matches('#contents [data-description-contents]')).map(control => control.outerHTML.slice(0,100))), [], 'Gallery controls must use the component library or production description controls');
+  assert.deepEqual(await page.evaluate(() => Array.from(document.querySelectorAll('button, input:not([type=hidden]), textarea, select, dialog, details')).filter(control => !control.closest('pl-button, pl-field, pl-checkbox, pl-select, pl-number, pl-dialog, pl-menu, pl-disclosure, pl-diagram') && !control.matches('#contents [data-description-contents], [data-gallery-review] .review-disclosure, [data-gallery-review] .row-menu, [data-gallery-review] .row-popover button')).map(control => control.outerHTML.slice(0,100))), [], 'Gallery controls must use the component library or the production description/review-row controls');
   await page.waitForFunction(() => document.querySelectorAll('#ds-diagrams pl-diagram[data-state=ready]').length === 3);
   assert.equal(await page.locator('#ds-diagrams pl-diagram[data-state=error]').count(), 4);
   const diagramTrigger = page.locator('#ds-diagrams .mermaid-canvas').first();

@@ -50,15 +50,6 @@ type handler struct {
 
 func newHandler(application *app.WebApplication, hub *eventHub, config handlerConfig) (http.Handler, error) {
 	functions := template.FuncMap{
-		"queueCount": func(rows []pelletView) int {
-			n := 0
-			for _, p := range rows {
-				if p.Pellet.Kind == domain.PelletOrdinary {
-					n++
-				}
-			}
-			return n
-		},
 		"statusLabel":   statusLabel,
 		"statusSymbol":  statusSymbol,
 		"runStateLabel": runStateLabel,
@@ -257,6 +248,8 @@ type pageData struct {
 	ScopeCandidates     []pelletView
 	QueueContext        []pelletView
 	ProjectQueueCount   int
+	ResultPellets       int
+	ResultReviews       int
 
 	QueueOrderURL      string
 	ClearFiltersURL    string
@@ -396,10 +389,14 @@ type scheduleView struct {
 }
 
 type pelletView struct {
+	CSRF         string
 	ExecutionURL string
 	ScopeRefs    string
-	ScopeVisible int
 	ScopeTotal   int
+	ScopeHidden  int
+	ScopeTargets []checkpointTargetView
+	ReviewStatus string
+	ReviewHelp   string
 	OwnerName    string
 
 	CheckpointOutcome    *checkpointOutcomeView

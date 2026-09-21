@@ -150,7 +150,7 @@ func (h *handler) prepareWorkbench(request *http.Request, data *pageData) error 
 		return err
 	}
 	for _, p := range all {
-		if p.Kind == "ordinary" && (p.Status == domain.PelletOpen || p.Status == domain.PelletInProgress) {
+		if p.Status == domain.PelletOpen || p.Status == domain.PelletInProgress {
 			data.ProjectQueueCount++
 		}
 		if (p.Status == domain.PelletOpen || p.Status == domain.PelletInProgress) && (p.Checkpoint == nil || !p.Checkpoint.Removed) {
@@ -214,7 +214,7 @@ func (h *handler) prepareWorkbench(request *http.Request, data *pageData) error 
 	}
 	selected := data.Pellets[:0]
 	for _, p := range data.Pellets {
-		if !workbenchStatusMatches(data.Filters.Status, p.Pellet.Status) || p.Pellet.Checkpoint != nil && p.Pellet.Checkpoint.Removed && data.Filters.Status != "maybe_later" {
+		if !workbenchStatusMatches(data.Filters.Status, p.Pellet.Status) || p.Pellet.Checkpoint != nil && p.Pellet.Checkpoint.Removed && data.Filters.Status != "maybe_later" && data.Filters.Status != "all" {
 			continue
 		}
 		if p.Pellet.Kind == "ordinary" {
@@ -241,7 +241,7 @@ func (h *handler) prepareWorkbench(request *http.Request, data *pageData) error 
 		existing[p.Pellet.Reference.String()] = true
 	}
 	for _, p := range all {
-		if p.Checkpoint == nil || (p.Checkpoint.Removed && data.Filters.Status != "maybe_later") || existing[p.Reference.String()] {
+		if p.Checkpoint == nil || (p.Checkpoint.Removed && data.Filters.Status != "maybe_later" && data.Filters.Status != "all") || existing[p.Reference.String()] {
 			continue
 		}
 		if !workbenchStatusMatches(data.Filters.Status, p.Status) {
@@ -272,19 +272,30 @@ func (h *handler) prepareWorkbench(request *http.Request, data *pageData) error 
 			}
 		}
 		if p.Pellet.Checkpoint == nil {
+			data.ResultPellets++
 			continue
 		}
+		data.ResultReviews++
 		refs := []string{}
 		for _, target := range p.Pellet.Checkpoint.Targets {
 			refs = append(refs, target.Reference)
-			if ordinary[target.Reference] {
-				p.ScopeVisible++
+			member := checkpointTargetView{Reference: target.Reference, Title: target.Title, Reason: checkpointTargetReason(target)}
+			if live, ok := current[target.Number]; ok {
+				member.URL = taskURL(data.Project.Code, request.URL.Query(), live.Reference.String(), storage.WebPelletSort{Column: storage.WebPelletSortColumn(data.Filters.Sort), Direction: storage.WebPelletSortDirection(data.Filters.Direction)})
+				member.Status = statusLabel(string(live.Status))
+				member.Hidden = !ordinary[target.Reference]
+				if member.Hidden {
+					p.ScopeHidden++
+				}
+			} else {
+				member.Status = "Unavailable"
 			}
+			p.ScopeTargets = append(p.ScopeTargets, member)
 		}
 		p.ScopeRefs = strings.Join(refs, " ")
 		p.ScopeTotal = len(refs)
 	}
-	return nil
+	return h.prepareCheckpointRows(request, data)
 }
 
 func (h *handler) saveRouting(w http.ResponseWriter, r *http.Request, project storage.Project, workspace string) {

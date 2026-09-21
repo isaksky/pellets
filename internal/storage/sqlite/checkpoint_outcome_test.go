@@ -197,3 +197,44 @@ func TestCheckpointOutcomeCompletedBeforeTriageReceipts(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckpointOutcomesBatchPreservesIdentityAndGenerationAcrossChunks(t *testing.T) {
+	ctx := context.Background()
+	finding := triageFinding(1)
+	f, _, db, run := triageFixture(t, []storage.ReviewFinding{finding})
+	receipt := reconcileFinding(t, db, run, validAssessment(finding))
+	reader, err := OpenWebReader(ctx, f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	ids := make([]storage.CheckpointIdentity, 205)
+	for i := range ids {
+		ids[i] = storage.CheckpointIdentity{ProjectID: run.ProjectID, Number: run.PelletNumber, ImplementationRevision: run.ImplementationRevision + int64(i) + 1}
+	}
+	exact := storage.CheckpointIdentity{ProjectID: run.ProjectID, Number: run.PelletNumber, ImplementationRevision: run.ImplementationRevision}
+	ids[0], ids[101], ids[204] = exact, exact, exact
+	ids[99] = storage.CheckpointIdentity{ProjectID: f.other.Project.ID, Number: run.PelletNumber, ImplementationRevision: run.ImplementationRevision}
+	got, err := reader.ReadCheckpointOutcomes(ctx, ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(ids) {
+		t.Fatalf("batch lost results: %d", len(got))
+	}
+	for i, o := range got {
+		if o.ProjectID != ids[i].ProjectID || o.CheckpointNumber != ids[i].Number || o.ImplementationRevision != ids[i].ImplementationRevision {
+			t.Fatalf("identity drift at %d: %+v", i, o)
+		}
+		if i == 0 || i == 101 || i == 204 {
+			if o.RunID != run.ID || o.RunState != "running" || o.RunPhase != "review" || !o.ReviewCompleted || o.Assessed != 1 || o.Dispositions[0].PelletNumber != receipt.PelletNumber {
+				t.Fatalf("receipt missing: %+v", o)
+			}
+		} else if o.ReviewCompleted || o.RunID != 0 || len(o.Dispositions) != 0 {
+			t.Fatalf("cross-generation/project leak at %d: %+v", i, o)
+		}
+	}
+	if _, err := reader.ReadCheckpointOutcomes(ctx, []storage.CheckpointIdentity{{}}); err == nil {
+		t.Fatal("invalid identity accepted")
+	}
+}

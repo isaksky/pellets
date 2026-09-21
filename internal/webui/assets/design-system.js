@@ -80,6 +80,11 @@ document.addEventListener("submit", event => {
 document.addEventListener("click", event => {
   const trigger = event.target.closest("button, a");
   if (!trigger) return;
+  if (trigger.closest("[data-gallery-review]")) {
+    event.preventDefault();
+    if (trigger.matches(".checkpoint-open")) trigger.dataset.record = "checkpoint";
+    else trigger.dataset.demoAction = trigger.textContent.trim();
+  }
   if (trigger.dataset.record) {
     const host = document.getElementById("inspector-host");
     host.replaceChildren(document.getElementById(`ds-record-${trigger.dataset.record}`).content.cloneNode(true));

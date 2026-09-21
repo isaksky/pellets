@@ -23,7 +23,7 @@ type checkpointDispositionView struct {
 
 func makeCheckpointOutcomeView(outcome storage.CheckpointOutcome, code string, query url.Values, sort storage.WebPelletSort) *checkpointOutcomeView {
 	v := &checkpointOutcomeView{CheckpointOutcome: outcome}
-	v.Label = map[string]string{"pending": "Pending separate review", "running": "Review in progress", "needs_attention": "Needs attention", "clean": "Clean", "findings": "Findings"}[outcome.Status]
+	v.Label = map[string]string{"pending": "Pending separate review", "running": "Review result pending", "needs_attention": "Needs attention", "clean": "Clean", "findings": "Findings"}[outcome.Status]
 	for _, disposition := range outcome.Dispositions {
 		d := checkpointDispositionView{FindingNumber: disposition.FindingNumber}
 		d.Label = map[string]string{"valid": "Created follow-up", "existing": "Covered by existing Pellet", "duplicate": "Duplicate finding", "invalid": "Invalid finding", "already_fixed": "Already fixed", "stylistic": "Stylistic; no follow-up"}[disposition.Decision]

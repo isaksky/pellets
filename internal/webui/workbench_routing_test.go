@@ -186,8 +186,8 @@ func TestWorkbenchCheckpointScopesSurviveFiltersAndUseCurrentTargetRouting(t *te
 		t.Fatalf("filtered scope insertion/sort: %v", got)
 	}
 	response := performRequest(f.handler, http.MethodGet, base, "", nil)
-	if !strings.Contains(response.Body.String(), `data-scope="`+a.Reference.String()+" "+b.Reference.String()+`"`) || !strings.Contains(response.Body.String(), `class="scope-count">1 of 2`) {
-		t.Fatal("exact scope/hidden members lost")
+	if !strings.Contains(response.Body.String(), `data-scope="`+a.Reference.String()+" "+b.Reference.String()+`"`) || !strings.Contains(response.Body.String(), `class="scope-count">2 pellets`) {
+		t.Fatal("exact scope count lost")
 	}
 	if slices.Contains(got, unrelated.Reference.String()) {
 		t.Fatal("adjacent unrelated pellet included")
@@ -298,16 +298,19 @@ func TestWorkbenchRemovedCheckpointsRemainDiscoverableForRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, query := range []string{"", "?status=all"} {
+	for _, query := range []string{"", "?status=active"} {
 		if got := workbenchRows(t, f, "/projects/project1/tasks"+query); slices.Contains(got, cp.Reference.String()) {
 			t.Fatalf("removed checkpoint remained in queue: %v", got)
 		}
+	}
+	if got := workbenchRows(t, f, "/projects/project1/tasks?status=all"); !slices.Contains(got, cp.Reference.String()) {
+		t.Fatal("All states must include removed reviews")
 	}
 	if got := workbenchRows(t, f, "/projects/project1/tasks?status=maybe_later"); !slices.Equal(got, []string{cp.Reference.String()}) {
 		t.Fatalf("removed checkpoint cannot be found for restore: %v", got)
 	}
 	response := performRequest(f.handler, http.MethodGet, "/projects/project1/tasks?status=maybe_later", "", nil)
-	if !strings.Contains(response.Body.String(), "<small>Removed</small>") {
+	if !strings.Contains(response.Body.String(), `class="review-status">Removed</span>`) {
 		t.Fatal("removed checkpoint presented as pending review")
 	}
 	if _, err := f.application.RestoreCheckpoint(context.Background(), p, removed.Reference, storage.PelletVersion(removed)); err != nil {

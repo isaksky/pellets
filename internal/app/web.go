@@ -160,6 +160,10 @@ func (application *WebApplication) Pellet(ctx context.Context, project storage.P
 	return application.Reader.ReadWebPellet(ctx, project, reference)
 }
 
+func (application *WebApplication) CheckpointOutcomes(ctx context.Context, identities []storage.CheckpointIdentity) ([]storage.CheckpointOutcome, error) {
+	return application.Reader.ReadCheckpointOutcomes(ctx, identities)
+}
+
 func (application *WebApplication) CheckpointOutcome(ctx context.Context, pellet storage.Pellet) (storage.CheckpointOutcome, error) {
 	return application.Reader.ReadCheckpointOutcome(ctx, pellet.ProjectID, pellet.Reference.Number, pellet.ImplementationRevision)
 }

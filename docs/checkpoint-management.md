@@ -1,12 +1,54 @@
 # Checkpoints in the Workbench queue
 
-Review dividers are queue records with explicit target identities. Their visual
-brackets come from those identities, including overlapping and noncontiguous
-scopes. Neither queue position nor browsing filters change review scope.
-Ordinary implementation readiness, lifecycle generations, verified evidence,
-and the separate checkpoint review/triage execution policy remain authoritative.
-The queue's Closed label describes lifecycle status; the dialog's review outcome
-separately records whether a review succeeded and its findings.
+Reviews are full queue rows with an independent title/editor link, native
+**Review · N pellets** scope disclosure, explicit activity/result label and the
+standard actions menu. Titles retain the saved text verbatim. The default is
+**Review selected changes**; follow-up creation belongs in supporting copy and
+outcomes, not a required title suffix.
+
+The disclosure lists every explicit selected member by title, reference and
+current lifecycle status. It explains readiness failures and marks members not
+shown by the current filters, including workspace routing. A missing record
+retains its selected title/reference and has no replacement link. Scope is an
+explicit set, including overlaps and noncontiguous members. Queue order and
+filters never change it. There are no connecting brackets, scope lanes or layout
+indentation. Optional focus/hover highlighting identifies only exact visible
+members. Large scopes scroll in a keyboard-focusable panel bounded to 420px or
+55vh; expanding does not duplicate, nest or move actual queue records.
+
+Row labels separate **Ready**, **Waiting for N pellets**, **Not running** (claimed
+without execution), **Preparing review**, **Reviewing**, **Checking findings**,
+**Finishing review**, and **Needs attention**. A persisted running attempt alone
+is insufficient: the foreground supervisor must own the exact attempt and the
+checkpoint must still be in progress. Interrupted/failed attempts and unfinished
+triage cannot appear successful. **Reviewed with no issues** requires a completed
+clean result; **Reviewed with N follow-ups** counts only permanent `valid`
+creation receipts, not existing coverage, duplicates, invalid, stylistic or
+already-fixed findings. A closed record without retained successful evidence is
+**Closed without review**. Deferred and removed reviews remain visible in
+**All states** and **Maybe later**, with their distinct lifecycle labels.
+
+The row disclosure reuses the inspector’s durable outcome, follow-up links and
+other finding dispositions. Each result names its generation and latest attempt;
+earlier generations remain available through the review details/history link.
+Reopening never inherits a prior generation’s success. Outcomes are loaded in
+two queries per batch of up to 100 exact identities in one read transaction,
+independent of the workspace’s recent-run limit. No review/triage write or model
+call is performed while browsing.
+
+The navigation count is the complete project’s active queue: ordinary pellets
+**and** reviews in open or in-progress state. The footer repeats that count as
+**N active in project**. **Queue results** (or **Workspace results**) reports the
+filtered composition as **N pellets · M reviews**, with the state filter visible
+beside it. Those results can include closed/deferred records when requested;
+project totals ignore display filters. All three are server-rendered in the same
+refresh bundle, never inferred from the currently visible DOM.
+
+Native disclosures, focus, ordinary review selection, bounded-panel scroll and
+editor drafts survive refreshes and display changes. Successful menu removal
+closes the menu, focuses Undo, and refreshes the row and counts together. Scope
+editing, reversible removal/restoration, historical evidence and the separate
+review/triage execution policy keep their existing domain contracts.
 
 ## Historical implementation requirements
 
@@ -117,3 +159,17 @@ The browser posts to `/projects/CODE/checkpoints/REF/scope`, `/remove`, and
 Scope targets are explicit `REF:ROW_VERSION` values. All authoritative mutation
 checks run again inside the database writer transaction; UI availability is
 only presentation.
+
+## Presentation verification
+
+`scripts/test-web-review-rows-browser.cjs` exercises the production queue with
+five adjacent overlapping reviews, noncontiguous/hidden/deferred/purged members,
+large scopes, native keyboard controls, sorting, live drafts/selection/focus/scroll,
+and shared lifecycle counts. It captures all five themes at 1280, 1092, 800 and
+390px with both sidebars available. Run it in Chromium and again with
+`PLAYWRIGHT_BROWSER=webkit`. The checkpoint browser suite uses the deterministic
+protocol peer to verify ready/idle/running, interrupted triage, Resume, clean and
+finding outcomes, and reopened generations. Neither suite uses a live model.
+The gallery reuses the production row with local-only fixture actions. The parity
+suite checks the exact intentional removal of the bracket gutter and displacement
+from taller review rows while continuing to compare all original controls.

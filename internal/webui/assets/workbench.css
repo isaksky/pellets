@@ -722,6 +722,8 @@ input[type="checkbox"] {
   vertical-align: middle;
   margin-left: 5px;
 }
+#tasks-title small { display: inline-block; white-space: nowrap; }
+.section-heading:has(#tasks-title) > .create-popover { flex-shrink: 0; }
 .section-heading .primary-button,
 .section-heading summary {
   border: 0;
@@ -880,7 +882,7 @@ input[type="checkbox"] {
 }
 .queue-rows {
   position: relative;
-  padding-left: 10px;
+  padding-left: 0;
 }
 .queue-caption {
   display: grid;
@@ -976,13 +978,15 @@ input[type="checkbox"] {
   min-width: 205px;
   display: grid;
 }
-.row-popover button {
+.row-popover button,
+.row-popover a {
   background: transparent;
   border: 0;
   text-align: left;
   padding: 7px 8px;
 }
-.row-popover button:not(:disabled):hover {
+.row-popover button:not(:disabled):hover,
+.row-popover a:hover {
   background: var(--theme-menu-hover);
 }
 .row-popover label {
@@ -990,67 +994,60 @@ input[type="checkbox"] {
   font-size: 12px;
 }
 .checkpoint-row {
-  height: 42px;
   position: relative;
+  padding: 12px 38px 12px 10px;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+.checkpoint-heading {
   display: flex;
-  align-items: center;
-  margin-left: 0;
-  gap: 8px;
-  padding: 0 13px 0 10px;
-  color: var(--muted);
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
 }
 .checkpoint-open {
-  display: flex;
-  align-items: center;
-  gap: 7px;
+  flex: 1 1 220px;
   min-width: 0;
-  flex: 1;
-  font-size: 11px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  overflow-wrap: anywhere;
 }
-.checkpoint-open > span:nth-child(2) {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+.review-status { font-size: 12px; color: var(--muted); }
+.review-disclosure { margin-top: 5px; }
+.review-disclosure > summary {
+  width: fit-content;
+  max-width: 100%;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  overflow-wrap: anywhere;
 }
-.checkpoint-open small {
-  font-size: 9px;
-  white-space: nowrap;
-  color: var(--dim);
+.review-identity { font-weight: 600; }
+.checkpoint-row > .row-menu { position: absolute; top: 8px; right: 6px; }
+.checkpoint-row .row-menu summary { opacity: 1; }
+.review-content {
+  max-height: min(420px, 55vh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  margin-top: 10px;
+  padding: 0 10px 8px;
+  border-left: 2px solid var(--line);
+  overflow-wrap: anywhere;
 }
-.checkpoint-rule {
-  height: 1px;
-  background: var(--theme-rule);
-  flex: 1;
-  min-width: 15px;
-  margin-left: 6px;
+.review-content p { margin: 8px 0; }
+.review-targets { list-style: none; padding: 0; margin: 10px 0; }
+.review-targets li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.review-targets a { font-weight: 500; }
+.review-target-meta, .review-target-reason { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; }
+.review-content h4 { margin: 12px 0 6px; }
+.checkpoint-row a:focus-visible, .review-disclosure > summary:focus-visible, .review-content:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
-.scope-highlight {
-  background: var(--theme-chip-selected) !important;
-}
-.scope-brackets {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  overflow: visible;
-  width: 100%;
-  height: 100%;
-}
-.scope-brackets path {
-  fill: none;
-  stroke: var(--theme-rule);
-  stroke-width: 1;
-}
-.scope-brackets .scope-muted {
-  stroke-dasharray: 2 3;
-}
-.scope-brackets .scope-active {
-  stroke: var(--accent);
-  stroke-width: 1.5;
-}
-.checkpoint-row:focus-within {
-  outline: 1px solid var(--focus);
-  outline-offset: -1px;
-}
+.scope-highlight { background: var(--theme-chip-selected) !important; }
+.checkpoint-row.selected { background: var(--theme-chip-selected); }
 .workspace-path {
   font-family: ui-monospace, monospace;
   font-size: 10px;
@@ -2245,13 +2242,6 @@ dialog::backdrop {
     left: auto;
     right: 0;
   }
-  .checkpoint-open {
-    font-size: 10px;
-    gap: 4px;
-  }
-  .checkpoint-open > small {
-    font-size: 9px;
-  }
   .run-facts {
     grid-template-columns: 1fr 1fr;
   }
@@ -2284,9 +2274,6 @@ dialog::backdrop {
 }
 .row-link {
   font-weight: 400;
-}
-.checkpoint-open {
-  color: var(--muted);
 }
 .filters {
   border-radius: 0;
@@ -2468,19 +2455,6 @@ dialog::backdrop {
 .inspector .select-trigger {
   overflow: hidden;
 }
-.checkpoint-remove-inline {
-  margin: 0;
-}
-.checkpoint-remove-inline button {
-  border: 0;
-  background: transparent;
-  padding: 0 2px;
-  font-size: 13px;
-  color: var(--dim);
-}
-.checkpoint-remove-inline button:not(:disabled):hover {
-  color: var(--red);
-}
 .activity-event pre {
   counter-reset: line;
 }
@@ -2499,15 +2473,7 @@ dialog::backdrop {
   font-size: 9px;
   user-select: none;
 }
-.checkpoint-remove-form {
-  margin: 0;
-  flex-shrink: 0;
-}
-.checkpoint-remove-form button {
-  padding: 0 2px;
-  border: 0;
-  background: transparent;
-}
+.checkpoint-remove-form { margin: 0; }
 .current-pellet {
   display: grid;
   gap: 5px;
