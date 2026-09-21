@@ -136,3 +136,12 @@ document.getElementById("ds-resizer").addEventListener("pl-resize", event => {
   document.querySelector(".ds-resize-preview").style.width = resizer.value + "px";
   document.getElementById("ds-resize-value").textContent = resizer.value + "px";
 });
+
+// Local-only example: updating options keeps the menu and keyboard focus intact.
+document.addEventListener('pl-select-action', event => {
+  const select=event.target.querySelector('#ds-live-catalog');
+  if(!select)return;
+  if(!select.querySelector('[value=two]')) select.add(new Option('Example two','two'));
+  select.dataset.menuStatus='Example refreshed locally';
+  event.target.refresh();
+});

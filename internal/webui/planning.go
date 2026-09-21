@@ -103,24 +103,7 @@ func (h *handler) servePlanning(w http.ResponseWriter, r *http.Request) {
 			planningJSON(w, 405, map[string]string{"error": "Use GET for model choices."})
 			return
 		}
-		if !h.takePlanningJob() {
-			planningJSON(w, 409, map[string]string{"error": "The planner is busy. Try again shortly.", "code": "planning_busy"})
-			return
-		}
-		defer h.releasePlanningJob()
-		ctx, cancel := h.planningContext(r.Context())
-		defer cancel()
-		workspaceID, parseErr := strconv.ParseInt(r.URL.Query().Get("workspace"), 10, 64)
-		if parseErr != nil || workspaceID < 1 {
-			h.planningError(w, requestError("Choose a workspace before loading planning models."))
-			return
-		}
-		models, err := h.application.PlanningModels(ctx, project, workspaceID, r.URL.Query().Get("access_mode"))
-		if err != nil {
-			h.planningError(w, err)
-			return
-		}
-		planningJSON(w, 200, map[string]any{"models": models})
+		h.serveModels(w, r)
 		return
 	}
 	reader, ok := h.application.Reader.(storage.PlanningReader)

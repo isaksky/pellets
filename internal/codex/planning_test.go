@@ -370,3 +370,18 @@ func TestPlanningFullAccessAndManagedRestriction(t *testing.T) {
 		})
 	}
 }
+
+func TestGlobalModelsDoesNotReadWorkspaceConfiguration(t *testing.T) {
+	options := planningTestOptions(t, "planning_chat")
+	t.Chdir(options.WorkspaceDir)
+	models, err := GlobalModels(context.Background())
+	if err != nil || len(models) == 0 {
+		t.Fatal(models, err)
+	}
+	for _, call := range planningRecordedCalls(t, options.WorkspaceDir) {
+		switch call.Method {
+		case "config/read", "configRequirements/read", "thread/start", "turn/start":
+			t.Fatalf("global discovery called %s", call.Method)
+		}
+	}
+}

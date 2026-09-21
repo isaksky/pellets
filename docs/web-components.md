@@ -138,6 +138,23 @@ Use a wrapper only after checking the target screen, its selectors and behavior.
 layout, and browser-owned unload/discard confirmations remain native HTML/browser
 features. Wrapping every layout node would not add a useful component boundary.
 
+### Live selector options and footer
+
+Opt a native select into in-place menu reconciliation with `data-live-options`.
+Call its `pl-select.refresh()` after updating options or presentation attributes.
+The controller retains the open popover, current value, focused option by value,
+and scroll; ordinary selectors keep their existing close-on-change behavior.
+
+`data-menu-action="Refresh models"` adds a footer outside the listbox.
+`data-menu-status` supplies nonselectable status text; `data-menu-busy="true"`
+marks its action unavailable without removing keyboard focus. Activating the
+footer emits bubbling `pl-select-action` from the wrapper. The application owns
+requests, persistence and status. Tab reaches the footer, Shift+Tab returns to
+options, and Escape closes the menu and returns focus. Arrow navigation and
+selection remain owned by the native select. The gallery has a local-only live
+catalog example, while the production model and effort selectors share the global
+catalog documented in Workbench.
+
 ## Dialogs and tabs
 
 ```html
@@ -208,6 +225,11 @@ listbox cleanup, guarded dismissal, tabs, desktop/mobile layouts, and the releas
 gate. The existing application browser suites cover real Datastar mutations,
 focus, dirty drafts, execution, planning, settings, checkpoint actions, and UI
 version handoff. These run against compiled binaries and disposable databases.
+
+`node scripts/test-web-model-catalog-browser.cjs` checks immediate opening with
+delayed discovery, SSE invalidation without polling, live focus/selection
+preservation, stale/error recovery and retry. It captures both menus in all five
+themes at 1280px, 800px and 390px widths; run it in both engines.
 
 For a before/after comparison against the committed version, run:
 

@@ -1547,6 +1547,7 @@ func assertSchemaObjects(t *testing.T, db *sql.DB) {
 		"memories_fts_data",
 		"memories_fts_docsize",
 		"memories_fts_idx",
+		"model_catalog",
 		"pellet_add_requests",
 		"pellets",
 		"pellets_fts",

@@ -304,7 +304,8 @@ workspace binding cannot be changed: start a new chat to use another worktree.
 Legacy chats without a binding automatically use the project’s sole checkout.
 The workspace selector is hidden when there is no choice to make. Projects with
 multiple checkouts still require a one-time selection for unbound chats. Missing or changed checkouts stop planning rather than selecting another
-workspace. Model discovery uses the same selected workspace and its settings.
+workspace. Model discovery is global: the SQLite catalog uses the server default
+Codex runtime/account, independent of workspace settings.
 New chat requires confirmation when replacing
 visible content; existing stored conversations are not destructively deleted.
 Compact draft rows expand for title, description, acceptance criteria, and group
@@ -315,9 +316,31 @@ Creation never claims work or starts execution. Group routing uses the current
 project assignments; groups have stable identity and shared Markdown context,
 while filters still use their exact, case-sensitive names.
 
+The model catalog has a seven-day TTL. Server startup checks freshness in the
+background; a fresh cache does not start Codex. Expired choices remain usable
+while a bounded refresh runs or fails. The model and effort menus open immediately
+and offer **Refresh models** (or **Retry refresh**) in a separate footer. Missing
+catalogs show only the current selection and loading status. New options update
+an open menu without changing selection or focus. SQLite changes propagate via
+the existing SSE invalidation stream; browsers re-read on invalidation, panel
+activation and reconnect, without a polling timer. Changing projects, workspaces
+or access modes never clears the catalog.
+
+`GET /models` returns `models`, `fetched_at`, `expires_at` (Unix seconds), `stale`,
+`refreshing`, and an optional sanitized `error`. `POST /models/refresh` accepts
+JSON `{"_csrf": "…"}` and returns 202 without waiting for discovery. The old
+project planning `/models` route aliases the global read and ignores workspace
+and access parameters. Reads never wait for runtime discovery. One 90-second
+SQLite claim coordinates servers, and token/expiry checks reject late results.
+Discovery times out after 60 seconds; failures retain the last successful data
+and timestamp, with a 60-second automatic retry cooldown. Manual retries bypass
+the cooldown. There is no periodic retry loop after failure; successful catalogs
+schedule their next expiry check. Shutdown cancels discovery and cleans up owned
+runtime processes before storage closes. Only model metadata is persisted.
+
 Sending a message uses the configured Codex runtime in a separate ephemeral
-session with bounded conversation and draft context. Model choices come from
-that runtime; there are no local template replies or simulated model events.
+session with bounded conversation and draft context. Actual runs validate the
+chosen model against their runtime; there are no local template replies or simulated model events.
 The planner can inspect repository files and Git state using shell commands.
 The **Access** dropdown offers **Automatic approval** (the default) and **Full access**. Automatic approval uses a
 workspace-write sandbox with `on-request` approvals and the runtime's

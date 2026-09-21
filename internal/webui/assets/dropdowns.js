@@ -123,13 +123,14 @@ function sync(record) {
   if (select.title) {
     if (trigger.title !== select.title) trigger.title = select.title;
   } else trigger.removeAttribute("title");
-  if (
-    active?.select === select &&
-    (disabled || !trigger.getClientRects().length ||
-      active.signature !== signature(select) ||
-      active.value !== select.value)
-  )
-    close(active.menu.contains(document.activeElement));
+  if (active?.select === select) {
+    if (disabled || !trigger.getClientRects().length) close(active.menu.contains(document.activeElement));
+    else if (select.hasAttribute('data-live-options')) {
+      if (active.signature !== signature(select) || active.value !== select.value) updateLiveOptions();
+      syncFooter(active);
+      place();
+    } else if (active.signature !== signature(select) || active.value !== select.value) close(active.menu.contains(document.activeElement));
+  }
 }
 
 export function connectSelect(wrapper) {
@@ -253,20 +254,7 @@ function focusOption(index) {
     menu.scrollTop += optionRect.bottom - menuRect.bottom + 5;
 }
 
-function open(record, initial = "selected") {
-  close(false);
-  if (record.select.id === "view-switcher")
-    window.Navigation?.sync?.(record.select);
-  sync(record);
-  const { select, trigger } = record;
-  if (select.matches(":disabled") || !trigger.isConnected) return;
-  const menu = document.createElement("div");
-  menu.className = "select-popover";
-  menu.id = `${select.id}-listbox`;
-  menu.setAttribute("popover", "manual");
-  menu.setAttribute("role", "listbox");
-  menu.setAttribute("aria-label", labelFor(select));
-  menu.dataset.selectId = select.id;
+function buildOptions(select, menu) {
   const options = [];
   let lastGroup = null;
   Array.from(select.options).forEach((option, index) => {
@@ -310,19 +298,93 @@ function open(record, initial = "selected") {
     menu.append(button);
     if (!button.disabled) options.push(button);
   });
+  return options;
+}
+function syncFooter(current) {
+  if (!current?.footer) return;
+  const {select, footer} = current;
+  const status = footer.querySelector('[role=status]');
+  status.textContent = select.dataset.menuStatus || '';
+  status.hidden = !status.textContent;
+  const action = footer.querySelector('button');
+  action.textContent = select.dataset.menuAction || 'Refresh';
+  action.setAttribute('aria-disabled', String(select.dataset.menuBusy === 'true'));
+}
+function updateLiveOptions() {
+  const current = active;
+  const focused = document.activeElement;
+  const focusedValue = focused?.closest('.select-option')?.dataset.value ?? current.options[current.index]?.dataset.value;
+  const hadFocus = current.list.contains(focused);
+  const scroll = current.menu.scrollTop;
+  // Reconcile by value so a focused option survives asynchronous arrival.
+  const scratch = document.createElement('div');
+  buildOptions(current.select, scratch);
+  const old = new Map(Array.from(current.list.querySelectorAll('.select-option'), node => [node.dataset.value,node]));
+  const next = [];
+  for (const candidate of Array.from(scratch.children)) {
+    const retained = candidate.matches('.select-option') && old.get(candidate.dataset.value);
+    if (retained) {
+      retained.disabled = candidate.disabled;
+      for (const attr of candidate.attributes) retained.setAttribute(attr.name,attr.value);
+      retained.replaceChildren(...candidate.childNodes);
+      next.push(retained);
+    } else next.push(candidate);
+  }
+  // Avoid detaching the active option when its position is unchanged.
+  next.forEach((node,index) => { if(current.list.children[index]!==node) current.list.insertBefore(node,current.list.children[index] || null); });
+  for (const node of Array.from(current.list.children)) if(!next.includes(node)) node.remove();
+  current.options=next.filter(node=>node.matches('.select-option')&&!node.disabled);
+  current.index=current.options.findIndex(node=>node.dataset.value===focusedValue);
+  current.signature=signature(current.select); current.value=current.select.value;
+  if(hadFocus) {
+    if(current.index<0) current.index=Math.max(0,current.options.findIndex(node=>node.dataset.value===current.select.value));
+    focusOption(current.index);
+  }
+  current.menu.scrollTop=scroll;
+  place();
+}
+
+function open(record, initial = "selected") {
+  close(false);
+  if (record.select.id === "view-switcher")
+    window.Navigation?.sync?.(record.select);
+  sync(record);
+  const { select, trigger } = record;
+  if (select.matches(":disabled") || !trigger.isConnected) return;
+  const menu = document.createElement("div");
+  menu.className = "select-popover";
+  menu.id = `${select.id}-listbox`;
+  menu.setAttribute("popover", "manual");
+  menu.setAttribute("role", "listbox");
+  menu.setAttribute("aria-label", labelFor(select));
+  menu.dataset.selectId = select.id;
+  let list=menu, footer=null;
+  if(select.hasAttribute('data-menu-action')) {
+    menu.removeAttribute('role'); menu.removeAttribute('aria-label');
+    menu.id=`${select.id}-popover`;
+    list=document.createElement('div'); list.id=`${select.id}-listbox`;
+    list.setAttribute('role','listbox');list.setAttribute('aria-label',labelFor(select));
+    footer=document.createElement('div');footer.className='select-footer';
+    const status=document.createElement('p');status.setAttribute('role','status');
+    const action=document.createElement('button');action.type='button';action.className='select-menu-action';
+    footer.append(status,action);menu.append(list,footer);
+  }
+  const options=buildOptions(select,list);
   (select.closest("dialog") || document.body).append(menu);
   active = {
     wrapper: record.wrapper,
     select,
     trigger,
     menu,
+    list, footer,
     options,
     index: -1,
     signature: signature(select),
     value: select.value,
   };
   trigger.setAttribute("aria-expanded", "true");
-  trigger.setAttribute("aria-controls", menu.id);
+  trigger.setAttribute("aria-controls", list.id);
+  syncFooter(active);
   try {
     menu.showPopover?.();
   } catch {
@@ -436,7 +498,12 @@ document.addEventListener(
     if (active?.menu.contains(event.target)) {
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (option) choose(option);
+      const action = event.target.closest('.select-menu-action');
+      if (action) {
+        // WebKit does not focus clicked buttons; retain keyboard dismissal.
+        action.focus({preventScroll:true});
+        if(active.select.dataset.menuBusy!=='true') active.wrapper.dispatchEvent(new CustomEvent('pl-select-action',{bubbles:true}));
+      } else if (option) choose(option);
       return;
     }
     const trigger = event.target.closest(".select-trigger");
@@ -477,10 +544,14 @@ document.addEventListener(
       " ",
       "Escape",
     ].includes(event.key);
-    if (event.key === "Tab" && active) {
-      close(true);
-      return;
+    const footerAction = active?.footer?.querySelector('button');
+    const inFooter = active?.footer?.contains(event.target);
+    if (event.key === 'Tab' && active) {
+      if(footerAction && !event.shiftKey && !inFooter) {event.preventDefault();event.stopImmediatePropagation();footerAction.focus();return;}
+      if(inFooter && event.shiftKey) {event.preventDefault();event.stopImmediatePropagation();focusOption(Math.max(0,active.index));return;}
+      close(true); return;
     }
+    if(inFooter && !['Escape','ArrowUp','ArrowDown','Home','End'].includes(event.key)) return;
     if (handled) {
       event.preventDefault();
       event.stopImmediatePropagation();

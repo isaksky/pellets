@@ -2856,3 +2856,8 @@ pl-description-reader [data-markdown-heading]:focus-visible { outline: 2px solid
 .group-title-input:hover { background: var(--theme-quiet-hover); }
 .group-title-input:focus { background: transparent; }
 #group-name-error { margin: 4px 0 0; }
+
+.select-footer { border-top: 1px solid var(--line); padding: 6px; }
+.select-footer p { margin: 0 0 5px; max-width: 260px; font-size: 12px; color: var(--muted); }
+.select-menu-action { width: 100%; text-align: left; background: transparent; border: 0; }
+.select-menu-action[aria-disabled="true"] { opacity: .6; cursor: default; }

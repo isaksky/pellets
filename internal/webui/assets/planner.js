@@ -14,7 +14,8 @@ let splitting = null, confirming = false, feedback = '';
 let savingNewChatPreference = false;
 let skipNewChatConfirmation = JSON.parse(document.documentElement.dataset.settings || '{}').skip_new_chat_confirmation === 'true';
 let trayCollapsed = false;
-let modelsLoaded = false, refreshedAt = 0;
+let refreshedAt = 0;
+let catalog = {models:[],refreshing:false,stale:true}, catalogFlight=null, catalogLoaded=false, catalogVisible=false, catalogAgain=false, catalogForce=false;
 let activeOperation = null, handoffError = '', lastPlannerFocus = null, presentationToRestore = null;
 let selectedTab = (document.documentElement.dataset.rightPanelTab || saved('pellets-right-panel-tab')) === 'plan' ? 'plan' : 'execution';
 let pinned = null;
@@ -104,14 +105,11 @@ function useOnlyWorkspace() {
 function accept(value) {
   if (value.chat?.state?.drafts?.some(d=>!created(d)&&!state.drafts.some(existing=>existing.id===d.id))) trayCollapsed=false;
   if ((chat && value.chat?.id !== chat.id) || (data && value.project?.code !== data.project?.code)) {trayCollapsed=false;}
-  if (value.models?.length) modelsLoaded = true;
-  data = {...data, ...value, models:value.models?.length ? value.models : data?.models || []};
+  data = {...data, ...value};
   chat = value.chat;
-  const previousWorkspace = state.workspace_id;
   state = normalize(clone(chat?.state || {}));
   if (!chat) state.workspace_id = initialWorkspace(value.project.code);
   useOnlyWorkspace();
-  if (previousWorkspace !== state.workspace_id) {modelsLoaded=false;data.models=[];}
   pin();
 }
 async function ensureLoaded() {
@@ -227,7 +225,7 @@ function scaffold() {
   if (panel.querySelector('#plan-content')) return;
   panel.innerHTML = `<dialog id="plan-new-dialog" aria-labelledby="plan-new-heading" aria-describedby="plan-new-description"><h2 id="plan-new-heading">Start a new chat?</h2><p id="plan-new-description"></p><label class="plan-confirm-preference"><input type="checkbox" id="plan-skip-new-confirmation"> Don’t ask me again</label><p class="plan-new-error" role="alert" hidden></p><div class="plan-new-actions"><button type="button" data-plan="cancel-new" autofocus>Cancel</button><button type="button" class="primary-button" data-plan="confirm-new">Start new chat</button></div></dialog><div id="plan-content"><div class="plan-context"><div data-plan-new><button type="button" class="quiet" data-plan="new">New chat</button></div></div>
     <div class="plan-transcript" aria-live="polite"><div class="plan-messages"></div><div class="plan-receipts" role="group" aria-label="Created pellets"></div><div class="plan-pending" hidden></div><div class="plan-chat-status"><div class="plan-status" role="status" aria-live="polite" aria-atomic="true" hidden></div></div></div><section class="plan-drafts" aria-label="Proposed pellets"><div class="plan-draft-heading"><button type="button" class="plan-tray-toggle" data-plan="toggle-tray" aria-expanded="true" aria-controls="plan-proposal-list"><svg class="plan-tray-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg><span class="plan-total">0</span> <span data-proposal-label>proposed pellets</span></button><div class="plan-batch-tools" role="group" aria-label="Proposal actions"><button type="button" data-plan="select-all" aria-label="Select all" title="Select all"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="2"/><path d="m5 8 2 2 4-4"/></svg></button><button type="button" data-plan="combine" aria-label="Combine selected" title="Combine selected"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3v2c0 2 5 2 5 4v4M13 3v2c0 2-5 2-5 4m-3 1 3 3 3-3"/></svg></button><button type="button" data-plan="add-draft" aria-label="Add draft" title="Add draft"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg></button></div></div><div class="plan-draft-list" id="plan-proposal-list"></div><div class="plan-create-row"><button type="button" data-plan="dismiss-all">Dismiss all</button><button type="button" class="primary-button" data-plan="create">Create pellets</button></div></section>
-    <datalist id="plan-groups"></datalist><div class="plan-bottom"><form id="plan-form" method="post"><input type="hidden" name="version"><div class="plan-refining" hidden></div><div class="plan-composer-settings"><div class="plan-folder"><label class="plan-workspace-label"><pl-select><select data-value-prefix="Folder: " id="plan-workspace" aria-label="Working folder" aria-describedby="plan-folder-error plan-folder-path"></select></pl-select></label><span class="plan-folder-context"></span><p id="plan-folder-error" class="plan-folder-error" role="alert" hidden></p></div><label class="plan-access"><pl-select><select data-value-prefix="Approval: " id="plan-access" name="access_mode" aria-label="Planning access"><option value="automatic">Automatic</option><option value="full">None (full access)</option></select></pl-select></label></div><span id="plan-folder-path" class="plan-path visually-hidden"></span><label class="visually-hidden" for="plan-message">Message planner</label><textarea id="plan-message" name="input" rows="2" placeholder="What should we plan?" maxlength="65536"></textarea><div class="plan-composer-tools"><pl-select><select id="plan-model" name="model" aria-label="Planning model"></select></pl-select><span class="plan-tool-divider"></span><pl-select><select id="plan-effort" name="effort" aria-label="Reasoning effort"></select></pl-select><button type="submit" class="plan-send" aria-label="Send message">↑</button></div></form><button type="button" class="plan-select-models" data-plan="models">Choose a model…</button></div></div>`;
+    <datalist id="plan-groups"></datalist><div class="plan-bottom"><form id="plan-form" method="post"><input type="hidden" name="version"><div class="plan-refining" hidden></div><div class="plan-composer-settings"><div class="plan-folder"><label class="plan-workspace-label"><pl-select><select data-value-prefix="Folder: " id="plan-workspace" aria-label="Working folder" aria-describedby="plan-folder-error plan-folder-path"></select></pl-select></label><span class="plan-folder-context"></span><p id="plan-folder-error" class="plan-folder-error" role="alert" hidden></p></div><label class="plan-access"><pl-select><select data-value-prefix="Approval: " id="plan-access" name="access_mode" aria-label="Planning access"><option value="automatic">Automatic</option><option value="full">None (full access)</option></select></pl-select></label></div><span id="plan-folder-path" class="plan-path visually-hidden"></span><label class="visually-hidden" for="plan-message">Message planner</label><textarea id="plan-message" name="input" rows="2" placeholder="What should we plan?" maxlength="65536"></textarea><div class="plan-composer-tools"><pl-select><select data-live-options data-menu-action="Refresh models" id="plan-model" name="model" aria-label="Planning model"></select></pl-select><span class="plan-tool-divider"></span><pl-select><select data-live-options data-menu-action="Refresh models" id="plan-effort" name="effort" aria-label="Reasoning effort"></select></pl-select><button type="submit" class="plan-send" aria-label="Send message">↑</button></div></form><button type="button" class="plan-select-models" data-plan="models">Choose a model…</button></div></div>`;
   const dialog=panel.querySelector('#plan-new-dialog');
   dialog.addEventListener('cancel',event=>{if(savingNewChatPreference)event.preventDefault();});
   dialog.addEventListener('close',()=>{confirming=false;panel.querySelector('[data-plan=new]').focus({preventScroll:true});});
@@ -368,11 +366,11 @@ function render() {
   const composer = panel.querySelector('#plan-form'); composer.action = endpoint();
   composer.elements.version.value = chat?.version || '';
   if (composer.elements.input.value !== state.input) composer.elements.input.value = state.input;
-  const models = (data?.models || []).map(m => ({id:m.id, name:m.name || m.id}));
+  const models = (catalog.models || []).map(m => ({id:m.id, name:m.name || m.id}));
   if (!models.some(m => m.id === (state.model || ''))) models.unshift({id:state.model || '', name:state.model || 'Configured model'});
   updateOptions(composer.elements.model, models, state.model || '');
   composer.elements.access_mode.value = state.access_mode || 'automatic';
-  const efforts = (data?.models || []).find(m => m.id === state.model)?.efforts || [];
+  const efforts = (catalog.models || []).find(m => m.id === state.model)?.efforts || [];
   const effortOptions = efforts.map(value => ({id:value,name:value}));
   if (!effortOptions.some(e => e.id === (state.effort || ''))) effortOptions.unshift({id:state.effort || '',name:state.effort || 'Configured effort'});
   updateOptions(composer.elements.effort, effortOptions, state.effort || '');
@@ -383,8 +381,9 @@ function render() {
     if (!field.closest('.markdown-body')) field.disabled = !!activeOperation?.replace;
   }
   panel.querySelector('#plan-workspace').disabled = !!chat?.state.workspace_id || !!flight;
-  composer.elements.model.disabled = !workspace || !!activeOperation?.replace;
-  composer.elements.effort.disabled = !workspace || !!activeOperation?.replace;
+  composer.elements.model.disabled = !!activeOperation?.replace;
+  composer.elements.effort.disabled = !!activeOperation?.replace;
+  syncModelMenus();
   composer.elements.access_mode.disabled = !workspace || !!activeOperation || (!!failed && !failed.safeToReplace);
   panel.querySelector('[data-plan=models]').hidden = true;
   const refining = state.drafts.find(d => d.id === state.refining_draft_id && !created(d));
@@ -457,7 +456,9 @@ function sync() {
     const tab = document.getElementById(name + '-tab');
     if (tab) {tab.setAttribute('aria-selected',String(name === selectedTab));tab.tabIndex=name === selectedTab ? 0 : -1;}
   }
-  if (selectedTab === 'plan') { scaffold(); ensureLoaded(); }
+  const showCatalog=selectedTab==='plan'&&!collapsed;
+  if (selectedTab === 'plan') { scaffold(); ensureLoaded(); if(showCatalog&&(!catalogVisible||!catalogLoaded)) loadModels(); }
+  catalogVisible=showCatalog;
   if (data) render();
   applyPresentation();
 }
@@ -468,27 +469,46 @@ function status(value, attention) {
   const toggle = document.getElementById('toggle-execution');
   if (toggle) {toggle.setAttribute('aria-controls','right-panel');toggle.title = `${root.classList.contains('execution-collapsed') ? 'Show' : 'Hide'} right panel · Execution: ${value}`;toggle.setAttribute('aria-label',toggle.title);}
 }
-async function loadModels(openMenu = false, triggerID = 'plan-model-trigger') {
-  if (!data) await ensureLoaded();
-  if (!data) return;
-  try {
-    feedback='Loading available models…';render();
-    const code=projectCode(), workspaceID=state.workspace_id, accessMode=state.access_mode || 'automatic';
-    const result=await json(endpoint(code)+'/models?workspace='+encodeURIComponent(workspaceID)+'&access_mode='+encodeURIComponent(accessMode));
-    if (projectCode()!==code || state.workspace_id!==workspaceID || accessMode!==(state.access_mode || 'automatic')) return;
-    data.models=result.models || [];modelsLoaded=true;feedback='';render();
-    const trigger=document.getElementById(triggerID);
-    if(openMenu)trigger?.click();else trigger?.focus();
-  }catch(error){feedback=error.message;render();}
+function syncModelMenus() {
+  const status=catalog.refreshing ? (catalog.models.length ? 'Refreshing models…' : 'Loading available models…') : catalog.error || (!catalogLoaded || !catalog.fetched_at ? 'Loading available models…' : catalog.stale ? 'Showing cached models.' : '');
+  for(const select of panel?.querySelectorAll('#plan-model,#plan-effort') || []) {
+    select.dataset.menuStatus=status;
+    select.dataset.menuAction=catalog.error ? 'Retry refresh' : 'Refresh models';
+    select.dataset.menuBusy=String(catalog.refreshing);
+    select.closest('pl-select')?.refresh();
+  }
 }
-// Window capture precedes the shared selector's document listener. Opening the
-// model or effort menu loads the shared runtime catalog.
-for (const type of ['click','keydown']) window.addEventListener(type,event=>{
-  const trigger=event.target.closest?.('#plan-model-trigger, #plan-effort-trigger');
-  if(modelsLoaded || !trigger)return;
-  if(type==='keydown'&&!['Enter',' ','ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
-  event.preventDefault();event.stopImmediatePropagation();loadModels(true,trigger.id);
-},true);
+async function loadModels(force=false) {
+  if(catalogFlight){catalogAgain=true;catalogForce=catalogForce||force;return catalogFlight;}
+  catalogFlight=(async()=>{
+    try {
+      if(force) {
+        await json('/models/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({_csrf:csrf()})});
+        catalog.refreshing=true;catalog.error='';syncModelMenus();
+      } else {
+        catalog=await json('/models');catalogLoaded=true;
+        if(data)render();else syncModelMenus();
+      }
+    }catch(error){catalog.error=error.message;catalog.refreshing=false;syncModelMenus();}
+    finally{
+      catalogFlight=null;
+      if(catalogAgain){
+        const forceNext=catalogForce;catalogAgain=false;catalogForce=false;
+        if(forceNext||catalogVisible) queueMicrotask(()=>loadModels(forceNext));
+      }
+    }
+  })();
+  return catalogFlight;
+}
+document.addEventListener('pl-select-action',event=>{
+  if(event.target.querySelector('#plan-model,#plan-effort')) loadModels(true);
+});
+// SQLite changes arrive through the existing SSE invalidation/reconnect path.
+// Catalog reconciliation is independent of chat dirty state and never saves it.
+document.addEventListener('pellets-refresh',()=>{
+  if(selectedTab==='plan' && !root.classList.contains('execution-collapsed') && !uiVersion.isOutdated()) loadModels();
+});
+window.addEventListener('focus',()=>{if(selectedTab==='plan')loadModels();});
 async function fresh() {
   if (flight) return;
   clearTimeout(timer);
@@ -526,12 +546,12 @@ document.addEventListener('input', event => {
 document.addEventListener('change', event => {
   if (event.target.id === 'plan-workspace') {
     if (chat?.state.workspace_id || flight) return;
-    state.workspace_id=Number(event.target.value);modelsLoaded=false;data.models=[];
+    state.workspace_id=Number(event.target.value);
     markDirty();render();return;
   }
-  if (event.target.id === 'plan-access') {state.access_mode=event.target.value;modelsLoaded=false;markDirty();render();return;}
+  if (event.target.id === 'plan-access') {state.access_mode=event.target.value;markDirty();render();return;}
   if (!['plan-model','plan-effort'].includes(event.target.id)) return;
-  if (event.target.id === 'plan-model') {state.model=event.target.value;const choices=(data?.models || []).find(m=>m.id===state.model)?.efforts || [];if(!choices.includes(state.effort))state.effort=choices.includes('medium')?'medium':choices[0] || '';}
+  if (event.target.id === 'plan-model') {state.model=event.target.value;const choices=(catalog.models || []).find(m=>m.id===state.model)?.efforts || [];if(!choices.includes(state.effort))state.effort=choices.includes('medium')?'medium':choices[0] || '';}
   else state.effort=event.target.value;
   markDirty();render();
 });
@@ -551,7 +571,7 @@ document.addEventListener('click', async event => {
   if(action==='toggle-tray'){trayCollapsed=!trayCollapsed;render();return;}
   if(action==='remove'&&draft){deleteDrafts([draft]);return;}
   if(action==='dismiss-all'){deleteDrafts(state.drafts.filter(d=>!created(d)));return;}
-  if(action==='models') {loadModels(true);return;}
+  if(action==='models') {loadModels();return;}
   if(action==='new'){if(!skipNewChatConfirmation&&(state.messages.length||state.drafts.length||state.input)){panel.querySelector('#plan-skip-new-confirmation').checked=false;panel.querySelector('.plan-new-error').hidden=true;confirming=true;render();}else fresh();return;}
   if(action==='confirm-new'){
     const dialog=panel.querySelector('#plan-new-dialog'),error=dialog.querySelector('.plan-new-error');

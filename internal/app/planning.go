@@ -42,33 +42,6 @@ func (a *WebApplication) planningOptions(ctx context.Context, p storage.Project,
 	return codex.PlanningOptions{WorkspaceDir: root, Saved: saved, Model: model, Effort: effort}, nil
 }
 
-type PlanningModel struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	Efforts []string `json:"efforts"`
-}
-
-func (a *WebApplication) PlanningModels(ctx context.Context, p storage.Project, workspaceID int64, accessMode string) ([]PlanningModel, error) {
-	opts, err := a.planningOptions(ctx, p, workspaceID, "", "")
-	if err != nil {
-		return nil, err
-	}
-	opts.AccessMode = accessMode
-	fetch := a.PlanningCatalog
-	if fetch == nil {
-		fetch = codex.PlanningModels
-	}
-	catalog, err := fetch(ctx, opts)
-	if err != nil {
-		return nil, planningRuntimeError(err)
-	}
-	models := []PlanningModel{}
-	for _, m := range catalog.Models {
-		models = append(models, PlanningModel{ID: m.Model, Name: m.DisplayName, Efforts: m.SupportedReasoningEfforts})
-	}
-	return models, nil
-}
-
 func (a *WebApplication) SendPlanningMessage(ctx context.Context, p storage.Project, id int64, version, requestID string, state storage.PlanningState) (storage.PlanningChat, error) {
 	reader, rok := a.Reader.(storage.PlanningReader)
 	writer, wok := a.Writer.(storage.PlanningWriter)

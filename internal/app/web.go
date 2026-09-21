@@ -14,6 +14,7 @@ import (
 // tool. Reader and writer lifetimes are server-scoped, but every returned row
 // is fully materialized before this layer hands it to HTTP rendering.
 type WebApplication struct {
+	ModelCatalog     *ModelCatalogService
 	Reader           storage.WebReader
 	Writer           storage.WebWriter
 	Current          *storage.ResolvedProject
@@ -21,7 +22,6 @@ type WebApplication struct {
 	Scheduler        *Scheduler
 	Database         Database
 	PlanningGenerate func(context.Context, codex.PlanningOptions) (codex.PlanningReply, error)
-	PlanningCatalog  func(context.Context, codex.PlanningOptions) (codex.PlanningCatalog, error)
 }
 
 // WorkspaceRuns is a durable read used by the server-rendered activity view.

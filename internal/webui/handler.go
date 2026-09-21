@@ -98,6 +98,8 @@ func (h *handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	switch {
+	case request.URL.Path == "/models" || request.URL.Path == "/models/refresh":
+		h.serveModels(response, request)
 	case request.URL.Path == "/dev/design-system":
 		h.serveDesignSystem(response, request)
 	case request.URL.Path == "/settings":

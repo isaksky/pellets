@@ -31,7 +31,8 @@ func TestCompiledServerDiscoveryStartupAndCleanShutdown(t *testing.T) {
 
 	command := exec.Command(executable, "server", "--port", "0", "--no-open")
 	command.Dir = nested
-	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
+	// Eager catalog warming must never discover the developer's installed runtime.
+	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "PELLETS_CODEX_EXECUTABLE="+filepath.Join(root, "unavailable-codex"))
 	stdout, err := command.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +123,14 @@ func TestCompiledServerDiscoveryStartupAndCleanShutdown(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("compiled server command did not shut down after interrupt")
 	}
-	if stderr.String() != "Stopping server… Press Ctrl+C again to force exit.\n" {
+	var lifecycleOutput strings.Builder
+	for _, line := range strings.SplitAfter(stderr.String(), "\n") {
+		if strings.HasPrefix(line, "model catalog refresh: duration=") {
+			continue
+		}
+		lifecycleOutput.WriteString(line)
+	}
+	if lifecycleOutput.String() != "Stopping server… Press Ctrl+C again to force exit.\n" {
 		t.Fatalf("compiled --no-open stderr = %q", stderr.String())
 	}
 

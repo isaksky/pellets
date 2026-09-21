@@ -304,10 +304,7 @@ func TestPlanningBindsSelectedWorktreeForTurnsModelsAndDisplay(t *testing.T) {
 		checkRoot(options)
 		return codex.PlanningReply{Text: "Inspected linked workspace.", Drafts: []codex.PlanningDraft{}}, nil
 	}
-	f.application.PlanningCatalog = func(_ context.Context, options codex.PlanningOptions) (codex.PlanningCatalog, error) {
-		checkRoot(options)
-		return codex.PlanningCatalog{}, nil
-	}
+	installCatalogFixture(t, f)
 	state := storage.PlanningState{WorkspaceID: linkedID, Composer: "Inspect this worktree"}
 	chat := planningChatResponse(t, planningHTTP(t, f, p.Code, planningRequest{Action: "new", CSRF: testCSRF, RequestID: "linked-chat", State: state}))
 	chat = planningChatResponse(t, planningHTTP(t, f, p.Code, planningRequest{Action: "send", CSRF: testCSRF, ChatID: chat.ID, Version: chat.Version, RequestID: "linked-send", State: chat.State}))
@@ -322,7 +319,7 @@ func TestPlanningBindsSelectedWorktreeForTurnsModelsAndDisplay(t *testing.T) {
 		t.Fatalf("incorrect planning workspace display: %s", response.Body.String())
 	}
 	response = performRequest(f.handler, http.MethodGet, fmt.Sprintf("/projects/%s/planning/models?workspace=%d", p.Code, linkedID), "", nil)
-	if response.Code != 200 || calls != 2 {
+	if response.Code != 200 || calls != 1 {
 		t.Fatalf("linked model catalog: %d %s, calls=%d", response.Code, response.Body.String(), calls)
 	}
 	for _, id := range []int64{0, mainID, f.projects[1].Workspaces[0].ID} {
@@ -330,7 +327,7 @@ func TestPlanningBindsSelectedWorktreeForTurnsModelsAndDisplay(t *testing.T) {
 		changed.WorkspaceID, changed.Composer = id, "Do not switch"
 		for _, action := range []string{"save", "send"} {
 			response = planningHTTP(t, f, p.Code, planningRequest{Action: action, CSRF: testCSRF, ChatID: chat.ID, Version: chat.Version, RequestID: "wrong-workspace", State: changed})
-			if response.Code == 200 || calls != 2 {
+			if response.Code == 200 || calls != 1 {
 				t.Fatalf("%s retargeted chat to %d: %s", action, id, response.Body.String())
 			}
 		}
@@ -342,7 +339,7 @@ func TestPlanningBindsSelectedWorktreeForTurnsModelsAndDisplay(t *testing.T) {
 	state = chat.State
 	state.Composer = "Inspect again"
 	response = planningHTTP(t, f, p.Code, planningRequest{Action: "send", CSRF: testCSRF, ChatID: chat.ID, Version: chat.Version, RequestID: "missing-workspace", State: state})
-	if response.Code != 409 || calls != 2 || !strings.Contains(response.Body.String(), "planning_workspace_unavailable") {
+	if response.Code != 409 || calls != 1 || !strings.Contains(response.Body.String(), "planning_workspace_unavailable") {
 		t.Fatalf("missing checkout fallback: %s", response.Body.String())
 	}
 }

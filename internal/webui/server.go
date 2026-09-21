@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"pellets/internal/app"
+	"pellets/internal/storage"
 )
 
 const (
@@ -151,8 +152,15 @@ func (runner Runner) Run(ctx context.Context, options Options) (runErr error) {
 		defer close(monitorDone)
 		runDataVersionMonitor(monitorContext, monitor, hub, interval, coalesce)
 	}()
-	go func() { serveErrors <- httpServer.Serve(listener) }()
+	if reader, ok := application.Reader.(storage.ModelCatalogReader); ok {
+		if writer, ok := application.Writer.(storage.ModelCatalogWriter); ok {
+			application.ModelCatalog = app.NewModelCatalogService(ctx, reader, writer, nil, options.Stderr)
+			application.ModelCatalog.Start()
+			defer application.ModelCatalog.Close()
+		}
+	}
 
+	go func() { serveErrors <- httpServer.Serve(listener) }()
 	// Listen has succeeded and Serve is scheduled before the URL is printed or
 	// a browser can be launched.
 	if _, err := fmt.Fprintln(options.Stdout, baseURL); err != nil {
