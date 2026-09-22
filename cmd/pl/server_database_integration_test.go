@@ -74,9 +74,16 @@ func TestCompiledServerOutsideGit(t *testing.T) {
 				decodeFoundationSuccess[foundationPellet](t, runFoundationCLI(t, executable, child, "add", "child task"), "add")
 				result := runFoundationCLI(t, executable, root, command, "--no-open")
 				if result.exit != 3 || result.stdout != "" || !strings.Contains(result.stderr, "Error:") ||
-					!strings.Contains(result.stderr, "no Pellets database was found") || !strings.Contains(result.stderr, foundationCanonicalPath(t, root)) {
+					!strings.Contains(result.stderr, "no Pellets database was found") {
 					t.Fatalf("human server discovery error = %#v", result)
 				}
+				_, reportedPath, found := strings.Cut(result.stderr, "\n  start path: ")
+				if !found {
+					t.Fatalf("human server discovery error omitted the start path: %q", result.stderr)
+				}
+				// Windows may report the runner's short TEMP path while
+				// EvalSymlinks expands it; both must identify the same directory.
+				assertFoundationSamePath(t, strings.TrimSpace(reportedPath), root)
 				if _, err := os.Stat(discovery.DatabasePath(root)); !os.IsNotExist(err) {
 					t.Fatalf("startup created an outside-Git database: %v", err)
 				}
