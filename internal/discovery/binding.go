@@ -79,17 +79,29 @@ func WithDatabaseBinding(ctx context.Context, start string, bootstrap func() (Da
 	if err != nil {
 		return Database{}, err
 	}
-	if _, found, err := readDatabaseBinding(identity.GitCommonDir); err != nil {
+	return withDatabaseBinding(ctx, identity.GitCommonDir, bootstrap, os.Mkdir)
+}
+
+func withDatabaseBinding(ctx context.Context, commonDir string, bootstrap func() (Database, error), mkdir func(string, os.FileMode) error) (Database, error) {
+	if _, found, err := readDatabaseBinding(commonDir); err != nil {
 		return Database{}, err
 	} else if found {
 		return bootstrap()
 	}
-	lockPath := filepath.Join(identity.GitCommonDir, databaseBindingName+".lock")
+	lockPath := filepath.Join(commonDir, databaseBindingName+".lock")
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		err = os.Mkdir(lockPath, 0o700)
+		err := mkdir(lockPath, 0o700)
 		if err == nil {
 			break
+		}
+		// Another initializer may have published the binding since our first
+		// read. Reuse it without reacquiring its lock, including while Windows
+		// still has the removed lock directory pending deletion.
+		if _, found, bindingErr := readDatabaseBinding(commonDir); bindingErr != nil {
+			return Database{}, bindingErr
+		} else if found {
+			return bootstrap()
 		}
 		if !errors.Is(err, os.ErrExist) {
 			return Database{}, bindingFailure(lockPath, err)
@@ -109,16 +121,16 @@ func WithDatabaseBinding(ctx context.Context, start string, bootstrap func() (Da
 	if err != nil {
 		return Database{}, err
 	}
-	if _, found, err := readDatabaseBinding(identity.GitCommonDir); found || err != nil {
+	if _, found, err := readDatabaseBinding(commonDir); found || err != nil {
 		return database, err
 	}
 	path := database.Path
-	if relative, relErr := filepath.Rel(identity.GitCommonDir, path); relErr == nil {
+	if relative, relErr := filepath.Rel(commonDir, path); relErr == nil {
 		path = relative
 	}
 	data, err := json.Marshal(databaseBinding{Version: 1, Path: filepath.ToSlash(path)})
 	if err != nil {
-		return Database{}, bindingFailure(identity.GitCommonDir, err)
+		return Database{}, bindingFailure(commonDir, err)
 	}
 	// Rename a fully written file so readers never observe a partial binding.
 	temporary := filepath.Join(lockPath, "binding.json")
@@ -126,7 +138,7 @@ func WithDatabaseBinding(ctx context.Context, start string, bootstrap func() (Da
 	if err := os.WriteFile(temporary, append(data, '\n'), 0o600); err != nil {
 		return Database{}, bindingFailure(temporary, err)
 	}
-	bindingPath := filepath.Join(identity.GitCommonDir, databaseBindingName)
+	bindingPath := filepath.Join(commonDir, databaseBindingName)
 	if err := os.Rename(temporary, bindingPath); err != nil {
 		return Database{}, bindingFailure(bindingPath, err)
 	}
