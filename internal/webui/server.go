@@ -52,6 +52,7 @@ type Options struct {
 	WorkingDirectory string
 	InitialProject   string
 	Port             uint16
+	RetryPort        bool
 	NoOpen           bool
 	Development      bool // Enabled by the CLI only for unversioned development builds.
 	Stdout           io.Writer
@@ -68,6 +69,18 @@ func (runner Runner) Run(ctx context.Context, options Options) (runErr error) {
 	if options.Stderr == nil {
 		options.Stderr = io.Discard
 	}
+	listener, err := runner.listenLoopback(ctx, options.Port, options.RetryPort)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	tcpAddress, ok := listener.Addr().(*net.TCPAddr)
+	if !ok || !tcpAddress.IP.IsLoopback() {
+		return errors.New("listener did not resolve to a loopback TCP address")
+	}
+	host := net.JoinHostPort("127.0.0.1", strconv.Itoa(tcpAddress.Port))
+	baseURL := "http://" + host
+
 	application, err := runner.OpenApplication(ctx, options.DatabaseRoot, options.DatabasePath, options.WorkingDirectory)
 	if err != nil {
 		return err
@@ -93,22 +106,6 @@ func (runner Runner) Run(ctx context.Context, options Options) (runErr error) {
 		return err
 	}
 	defer monitor.Close()
-
-	listen := runner.Listen
-	if listen == nil {
-		listen = net.Listen
-	}
-	listener, err := listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(options.Port))))
-	if err != nil {
-		return fmt.Errorf("listen on loopback: %w", err)
-	}
-	defer listener.Close()
-	tcpAddress, ok := listener.Addr().(*net.TCPAddr)
-	if !ok || !tcpAddress.IP.IsLoopback() {
-		return errors.New("listener did not resolve to a loopback TCP address")
-	}
-	host := net.JoinHostPort("127.0.0.1", strconv.Itoa(tcpAddress.Port))
-	baseURL := "http://" + host
 
 	csrf, err := randomCapability()
 	if err != nil {

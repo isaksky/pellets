@@ -136,7 +136,7 @@ func main() {
 			}
 			return webRunner.Run(ctx, webui.Options{
 				DatabaseRoot: invocation.Database.Root, DatabasePath: invocation.Database.Path, WorkingDirectory: invocation.WorkingDirectory,
-				InitialProject: invocation.Globals.Project, Port: options.Port, NoOpen: options.NoOpen,
+				InitialProject: invocation.Globals.Project, Port: options.Port, RetryPort: options.RetryPort, NoOpen: options.NoOpen,
 				Stdout: stdout, Stderr: stderr, Development: version == "dev",
 			})
 		}),

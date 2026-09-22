@@ -13,9 +13,12 @@ import (
 	"pellets/internal/domain"
 )
 
+const DefaultServerPort uint16 = 7419
+
 type ServerOptions struct {
-	Port   uint16
-	NoOpen bool
+	Port      uint16
+	RetryPort bool // Try subsequent ports when the default is occupied.
+	NoOpen    bool
 }
 
 type ServerRunner func(context.Context, Invocation, ServerOptions, io.Writer, io.Writer) error
@@ -27,7 +30,7 @@ func ServerCommand(run ServerRunner) Command {
 		Name:                  "server",
 		Aliases:               []string{"web"},
 		Summary:               "Run the foreground local server.",
-		Usage:                 "pl [--project CODE] server [--port PORT] [--no-open]",
+		Usage:                 "pl [--project CODE] server [--port PORT] [--no-open]\n\nWithout --port, try 7419 and increment when occupied.\n--port PORT uses that exact port; 0 asks the OS for an available port.",
 		Parse:                 parseServerOptions,
 		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
 		AllowOutsideGit:       true,
@@ -69,7 +72,7 @@ func ServerCommand(run ServerRunner) Command {
 }
 
 func parseServerOptions(arguments []string) (any, error) {
-	var options ServerOptions
+	options := ServerOptions{Port: DefaultServerPort, RetryPort: true}
 	seen := make(map[string]bool)
 	for len(arguments) > 0 {
 		name, value, hasValue := splitOption(arguments[0])
@@ -99,6 +102,7 @@ func parseServerOptions(arguments []string) (any, error) {
 				return nil, domain.NewError(domain.Usage, "invalid_port", "port must be a canonical integer from 0 through 65535", map[string]any{"port": value})
 			}
 			options.Port = uint16(port)
+			options.RetryPort = false
 		default:
 			return nil, unknownFlag(name)
 		}

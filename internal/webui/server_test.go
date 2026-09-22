@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -340,7 +341,7 @@ func TestSlowMutationResponseDoesNotRetainWriterLock(t *testing.T) {
 func TestRunnerBindsLoopbackPrintsReadyURLWarnsOnBrowserFailureAndStops(t *testing.T) {
 	fixture := newHandlerFixture(t, 0)
 	monitor := &fakeMonitor{}
-	var listenedAddress string
+	var listenedAddresses []string
 	browserCalled := make(chan string, 1)
 	output := &lockedBuffer{ready: make(chan struct{})}
 	stderr := &lockedBuffer{ready: make(chan struct{})}
@@ -357,14 +358,17 @@ func TestRunnerBindsLoopbackPrintsReadyURLWarnsOnBrowserFailureAndStops(t *testi
 			if network != "tcp4" {
 				t.Fatalf("listen network = %q", network)
 			}
-			listenedAddress = address
-			return net.Listen(network, address)
+			listenedAddresses = append(listenedAddresses, address)
+			if len(listenedAddresses) == 1 {
+				return nil, syscall.EADDRINUSE
+			}
+			return net.Listen(network, "127.0.0.1:0")
 		},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
 	go func() {
-		result <- runner.Run(ctx, Options{DatabasePath: "ignored", NoOpen: false, Stdout: output, Stderr: stderr})
+		result <- runner.Run(ctx, Options{DatabasePath: "ignored", Port: 7419, RetryPort: true, NoOpen: false, Stdout: output, Stderr: stderr})
 	}()
 	select {
 	case <-output.ready:
@@ -372,8 +376,8 @@ func TestRunnerBindsLoopbackPrintsReadyURLWarnsOnBrowserFailureAndStops(t *testi
 		cancel()
 		t.Fatal("runner did not print readiness URL")
 	}
-	if listenedAddress != "127.0.0.1:0" {
-		t.Fatalf("listen address = %q, want loopback free port", listenedAddress)
+	if !slices.Equal(listenedAddresses, []string{"127.0.0.1:7419", "127.0.0.1:7420"}) {
+		t.Fatalf("listen addresses = %v, want incremental loopback ports", listenedAddresses)
 	}
 	printed := strings.TrimSpace(output.String())
 	select {

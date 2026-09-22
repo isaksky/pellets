@@ -27,7 +27,9 @@ func TestParseServerOptionsStrictly(t *testing.T) {
 		want WebOptions
 		code string
 	}{
-		{name: "defaults", want: WebOptions{}},
+		{name: "defaults", want: WebOptions{Port: 7419, RetryPort: true}},
+		{name: "no open default", args: []string{"--no-open"}, want: WebOptions{Port: 7419, RetryPort: true, NoOpen: true}},
+		{name: "explicit default is strict", args: []string{"--port", "7419"}, want: WebOptions{Port: 7419}},
 		{name: "free port explicit", args: []string{"--port", "0", "--no-open"}, want: WebOptions{NoOpen: true}},
 		{name: "fixed port equals", args: []string{"--port=8123"}, want: WebOptions{Port: 8123}},
 		{name: "duplicate", args: []string{"--no-open", "--no-open"}, code: "duplicate_flag"},
@@ -104,7 +106,7 @@ func TestWebIsCompatibilityAliasForCanonicalServerCommand(t *testing.T) {
 		t.Fatalf("web alias = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 	stdout, stderr, exit = runTestApp(application, "web", "--help")
-	if exit != 0 || stderr != "" || stdout != "Usage:\n  pl [--project CODE] server [--port PORT] [--no-open]\n" {
+	if exit != 0 || stderr != "" || stdout != "Usage:\n  "+command.Usage+"\n" || !strings.Contains(stdout, "try 7419 and increment when occupied") {
 		t.Fatalf("web alias help = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 	stdout, stderr, exit = runTestApp(application, "--help")

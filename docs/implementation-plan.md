@@ -189,7 +189,7 @@ Implement `pl server` with standard-library HTTP/templates/embedding, pinned ven
 
 Acceptance criteria:
 
-- Normal upward database discovery runs before startup. The listener is hard-coded to `127.0.0.1`, defaults to an OS-selected port, supports `--port`/`--no-open`, prints readiness URL, opens the browser after readiness, warns without exiting on launcher failure, and shuts down cleanly on interruption.
+- Normal upward database discovery runs before startup. The listener is hard-coded to `127.0.0.1`, defaults to port 7419 with incremental fallback on occupied ports, supports `--port`/`--no-open`, prints readiness URL, opens the browser after readiness, warns without exiting on launcher failure, and shuts down cleanly on interruption.
 - Empty, one-project, and multi-project databases render without crossing project boundaries. Wide multi-project navigation, narrow drawer navigation, stable task/memory deep links, task table ordering, composable URL filters, exact ungrouped handling, and safe escaped FTS search are covered with deterministic handlers.
 - The interface displays complete project/workspace ownership, pellet lifecycle/order/identity, and memory provenance/approval/timestamps. It supports pellet create/scalar edit/reorder/lifecycle, memory create/text edit/approve, and explicit named workspace recovery. It exposes no purge or removal.
 - Every existing-row mutation validates a complete-row token under the short writer lock. Concurrent edits yield one commit and one write-free conflict containing current row plus preserved draft (application status 409 in a Datastar HTTP 200 SSE response, or HTTP 409 for an ordinary request). Memory text/FTS changes are atomic and agent-memory approval resets when text changes.

@@ -3,18 +3,29 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestCompiledServerDiscoveryStartupAndCleanShutdown(t *testing.T) {
+	testCompiledServerStartup(t, false)
+}
+
+func TestCompiledServerDefaultSkipsOccupiedPort(t *testing.T) {
+	testCompiledServerStartup(t, true)
+}
+
+func testCompiledServerStartup(t *testing.T, defaultPort bool) {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows cannot deliver os.Interrupt to a child process; Windows build coverage is in verify-cross-builds.sh")
 	}
@@ -29,7 +40,16 @@ func TestCompiledServerDiscoveryStartupAndCleanShutdown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	command := exec.Command(executable, "server", "--port", "0", "--no-open")
+	arguments := []string{"server", "--port", "0", "--no-open"}
+	if defaultPort {
+		occupied, err := net.Listen("tcp4", "127.0.0.1:7419")
+		if err != nil {
+			t.Skipf("cannot reserve default port for collision test: %v", err)
+		}
+		defer occupied.Close()
+		arguments = []string{"server", "--no-open"}
+	}
+	command := exec.Command(executable, arguments...)
 	command.Dir = nested
 	// Eager catalog warming must never discover the developer's installed runtime.
 	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "PELLETS_CODEX_EXECUTABLE="+filepath.Join(root, "unavailable-codex"))
@@ -71,6 +91,12 @@ func TestCompiledServerDiscoveryStartupAndCleanShutdown(t *testing.T) {
 	parsed, err := url.Parse(address)
 	if err != nil || parsed.Scheme != "http" || parsed.Hostname() != "127.0.0.1" || parsed.Port() == "" {
 		t.Fatalf("reported URL = %q, parse error %v", address, err)
+	}
+	if defaultPort {
+		port, err := strconv.Atoi(parsed.Port())
+		if err != nil || port <= 7419 {
+			t.Fatalf("fallback URL = %q, expected port above 7419", address)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(root, ".pellets", "pellets.db")); err != nil {
 		t.Fatalf("first-use server did not bootstrap the project database: %v", err)

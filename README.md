@@ -601,6 +601,10 @@ pl server --port 8123 --no-open
 pl --project demo server
 ```
 
+Without `--port`, startup tries **7419**, then 7420, 7421, and so on if occupied.
+The printed URL and browser use the selected port. `--port PORT` requires that
+exact port; `--port 0` lets the OS choose an available port.
+
 `pl server` is an optional foreground operator tool over the same resolved
 database and performs the same automatic first-use bootstrap. It listens only
 on `127.0.0.1`, uses embedded offline assets, and stops when interrupted. It
