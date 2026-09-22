@@ -53,7 +53,7 @@
  {{template "area-tabs" .}}
  <div class="workspace-nav-heading"><span>Workspaces</span><button type="button" class="quiet" data-project-settings aria-label="Workspace group settings">···</button></div>
  <nav aria-label="Workspaces">{{range .RunWorkspaces}}<a class="workspace-link {{if eq $.SelectedWorkspace .ID}}active{{end}}" href="{{.URL}}" data-on:click="@navigate('app-content')" title="{{.Root}}" {{if eq $.SelectedWorkspace .ID}}aria-current="page"{{end}}><span class="workspace-dot {{if .Busy}}busy{{end}}" aria-hidden="true">●</span><span>{{.Name}}</span>{{if or .RecoveryAttention .NoRunResume}}<span class="workspace-attention" aria-label="Needs attention">!</span>{{else if .Run}}{{if or .Run.Awaiting .Run.Attention}}<span class="workspace-attention" aria-label="Needs input">!</span>{{else if .Run.Active}}<small>Running</small>{{end}}{{end}}</a>{{end}}</nav>
- <div class="sidebar-bottom"><span>{{.Project.Code}}</span><code title="{{path .Project.GitCommonDir}}">{{path .Project.GitCommonDir}}</code></div>
+ <div class="sidebar-bottom"><code title="{{repositoryPath .Project.GitCommonDir}}">{{repositoryPath .Project.GitCommonDir}}</code></div>
 </aside>{{end}}
 
 {{define "run-dashboard"}}<section id="run-dashboard" class="run-dashboard live-fragment" aria-labelledby="run-dashboard-title" data-refresh-url="{{.CurrentURL}}">

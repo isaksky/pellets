@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -68,8 +69,11 @@ func newHandler(application *app.WebApplication, hub *eventHub, config handlerCo
 			}
 			return n
 		},
-		"text":     nullableText,
-		"path":     localPath,
+		"text": nullableText,
+		"path": localPath,
+		"repositoryPath": func(value domain.LocalPath) string {
+			return strings.TrimPrefix(strings.TrimSuffix(localPath(value), "/.git"), "./")
+		},
 		"eqStatus": func(left domain.PelletStatus, right string) bool { return string(left) == right },
 		"sameID":   func(left, right int64) bool { return left == right },
 		"lifecycle": func(page pageData, operation string) lifecycleFormView {
@@ -543,7 +547,7 @@ func (h *handler) serveRoot(response http.ResponseWriter, request *http.Request)
 		if stream {
 			name = "app-content"
 		}
-		h.render(response, http.StatusOK, name, pageData{CSRF: h.config.CSRF, DatabasePath: h.application.Database.Path, CurrentURL: "/"})
+		h.render(response, http.StatusOK, name, pageData{CSRF: h.config.CSRF, DatabaseLabel: homePath(h.application.Database.Root), DatabasePath: h.application.Database.Path, CurrentURL: "/"})
 		return
 	}
 	code := h.config.InitialProject
@@ -597,7 +601,7 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 		return pageData{}, domain.NewError(domain.NotFound, "project_not_registered", "the project is not registered in this Pellets database", map[string]any{"code": code})
 	}
 	data := pageData{
-		DatabaseLabel: h.application.Database.Root, DatabasePath: h.application.Database.Path, WorkspacesURL: "/projects/" + url.PathEscape(code) + "/workspaces",
+		DatabaseLabel: homePath(h.application.Database.Root), DatabasePath: h.application.Database.Path, WorkspacesURL: "/projects/" + url.PathEscape(code) + "/workspaces",
 		CSRF: h.config.CSRF, Project: selected.Project, ProjectSummary: selected, HasProject: true,
 		MultiProject: len(projects) > 1, Area: area,
 		TasksURL:    "/projects/" + url.PathEscape(code) + "/tasks",
@@ -1247,6 +1251,25 @@ func textOrDash(value *string) string {
 	}
 	return *value
 }
+
+// homePath abbreviates only paths inside the current OS user's home directory.
+// filepath.Rel handles native separators, volumes and Windows path comparison.
+func homePath(value string) string {
+	home, err := os.UserHomeDir()
+	if err == nil && value != "" {
+		relative, err := filepath.Rel(home, value)
+		if err == nil {
+			if relative == "." {
+				return "~"
+			}
+			if relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+				return "~/" + filepath.ToSlash(relative)
+			}
+		}
+	}
+	return filepath.ToSlash(value)
+}
+
 func localPath(value domain.LocalPath) string {
 	if value.Relative {
 		return "./" + value.Value

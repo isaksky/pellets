@@ -10,6 +10,12 @@ selection.
 
 ## Navigation and presentation
 
+The status bar shows the folder containing `.pellets`, abbreviating the current
+OS user’s home directory as `~` (for example, `~/src`). Paths outside home stay
+absolute; display separators are `/` on every platform. The full database file
+path remains available on hover. The sidebar shows one project path relative to the database root, without a
+leading `./`, trailing `/.git`, or repeated project name.
+
 The first breadcrumb selects the project. The second selects the shared Queue,
 Memories, Groups, or a registered workspace. Workspace links appear in the left sidebar.
 A workspace queue uses `/projects/CODE/tasks?workspace=ID`; existing

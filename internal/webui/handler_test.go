@@ -69,7 +69,7 @@ func newHandlerFixture(t *testing.T, projectCount int) handlerFixture {
 		writer.Close()
 		t.Fatal(err)
 	}
-	application := &app.WebApplication{Reader: reader, Writer: writer}
+	application := &app.WebApplication{Reader: reader, Writer: writer, Database: app.Database{Root: filepath.Dir(databasePath), Path: databasePath}}
 	if len(projects) > 0 {
 		application.Current = &storage.ResolvedProject{Project: projects[0], Workspace: projects[0].Workspaces[0]}
 	}
@@ -105,7 +105,7 @@ func TestHandlerRendersAuthoritativeResponsiveProjectViewsAndEscapesHTML(t *test
 		t.Fatalf("GET status = %d; body=%s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	for _, required := range []string{"project1", "project-drawer", "pellets.db", "Workspaces", "Queue", "New pellet", "All states", "Gruvbox Light", "Gruvbox Dark", "Icy", "app.js"} {
+	for _, required := range []string{"project1", "project-drawer", filepath.Dir(fixture.databasePath), "Workspaces", "Queue", "New pellet", "All states", "Gruvbox Light", "Gruvbox Dark", "Icy", "app.js"} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("page missing %q", required)
 		}
