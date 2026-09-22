@@ -3,6 +3,12 @@ Pellets is a local task queue for coding agents.
 Usage:
   pl [global-options] <command> [command-options] [arguments]
 
+Get started:
+  pl list                 See the queue.
+  pl next                 See what to work on next.
+  pl add "Fix a bug"      Add work to the queue.
+  pl help <command>       Read command options and examples.
+
 Output defaults to readable text, including when redirected.
 Terminal decisions prompt once; automation must supply choices and approvals.
 Help/version and the foreground server URL are always text.
@@ -13,5 +19,7 @@ Global options:
   --human        Explicit alias for the default readable text output.
                  --human conflicts with --json and --pretty.
   --project CODE Select a registered project where the command permits it.
-  --help         Print help and exit.
+  --help, -h     Print help and exit (also: pl help [command]).
   --version      Print executable and JSON schema versions.
+
+Place global options before the command, e.g. pl --json list.

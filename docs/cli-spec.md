@@ -22,6 +22,22 @@ pl [global-options] <command> [command-options] [arguments]
 - Results and errors are human-readable text unless `--json` or `--pretty` is set; redirection never changes the selected format.
 - Unknown flags and positional arguments are errors; the parser never silently guesses.
 
+Bare `pl` prints introductory help, common commands, and usage to stdout and exits
+successfully, without database discovery. `pl help`, `pl -h`, and `pl --help`
+show the same help. Use `pl help COMMAND`, `pl COMMAND -h`, or
+`pl COMMAND --help` for descriptions, options, and examples. Command families
+(`group`, `memory`, `project`, and `skill`) show their help when invoked without
+a subcommand in human mode; `pl help FAMILY SUBCOMMAND` and
+`pl FAMILY SUBCOMMAND --help` also show family help.
+
+Human usage errors explain how to proceed with relevant usage, examples, or a
+help command. Misplaced global flags explain their required position before the
+command. Human errors omit internal error codes and redundant parser fields;
+operational details such as paths and conflicting records remain available.
+Explicit `--json` and `--pretty` preserve the stable error envelopes and exit
+codes, including `missing_command` when no command is supplied. Explicit help
+requests remain text in all modes.
+
 ## Global options
 
 | Option | Meaning |
@@ -30,7 +46,7 @@ pl [global-options] <command> [command-options] [arguments]
 | `--json` | Compact JSON success/error envelopes; never prompt. |
 | `--pretty` | Pretty JSON successes and errors; implies JSON and never prompts. May be combined with `--json`. |
 | `--project CODE` | Select a registered project explicitly where the command permits it. |
-| `--help` | Print help to stdout and exit successfully. |
+| `--help`, `-h` | Print help to stdout and exit successfully. |
 | `--version` | Print executable and JSON schema versions. |
 
 No mode adds color or terminal control codes, honoring `NO_COLOR`. Human results wrap to the terminal width without truncating content; redirected results are unwrapped. Group context records retain their Markdown line layout even on narrow terminals. Human output escapes embedded control characters other than tabs/newlines; JSON preserves the exact context string. Help/version remain text in all modes. Format flags are global and precede the command, including when requesting JSON validation errors.

@@ -123,7 +123,7 @@ func TestStrictGlobalParsing(t *testing.T) {
 		args []string
 		code string
 	}{
-		{"missing command", nil, "missing_command"},
+		{"missing command", []string{"--json"}, "missing_command"},
 		{"duplicate flag", []string{"--pretty", "--pretty"}, "duplicate_flag"},
 		{"conflicting formats", []string{"--pretty", "--human", "status"}, "conflicting_flags"},
 		{"conflicting terminal flags", []string{"--help", "--version"}, "conflicting_flags"},
@@ -138,7 +138,11 @@ func TestStrictGlobalParsing(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			var stdout, stderr bytes.Buffer
-			if exit := app.Run(test.args, &stdout, &stderr); exit != 2 {
+			args := append([]string{"--json"}, test.args...)
+			if test.name == "missing command" {
+				args = test.args
+			}
+			if exit := app.Run(args, &stdout, &stderr); exit != 2 {
 				t.Fatalf("exit = %d, want 2", exit)
 			}
 			if !bytes.Contains(stderr.Bytes(), []byte(test.code)) {

@@ -15,6 +15,7 @@ func SkillCommand(installer app.SkillInstaller) Command {
 	return Command{
 		Name:                  "skill",
 		Summary:               "Install the Pellets agent skill.",
+		Subcommands:           []string{"install"},
 		Usage:                 "pl skill install [--scope repo|personal] [--agent codex|claude|both] [--yes] [--dry-run] [--force]",
 		SkipDatabaseDiscovery: true,
 		Parse:                 parseSkill,

@@ -95,6 +95,17 @@ locking behavior, queue operations, release-archive execution, and Scoop
 installation. A successful cross-build alone is not treated as Windows
 support.
 
+## Find commands and help
+
+Run `pl` for an introduction and common commands. `pl help` and `pl -h` also
+show help. Use `pl help add` (or `pl add --help`) for option explanations and
+examples. Running a command family such as `pl memory` shows its available
+operations.
+
+Output is readable text by default. Agents and scripts should put `--json`
+before the command, for example `pl --json list`. Usage errors show how to
+proceed; a misplaced global flag explains the correct placement.
+
 ## Choose a database layout
 
 Every database lives at `.pellets/pellets.db`. The directory containing

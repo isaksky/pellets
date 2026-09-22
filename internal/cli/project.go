@@ -16,8 +16,9 @@ import (
 // renames with automation-safe redirect-conflict confirmation.
 func ProjectCommand(manager app.ProjectManager) Command {
 	return Command{
-		Name:    "project",
-		Summary: "List, show, or rename registered projects.",
+		Name:        "project",
+		Summary:     "List, show, or rename registered projects.",
+		Subcommands: []string{"list", "show", "rename"},
 		Usage: "pl project list\n  pl project show [CODE]\n" +
 			"  pl [--project CODE] project rename NEW_CODE [--delete-conflicting-redirects --yes]",
 		Parse: parseProject,

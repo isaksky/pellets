@@ -40,7 +40,7 @@ func TestDefaultHumanAndExplicitMachinePolicy(t *testing.T) {
 			}
 		}
 	}
-	for _, args := range [][]string{nil, {"unknown"}, {"status", "--json"}, {"--human", "--unknown"}, {"--json=true"}} {
+	for _, args := range [][]string{{"unknown"}, {"status", "--json"}, {"--human", "--unknown"}, {"--json=true"}} {
 		out, err, code := runRawApp(a, args...)
 		if code != 2 || out != "" {
 			t.Fatalf("%v: %d %q %q", args, code, out, err)

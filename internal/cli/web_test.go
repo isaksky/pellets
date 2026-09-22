@@ -106,7 +106,7 @@ func TestWebIsCompatibilityAliasForCanonicalServerCommand(t *testing.T) {
 		t.Fatalf("web alias = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 	stdout, stderr, exit = runTestApp(application, "web", "--help")
-	if exit != 0 || stderr != "" || stdout != "Usage:\n  "+command.Usage+"\n" || !strings.Contains(stdout, "try 7419 and increment when occupied") {
+	if exit != 0 || stderr != "" || stdout != commandHelp(command) || !strings.Contains(stdout, "try 7419 and increment when occupied") {
 		t.Fatalf("web alias help = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 	stdout, stderr, exit = runTestApp(application, "--help")

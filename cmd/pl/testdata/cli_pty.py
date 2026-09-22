@@ -94,6 +94,19 @@ def assert_preview(prompt, *expected):
 controls = '\x1b[2J\x1b[H\rreplaced\b!'
 escaped_controls = r'\u001b[2J\u001b[H\u000dreplaced\u0008!'
 
+# First-contact help and errors work before any database is initialized.
+for args in [(), ('help',), ('-h',), ('--help',)]:
+    text = Terminal(*args).finish()
+    assert 'pl list' in text and 'pl help <command>' in text
+for args in [('help', 'add'), ('add', '-h'), ('add', '--help')]:
+    text = Terminal(*args).finish()
+    assert 'Examples:' in text and '- reads stdin' in text
+assert 'pl show foo-123' in Terminal('show').finish(2)
+assert 'pl --json list' in Terminal('list', '--json').finish(2)
+assert 'pl --help' in Terminal('unknown-command').finish(2)
+assert json.loads(Terminal('--json').finish(2))['error']['code'] == 'missing_command'
+assert not (repo / '.pellets').exists()
+
 git(repo, 'init', '-q')
 git(repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'fixture')
 cli('init-db', cwd=root)
@@ -110,8 +123,8 @@ text = Terminal('group', 'edit', group_id, '--context-file', '-').send(payload).
 assert '[y/N]' not in text
 assert cli('group', 'show', group_id)['data']['context'] == payload
 assert payload in Terminal('group', 'show', group_id, width=12).finish()
-assert 'group_revision_conflict' in Terminal('group', 'edit', group_id, '--context', 'lost', '--revision', '1').finish(4)
-assert 'group_name_conflict' in Terminal('group', 'create', 'terminal-context').finish(4)
+assert 'group changed; inspect it with group show' in Terminal('group', 'edit', group_id, '--context', 'lost', '--revision', '1').finish(4)
+assert 'a group with that exact name already exists' in Terminal('group', 'create', 'terminal-context').finish(4)
 assert 'revision=3' in Terminal('group', 'edit', group_id, '--clear-context').finish()
 assert json.loads(Terminal('--pretty', 'group', 'show', group_id).finish())['data']['context'] == ''
 assert json.loads(Terminal('--json', 'group', 'rename', group_id, 'terminal-renamed').finish())['data']['name'] == 'terminal-renamed'
@@ -138,7 +151,7 @@ assert skill.read_text() == expected_skill
 skill.write_text('before prompt')
 prompt = Terminal('skill', 'install', '--scope', 'repo', '--agent', 'codex').expect('[y/N]:')
 skill.write_text('changed while prompting')
-assert 'skill_plan_changed' in prompt.send('yes\n').finish(4)
+assert 'skill destinations changed during confirmation; inspect them and retry' in prompt.send('yes\n').finish(4)
 assert skill.read_text() == 'changed while prompting'
 # Explicit machine mode never asks, even on a controlling terminal.
 assert 'missing_skill_choices' in Terminal('--json', 'skill', 'install').finish(2)
@@ -178,7 +191,7 @@ for action, preview in [
 prompt = Terminal('memory', 'remove', str(memory['id'])).expect('[y/N]:')
 assert_preview(prompt, memory_preview)
 cli('memory', 'approve', str(memory['id']))
-assert 'confirmation_changed' in prompt.send('yes\n').finish(4)
+assert 'records changed during confirmation; inspect the current state and retry' in prompt.send('yes\n').finish(4)
 assert cli('memory', 'show', str(memory['id']))['data']['text'] == memory_text
 prompt = Terminal('memory', 'remove', str(memory['id'])).expect('[y/N]:')
 assert_preview(prompt, memory_preview)
@@ -189,7 +202,7 @@ prompt = Terminal('purge', '--project', 'demo').expect('[y/N]:')
 assert_preview(prompt, *purge_rows)
 other = cli('add', 'closed during prompt')['data']
 cli('close', other['id'])
-assert 'confirmation_changed' in prompt.send('yes\n').finish(4)
+assert 'records changed during confirmation; inspect the current state and retry' in prompt.send('yes\n').finish(4)
 cli('show', pellet['id'])
 assert cli('show', unsafe['id'])['data']['title'] == unsafe_title
 cli('show', other['id'])
@@ -239,7 +252,7 @@ prompt = Terminal('release', owned['id'], '--recover-workspace', workspace, cwd=
 assert_preview(prompt, recovery_preview('owned work ' + escaped_controls))
 changed_title = 'changed owner record ' + controls
 cli('edit', owned['id'], '--title', changed_title, cwd=recovery_repo)
-assert 'confirmation_changed' in prompt.send('yes\n').finish(4)
+assert 'records changed during confirmation; inspect the current state and retry' in prompt.send('yes\n').finish(4)
 prompt = Terminal('release', owned['id'], '--recover-workspace', workspace, cwd=linked).expect('[y/N]:')
 assert_preview(prompt, recovery_preview('changed owner record ' + escaped_controls))
 assert 'Recovered workspace' in prompt.send('yes\n').finish()

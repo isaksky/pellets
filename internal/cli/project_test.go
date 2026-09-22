@@ -240,7 +240,7 @@ func TestProjectRenameCLIResolvesOldReferencesAndProtectsRedirectConflicts(t *te
 	}
 	application.stdin = errorReader{}
 	stdout, stderr, exit = runTestApp(application, "--human", "--project", "bar", "project", "rename", "other")
-	if exit != 1 || !strings.Contains(stderr, "internal_error") {
+	if exit != 1 || !strings.Contains(stderr, "unexpected operational failure") {
 		t.Fatalf("interactive interruption = exit %d stdout %q stderr %q", exit, stdout, stderr)
 	}
 	stdout, stderr, exit = runTestApp(application, "project", "show", "bar")

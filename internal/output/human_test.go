@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"pellets/internal/domain"
 )
 
 func TestWriteHuman(t *testing.T) {
@@ -20,6 +22,19 @@ func TestWriteHuman(t *testing.T) {
 	}
 	if err := WriteHuman(failingWriter{}, text); !IsWriteFailure(err) || !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("WriteHuman() error = %v, want a closed-pipe write failure", err)
+	}
+}
+
+func TestHumanErrorsKeepUsefulDetailsWithoutInternalCodes(t *testing.T) {
+	var b bytes.Buffer
+	err := domain.NewError(domain.Usage, "unknown_command", `unknown command "wat"`, map[string]any{"command": "wat"})
+	if writeErr := WriteHumanError(&b, err, 0); writeErr != nil || b.String() != "Error: unknown command \"wat\"\n" {
+		t.Fatalf("usage error: %v, %q", writeErr, b.String())
+	}
+	b.Reset()
+	err = domain.NewError(domain.Storage, "database_binding_unavailable", "the bound database is unavailable", map[string]any{"database_path": "/project/data/pellets.db"})
+	if writeErr := WriteHumanError(&b, err, 0); writeErr != nil || !strings.Contains(b.String(), "database path: /project/data/pellets.db") || strings.Contains(b.String(), "database_binding_unavailable") {
+		t.Fatalf("operational error: %v, %q", writeErr, b.String())
 	}
 }
 

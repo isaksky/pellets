@@ -73,8 +73,15 @@ func wrapHuman(s string, width int) string {
 func WriteHumanError(w io.Writer, err error, width int) error {
 	public := domain.PublicError(err)
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "Error: %s (%s)\n", public.Message, public.Code)
-	humanValue(&b, reflect.ValueOf(public.Details), "  ")
+	fmt.Fprintf(&b, "Error: %s\n", public.Message)
+	// Parser errors already name the offending token in their message. Keep
+	// structured operational details, but omit redundant parser fields.
+	switch public.Code {
+	case "unknown_command", "unknown_flag", "unexpected_argument", "duplicate_flag",
+		"conflicting_flags", "missing_flag_value", "unexpected_flag_value":
+	default:
+		humanValue(&b, reflect.ValueOf(public.Details), "  ")
+	}
 	return write(w, []byte(wrapHuman(b.String(), width)))
 }
 

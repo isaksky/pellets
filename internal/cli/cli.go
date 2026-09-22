@@ -142,7 +142,7 @@ func (a *App) WithCurrentWorkspaceBootstrap(
 func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 	parsed, err := a.parse(args)
 	if err != nil {
-		return writeFailure(stderr, err, outputOptions(args), args)
+		return a.writeFailure(stderr, err, outputOptions(args), args, Command{})
 	}
 
 	switch parsed.action {
@@ -174,7 +174,7 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 					Interactive: !parsed.globals.machine() && a.isInteractive(a.stdin, stdout),
 				}
 				if err = validateInteraction(invocation); err != nil {
-					return writeFailure(stderr, err, parsed.globals, args)
+					return a.writeFailure(stderr, err, parsed.globals, args, parsed.command)
 				}
 				invocation.WorkingDirectory, err = a.workingDirectory()
 				if err != nil {
@@ -247,7 +247,7 @@ func (a *App) Run(args []string, stdout, stderr io.Writer) int {
 		if output.IsWriteFailure(err) || parsed.action == actionHelp || parsed.action == actionVersion || parsed.action == actionCommandHelp {
 			return 1
 		}
-		return writeFailure(stderr, err, parsed.globals, args)
+		return a.writeFailure(stderr, err, parsed.globals, args, parsed.command)
 	}
 	return 0
 }
@@ -293,6 +293,9 @@ type parsedInvocation struct {
 func (a *App) parse(args []string) (parsedInvocation, error) {
 	var parsed parsedInvocation
 	seen := make(map[string]bool)
+	if len(args) == 0 {
+		return parsedInvocation{action: actionHelp}, nil
+	}
 
 	for len(args) > 0 {
 		arg := args[0]
@@ -302,6 +305,24 @@ func (a *App) parse(args []string) (parsedInvocation, error) {
 			}
 			if parsed.action == actionHelp || parsed.action == actionVersion {
 				return parsedInvocation{}, unexpectedArgument(arg)
+			}
+			if arg == "help" {
+				if len(args) == 1 {
+					parsed.action = actionHelp
+					return parsed, nil
+				}
+				// Reuse command-help validation, including aliases and families.
+				helpArgs := append([]string(nil), args[1:]...)
+				helpArgs = append(helpArgs, "--help")
+				help, err := a.parse(helpArgs)
+				if err != nil {
+					return parsedInvocation{}, err
+				}
+				if help.action != actionCommandHelp {
+					return parsedInvocation{}, unexpectedArgument(strings.Join(args[1:], " "))
+				}
+				help.globals = parsed.globals
+				return help, nil
 			}
 			command, ok := a.commands[arg]
 			if !ok {
@@ -320,20 +341,26 @@ func (a *App) parse(args []string) (parsedInvocation, error) {
 			parsed.action = actionRun
 			parsed.command = command
 			parsed.args = args[1:]
-			if len(parsed.args) == 1 && parsed.args[0] == "--help" {
+			if len(parsed.args) == 1 && isHelpFlag(parsed.args[0]) {
 				parsed.action = actionCommandHelp
 			}
-			if len(parsed.args) == 2 && parsed.args[1] == "--help" {
+			if len(parsed.args) == 2 && isHelpFlag(parsed.args[1]) {
 				for _, subcommand := range command.Subcommands {
 					if parsed.args[0] == subcommand {
 						parsed.action = actionCommandHelp
 					}
 				}
 			}
+			if len(parsed.args) == 0 && len(command.Subcommands) > 0 && !parsed.globals.machine() {
+				parsed.action = actionCommandHelp
+			}
 			return parsed, validateFormats(parsed)
 		}
 
 		name, value, hasValue := splitOption(arg)
+		if name == "-h" {
+			name = "--help"
+		}
 		if seen[name] {
 			return parsedInvocation{}, domain.NewError(
 				domain.Usage,
@@ -398,6 +425,10 @@ func (a *App) parse(args []string) (parsedInvocation, error) {
 		return parsedInvocation{}, err
 	}
 	if parsed.action == actionHelp || parsed.action == actionVersion {
+		return parsed, nil
+	}
+	if !parsed.globals.machine() {
+		parsed.action = actionHelp
 		return parsed, nil
 	}
 	return parsedInvocation{}, domain.NewError(
@@ -475,12 +506,19 @@ func flagTakesNoValue(flag string) error {
 	)
 }
 
-func writeFailure(stderr io.Writer, err error, globals GlobalOptions, args []string) int {
+func (a *App) writeFailure(stderr io.Writer, err error, globals GlobalOptions, args []string, command Command) int {
 	var writeErr error
 	if globals.machine() {
 		writeErr = output.WriteJSONError(stderr, err, globals.Pretty)
 	} else {
-		writeErr = output.WriteHumanError(stderr, err, terminalWidth(stderr))
+		humanErr := err
+		if flag := misplacedGlobalFlag(err, command); flag != "" {
+			humanErr = domain.NewError(domain.Usage, "unknown_flag", flag+" is a global option; place it before the command", nil)
+		}
+		writeErr = output.WriteHumanError(stderr, humanErr, terminalWidth(stderr))
+		if writeErr == nil {
+			writeErr = output.WriteHuman(stderr, usageHint(err, command))
+		}
 		if writeErr == nil {
 			if hint := automationHint(err, args); hint != "" {
 				_, writeErr = fmt.Fprintln(stderr, hint)
@@ -497,6 +535,7 @@ func (a *App) help() string {
 	var builder strings.Builder
 	builder.WriteString(productDescription)
 	builder.WriteString("\n\nUsage:\n  pl [global-options] <command> [command-options] [arguments]\n")
+	builder.WriteString("\nGet started:\n  pl list                 See the queue.\n  pl next                 See what to work on next.\n  pl add \"Fix a bug\"      Add work to the queue.\n  pl help <command>       Read command options and examples.\n")
 
 	if len(a.commands) > 0 {
 		builder.WriteString("\nCommands:\n")
@@ -522,15 +561,25 @@ Global options:
   --human        Explicit alias for the default readable text output.
                  --human conflicts with --json and --pretty.
   --project CODE Select a registered project where the command permits it.
-  --help         Print help and exit.
+  --help, -h     Print help and exit (also: pl help [command]).
   --version      Print executable and JSON schema versions.
+
+Place global options before the command, e.g. pl --json list.
 `)
 	return builder.String()
 }
 
 func commandHelp(command Command) string {
-	if command.Usage != "" {
-		return fmt.Sprintf("Usage:\n  %s\n", command.Usage)
+	var builder strings.Builder
+	if command.Summary != "" {
+		fmt.Fprintf(&builder, "%s\n\n", command.Summary)
 	}
-	return fmt.Sprintf("Usage:\n  pl %s\n", command.Name)
+	if command.Usage != "" {
+		fmt.Fprintf(&builder, "Usage:\n  %s\n", wrapUsage(command.Usage))
+	} else {
+		fmt.Fprintf(&builder, "Usage:\n  pl %s\n", command.Name)
+	}
+	writeCommandDetails(&builder, command)
+	builder.WriteString("\nGlobal options go before the command (see pl --help).\n")
+	return builder.String()
 }

@@ -74,7 +74,7 @@ func TestCompiledServerOutsideGit(t *testing.T) {
 				decodeFoundationSuccess[foundationPellet](t, runFoundationCLI(t, executable, child, "add", "child task"), "add")
 				result := runFoundationCLI(t, executable, root, command, "--no-open")
 				if result.exit != 3 || result.stdout != "" || !strings.Contains(result.stderr, "Error:") ||
-					!strings.Contains(result.stderr, "database_not_found") || !strings.Contains(result.stderr, foundationCanonicalPath(t, root)) {
+					!strings.Contains(result.stderr, "no Pellets database was found") || !strings.Contains(result.stderr, foundationCanonicalPath(t, root)) {
 					t.Fatalf("human server discovery error = %#v", result)
 				}
 				if _, err := os.Stat(discovery.DatabasePath(root)); !os.IsNotExist(err) {

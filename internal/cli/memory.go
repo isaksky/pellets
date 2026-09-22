@@ -18,8 +18,9 @@ import (
 // MemoryCommand implements the project-memory command family.
 func MemoryCommand(manager app.MemoryManager) Command {
 	return Command{
-		Name:    "memory",
-		Summary: "Add, search, review, or remove project memory.",
+		Name:        "memory",
+		Summary:     "Add, search, review, or remove project memory.",
+		Subcommands: []string{"add", "list", "show", "search", "approve", "remove"},
 		Usage: "pl memory add (--text TEXT | --file PATH) [--created-by agent|human]\n" +
 			"  pl memory list [--approved-only] [--limit N]\n" +
 			"  pl memory show MEMORY_ID\n" +
