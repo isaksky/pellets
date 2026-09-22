@@ -298,6 +298,23 @@ scoped styles and local marker references with repeated diagrams in all five
 themes, including theme changes while each viewer stays open.
 The description suite covers save/reload/CLI round trips and proposal autosave.
 
+## Pellet execution preferences
+
+Creation forms, review checkpoint creation, pellet editors, and planning draft
+editors expose **Execution model** and **Reasoning effort**. Each offers **Use
+execution default**. Populated choices take precedence independently over the
+execution defaults; they do not alter the planning chat model. Controls share
+the global model catalog, including refresh/retry and stale/loading states.
+Missing catalog entries remain selectable and never silently reset saved values.
+With an inherited model, the effort menu offers the catalog's combined effort
+choices; execution preflight validates the actual workspace/model pair.
+
+Draft refinement and splitting preserve user choices. Combining drafts retains
+each preference only when all selected drafts agree; otherwise that field returns
+to inheritance. Creation saves preferences atomically with the selected drafts.
+Edits during execution apply to the next attempt or explicit Resume. Run details
+continue to show the effective settings captured for that attempt.
+
 ## Planning chat
 
 The right panel has Plan and Execution tabs. Its footer toggle hides the whole

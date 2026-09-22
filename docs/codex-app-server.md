@@ -633,12 +633,14 @@ and the stable `ThreadStartParams.config`/`ConfigReadResponse` schemas generated
 by Codex CLI 0.154.0. The reviewer conversation therefore contains no implementation
 discussion. Its instructions enumerate every result commit independently and
 forbid replacing noncontiguous or cross-worktree selections with a broad range.
-Checkpoint Resume retains the captured review model and effort in its lineage
-and any unfinished finding assessments, even if workspace settings or request
-overrides have changed. It still prepares the currently selected executable and
-revalidates authentication, policy, and support for the captured model/effort;
-it never starts another review to adopt new settings. Ordinary execution Resume
-continues to use its normal current-settings behavior.
+Pellet model and reasoning-effort preferences take precedence independently over
+execution defaults. Each selected pellet supplies an admission snapshot checked
+again when recording the attempt. Changing preferences leaves active attempts
+unchanged; ordinary and checkpoint Resume resolve current preferences and
+revalidate authentication, policy, and runtime support. Completed review output
+and finished finding assessments are reused without another review. Original
+settings remain in the originating attempt, linked by `resume_from`; the resumed
+attempt records settings used for its remaining calls.
 Codex parses the built-in review rubric internally; app-server exposes the
 rendered native review text in `exitedReviewMode.review`, not that internal JSON
 event. With no findings, that renderer exposes only `overall_explanation`, the

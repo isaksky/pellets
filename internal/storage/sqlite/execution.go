@@ -53,12 +53,15 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 		var externalID, group sql.NullString
 		var groupID sql.NullInt64
 		var pellet storage.Pellet
-		err := conn.QueryRowContext(ctx, `SELECT title, description, status, workspace_id, external_id, group_id, group_record_id, kind, implementation_revision FROM pellets WHERE project_id = ? AND number = ?`, c.ProjectID, c.PelletNumber).Scan(&title, &description, &status, &workspace, &externalID, &group, &groupID, &pellet.Kind, &pellet.ImplementationRevision)
+		err := conn.QueryRowContext(ctx, `SELECT title, description, status, workspace_id, external_id, group_id, group_record_id, kind, implementation_revision, model, reasoning_effort FROM pellets WHERE project_id = ? AND number = ?`, c.ProjectID, c.PelletNumber).Scan(&title, &description, &status, &workspace, &externalID, &group, &groupID, &pellet.Kind, &pellet.ImplementationRevision, &pellet.Model, &pellet.ReasoningEffort)
 		if errors.Is(err, sql.ErrNoRows) {
 			return storage.InvalidExecutionRun("the exact pellet no longer exists")
 		}
 		if err != nil {
 			return err
+		}
+		if c.ExpectedPreferences != nil && !reflect.DeepEqual(c.ExpectedPreferences, pellet.ExecutionPreferences()) {
+			return storage.InvalidExecutionRun("the pellet execution preferences changed during preflight; retry with the latest preferences")
 		}
 		implementationRevision := pellet.ImplementationRevision
 		if c.ResumeFrom == nil && c.ExpectedImplementationRevision != 0 && c.ExpectedImplementationRevision != implementationRevision {
@@ -151,12 +154,6 @@ func (db *ProjectDatabase) CreateExecutionRun(ctx context.Context, c storage.Run
 			}
 			c.StartingRef = previous.StartingRef
 			c.Mode = previous.Mode
-			if previous.Mode == "review_checkpoint" {
-				// This lineage retains the original review, so newly observed
-				// defaults must not relabel its model or reasoning effort.
-				c.Settings.Codex.Model = previous.Settings.Codex.Model
-				c.Settings.Codex.ReasoningEffort = previous.Settings.Codex.ReasoningEffort
-			}
 			c.ScheduleMode, c.ScheduleRemaining = previous.ScheduleMode, previous.ScheduleRemaining
 			c.ExternalID, c.Group = previous.ExternalID, previous.Group
 			c.WorkspaceSelection = previous.WorkspaceSelection
@@ -954,4 +951,10 @@ func runStorageError(err error) error {
 		return stable
 	}
 	return domain.WrapError(domain.Storage, "execution_run_storage_failed", "could not access durable execution evidence", nil, fmt.Errorf("execution records: %w", err))
+}
+
+func (db *ProjectDatabase) ReadPelletExecutionPreferences(ctx context.Context, projectID, number int64) (*storage.PelletExecutionPreferences, error) {
+	p := &storage.PelletExecutionPreferences{}
+	err := db.db.QueryRowContext(ctx, "SELECT model, reasoning_effort FROM pellets WHERE project_id=? AND number=?", projectID, number).Scan(&p.Model, &p.ReasoningEffort)
+	return p, err
 }

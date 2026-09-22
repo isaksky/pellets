@@ -21,7 +21,7 @@ func AddCommand(manager app.PelletManager) Command {
 	return Command{
 		Name:    "add",
 		Summary: "Add a pellet to the current project's queue.",
-		Usage: "pl add TITLE [--request-id ID] [--description TEXT | --description-file PATH] [--external-id ID] [--group GROUP] " +
+		Usage: "pl add TITLE [--request-id ID] [--description TEXT | --description-file PATH] [--external-id ID] [--group GROUP] [--model MODEL] [--reasoning-effort EFFORT] " +
 			"[--before PELLET | --after PELLET] [--maybe-later] [--review-targets PELLET,PELLET]",
 		Parse:                 parseAdd,
 		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
@@ -35,7 +35,7 @@ func AddCommand(manager app.PelletManager) Command {
 				ctx, invocationDatabase(invocation), invocation.WorkingDirectory, invocation.Globals.Project,
 				storage.NewPellet{
 					RequestID: input.RequestID, Title: input.Title, Description: description,
-					ExternalID: input.ExternalID, Group: input.Group,
+					ExternalID: input.ExternalID, Group: input.Group, Model: input.Model, ReasoningEffort: input.ReasoningEffort,
 					Status: input.Status, Placement: input.Placement,
 					Kind: input.Kind, ReviewTargets: input.ReviewTargets,
 				},
@@ -241,7 +241,7 @@ func EditCommand(manager app.PelletManager) Command {
 		Name:    "edit",
 		Summary: "Edit user-controlled pellet fields.",
 		Usage: "pl edit PELLET [--title TEXT] [--description TEXT | --description-file PATH] " +
-			"[--external-id ID | --clear-external-id] [--group GROUP | --clear-group]",
+			"[--external-id ID | --clear-external-id] [--group GROUP | --clear-group] [--model MODEL | --clear-model] [--reasoning-effort EFFORT | --clear-reasoning-effort]",
 		Parse:                 parseEdit,
 		NeedsCurrentWorkspace: alwaysNeedsCurrentWorkspace,
 		Run: func(ctx context.Context, invocation Invocation) (any, error) {
@@ -252,7 +252,7 @@ func EditCommand(manager app.PelletManager) Command {
 			}
 			changes := storage.PelletChanges{
 				Title: input.Title, Description: description,
-				ExternalID: input.ExternalID, Group: input.Group,
+				ExternalID: input.ExternalID, Group: input.Group, Model: input.Model, ReasoningEffort: input.ReasoningEffort,
 			}
 			pellet, err := manager.Edit(
 				ctx, invocationDatabase(invocation), invocation.WorkingDirectory, invocation.Globals.Project,
@@ -397,6 +397,8 @@ func pelletLifecycleCommand(manager app.PelletManager, operation storage.PelletL
 }
 
 type addInput struct {
+	Model           *string
+	ReasoningEffort *string
 	Kind            domain.PelletKind
 	ReviewTargets   []domain.PelletReference
 	RequestID       *string
@@ -428,7 +430,7 @@ func parseAdd(args []string) (any, error) {
 		}
 		seen[name] = true
 		switch name {
-		case "--request-id", "--description", "--description-file", "--external-id", "--group", "--before", "--after", "--review-targets":
+		case "--request-id", "--description", "--description-file", "--external-id", "--group", "--before", "--after", "--review-targets", "--model", "--reasoning-effort":
 			var err error
 			value, args, err = takeCommandFlagValue(
 				args, name, value, hasValue,
@@ -438,6 +440,10 @@ func parseAdd(args []string) (any, error) {
 				return nil, err
 			}
 			switch name {
+			case "--model":
+				input.Model = stringPointer(value)
+			case "--reasoning-effort":
+				input.ReasoningEffort = stringPointer(value)
 			case "--review-targets":
 				input.Kind = domain.PelletReviewCheckpoint
 				for _, part := range strings.Split(value, ",") {
@@ -781,6 +787,8 @@ func parseShow(args []string) (any, error) {
 }
 
 type editInput struct {
+	Model           storage.NullableTextChange
+	ReasoningEffort storage.NullableTextChange
 	Reference       domain.PelletReference
 	Title           *string
 	Description     *string
@@ -814,7 +822,7 @@ func parseEdit(args []string) (any, error) {
 		}
 		seen[name] = true
 		switch name {
-		case "--title", "--description", "--description-file", "--external-id", "--group":
+		case "--title", "--description", "--description-file", "--external-id", "--group", "--model", "--reasoning-effort":
 			var err error
 			value, args, err = takeCommandFlagValue(
 				args, name, value, hasValue,
@@ -824,6 +832,10 @@ func parseEdit(args []string) (any, error) {
 				return nil, err
 			}
 			switch name {
+			case "--model":
+				input.Model = storage.NullableTextChange{Set: true, Value: stringPointer(value)}
+			case "--reasoning-effort":
+				input.ReasoningEffort = storage.NullableTextChange{Set: true, Value: stringPointer(value)}
 			case "--title":
 				input.Title = stringPointer(value)
 			case "--description":
@@ -835,11 +847,15 @@ func parseEdit(args []string) (any, error) {
 			case "--group":
 				input.Group = storage.NullableTextChange{Set: true, Value: stringPointer(value)}
 			}
-		case "--clear-external-id", "--clear-group":
+		case "--clear-external-id", "--clear-group", "--clear-model", "--clear-reasoning-effort":
 			if hasValue {
 				return nil, flagTakesNoValue(name)
 			}
-			if name == "--clear-external-id" {
+			if name == "--clear-model" {
+				input.Model = storage.NullableTextChange{Set: true}
+			} else if name == "--clear-reasoning-effort" {
+				input.ReasoningEffort = storage.NullableTextChange{Set: true}
+			} else if name == "--clear-external-id" {
 				input.ExternalID = storage.NullableTextChange{Set: true}
 			} else {
 				input.Group = storage.NullableTextChange{Set: true}
@@ -855,13 +871,18 @@ func parseEdit(args []string) (any, error) {
 	if input.Description != nil && input.DescriptionFile != nil {
 		return nil, conflictingFlags("--description", "--description-file")
 	}
+	for _, field := range []string{"model", "reasoning-effort"} {
+		if seen["--"+field] && seen["--clear-"+field] {
+			return nil, conflictingFlags("--"+field, "--clear-"+field)
+		}
+	}
 	if seen["--external-id"] && seen["--clear-external-id"] {
 		return nil, conflictingFlags("--external-id", "--clear-external-id")
 	}
 	if seen["--group"] && seen["--clear-group"] {
 		return nil, conflictingFlags("--group", "--clear-group")
 	}
-	if input.Title == nil && input.Description == nil && input.DescriptionFile == nil && !input.ExternalID.Set && !input.Group.Set {
+	if input.Title == nil && input.Description == nil && input.DescriptionFile == nil && !input.ExternalID.Set && !input.Group.Set && !input.Model.Set && !input.ReasoningEffort.Set {
 		return nil, domain.NewError(domain.Usage, "missing_edit", "at least one editable pellet field is required", nil)
 	}
 	if input.Title != nil && strings.TrimSpace(*input.Title) == "" {
@@ -1077,21 +1098,23 @@ func invalidLimit(value string) error {
 }
 
 type pelletData struct {
-	Kind        domain.PelletKind         `json:"kind,omitempty"`
-	Checkpoint  *storage.ReviewCheckpoint `json:"checkpoint,omitempty"`
-	ID          string                    `json:"id"`
-	Project     string                    `json:"project"`
-	Number      int64                     `json:"number"`
-	Title       string                    `json:"title"`
-	Description string                    `json:"description"`
-	ExternalID  *string                   `json:"external_id"`
-	Group       *string                   `json:"group"`
-	Status      domain.PelletStatus       `json:"status"`
-	Priority    *int64                    `json:"priority"`
-	Workspace   *pelletWorkspaceData      `json:"workspace"`
-	CreatedAt   string                    `json:"created_at"`
-	UpdatedAt   string                    `json:"updated_at"`
-	CompletedAt *string                   `json:"completed_at"`
+	Model           *string                   `json:"model,omitempty"`
+	ReasoningEffort *string                   `json:"reasoning_effort,omitempty"`
+	Kind            domain.PelletKind         `json:"kind,omitempty"`
+	Checkpoint      *storage.ReviewCheckpoint `json:"checkpoint,omitempty"`
+	ID              string                    `json:"id"`
+	Project         string                    `json:"project"`
+	Number          int64                     `json:"number"`
+	Title           string                    `json:"title"`
+	Description     string                    `json:"description"`
+	ExternalID      *string                   `json:"external_id"`
+	Group           *string                   `json:"group"`
+	Status          domain.PelletStatus       `json:"status"`
+	Priority        *int64                    `json:"priority"`
+	Workspace       *pelletWorkspaceData      `json:"workspace"`
+	CreatedAt       string                    `json:"created_at"`
+	UpdatedAt       string                    `json:"updated_at"`
+	CompletedAt     *string                   `json:"completed_at"`
 }
 
 type pelletWorkspaceData struct {
@@ -1105,7 +1128,7 @@ type pelletWorkspaceData struct {
 func newPelletData(pellet storage.Pellet) pelletData {
 	data := pelletData{
 		ID: pellet.Reference.String(), Project: pellet.Reference.ProjectCode, Number: pellet.Reference.Number,
-		Title: pellet.Title, Description: pellet.Description,
+		Title: pellet.Title, Description: pellet.Description, Model: pellet.Model, ReasoningEffort: pellet.ReasoningEffort,
 		ExternalID: pellet.ExternalID, Group: pellet.Group, Status: pellet.Status, Priority: pellet.Priority,
 		CreatedAt: output.FormatTimestamp(pellet.CreatedAt), UpdatedAt: output.FormatTimestamp(pellet.UpdatedAt),
 	}
@@ -1149,6 +1172,16 @@ func (data pelletDetailData) RenderHuman(writer io.Writer) error {
 	}
 	if _, err := fmt.Fprintf(writer, "\nDescription:\n%s\n", data.Description); err != nil {
 		return err
+	}
+	for _, field := range []struct {
+		name  string
+		value *string
+	}{{"Execution model", data.Model}, {"Reasoning effort", data.ReasoningEffort}} {
+		if field.value != nil {
+			if _, err := fmt.Fprintf(writer, "%s: %s\n", field.name, *field.value); err != nil {
+				return err
+			}
+		}
 	}
 	return data.renderGroupContext(writer)
 }

@@ -10,7 +10,7 @@ const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-ui-parity-'));
 const fixture = path.join(temporary, 'parity'), current = path.join(temporary, 'pl-current');
 const baseline = process.env.PELLETS_UI_BASELINE ? path.resolve(process.env.PELLETS_UI_BASELINE) : path.join(temporary, 'pl-baseline');
-const results = {}, groupAdditions = {}, reviewLayouts = {};
+const results = {}, groupAdditions = {}, reviewLayouts = {}, executionPreferences = {};
 let server, browser;
 
 async function start(binary) {
@@ -77,6 +77,19 @@ async function measure(page, scene, build) {
         targets: row.dataset.scope,
       }))};
   });
+  // The new, feature-owned preference row intentionally increases form height.
+  // Capture its real geometry in the screenshot and separately verify that
+  // removing exactly that addition restores every original control unchanged.
+  executionPreferences[build+'-'+scene] = await page.evaluate(() => [...document.querySelectorAll('[data-execution-preferences]')].filter(el=>el.checkVisibility()).map(el=>({
+    width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height,
+    fields:[...el.querySelectorAll('select')].map(s=>s.name),
+    fits:[...el.querySelectorAll('.select-trigger')].every(s=>{const b=s.getBoundingClientRect();return b.x>=0&&b.right<=innerWidth+1;})
+  })));
+  for(const row of executionPreferences[build+'-'+scene]) {
+    assert.deepEqual(row.fields,['model','reasoning_effort']);
+    assert.ok(row.width>0&&row.height>0&&row.fits,scene+': preference row must fit');
+  }
+  await page.evaluate(()=>{for(const el of document.querySelectorAll('[data-execution-preferences]')){el.dataset.parityDisplay=el.style.display;el.style.display='none';}});
   results[build][scene] = await page.evaluate(() => {
     const closed = Array.from(document.querySelectorAll('details:not([open])'));
     const selectors = 'button, input:not([type=hidden]):not(.select-native), textarea, select:not(.select-native), label, summary, dialog[open], .task-row, .checkpoint-row, .memory-card, .section-heading, #main, #right-panel, #project-drawer, .plan-tabs, .create-popover[open] > form, .filter-fields:popover-open, .select-popover, .select-value, .select-chevron, .inspector > header, .dialog-footer';
@@ -96,6 +109,7 @@ async function measure(page, scene, build) {
         };
       });
   });
+  await page.evaluate(()=>{for(const el of document.querySelectorAll('[data-execution-preferences]')){el.style.display=el.dataset.parityDisplay;delete el.dataset.parityDisplay;}});
 }
 
 (async () => {
@@ -191,6 +205,7 @@ async function measure(page, scene, build) {
   }
   fs.writeFileSync(path.join(temporary, 'measurements.json'), JSON.stringify(results, null, 2));
   fs.writeFileSync(path.join(temporary, 'review-layouts.json'), JSON.stringify(reviewLayouts, null, 2));
+  fs.writeFileSync(path.join(temporary, 'execution-preferences.json'),JSON.stringify(executionPreferences,null,2));
   fs.writeFileSync(path.join(temporary, 'group-additions.json'), JSON.stringify(groupAdditions, null, 2));
   console.log('Visual artifacts: ' + temporary);
   const labels = {status: ['Status'], sort: ['Sort'], direction: ['Direction', 'Move'], group: ['Group'], target: ['Task'], workspace_id: ['Workspace']};

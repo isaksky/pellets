@@ -29,15 +29,17 @@ type PlanningMessage struct {
 	Effort string `json:"effort,omitempty"`
 }
 type PlanningDraft struct {
-	ID               string `json:"id"`
-	Title            string `json:"title"`
-	Description      string `json:"description"`
-	Acceptance       string `json:"acceptance,omitempty"`
-	Group            string `json:"group"`
-	Reason           string `json:"reason,omitempty"`
-	Selected         bool   `json:"selected"`
-	CreatedNumber    int64  `json:"created_number,omitempty"`
-	CreatedReference string `json:"created_reference,omitempty"`
+	Model            *string `json:"model,omitempty"`
+	ReasoningEffort  *string `json:"reasoning_effort,omitempty"`
+	ID               string  `json:"id"`
+	Title            string  `json:"title"`
+	Description      string  `json:"description"`
+	Acceptance       string  `json:"acceptance,omitempty"`
+	Group            string  `json:"group"`
+	Reason           string  `json:"reason,omitempty"`
+	Selected         bool    `json:"selected"`
+	CreatedNumber    int64   `json:"created_number,omitempty"`
+	CreatedReference string  `json:"created_reference,omitempty"`
 }
 type PlanningState struct {
 	AccessMode      string            `json:"access_mode,omitempty"`
@@ -92,6 +94,9 @@ func ValidatePlanningState(state PlanningState) error {
 	}
 	drafts := map[string]bool{}
 	for _, d := range state.Drafts {
+		if err := ValidatePelletPreferences(d.Model, d.ReasoningEffort); err != nil {
+			return err
+		}
 		if !ValidPlanningID(d.ID) || drafts[d.ID] || !planningText(d.Title, 4096) || !planningText(d.Description, MaxPlanningTextBytes) || !planningText(d.Acceptance, MaxPlanningTextBytes) || !planningText(d.Group, 4096) || !planningText(d.Reason, 4096) || d.CreatedNumber < 0 || !planningText(d.CreatedReference, 64) {
 			return InvalidPlanningState("planning drafts require unique IDs and bounded text")
 		}

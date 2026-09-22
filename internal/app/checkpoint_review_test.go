@@ -285,8 +285,8 @@ func TestCheckpointReviewCompletedReceiptReconcilesCrashBeforeLockCleanup(t *tes
 	if err != nil || !storage.CompletedReviewReceipt(resumed) || resumed.ResumeFrom == nil || *resumed.ResumeFrom != receipt.ID {
 		t.Fatalf("reconciled review attempt: %+v %v", resumed, err)
 	}
-	if resumed.Settings.Codex.Model != receipt.Settings.Codex.Model || resumed.Settings.Codex.ReasoningEffort != "high" {
-		t.Fatalf("reconciliation relabeled the original review settings: %+v", resumed.Settings.Codex)
+	if resumed.Settings.Codex.Model != receipt.Settings.Codex.Model || resumed.Settings.Codex.ReasoningEffort != "medium" {
+		t.Fatalf("reconciliation did not capture current execution settings: %+v", resumed.Settings.Codex)
 	}
 	reviews := 0
 	for _, event := range readPeerEvents(t, s.options.Database.Root) {
@@ -597,8 +597,8 @@ func TestCheckpointReviewerCancellationResumesDurableResultWithoutRepeatingRevie
 		t.Fatalf("resume status: %+v", status)
 	}
 	resumed, err := s.options.Supervisor.ReadRun(context.Background(), s.options.Database, status.RunID)
-	if err != nil || resumed.Settings.Codex.ReasoningEffort != first.Settings.Codex.ReasoningEffort {
-		t.Fatalf("resume changed captured review effort: %+v %v", resumed.Settings.Codex, err)
+	if err != nil || resumed.Settings.Codex.ReasoningEffort != "medium" {
+		t.Fatalf("resume did not use current effort: %+v %v", resumed.Settings.Codex, err)
 	}
 	assertReviewContexts(t, resumed.ReviewSnapshot, implementations)
 	assertCheckpointContextPrompts(t, s, resumed, implementations)

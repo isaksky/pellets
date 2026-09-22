@@ -491,6 +491,14 @@ import { action, actions } from "./datastar-1.0.3.js";
       var input = form.querySelector("[data-checkpoint-metadata='" + entry[0] + "']");
       input.value = Object.prototype.hasOwnProperty.call(checkpointMetadataOverrides, entry[0]) ? checkpointMetadataOverrides[entry[0]] : entry[1].value;
     });
+    ["model", "reasoning_effort"].forEach(function (name) {
+      var input = form.querySelector("[data-checkpoint-metadata='" + name + "']");
+      if (!input || !Object.prototype.hasOwnProperty.call(checkpointMetadataOverrides, name)) return;
+      var value = checkpointMetadataOverrides[name];
+      if (!Array.from(input.options).some(function (option) { return option.value === value; })) input.add(new Option(value, value));
+      input.value = value;
+      input.closest("pl-select")?.refresh();
+    });
     var metadataNotice = "External ID: " + external.source + "; Group: " + group.source + ".";
     if (composer.dataset.filterGroupUngrouped === "true") metadataNotice += " The exact Ungrouped filter remains ungrouped and cannot be scheduled until it is removed.";
     if (external.mixed || group.mixed) metadataNotice += " Mixed values default to no exact filter, so this checkpoint will not disappear from a guessed runner filter.";

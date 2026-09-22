@@ -130,7 +130,7 @@ func Run() bool {
 			}
 		case "model/list":
 			result = map[string]any{"data": []any{map[string]any{"id": "test-model", "model": "test-model", "displayName": "Test", "isDefault": true, "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "high"}}}}, "nextCursor": nil}
-			if strings.HasPrefix(mode, "review_") {
+			if strings.HasPrefix(mode, "review_") || mode == "schedule_success" {
 				result = map[string]any{"data": []any{map[string]any{"id": "test-model", "model": "test-model", "displayName": "Test", "isDefault": true, "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "medium"}, map[string]any{"reasoningEffort": "high"}}}}, "nextCursor": nil}
 			}
 		case "thread/start", "thread/resume":

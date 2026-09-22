@@ -527,6 +527,10 @@ func TestPrepareRunStopsOnLoginPolicyAndEffortFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	prepared.Client.Close()
+	base.RequireAdvertisedModel = true
+	if prepared, err := PrepareRun(context.Background(), base); prepared != nil || !errors.Is(err, ErrInvalidSettings) {
+		t.Fatalf("unknown pellet model passed preflight: %v %v", prepared, err)
+	}
 }
 
 func TestPrepareRunStopsWhenPelletsIsMissingFromChildPath(t *testing.T) {

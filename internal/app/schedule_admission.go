@@ -92,10 +92,6 @@ func (s *Scheduler) CheckAdmission(ctx context.Context, request ScheduleRequest)
 			return storage.ExecutionRunConflict(prior.ID)
 		}
 		previous = &prior
-		if prior.Mode == "review_checkpoint" {
-			request.Overrides.Model = &prior.Settings.Codex.Model
-			request.Overrides.ReasoningEffort = &prior.Settings.Codex.ReasoningEffort
-		}
 		request.ExternalID, request.Group = prior.ExternalID, prior.Group
 		request.UseWorkspaceAssignments, request.SavedWorkspaceSelection = prior.WorkspaceSelection != nil, prior.WorkspaceSelection
 	} else if request.FreshConversation {
@@ -117,9 +113,12 @@ func (s *Scheduler) CheckAdmission(ctx context.Context, request ScheduleRequest)
 	if err != nil {
 		return err
 	}
+	var preferences *storage.PelletExecutionPreferences
 	candidate := errors.New("candidate available")
 	if previous != nil && previous.Finalization != nil && previous.ResultCommit != "" && (previous.Phase == "close" || previous.State == "completed") {
-		_, err = queue.ReadPellet(ctx, request.Selected, domain.PelletReference{ProjectCode: previous.ProjectCode, Number: previous.PelletNumber})
+		var pellet storage.Pellet
+		pellet, err = queue.ReadPellet(ctx, request.Selected, domain.PelletReference{ProjectCode: previous.ProjectCode, Number: previous.PelletNumber})
+		preferences = pellet.ExecutionPreferences()
 	} else {
 		_, err = queue.SelectScheduledPellet(ctx, request.Selected, storage.ScheduleSelection{ResumePellet: request.ResumePellet, ExternalID: request.ExternalID, Group: request.Group, UseWorkspaceAssignments: request.UseWorkspaceAssignments, SavedWorkspaceSelection: request.SavedWorkspaceSelection, Ready: func(ctx context.Context, pellet storage.Pellet) (bool, error) {
 			if pellet.Kind == domain.PelletReviewCheckpoint && (s.options.Checkpoints == nil || s.options.Checkpoints.Drive == nil) {
@@ -131,6 +130,7 @@ func (s *Scheduler) CheckAdmission(ctx context.Context, request ScheduleRequest)
 					return ready, err
 				}
 			}
+			preferences = pellet.ExecutionPreferences()
 			return false, candidate
 		}})
 	}
@@ -156,7 +156,7 @@ func (s *Scheduler) CheckAdmission(ctx context.Context, request ScheduleRequest)
 	if err != nil {
 		return err
 	}
-	prepared, err := supervisor.options.Prepare(ctx, codex.PrepareOptions{WorkspaceDir: root, DatabasePath: s.options.Database.Path, ClientVersion: supervisor.options.ClientVersion, Saved: saved.Settings, Overrides: request.Overrides})
+	prepared, err := supervisor.options.Prepare(ctx, codex.PrepareOptions{RequireAdvertisedModel: preferences != nil && preferences.Model != nil, WorkspaceDir: root, DatabasePath: s.options.Database.Path, ClientVersion: supervisor.options.ClientVersion, Saved: saved.Settings, Overrides: pelletRunOverrides(request.Overrides, preferences)})
 	if err != nil {
 		return codexPreflightFailure(err)
 	}

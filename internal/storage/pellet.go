@@ -10,6 +10,8 @@ import (
 // Pellet is one authoritative queue record. Workspace is non-nil exactly
 // while Status is in_progress.
 type Pellet struct {
+	Model                  *string `json:",omitempty"`
+	ReasoningEffort        *string `json:",omitempty"`
 	Kind                   domain.PelletKind
 	ImplementationRevision int64
 	Checkpoint             *ReviewCheckpoint `json:",omitempty"`
@@ -35,6 +37,8 @@ type Pellet struct {
 // NewPellet contains the fields accepted when allocating a new pellet. Status
 // may be open or maybe_later; an empty status means open.
 type NewPellet struct {
+	Model                *string                  `json:",omitempty"`
+	ReasoningEffort      *string                  `json:",omitempty"`
 	Kind                 domain.PelletKind        `json:",omitempty"`
 	ReviewTargets        []domain.PelletReference `json:",omitempty"`
 	ReviewTargetVersions []ReviewTargetVersion    `json:",omitempty"`
@@ -109,10 +113,12 @@ type NullableTextChange struct {
 // PelletChanges contains only editable fields. Identity, lifecycle state,
 // priority, and workspace ownership are deliberately absent.
 type PelletChanges struct {
-	Title       *string
-	Description *string
-	ExternalID  NullableTextChange
-	Group       NullableTextChange
+	Model           NullableTextChange
+	ReasoningEffort NullableTextChange
+	Title           *string
+	Description     *string
+	ExternalID      NullableTextChange
+	Group           NullableTextChange
 }
 
 // PelletListOptions describes project-scoped exact filters and deterministic

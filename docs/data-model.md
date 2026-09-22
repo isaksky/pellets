@@ -147,6 +147,8 @@ CREATE TABLE pellets (
     completed_at REAL,
     kind         TEXT NOT NULL DEFAULT 'ordinary',
     implementation_revision INTEGER NOT NULL DEFAULT 1,
+    model TEXT,
+    reasoning_effort TEXT,
 
     UNIQUE (project_id, number),
     FOREIGN KEY (project_id, workspace_id)
@@ -157,6 +159,8 @@ CREATE TABLE pellets (
     CHECK (group_id IS NULL OR group_id <> ''),
     CHECK (kind IN ('ordinary', 'review_checkpoint')),
     CHECK (implementation_revision > 0),
+    CHECK (model IS NULL OR (length(model) BETWEEN 1 AND 512 AND trim(model) = model)),
+    CHECK (reasoning_effort IS NULL OR (length(reasoning_effort) BETWEEN 1 AND 128 AND trim(reasoning_effort) = reasoning_effort)),
     CHECK (status IN ('open', 'in_progress', 'closed', 'maybe_later')),
     CHECK (
         (status = 'in_progress' AND workspace_id IS NOT NULL)
@@ -211,6 +215,24 @@ CREATE INDEX memories_project_approval_idx
 `pellets.rowid` is a database-internal surrogate used by SQLite and FTS. It is never shown as the public pellet ID.
 
 `memories.memory_id` is a database-local, user-visible identity for a removable record. Under [SQLite's `AUTOINCREMENT` allocation rules](https://sqlite.org/autoinc.html), an automatically allocated ID from a committed row is never assigned to a different memory after removal. SQLite may leave gaps, and an allocation rolled back before commit may be reused. `groups.group_id` and `execution_runs.run_id` use the same non-reuse guarantee for stable group and review-evidence identities. Internal `pellets.rowid` and unrelated keys remain plain `INTEGER PRIMARY KEY` columns.
+
+## Pellet execution preferences
+
+Migration 25 adds nullable `pellets.model` and `pellets.reasoning_effort`.
+Each field independently takes precedence over existing execution defaults;
+`NULL` inherits those defaults, ultimately the selected Codex runtime's defaults.
+Identifiers are open-ended, nonempty trimmed UTF-8 without control characters,
+bounded to 512 bytes for model and 128 for effort. Runtime preflight validates
+availability and compatibility; catalog absence does not prevent saving a choice.
+
+Preferences participate in complete-row edit versions and creation fingerprints.
+Changing them updates `updated_at` but does not change implementation scope,
+`implementation_revision`, review readiness, or pending live-change assessments.
+Selection captures both preferences; run creation checks that snapshot inside its
+writer transaction. Each attempt stores its effective settings. Active attempts
+remain unchanged; explicit Resume resolves current preferences for future calls.
+Historical attempts and completed review results retain their original provenance
+through the existing `resume_from` lineage.
 
 ## Persistent project groups
 
@@ -904,7 +926,9 @@ Explicit draft IDs select ordinary pellets to create. One immediate transaction
 checks the chat version, validates the entire batch, allocates project numbers
 and queue positions, writes pellets and their FTS rows, records creation receipts,
 and updates the chat. Description and acceptance become the ordinary pellet's
-description; group bytes remain exact. No workspace is claimed and no execution
+description; group bytes remain exact. Optional draft `model` and
+`reasoning_effort` values become pellet execution preferences independently of
+the planning chat model. Old draft JSON omitting these fields inherits defaults. No workspace is claimed and no execution
 run is started. A failure rolls back the whole batch, including allocated numbers.
 
 `planning_draft_creations` records the immutable draft snapshot, stable pellet

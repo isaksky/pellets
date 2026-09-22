@@ -65,10 +65,11 @@ type EffectiveRunSettings struct {
 // RunCapture is immutable for an attempt. Nil filters mean unfiltered; supplied
 // values retain exact bytes. An explicit resume creates a new numbered attempt.
 type RunCapture struct {
-	WorkspaceSelection *WorkspaceSelection `json:"workspace_selection,omitempty"`
-	FreshConversation  bool                `json:"fresh_conversation,omitempty"`
+	ExpectedPreferences *PelletExecutionPreferences `json:"expected_preferences,omitempty"`
+	WorkspaceSelection  *WorkspaceSelection         `json:"workspace_selection,omitempty"`
+	FreshConversation   bool                        `json:"fresh_conversation,omitempty"`
 	// Admission-only guards, checked in the creation transaction. Zero/nil
-	// preserve callers without a preflight snapshot. Neither is persisted.
+	// preserve callers without a preflight snapshot. These guards are not persisted.
 	ExpectedImplementationRevision int64                `json:"expected_implementation_revision,omitempty"`
 	ExpectedWorkspace              *ResolvedProject     `json:"-"`
 	ProjectID                      int64                `json:"project_id"`
@@ -275,6 +276,7 @@ type UpdateExecutionRun struct {
 }
 
 type ExecutionRunDatabase interface {
+	ReadPelletExecutionPreferences(context.Context, int64, int64) (*PelletExecutionPreferences, error)
 	ExecutionChangeDatabase
 	CheckpointTriageDatabase
 	CreateExecutionRun(context.Context, RunCapture) (ExecutionRun, error)

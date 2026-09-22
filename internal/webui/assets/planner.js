@@ -1,3 +1,4 @@
+import { executionPreferenceFields, updateExecutionPreferences, syncExecutionPreferenceMenus, observeExecutionPreferences } from "./execution-preferences.js";
 import { rememberDescriptions, refreshDescriptions } from "./description.js";
 import { refreshComponents } from "./components.js";
 import { saveSetting } from "./settings.js";
@@ -247,7 +248,7 @@ function draftNode(draft) {
     node.innerHTML = `<a href="/projects/${encodeURIComponent(projectCode())}/tasks/${encodeURIComponent(reference)}" data-plan-reference><span class="plan-row-check" aria-label="Created">Created</span><span class="plan-row-ref">${esc(reference)}</span><span class="plan-row-title"></span><span class="plan-row-group"></span><span aria-hidden="true">↗</span></a>`;
   } else {
     const id = 'plan-draft-' + draft.id;
-    node.innerHTML = `<input class="plan-row-select" type="checkbox" name="selected" form="${esc(id)}" data-field="selected"><button type="button" class="plan-open-draft" data-plan="edit-draft" aria-haspopup="dialog"><span class="plan-row-title"></span><span class="plan-row-group"></span><span class="plan-row-error" hidden></span></button><dialog class="plan-draft-dialog" id="plan-details-${esc(draft.id)}" aria-labelledby="plan-editor-heading-${esc(draft.id)}"><header><h2 id="plan-editor-heading-${esc(draft.id)}">Edit proposed pellet</h2><button type="button" data-plan="close-editor" aria-label="Close draft editor">×</button></header><div class="plan-row-editor"><form id="${esc(id)}" method="post" class="plan-draft-form"><input type="hidden" name="version"><label class="visually-hidden" for="plan-title-${esc(draft.id)}">Pellet title</label><input class="plan-card-title" id="plan-title-${esc(draft.id)}" name="title" data-field="title" maxlength="4096"><div class="description-field" data-description data-description-key="proposal-${esc(draft.id)}"><div class="description-toolbar" data-ignore-morph></div><label class="plan-field-label">Description<textarea name="description" data-field="description" rows="4" maxlength="65536"></textarea></label><div class="markdown-body" data-ignore-morph hidden></div></div><label class="plan-field-label">Acceptance criteria<textarea class="plan-acceptance" name="acceptance" data-field="acceptance" rows="3" maxlength="65536"></textarea></label><div class="plan-group-row"><label>Group<input name="group" data-field="group" list="plan-groups" placeholder="Ungrouped" maxlength="4096"></label></div></form><p class="plan-route"></p><p class="plan-reason"></p><div class="plan-card-actions"><button type="button" data-plan="refine">Refine in chat</button><button type="button" data-plan="split">Split pellet</button></div><div class="plan-split" hidden><label>One title per new pellet<textarea rows="3" data-split-titles></textarea></label><p>Each draft keeps the description and acceptance criteria for refinement.</p><button type="button" data-plan="apply-split">Split into drafts</button><button type="button" data-plan="cancel-split">Cancel</button><span data-split-error role="alert"></span></div></div><footer><span class="plan-editor-status" role="status"></span><button type="button" data-plan="close-editor">Done</button></footer></dialog>`;
+    node.innerHTML = `<input class="plan-row-select" type="checkbox" name="selected" form="${esc(id)}" data-field="selected"><button type="button" class="plan-open-draft" data-plan="edit-draft" aria-haspopup="dialog"><span class="plan-row-title"></span><span class="plan-row-group"></span><span class="plan-row-error" hidden></span></button><dialog class="plan-draft-dialog" id="plan-details-${esc(draft.id)}" aria-labelledby="plan-editor-heading-${esc(draft.id)}"><header><h2 id="plan-editor-heading-${esc(draft.id)}">Edit proposed pellet</h2><button type="button" data-plan="close-editor" aria-label="Close draft editor">×</button></header><div class="plan-row-editor"><form id="${esc(id)}" method="post" class="plan-draft-form"><input type="hidden" name="version"><label class="visually-hidden" for="plan-title-${esc(draft.id)}">Pellet title</label><input class="plan-card-title" id="plan-title-${esc(draft.id)}" name="title" data-field="title" maxlength="4096"><div class="description-field" data-description data-description-key="proposal-${esc(draft.id)}"><div class="description-toolbar" data-ignore-morph></div><label class="plan-field-label">Description<textarea name="description" data-field="description" rows="4" maxlength="65536"></textarea></label><div class="markdown-body" data-ignore-morph hidden></div></div><label class="plan-field-label">Acceptance criteria<textarea class="plan-acceptance" name="acceptance" data-field="acceptance" rows="3" maxlength="65536"></textarea></label><div class="plan-group-row"><label>Group<input name="group" data-field="group" list="plan-groups" placeholder="Ungrouped" maxlength="4096"></label></div>${executionPreferenceFields()}</form><p class="plan-route"></p><p class="plan-reason"></p><div class="plan-card-actions"><button type="button" data-plan="refine">Refine in chat</button><button type="button" data-plan="split">Split pellet</button></div><div class="plan-split" hidden><label>One title per new pellet<textarea rows="3" data-split-titles></textarea></label><p>Each draft keeps the description and acceptance criteria for refinement.</p><button type="button" data-plan="apply-split">Split into drafts</button><button type="button" data-plan="cancel-split">Cancel</button><span data-split-error role="alert"></span></div></div><footer><span class="plan-editor-status" role="status"></span><button type="button" data-plan="close-editor">Done</button></footer></dialog>`;
   }
   if (!created(draft)) node.insertAdjacentHTML('beforeend', '<button type="button" class="plan-dismiss" data-plan="remove" title="Dismiss proposal">×</button>');
   const dialog=node.querySelector('dialog');
@@ -341,6 +342,7 @@ function render() {
     node.querySelector('[data-plan=remove]').setAttribute('aria-label','Dismiss proposal: '+(draft.title || 'Untitled pellet'));
     node.querySelector('[data-plan=remove]').disabled=!!flight || !!failed || conflict;
     node.querySelector('[data-field=selected]').setAttribute('aria-label', 'Select draft ' + (index+1) + ': ' + (draft.title || 'Untitled pellet'));
+    updateExecutionPreferences(node,catalog,draft);
     for (const field of node.querySelectorAll('[data-field]')) {
       const value = draft[field.dataset.field] ?? '';
       if (field.type === 'checkbox') field.checked = !!value;
@@ -471,6 +473,7 @@ function status(value, attention) {
 }
 function syncModelMenus() {
   const status=catalog.refreshing ? (catalog.models.length ? 'Refreshing models…' : 'Loading available models…') : catalog.error || (!catalogLoaded || !catalog.fetched_at ? 'Loading available models…' : catalog.stale ? 'Showing cached models.' : '');
+  syncExecutionPreferenceMenus(catalog,status);
   for(const select of panel?.querySelectorAll('#plan-model,#plan-effort') || []) {
     select.dataset.menuStatus=status;
     select.dataset.menuAction=catalog.error ? 'Retry refresh' : 'Refresh models';
@@ -487,26 +490,26 @@ async function loadModels(force=false) {
         catalog.refreshing=true;catalog.error='';syncModelMenus();
       } else {
         catalog=await json('/models');catalogLoaded=true;
-        if(data)render();else syncModelMenus();
+        if(data)render();syncModelMenus();
       }
     }catch(error){catalog.error=error.message;catalog.refreshing=false;syncModelMenus();}
     finally{
       catalogFlight=null;
       if(catalogAgain){
         const forceNext=catalogForce;catalogAgain=false;catalogForce=false;
-        if(forceNext||catalogVisible) queueMicrotask(()=>loadModels(forceNext));
+        if(forceNext||catalogVisible||document.querySelector('[data-execution-preferences]')) queueMicrotask(()=>loadModels(forceNext));
       }
     }
   })();
   return catalogFlight;
 }
 document.addEventListener('pl-select-action',event=>{
-  if(event.target.querySelector('#plan-model,#plan-effort')) loadModels(true);
+  if(event.target.querySelector('#plan-model,#plan-effort,[data-execution-preference]')) loadModels(true);
 });
 // SQLite changes arrive through the existing SSE invalidation/reconnect path.
 // Catalog reconciliation is independent of chat dirty state and never saves it.
 document.addEventListener('pellets-refresh',()=>{
-  if(selectedTab==='plan' && !root.classList.contains('execution-collapsed') && !uiVersion.isOutdated()) loadModels();
+  if(!uiVersion.isOutdated() && ((selectedTab==='plan' && !root.classList.contains('execution-collapsed')) || document.querySelector('[data-execution-preferences]'))) loadModels();
 });
 window.addEventListener('focus',()=>{if(selectedTab==='plan')loadModels();});
 async function fresh() {
@@ -540,7 +543,7 @@ window.addEventListener('beforeunload',event=>{
 document.addEventListener('input', event => {
   if (!event.target.closest('#planning-panel')) return;
   const field = event.target, draft = state.drafts.find(d => String(d.id) === field.closest('[data-draft-id]')?.dataset.draftId);
-  if (field.dataset.field && draft && !created(draft)) {draft[field.dataset.field] = field.type === 'checkbox' ? field.checked : field.value;markDirty();render();}
+  if (field.dataset.field && draft && !created(draft)) {draft[field.dataset.field] = field.type === 'checkbox' ? field.checked : field.matches('[data-execution-preference]') ? field.value || null : field.value;markDirty();render();}
   else if (field.id === 'plan-message') {state.input=field.value;markDirty();render();}
 });
 document.addEventListener('change', event => {
@@ -595,8 +598,8 @@ document.addEventListener('click', async event => {
   if(action==='end-refine'){state.refining_draft_id=null;markDirty();render();panel.querySelector('#plan-message').focus();return;}
   if(action==='split'&&draft){splitting=draft.id;render();const node=button.closest('[data-draft-id]');node.querySelector('[data-split-titles]').focus();return;}
   if(action==='cancel-split'){splitting=null;render();return;}
-  if(action==='apply-split'&&draft){const node=button.closest('[data-draft-id]'),titles=node.querySelector('[data-split-titles]').value.split('\n').map(x=>x.trim()).filter(Boolean);if(titles.length<2){node.querySelector('[data-split-error]').textContent='Enter at least two titles.';return;}node.querySelector('dialog').close();state.drafts.splice(state.drafts.indexOf(draft),1,...titles.map(title=>makeDraft(title,draft.description,draft.acceptance,draft.group)));splitting=null;state.refining_draft_id=null;}
-  else if(action==='combine'){const drafts=selected();if(drafts.length<2)return;const group=drafts.every(d=>d.group===drafts[0].group)?drafts[0].group:'';const combined=makeDraft(drafts.map(d=>d.title).join(' / '),drafts.map(d=>d.title+'\n'+d.description).join('\n\n'),drafts.map(d=>d.acceptance).filter(Boolean).join('\n\n'),group);const index=state.drafts.indexOf(drafts[0]);state.drafts=state.drafts.filter(d=>!drafts.includes(d));state.drafts.splice(index,0,combined);state.refining_draft_id=null;}
+  if(action==='apply-split'&&draft){const node=button.closest('[data-draft-id]'),titles=node.querySelector('[data-split-titles]').value.split('\n').map(x=>x.trim()).filter(Boolean);if(titles.length<2){node.querySelector('[data-split-error]').textContent='Enter at least two titles.';return;}node.querySelector('dialog').close();state.drafts.splice(state.drafts.indexOf(draft),1,...titles.map(title=>({...makeDraft(title,draft.description,draft.acceptance,draft.group),model:draft.model,reasoning_effort:draft.reasoning_effort})));splitting=null;state.refining_draft_id=null;}
+  else if(action==='combine'){const drafts=selected();if(drafts.length<2)return;const group=drafts.every(d=>d.group===drafts[0].group)?drafts[0].group:'';const combined=makeDraft(drafts.map(d=>d.title).join(' / '),drafts.map(d=>d.title+'\n'+d.description).join('\n\n'),drafts.map(d=>d.acceptance).filter(Boolean).join('\n\n'),group);for(const key of ['model','reasoning_effort'])combined[key]=drafts.every(d=>(d[key]||null)===(drafts[0][key]||null))?drafts[0][key]||null:null;const index=state.drafts.indexOf(drafts[0]);state.drafts=state.drafts.filter(d=>!drafts.includes(d));state.drafts.splice(index,0,combined);state.refining_draft_id=null;}
   else if(action==='select-all'){state.drafts.forEach(d=>{if(!created(d))d.selected=true;});}
   else if(action==='add-draft'){trayCollapsed=false;state.drafts.push(makeDraft());}
   else return;
@@ -614,3 +617,5 @@ document.addEventListener('pellets-refresh', async () => {
 });
 window.addEventListener('resize', sync);
 window.Planner={sync,status,selectExecution:()=>chooseTab('execution'),flush:()=>dirty?mutate(chat?'save':'new'):Promise.resolve(),prepareReload:()=>{const error=storePending(true);render();return error;}};
+
+observeExecutionPreferences(syncModelMenus,()=>{if(!catalogLoaded&&!catalogFlight)loadModels();});

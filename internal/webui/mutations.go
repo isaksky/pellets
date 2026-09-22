@@ -164,6 +164,11 @@ func (h *handler) submitRunAction(response http.ResponseWriter, request *http.Re
 }
 
 func (h *handler) createPellet(response http.ResponseWriter, request *http.Request, project storage.Project) {
+	for _, field := range []string{"model", "reasoning_effort"} {
+		if _, ok := request.PostForm[field]; !ok {
+			request.PostForm.Set(field, "")
+		}
+	}
 	for _, field := range []string{"placement_target", "placement_direction", "placement_target_version"} {
 		if _, present := request.PostForm[field]; !present {
 			request.PostForm.Set(field, "")
@@ -181,7 +186,7 @@ func (h *handler) createPellet(response http.ResponseWriter, request *http.Reque
 	if _, present := request.PostForm["request_id"]; !present {
 		request.PostForm.Set("request_id", "")
 	}
-	if err := requireFields(request.PostForm, []string{"_csrf", "request_id", "title", "description", "external_id", "group", "status", "review_targets", "review_target_versions", "placement_target", "placement_direction", "placement_target_version"}); err != nil {
+	if err := requireFields(request.PostForm, []string{"_csrf", "request_id", "title", "description", "external_id", "group", "status", "review_targets", "review_target_versions", "placement_target", "placement_direction", "placement_target_version", "model", "reasoning_effort"}); err != nil {
 		h.renderError(response, http.StatusUnprocessableEntity, err, submittedDraft(request.PostForm))
 		return
 	}
@@ -191,6 +196,7 @@ func (h *handler) createPellet(response http.ResponseWriter, request *http.Reque
 		return
 	}
 	input := storage.NewPellet{
+		Model: nullableInput(request.PostForm.Get("model")), ReasoningEffort: nullableInput(request.PostForm.Get("reasoning_effort")),
 		Title: request.PostForm.Get("title"), Description: request.PostForm.Get("description"),
 		ExternalID: nullableInput(request.PostForm.Get("external_id")), Group: nullableInput(request.PostForm.Get("group")),
 		Status: status, RequestID: nullableInput(request.PostForm.Get("request_id")),
@@ -250,7 +256,13 @@ func (h *handler) createPellet(response http.ResponseWriter, request *http.Reque
 }
 
 func (h *handler) editPellet(response http.ResponseWriter, request *http.Request, project storage.Project, reference domain.PelletReference) {
-	if err := requireFields(request.PostForm, []string{"_csrf", "version", "title", "description", "external_id", "group"}); err != nil {
+	fields := []string{"_csrf", "version", "title", "description", "external_id", "group"}
+	for _, field := range []string{"model", "reasoning_effort"} {
+		if _, ok := request.PostForm[field]; ok {
+			fields = append(fields, field)
+		}
+	}
+	if err := requireFields(request.PostForm, fields); err != nil {
 		h.renderError(response, http.StatusUnprocessableEntity, err, submittedDraft(request.PostForm))
 		return
 	}
@@ -264,6 +276,12 @@ func (h *handler) editPellet(response http.ResponseWriter, request *http.Request
 		Title: &title, Description: &description,
 		ExternalID: storage.NullableTextChange{Set: true, Value: nullableInput(request.PostForm.Get("external_id"))},
 		Group:      storage.NullableTextChange{Set: true, Value: nullableInput(request.PostForm.Get("group"))},
+	}
+	if _, ok := request.PostForm["model"]; ok {
+		changes.Model = storage.NullableTextChange{Set: true, Value: nullableInput(request.PostForm.Get("model"))}
+	}
+	if _, ok := request.PostForm["reasoning_effort"]; ok {
+		changes.ReasoningEffort = storage.NullableTextChange{Set: true, Value: nullableInput(request.PostForm.Get("reasoning_effort"))}
 	}
 	pellet, err := h.application.UpdatePellet(request.Context(), project, reference, version, changes)
 	if err != nil {

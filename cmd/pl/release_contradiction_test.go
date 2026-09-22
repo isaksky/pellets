@@ -66,7 +66,7 @@ func TestReleaseContradictionChecklist(t *testing.T) {
 		"rowid:INTEGER", "project_id:INTEGER", "workspace_id:INTEGER", "number:INTEGER", "title:TEXT",
 		"description:TEXT", "external_id:TEXT", "group_id:TEXT", "status:TEXT", "priority:INTEGER",
 		"created_at:REAL", "updated_at:REAL", "completed_at:REAL",
-		"kind:TEXT", "implementation_revision:INTEGER", "group_record_id:INTEGER",
+		"kind:TEXT", "implementation_revision:INTEGER", "group_record_id:INTEGER", "model:TEXT", "reasoning_effort:TEXT",
 	}
 	wantMemoryColumns := []string{
 		"memory_id:INTEGER", "project_id:INTEGER", "text:TEXT", "created_by:TEXT", "approved_at:REAL",

@@ -174,11 +174,14 @@ func validateSettingText(label, value string, optional bool) error {
 }
 
 type PrepareOptions struct {
-	WorkspaceDir  string
-	DatabasePath  string
-	ClientVersion string
-	Saved         WorkspaceRunSettings
-	Overrides     RunOverrides
+	// Pellet model choices are checked against the selected runtime catalog even
+	// when effort is inherited. Legacy workspace model aliases remain open-ended.
+	RequireAdvertisedModel bool
+	WorkspaceDir           string
+	DatabasePath           string
+	ClientVersion          string
+	Saved                  WorkspaceRunSettings
+	Overrides              RunOverrides
 }
 
 type AccountStatus struct {
@@ -279,6 +282,9 @@ func PrepareRun(ctx context.Context, options PrepareOptions) (_ *PreparedRun, er
 	models, err := readModels(ctx, client)
 	if err != nil {
 		return nil, err
+	}
+	if options.RequireAdvertisedModel && !slices.ContainsFunc(models, func(model ModelInfo) bool { return model.Model == settings.Model || model.ID == settings.Model }) {
+		return nil, fmt.Errorf("%w: pellet model %q is not in the selected Codex runtime catalog; choose an available model or clear the pellet preference", ErrInvalidSettings, settings.Model)
 	}
 	if err := validateEffort(settings, effective.Model, models); err != nil {
 		return nil, err

@@ -107,12 +107,16 @@ func TestCheckpointTriageResumePreservesPartialResultsAndOnlyAssessesUnfinished(
 	}
 	assertReviewContexts(t, completed.ReviewSnapshot, implementations)
 	assertCheckpointContextPrompts(t, s, completed, implementations)
-	if completed.Settings.Codex.Model != run.Settings.Codex.Model || completed.Settings.Codex.ReasoningEffort != "high" {
-		t.Fatalf("triage resume relabeled the original review settings: %+v", completed.Settings.Codex)
+	if completed.Settings.Codex.Model != run.Settings.Codex.Model || completed.Settings.Codex.ReasoningEffort != "medium" {
+		t.Fatalf("triage resume did not capture current settings: %+v", completed.Settings.Codex)
 	}
 	saved, err := s.options.Supervisor.options.Settings.Load(context.Background(), s.options.Database, request.Selected.Workspace.ID)
 	if err != nil || saved.Settings.ReasoningEffort != "medium" {
 		t.Fatalf("checkpoint recovery changed future workspace preferences: %+v %v", saved.Settings, err)
+	}
+	original, err := s.options.Supervisor.ReadRun(context.Background(), s.options.Database, run.ID)
+	if err != nil || original.Settings.Codex.ReasoningEffort != "high" || completed.ResumeFrom == nil || *completed.ResumeFrom != original.ID {
+		t.Fatal("review provenance changed", err)
 	}
 	reviews, triageTurns := 0, 0
 	findingTurns := map[string]int{}
@@ -135,8 +139,12 @@ func TestCheckpointTriageResumePreservesPartialResultsAndOnlyAssessesUnfinished(
 			if params.ThreadID == run.ThreadID || params.ApprovalsReviewer != "auto_review" || params.SandboxPolicy.Type != "readOnly" || len(params.Input) != 1 {
 				t.Fatalf("triage context/policy changed: %+v", params)
 			}
-			if params.Model != run.Settings.Codex.Model || params.Effort != "high" {
-				t.Fatalf("unfinished assessment abandoned captured review settings: %+v", params)
+			wantEffort := "high"
+			if triageTurns > 2 {
+				wantEffort = "medium"
+			}
+			if params.Model != run.Settings.Codex.Model || params.Effort != wantEffort {
+				t.Fatalf("assessment did not use its attempt settings: %+v", params)
 			}
 			prompt := params.Input[0].Text
 			assertCapturedCheckpointPrefix(t, prompt, run.PromptPrefix.Text, "Independently triage exactly")

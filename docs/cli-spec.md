@@ -245,6 +245,7 @@ Add an open pellet at the end of the project’s active priority order by defaul
 pl add TITLE [--request-id ID] [--description TEXT | --description-file PATH]
                   [--external-id ID]
                   [--group GROUP]
+                  [--model MODEL] [--reasoning-effort EFFORT]
                   [--before PELLET | --after PELLET]
                   [--maybe-later]
                   [--review-targets PELLET,PELLET]
@@ -421,7 +422,16 @@ pl edit PELLET [--title TEXT]
                      [--description TEXT | --description-file PATH]
                      [--external-id ID | --clear-external-id]
                      [--group GROUP | --clear-group]
+                     [--model MODEL | --clear-model]
+                     [--reasoning-effort EFFORT | --clear-reasoning-effort]
 ```
+
+Model and reasoning effort are optional execution preferences. Each populated
+field takes precedence over execution defaults; clearing it restores inheritance.
+Set and clear flags for the same field conflict. JSON pellet responses include
+`model` and `reasoning_effort` when set; human detail output shows saved choices.
+Editing preferences leaves a running attempt unchanged and applies on the next
+execution or explicit Resume.
 
 At least one edit option is required. Editing status or priority through this command is forbidden; use the lifecycle and move commands.
 
@@ -662,8 +672,11 @@ owns before releasing the workspace execution lock.
 
 Workspace settings contain only an executable selector, optional open-ended
 model ID, optional runtime-supported reasoning effort, and bounded transport
-limits. Empty model/effort preserve Codex defaults. One-run overrides do not
-rewrite the saved row. Runtime selection defaults to the [managed pinned package](codex-runtime.md), with
+limits. Empty model/effort preserve Codex defaults. Internal one-run overrides
+do not rewrite the saved row. Pellet `model` and `reasoning_effort` preferences
+take final precedence independently, including in admission checks and each
+Drain/Watch iteration. The browser exposes saved pellet preferences rather than
+model/effort run overrides. Unsupported pairs fail preflight without fallback. Runtime selection defaults to the [managed pinned package](codex-runtime.md), with
 explicit executable overrides retained. Compatibility is checked before a new
 claim. Preflight uses the selected runtime's local account,
 configuration, managed requirements, and model catalog; Codex owns credential

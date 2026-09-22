@@ -155,6 +155,18 @@ selection remain owned by the native select. The gallery has a local-only live
 catalog example, while the production model and effort selectors share the global
 catalog documented in Workbench.
 
+### Pellet preference forms
+
+Feature-owned `execution-preferences.js` renders two existing `pl-select` controls
+around authoritative native selects. It shares the planner's catalog loader and
+refresh state. Creation, checkpoint, record, and draft forms intentionally gain
+one responsive preference row; original controls keep their styles and dimensions.
+The parity suite captures actual screens and measures the added row, then hides
+only that row to compare every preexisting control against the baseline. The
+preference workflow suite verifies persistence, clearing, missing catalog entries,
+keyboard dismissal, and all five themes at desktop/intermediate/phone widths in
+Chromium and WebKit (`scripts/test-web-pellet-preferences-browser.cjs`).
+
 ## Dialogs and tabs
 
 ```html

@@ -411,7 +411,7 @@ func (writer *WebWriter) CreatePlanningPellets(ctx context.Context, project stor
 				value := draft.Group
 				group = &value
 			}
-			input, err := validateNewPellet(storage.NewPellet{Kind: domain.PelletOrdinary, Title: draft.Title, Description: description, Group: group, Status: domain.PelletOpen})
+			input, err := validateNewPellet(storage.NewPellet{Kind: domain.PelletOrdinary, Model: draft.Model, ReasoningEffort: draft.ReasoningEffort, Title: draft.Title, Description: description, Group: group, Status: domain.PelletOpen})
 			if err != nil {
 				return err
 			}

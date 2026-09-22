@@ -170,6 +170,7 @@ func (a *WebApplication) SendPlanningMessage(ctx context.Context, p storage.Proj
 			for j, existing := range state.Drafts {
 				if existing.ID == d.ID {
 					draft.Selected = existing.Selected
+					draft.Model, draft.ReasoningEffort = existing.Model, existing.ReasoningEffort
 					state.Drafts[j] = draft
 					break
 				}

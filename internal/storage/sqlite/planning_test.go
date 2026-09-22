@@ -402,7 +402,7 @@ func TestPlanningMigrationPreservesExistingQueue(t *testing.T) {
 	 VALUES(1,1,'existing work','migration preserves this',1024,2460000,2460000);
 	 INSERT INTO pellets_fts(rowid,title,description,external_id) SELECT rowid,title,description,external_id FROM pellets;
 	 UPDATE projects SET next_pellet_number=2 WHERE project_id=1`)
-	pellet, err := scanPellet(legacy.QueryRowContext(ctx, strings.ReplaceAll(pelletSelect, "p.group_record_id", "NULL")+" WHERE p.project_id=? AND p.number=1", project.ID))
+	pellet, err := scanPellet(legacy.QueryRowContext(ctx, strings.NewReplacer("p.group_record_id", "NULL", "p.model", "NULL", "p.reasoning_effort", "NULL").Replace(pelletSelect)+" WHERE p.project_id=? AND p.number=1", project.ID))
 	if err != nil {
 		t.Fatal(err)
 	}

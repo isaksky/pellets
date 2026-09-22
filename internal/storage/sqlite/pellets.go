@@ -26,7 +26,7 @@ const pelletSelectColumns = `
 	       workspace.git_dir, workspace.git_dir_relative,
 	       strftime('%Y-%m-%dT%H:%M:%fZ', workspace.created_at),
 	       strftime('%Y-%m-%dT%H:%M:%fZ', workspace.updated_at),
-	       p.kind, p.implementation_revision, ` + checkpointJSONSQL
+	       p.kind, p.implementation_revision, p.model, p.reasoning_effort, ` + checkpointJSONSQL
 
 const pelletSelectFrom = `
 	FROM pellets AS p
@@ -172,11 +172,11 @@ func createPelletInTransaction(ctx context.Context, connection *sql.Conn, projec
 	result, err := connection.ExecContext(ctx, `
 		INSERT INTO pellets(
 			project_id, workspace_id, number, title, description, external_id,
-			group_id, status, priority, created_at, updated_at, completed_at, kind
-		) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, COALESCE(NULLIF(?,''),'ordinary'))`,
+			group_id, status, priority, created_at, updated_at, completed_at, kind, model, reasoning_effort
+		) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, COALESCE(NULLIF(?,''),'ordinary'), ?, ?)`,
 		project.Project.ID, number, normalized.Title, normalized.Description,
 		nullableTextValue(normalized.ExternalID), nullableTextValue(normalized.Group),
-		normalized.Status, nullableInt64Value(priority), timestamp, timestamp, normalized.Kind)
+		normalized.Status, nullableInt64Value(priority), timestamp, timestamp, normalized.Kind, normalized.Model, normalized.ReasoningEffort)
 	if err != nil {
 		return storage.Pellet{}, pelletStorageError("insert pellet", err)
 	}
@@ -438,7 +438,7 @@ func (repository *PelletRepository) SearchPellets(ctx context.Context, project s
 		       workspace.git_dir, workspace.git_dir_relative,
 		       strftime('%Y-%m-%dT%H:%M:%fZ', workspace.created_at),
 		       strftime('%Y-%m-%dT%H:%M:%fZ', workspace.updated_at),
-		       p.kind, p.implementation_revision, ` + checkpointJSONSQL + `
+		       p.kind, p.implementation_revision, p.model, p.reasoning_effort, ` + checkpointJSONSQL + `
 		FROM pellets_fts
 		JOIN pellets AS p ON p.rowid = pellets_fts.rowid
 		JOIN projects AS project ON project.project_id = p.project_id
@@ -1388,9 +1388,9 @@ func (repository *PelletRepository) updatePellet(ctx context.Context, project st
 	}
 	if _, err := connection.ExecContext(ctx, `
 		UPDATE pellets
-		SET title = ?, description = ?, external_id = ?, group_id = ?, updated_at = ?
+		SET title = ?, description = ?, external_id = ?, group_id = ?, model = ?, reasoning_effort = ?, updated_at = ?
 		WHERE project_id = ? AND number = ?`,
-		after.Title, after.Description, nullableTextValue(after.ExternalID), nullableTextValue(after.Group), timestamp,
+		after.Title, after.Description, nullableTextValue(after.ExternalID), nullableTextValue(after.Group), after.Model, after.ReasoningEffort, timestamp,
 		project.Project.ID, reference.Number); err != nil {
 		return storage.Pellet{}, pelletStorageError("update pellet", err)
 	}
@@ -1714,7 +1714,7 @@ func scanPellet(scanner pelletScanner, extra ...any) (storage.Pellet, error) {
 		&status, &priority, &createdAt, &updatedAt, &completedAt,
 		&workspaceID, &workspaceProjectID, &rootPath, &rootRelative,
 		&gitDir, &gitDirRelative, &workspaceCreatedAt, &workspaceUpdatedAt,
-		&pellet.Kind, &pellet.ImplementationRevision, &checkpointJSON,
+		&pellet.Kind, &pellet.ImplementationRevision, &pellet.Model, &pellet.ReasoningEffort, &checkpointJSON,
 	}
 	if err := scanner.Scan(append(destinations, extra...)...); err != nil {
 		return storage.Pellet{}, err
@@ -1886,6 +1886,9 @@ func validateNewPellet(input storage.NewPellet) (storage.NewPellet, error) {
 	if err := validateNullablePelletText("group", input.Group); err != nil {
 		return storage.NewPellet{}, err
 	}
+	if err := storage.ValidatePelletPreferences(input.Model, input.ReasoningEffort); err != nil {
+		return storage.NewPellet{}, err
+	}
 	return input, nil
 }
 
@@ -1952,7 +1955,10 @@ func placementFlag(placement storage.PelletPlacement) string {
 }
 
 func validatePelletChanges(changes storage.PelletChanges) error {
-	if changes.Title == nil && changes.Description == nil && !changes.ExternalID.Set && !changes.Group.Set {
+	if err := storage.ValidatePelletPreferences(changes.Model.Value, changes.ReasoningEffort.Value); err != nil {
+		return err
+	}
+	if changes.Title == nil && changes.Description == nil && !changes.ExternalID.Set && !changes.Group.Set && !changes.Model.Set && !changes.ReasoningEffort.Set {
 		return domain.NewError(domain.Usage, "missing_edit", "at least one editable pellet field is required", nil)
 	}
 	if changes.Title != nil && strings.TrimSpace(*changes.Title) == "" {
@@ -1986,6 +1992,12 @@ func invalidPelletField(field, message string) error {
 }
 
 func applyPelletChanges(pellet storage.Pellet, changes storage.PelletChanges) storage.Pellet {
+	if changes.Model.Set {
+		pellet.Model = changes.Model.Value
+	}
+	if changes.ReasoningEffort.Set {
+		pellet.ReasoningEffort = changes.ReasoningEffort.Value
+	}
 	if changes.Title != nil {
 		pellet.Title = *changes.Title
 	}

@@ -20,7 +20,7 @@ import (
 
 const (
 	// LatestSchemaVersion is the newest schema understood by this executable.
-	LatestSchemaVersion     = 24
+	LatestSchemaVersion     = 25
 	driverName              = "sqlite"
 	busyTimeoutMilliseconds = 5000
 )
@@ -97,6 +97,9 @@ var migration23SQL string
 //go:embed migrations/0024_model_catalog.sql
 var migration24SQL string
 
+//go:embed migrations/0025_pellet_execution_preferences.sql
+var migration25SQL string
+
 type migration struct {
 	version    int
 	name       string
@@ -137,6 +140,7 @@ var migrations = []migration{
 	{version: 22, name: "execution-group-context", sql: migration22SQL, assert: assertMigration22, preflight: assertMigration22, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
 	{version: 23, name: "checkpoint-context-digest", sql: migration23SQL, assert: assertMigration23, preflight: assertMigration23, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
 	{version: 24, name: "model-catalog", sql: migration24SQL, assert: assertMigration24, preflight: assertMigration24, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
+	{version: 25, name: "pellet-execution-preferences", sql: migration25SQL, assert: assertMigration25, preflight: assertMigration25, ftsIndexes: []string{"pellets_fts", "memories_fts"}},
 }
 
 // Open opens path with the required hardened runtime settings and applies all
@@ -811,4 +815,8 @@ func assertMigration23(ctx context.Context, conn *sql.Conn) error {
 
 func assertMigration24(ctx context.Context, conn *sql.Conn) error {
 	return verifyProductionSchemaContract(ctx, conn, 24)
+}
+
+func assertMigration25(ctx context.Context, conn *sql.Conn) error {
+	return verifyProductionSchemaContract(ctx, conn, 25)
 }

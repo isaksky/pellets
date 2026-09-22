@@ -181,13 +181,6 @@ func (supervisor *ExecutionSupervisor) start(ctx context.Context, request Execut
 		if request.Overrides.AccessMode == nil {
 			request.Overrides.AccessMode = &previous.Settings.AccessMode
 		}
-		if previous.Mode == "review_checkpoint" {
-			// Recovery reuses the original reviewer output. Keep its model and
-			// effort for both the receipt and any unfinished finding assessments;
-			// Prepare still validates current runtime/authentication and policy.
-			request.Overrides.Model = &previous.Settings.Codex.Model
-			request.Overrides.ReasoningEffort = &previous.Settings.Codex.ReasoningEffort
-		}
 	}
 	if request.Capture.ResumeFrom == nil && lock.Owner() != nil {
 		if request.ResumePellet == nil || lock.Owner().RunID != 0 || lock.Owner().Preflight == nil || lock.Owner().Database != request.Database.Path {
@@ -469,6 +462,14 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 	defer cancelProcess()
 	// Preflight cancellation may stop its process immediately; an active turn
 	// instead receives the explicit bounded interrupt sequence below.
+	if request.Capture.ExpectedPreferences == nil {
+		preferences, err := supervisor.options.Recorder.preferences(processCtx, request.Database, request.Capture.ProjectID, request.Capture.PelletNumber)
+		if err != nil {
+			return run, err
+		}
+		request.Capture.ExpectedPreferences = preferences
+	}
+	request.Overrides = pelletRunOverrides(request.Overrides, request.Capture.ExpectedPreferences)
 	preflightDone := make(chan struct{})
 	preflightWatchDone := make(chan struct{})
 	go func() {
@@ -482,7 +483,7 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 	saved, err := supervisor.options.Settings.Load(processCtx, request.Database, request.Selected.Workspace.ID)
 	var prepared *codex.PreparedRun
 	if err == nil {
-		prepared, err = supervisor.options.Prepare(processCtx, codex.PrepareOptions{WorkspaceDir: root, DatabasePath: request.Database.Path, ClientVersion: supervisor.options.ClientVersion, Saved: saved.Settings, Overrides: request.Overrides})
+		prepared, err = supervisor.options.Prepare(processCtx, codex.PrepareOptions{RequireAdvertisedModel: request.Capture.ExpectedPreferences.Model != nil, WorkspaceDir: root, DatabasePath: request.Database.Path, ClientVersion: supervisor.options.ClientVersion, Saved: saved.Settings, Overrides: request.Overrides})
 	}
 	close(preflightDone)
 	<-preflightWatchDone

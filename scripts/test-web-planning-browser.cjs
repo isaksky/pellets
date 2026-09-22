@@ -106,6 +106,8 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   await editor.press('Escape');
   await until(async()=>await cards.nth(0).locator('.plan-open-draft').evaluate(el=>el===document.activeElement),'Escape did not restore draft focus');
   await cards.nth(0).locator('.plan-open-draft').click();
+  await cards.nth(0).locator('[name=model]').selectOption('test-model');
+  await cards.nth(0).locator('[name=reasoning_effort]').selectOption('high');
   await cards.nth(0).locator('[name=title]').fill('Create only this reviewed draft');
   await cards.nth(0).locator('[name=description]').fill('');
   await cards.nth(0).locator('[name=acceptance]').fill('Acceptance-only scope survives immediate creation.');
@@ -121,6 +123,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   await until(async()=>await page.locator('.plan-created').count()===1,'Explicit selected creation failed');
   const created=cli('list').find(p=>p.title==='Create only this reviewed draft');
   assert.ok(created,'Immediate Create lost the latest title');
+  assert.equal(created.model,'test-model');assert.equal(created.reasoning_effort,'high');
   assert.equal(await page.locator('.plan-transcript .plan-created').count(),1,'Created pellet confirmation is missing from chat');
   assert.equal(await page.locator('.plan-drafts .plan-created').count(),0,'Created pellet stayed in proposal tray');
   assert.equal(await page.locator('.plan-total').innerText(),'1','Tray count includes created pellets');
@@ -131,19 +134,31 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   assert.equal(cli('list').length,2,'Creation included an unselected draft');
   const remaining=page.locator('.plan-card').first();
   await remaining.locator('.plan-open-draft').click();
+  await remaining.locator('[name=model]').selectOption('test-model');
+  await remaining.locator('[name=reasoning_effort]').selectOption('medium');
   await remaining.getByRole('button',{name:'Split pellet',exact:true}).click();
   await remaining.locator('[data-split-titles]').fill('First split\nSecond split');
   await remaining.getByRole('button',{name:'Split into drafts',exact:true}).click();
   await until(async()=>await page.locator('.plan-card').count()===2,'Split proposals did not render');
+  for(const field of await page.locator('.plan-card [name=reasoning_effort]').all())assert.equal(await field.inputValue(),'medium');
   await until(async()=>await page.getByRole('button',{name:'Combine selected',exact:true}).isEnabled(),'Split did not save');
+  await page.locator('.plan-card .plan-open-draft').nth(1).click();
+  await page.locator('.plan-card [name=reasoning_effort]').nth(1).selectOption('high');
+  await page.getByRole('button',{name:'Done',exact:true}).click();
+  await until(async()=>await page.getByRole('button',{name:'Combine selected',exact:true}).isEnabled(),'Preference change did not save');
   await page.getByRole('button',{name:'Combine selected',exact:true}).click();
   await until(async()=>await page.locator('.plan-card').count()===1,'Combined proposal did not render');
+  assert.equal(await page.locator('.plan-card [name=model]').inputValue(),'test-model');
+  assert.equal(await page.locator('.plan-card [name=reasoning_effort]').inputValue(),'');
   await page.locator('.plan-card .plan-open-draft').click();
+  await page.locator('.plan-card [name=reasoning_effort]').selectOption('medium');
   await page.getByRole('button',{name:'Refine in chat',exact:true}).click();
   await page.locator('#plan-message').fill('Include the important edge cases');
   await until(async()=>await page.getByRole('button',{name:'Send message',exact:true}).isEnabled(),'Refinement did not save');
   await page.getByRole('button',{name:'Send message',exact:true}).click();
   await until(async()=>await page.locator('.plan-card [name=description]').inputValue()==='Refined with the requested edge cases.','Refinement did not update the exact draft');
+  assert.equal(await page.locator('.plan-card [name=model]').inputValue(),'test-model');
+  assert.equal(await page.locator('.plan-card [name=reasoning_effort]').inputValue(),'medium');
   await until(async()=>await page.locator('.plan-card').count()===1,'Combined proposal did not render');
   assert.equal(await page.locator('.plan-created').count(),1);
   for(const width of [390,1280]){

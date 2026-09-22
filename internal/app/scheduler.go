@@ -388,7 +388,7 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 							return nil, err
 						}
 						h.status.PelletNumber = previous.PelletNumber
-						return &storage.RunCapture{WorkspaceSelection: previous.WorkspaceSelection, ProjectID: previous.ProjectID, WorkspaceID: previous.WorkspaceID, PelletNumber: previous.PelletNumber, Mode: previous.Mode, ScheduleMode: request.Mode, ScheduleRemaining: request.Limit - h.status.Completed, ExternalID: request.ExternalID, Group: request.Group, ResumeFrom: request.ResumeFrom, FreshConversation: request.FreshConversation}, nil
+						return &storage.RunCapture{ExpectedPreferences: p.ExecutionPreferences(), WorkspaceSelection: previous.WorkspaceSelection, ProjectID: previous.ProjectID, WorkspaceID: previous.WorkspaceID, PelletNumber: previous.PelletNumber, Mode: previous.Mode, ScheduleMode: request.Mode, ScheduleRemaining: request.Limit - h.status.Completed, ExternalID: request.ExternalID, Group: request.Group, ResumeFrom: request.ResumeFrom, FreshConversation: request.FreshConversation}, nil
 					}
 				}
 			}
@@ -407,6 +407,7 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 			}
 			// First evaluate eligibility without claiming. Downloads and process
 			// probes must not hold the shared queue's SQLite writer transaction.
+			var candidatePreferences *storage.PelletExecutionPreferences
 			runtimeNeeded := errors.New("runtime preflight required")
 			ready := selection.Ready
 			selection.Ready = func(ctx context.Context, p storage.Pellet) (bool, error) {
@@ -414,6 +415,7 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 				if err != nil || !ok {
 					return ok, err
 				}
+				candidatePreferences = p.ExecutionPreferences()
 				return false, runtimeNeeded
 			}
 			selected, err := queue.SelectScheduledPellet(ctx, request.Selected, selection)
@@ -424,7 +426,7 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 					root, rootErr := executionRoot(ctx, s.options.Database, storage.ExecutionRun{WorkspaceRoot: request.Selected.Workspace.RootPath, WorkspaceGitDir: request.Selected.Workspace.GitDir, GitCommonDir: request.Selected.Project.GitCommonDir})
 					err = rootErr
 					if err == nil {
-						err = codex.CheckRuntime(ctx, saved.Settings, request.Overrides, root)
+						err = codex.CheckRuntime(ctx, saved.Settings, pelletRunOverrides(request.Overrides, candidatePreferences), root)
 					}
 				}
 				if err != nil {
@@ -447,7 +449,7 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 			if s.isCheckpoint(*selected.Pellet) {
 				mode = "review_checkpoint"
 			}
-			return &storage.RunCapture{WorkspaceSelection: selected.WorkspaceSelection, ProjectID: request.Selected.Project.ID, WorkspaceID: request.Selected.Workspace.ID, PelletNumber: selected.Pellet.Reference.Number, ExpectedImplementationRevision: selected.Pellet.ImplementationRevision, Mode: mode, ScheduleMode: request.Mode, ScheduleRemaining: request.Limit - h.status.Completed, ExternalID: request.ExternalID, Group: request.Group, ResumeFrom: request.ResumeFrom, FreshConversation: request.FreshConversation}, nil
+			return &storage.RunCapture{ExpectedPreferences: selected.Pellet.ExecutionPreferences(), WorkspaceSelection: selected.WorkspaceSelection, ProjectID: request.Selected.Project.ID, WorkspaceID: request.Selected.Workspace.ID, PelletNumber: selected.Pellet.Reference.Number, ExpectedImplementationRevision: selected.Pellet.ImplementationRevision, Mode: mode, ScheduleMode: request.Mode, ScheduleRemaining: request.Limit - h.status.Completed, ExternalID: request.ExternalID, Group: request.Group, ResumeFrom: request.ResumeFrom, FreshConversation: request.FreshConversation}, nil
 		})
 		h.execution = execution
 		if execution != nil {
