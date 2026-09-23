@@ -853,6 +853,7 @@ input[type="checkbox"] {
   display: grid;
   gap: 4px;
 }
+.filter-fields > .quiet-button[hidden] { display: none; }
 .filter-fields > .quiet-button {
   display: flex;
   width: fit-content;
@@ -1754,7 +1755,7 @@ dialog::backdrop {
   border: 1px solid transparent;
   box-shadow: none;
 }
-.dialog-cancel:hover,
+.dialog-cancel:not(:disabled, [aria-disabled="true"]):hover,
 .record-actions > summary:hover {
   background: var(--theme-quiet-hover);
 }
@@ -1939,11 +1940,24 @@ dialog::backdrop {
   margin: 0;
 }
 .checkpoint-composer {
+  grid-template-columns: minmax(0, 1fr);
   background: var(--pane);
   padding: 16px;
   margin: 14px 0;
   border: 1px solid var(--line);
 }
+.checkpoint-composer form {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+}
+.checkpoint-composer form > .form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.checkpoint-composer .checkpoint-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  align-items: center;
+}
+.checkpoint-composer .checkpoint-actions .quiet { padding: 5px 9px; }
 .checkpoint-composer[hidden] {
   display: none;
 }

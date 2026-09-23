@@ -21,6 +21,7 @@ const source = '# Shared plan\n\nContext for **every member**.\n\n```mermaid\ngr
   fs.mkdirSync(fixture); execFileSync('git', ['init','-q'], {cwd:fixture});
   execFileSync(binary, ['--help'], {cwd:fixture});
   execFileSync(binary, ['group','--help'], {cwd:fixture});
+  cli('init-db');
   const member = cli('add','Group member','--group','Existing');
   const existing = cli('group','list')[0];
   cli('group','create','Empty from CLI');

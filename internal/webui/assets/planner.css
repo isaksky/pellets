@@ -56,7 +56,8 @@
 .plan-new-confirm { display:flex; flex-wrap:wrap; gap:5px; max-width:150px; font-size:10px; }
 @media(max-width:600px) { .plan-welcome { padding-top:25px; } }
 .plan-batch-tools, .plan-card-actions { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
-.plan-batch-tools button, .plan-card-actions button, .plan-split button { font-size:10px; padding:4px 7px; color:var(--muted); background:transparent; border:1px solid var(--line); border-radius:4px; }
+.plan-batch-tools button, .plan-card-actions button, .plan-split button { font-size:10px; padding:4px 7px; color:var(--muted); border-radius:4px; }
+.plan-batch-tools button:not(.quiet), .plan-card-actions button:not(.quiet), .plan-split button:not(.quiet) { background:transparent; border:1px solid var(--line); }
 .plan-batch-tools button:disabled { opacity:.45; }
 .plan-draft-details summary { cursor:pointer; font-size:12px; font-weight:600; line-height:1.6; overflow-wrap:anywhere; }
 .plan-draft-details[open] summary { margin-bottom:12px; }

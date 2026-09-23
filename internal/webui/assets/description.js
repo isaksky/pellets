@@ -94,6 +94,16 @@ function draw(host) {
   });
   label.hidden = saved.mode !== "edit";
   label.classList.add("description-source");
+  // The toolbar supplies the visible heading in both modes. Retain the native
+  // source label for accessibility without repeating it above the textarea.
+  // Reconcile fresh labels from live patches without wrapping existing spans.
+  for (const node of Array.from(label.childNodes)) {
+    if (node.nodeType !== Node.TEXT_NODE || !node.textContent.trim()) continue;
+    const text = document.createElement("span");
+    text.className = "visually-hidden";
+    node.replaceWith(text);
+    text.append(node);
+  }
   view.hidden = saved.mode === "edit";
   const changed = rendered.get(view) !== field.value;
   if (changed) {

@@ -18,6 +18,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   fs.mkdirSync(fixture);
   const init=directory=>{fs.mkdirSync(directory,{recursive:true});execFileSync('git',['init','-q'],{cwd:directory});execFileSync('git',['config','user.name','Test'],{cwd:directory});execFileSync('git',['config','user.email','test@example.invalid'],{cwd:directory});execFileSync('git',['-c','commit.gpgSign=false','commit','--allow-empty','-qm','initial'],{cwd:directory});};
   init(fixture);
+  cli('init-db');
   const original=cli('add','Existing queue context','--group','web-ui');
   const linkedRoot=path.join(temporary,'linked');
   execFileSync('git',['worktree','add','--detach',linkedRoot,'HEAD'],{cwd:fixture});

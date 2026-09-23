@@ -112,11 +112,12 @@ async function checkFilters(page, project, changedPellet) {
   await page.locator(".filter-fields:popover-open").waitFor();
   const naturalSize = await panel.evaluate(node => ({height: node.getBoundingClientRect().height, rows: getComputedStyle(node).gridTemplateRows, children: Array.from(node.children, child => (child.matches("pl-button") ? child.firstElementChild : child).getBoundingClientRect().height)}));
   assert.ok(naturalSize.height <= 420, "Filter panel must fit its compact contents instead of stretching to the viewport: " + JSON.stringify(naturalSize));
-  const fieldGaps = await panel.evaluate(node => Array.from(node.children, child => child.matches("pl-button") ? child.firstElementChild : child).map(child => child.getBoundingClientRect()).slice(1).map((box, index) => box.top - (node.children[index].matches("pl-button") ? node.children[index].firstElementChild : node.children[index]).getBoundingClientRect().bottom));
+  const fieldGaps = await panel.evaluate(node => { const boxes = Array.from(node.children).filter(child => !child.hidden).map(child => child.getBoundingClientRect()); return boxes.slice(1).map((box, index) => box.top - boxes[index].bottom); });
   assert.ok(fieldGaps.every(gap => Math.abs(gap - 12) <= 1), "Filter fields must keep compact, even spacing: " + JSON.stringify(fieldGaps));
   await page.setViewportSize({width: 1280, height: 360});
   await until(() => panel.evaluate(node => node.scrollHeight > node.clientHeight + 2 && node.getBoundingClientRect().bottom <= innerHeight), "Short viewport must scroll compact filter content");
-  const lastFilter = panel.getByRole("link", {name: "Clear filters", exact: true});
+  assert.equal(await panel.getByRole("link", {name: "Clear filters", exact: true}).isVisible(), false, "Unfiltered queue has nothing to clear");
+  const lastFilter = panel.locator('[name="external_id"]');
   // Wait for the popover to settle after viewport resizing before wheeling.
   await panel.hover();
   await page.mouse.wheel(0, 800);
@@ -298,6 +299,7 @@ async function stop() {
   git("config", "user.email", "test@example.invalid");
   git("config", "commit.gpgSign", "false");
   git("commit", "--allow-empty", "-qm", "initial");
+  cli('init-db');
   fs.appendFileSync(
     path.join(repo, ".git", "info", "exclude"),
     "\n/fake-*\n/.agents/\n",

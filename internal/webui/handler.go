@@ -1292,7 +1292,7 @@ func (h *handler) renderUpdates(response *datastarResponse, status int, primary 
 		names = append(names, "run-dashboard")
 	}
 	if data.Area == "tasks" {
-		names = append(names, "filter-summary", "queue-order", "queue-title", "active-group-filter")
+		names = append(names, "filter-summary", "clear-filters", "queue-order", "queue-title", "active-group-filter")
 	}
 	if data.Area == "tasks" && primary != "tasks-area" && primary != "task-list" {
 		names = append(names, "task-list")

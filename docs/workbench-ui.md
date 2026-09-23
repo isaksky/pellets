@@ -28,7 +28,10 @@ remain independent from scheduler selection.
 Queue rows are 37 pixels high with reference, lifecycle status, title, group, and
 owner. Narrow layouts prioritize reference, status, and title; full metadata stays
 in the dialog. Pellet dialogs open with a formatted Markdown description; title and metadata
-remain editable. Memory dialogs open directly in edit mode. Both close on a backdrop
+remain editable. Memory dialogs open directly in edit mode. Their title identifies the memory once;
+provenance and approval remain beside the text, while IDs and timestamps live in
+**Record details**. The empty list uses the same **New memory** entry point as
+the populated list, without a second creation button. Both close on a backdrop
 click or Escape. Unsaved edits retain the discard guard. A fixed dialog footer places Cancel and
 the primary save action on the right. More actions on the left contains lifecycle
 operations and memory approval; queue and scope controls stay beside their fields. They support optimistic conflicts,
@@ -48,7 +51,10 @@ The Filters control shows the selected status and opens a panel for queue filter
 and sorting. It stays anchored beside search without moving the toolbar. The panel
 fits the viewport above the scrolling panes and dismisses on Escape, outside
 click, or keyboard focus leaving it. A nested selector consumes the first Escape.
-Changes apply immediately; Clear filters preserves the browsing workspace,
+Changes apply immediately; **Clear filters** appears only when search, status,
+group, or external ID differs from the default. Its visibility updates with the
+server-rendered filter summary, including live searches. Sorting alone does not
+show it because clearing preserves sort order. Clear filters preserves the browsing workspace,
 execution sidebar selection, and sort order.
 
 Both sidebars collapse independently using the bottom corner buttons. The theme
@@ -148,6 +154,11 @@ Fences labeled `mermaid` render local diagrams (see below). Raw HTML displays as
 text. Unsafe link schemes are disabled,
 images display their alternative text without fetching resources, and links open
 separately so they do not navigate away from unsaved edits.
+
+The shared description toolbar supplies the single visible label in both modes.
+The original native source label remains available to assistive technology,
+including **Shared context (Markdown)** in group forms; source and form ownership
+are unchanged.
 
 The selected mode, source selection, focus, and scroll positions survive live
 updates and reopening a record in the same browser tab. Native source fields and
@@ -482,7 +493,9 @@ A row action menu or context menu inserts a checkpoint before or after an active
 pellet. The initial scope comes from the authoritative queue since the preceding
 checkpoint, independently of the current display filter or sort. It remains
 editable before submission. Insertion atomically checks the anchor and target row
-versions. A checkpoint needs explicit scope; adjacency never becomes evidence.
+versions. The selected-scope composer uses columns based on the available pane
+width rather than viewport minimums. Its footer places quiet **Clear selection**
+before the primary **Insert review checkpoint** action, including narrow panes. A checkpoint needs explicit scope; adjacency never becomes evidence.
 
 Open, unowned checkpoints can change scope or be removed. Removal defers the
 checkpoint and retains a restore operation; it does not purge data or record a
@@ -705,7 +718,12 @@ expand it again. Dismiss all and Create selected controls stay with the tray.
 Dismissal autosaves without an Undo notice. Created pellets leave the tray and
 appear as linked confirmations in the conversation; empty trays disappear.
 
-Starting a new chat confirms replacement in a centered dialog. “Don’t ask me again”
+Proposal editor **Refine in chat**, **Split pellet**, and split **Cancel** actions
+use the established quiet treatment. **Dismiss all** already uses quiet styling;
+**Create selected** retains the primary emphasis.
+
+Starting a new chat confirms replacement in a centered dialog with quiet Cancel
+and primary Start new chat actions. “Don’t ask me again”
 is saved as the database-wide boolean setting `skip_new_chat_confirmation` when
 Start new chat is confirmed; Cancel and Escape do not save the checkbox choice.
 

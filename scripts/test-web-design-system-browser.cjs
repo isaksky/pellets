@@ -29,6 +29,7 @@ async function start(binary) {
   execFileSync('go', ['build', '-o', dev, './cmd/pl'], {cwd: repository});
   execFileSync('go', ['build', '-ldflags=-X main.version=1.2.3', '-o', release, './cmd/pl'], {cwd: repository});
   execFileSync('git', ['init', '-q'], {cwd: temporary});
+  execFileSync(dev, ['--json', 'init-db'], {cwd: temporary});
   const origin = await start(dev);
   const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
   browser = await engine.launch({headless: true, ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}), ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});

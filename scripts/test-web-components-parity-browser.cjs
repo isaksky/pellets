@@ -10,6 +10,7 @@ const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-ui-parity-'));
 const fixture = path.join(temporary, 'parity'), current = path.join(temporary, 'pl-current');
 const baseline = process.env.PELLETS_UI_BASELINE ? path.resolve(process.env.PELLETS_UI_BASELINE) : path.join(temporary, 'pl-baseline');
+const emphasis = {};
 const results = {}, groupAdditions = {}, reviewLayouts = {}, executionPreferences = {}, interactionStyles = {};
 let server, browser;
 
@@ -60,6 +61,38 @@ async function measure(page, scene, build) {
   await settleRootUnits(page);
   await page.screenshot({path: path.join(temporary, `${build}-${scene}.png`), animations: 'disabled', caret: 'hide'});
   await settleRootUnits(page);
+  // The emphasis audit intentionally removes duplicate source labels and
+  // collapses secondary memory metadata. Screenshots above show the delivered
+  // UI; restore only those exact presentation differences for strict comparison
+  // of all remaining control geometry and styling.
+  if (build === 'before') emphasis[scene] = await page.evaluate(() => ({
+    sourceLabels: !document.querySelector('.description-source > .visually-hidden'),
+    memory: !!document.querySelector('[id^="inspector-memory-"] section.metadata'),
+    clear: !document.querySelector('#clear-filters')?.hidden,
+  }));
+  if (build === 'after') await page.evaluate(baseline => {
+    window.emphasisRestore = [];
+    const undo = callback => window.emphasisRestore.push(callback);
+    if (baseline.sourceLabels) for (const span of document.querySelectorAll('.description-source > .visually-hidden')) {
+      const text = span.firstChild; span.replaceWith(text);
+      undo(() => { text.replaceWith(span); span.append(text); });
+    }
+    const clear = document.getElementById('clear-filters');
+    if (baseline.clear && clear?.hidden) { clear.hidden = false; undo(() => clear.hidden = true); }
+    const inspector = document.querySelector('[id^="inspector-memory-"]');
+    if (baseline.memory && inspector) {
+      const details = inspector.querySelector('details.metadata');
+      if (!details || details.open || inspector.querySelector('.eyebrow')) throw Error('Memory details must start collapsed without repeated heading');
+      const title = inspector.querySelector('h2'), eyebrow = document.createElement('span');
+      eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Memory'; title.before(eyebrow);undo(() => eyebrow.remove());
+      const section = document.createElement('section'), heading = document.createElement('h3'), dl = details.querySelector('dl');
+      section.className = 'metadata'; heading.textContent = 'Record'; section.append(heading, dl);
+      const provenance = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd');
+      dt.textContent = 'Provenance'; dd.textContent = inspector.querySelector('.provenance').textContent;
+      provenance.append(dt,dd); dl.firstElementChild.after(provenance);
+      details.replaceWith(section);undo(() => { provenance.remove();details.append(dl);section.replaceWith(details); });
+    }
+  }, emphasis[scene]);
   groupAdditions[build][scene] = await page.evaluate(() => {
     const navigation = [...document.querySelectorAll('#area-tabs a')].find(a => new URL(a.href).pathname.endsWith('/groups'));
     const details = document.querySelector('[data-group-details-link]');
@@ -166,6 +199,7 @@ async function measure(page, scene, build) {
         };
       });
   });
+  if (build === 'after') await page.evaluate(() => { for (const undo of window.emphasisRestore.reverse()) undo(); delete window.emphasisRestore; });
   if (build === 'after') await page.evaluate(() => { for (const [el, style] of window.spacingProbe) el.style.cssText = style; delete window.spacingProbe; });
   await page.evaluate(()=>{for(const el of document.querySelectorAll('[data-execution-preferences]')){el.style.display=el.dataset.parityDisplay;delete el.dataset.parityDisplay;}});
 }

@@ -333,6 +333,49 @@ It restores only the specific menu/disclosure and memory-card padding properties
 for strict comparison of the remaining interface. Real screenshots precede that
 restoration; the interaction suite verifies the intentional target changes.
 
+### Emphasis and copy audit
+
+The shared `.quiet` variant (including `pl-button variant="quiet"`) and dialog
+Cancel styling already provide the intended secondary treatment. The emphasis
+audit reused those treatments for the selected-review Clear selection action,
+proposal refinement/splitting, and new-chat cancellation; no new button variant
+or icon was added. Dismiss all, row menus, group actions, assignments, settings,
+record footers, and execution/recovery disclosures retain their existing roles.
+The shared dialog Cancel hover rule now excludes disabled controls, including
+new-chat cancellation while its preference save is pending.
+
+A systemic duplicate label came from `description.js`: its toolbar added a
+visible heading while the native source label remained visible in Edit. The
+helper now visually hides only that label's text nodes, retaining native naming,
+source ownership, and the single toolbar heading in creation, record, proposal,
+and group editors. Repeated refreshes do not nest label wrappers.
+
+Local template defects were the unconditional Clear filters action and memory
+empty-state/metadata repetition. Clear filters is a separately patched server
+fragment and appears only for clearable filters, including search. Memories keep
+one creation entry point and one provenance display; secondary record metadata
+uses the existing disclosure. Recovery, approval consequences, input labels, and
+validation remain visible where needed. The selected-review composer's fixed
+column minimums also clipped fields in narrow panes; it now sizes its columns
+from available width and keeps its primary action last.
+
+`test-web-emphasis-browser.cjs` checks these production surfaces in Chromium and
+WebKit, all five persisted themes, and 1280/1092/390px layouts. It checks native
+label names, quiet/focus/hover treatment, conditional reset, review form fit,
+keyboard actions, and draft/source preservation. It accepts
+`PELLETS_EMPHASIS_BASELINE=/path/to/pl` and `PELLETS_BROWSER_ARTIFACTS=/path` for
+matched, focused before/after captures. Each capture asserts its actual theme;
+the after capture uses the baseline's exact enclosing crop.
+
+The parity suite saves actual screenshots before temporarily restoring only the
+removed source-label text, hidden default-filter reset, and old memory heading
+and metadata presentation for strict comparison of all other controls. The
+emphasis suite verifies the delivered behavior separately. Description, planning,
+Workbench filter, and group suites retain their full draft/conflict, busy/error,
+retry, source-saving, and keyboard checks. Gallery tests cover unchanged shared
+quiet and busy/disabled variants. All fixture entry points used by this audit
+explicitly initialize their temporary database before project discovery.
+
 ### Completed audit
 
 The comparison baseline was commit

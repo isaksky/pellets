@@ -762,9 +762,3 @@ import { action, actions } from "./datastar-1.0.3.js";
     if (!document.hidden) refreshRegions();
   });
 }());
-
-document.addEventListener("click", function (event) {
- if (!event.target.closest("[data-create-memory]")) return;
- var form = document.querySelector(".create-popover form[action$='/memories']");
- if (form) { form.closest("details").open = true; form.querySelector("textarea").focus(); }
-});
