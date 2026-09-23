@@ -4,6 +4,11 @@ Use this guidance for browser UI work, including design, implementation, and
 review. The goal is a familiar, dependable application with reusable components
 whose appearance and behavior are verified in the screens that use them.
 
+Read [UI quality principles](ui-quality-principles.md) for recurring design
+expectations and the process for distinguishing shared defects from local
+instances. Apply those principles across the affected interface, not only the
+first control reported.
+
 ## Establish the existing behavior
 
 Read the adoption and deviations table and relevant APIs in
