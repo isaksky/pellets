@@ -122,6 +122,7 @@ async function measure(page, scene, build) {
       memories: read('.memory-card', ['padding']), memoryLinks: read('.memory-card > a', ['padding']),
       inlineSelects: read('.select-trigger', ['padding-left','padding-right']),
       positionedMenus: read('.switcher-menu,.row-popover,.assignment-form,.recipient-form', ['position']),
+      creationActions: read('.create-popover form button.primary-button', ['background-color','color','border','padding','font-weight']),
     };
   });
   // The new, feature-owned preference row intentionally increases form height.
@@ -162,6 +163,14 @@ async function measure(page, scene, build) {
     restore('.memory-card', baseline.memories);
     restore('.memory-card > a', baseline.memoryLinks, el => {
       if (!el.contains(el.closest('.memory-card').querySelector('footer'))) throw Error('Memory metadata is outside its link');
+    });
+    // The heading rule previously made these two primary submitters quiet.
+    // Screenshots retain the correction; restore only its exact properties for
+    // strict comparison of every other control and the form's previous height.
+    restore('.create-popover form button.primary-button', baseline.creationActions, el => {
+      const style = getComputedStyle(el);
+      if (style.padding !== '5px 9px' || style.borderTopWidth !== '1px')
+        throw Error('Creation submitter lost its primary geometry');
     });
     for (const [index, el] of [...document.querySelectorAll('.select-trigger')].entries()) {
       if (el.closest('.filters,.assignment-form,.run-controls,.theme-control,.plan-composer-settings,.plan-composer-tools,.record-actions-panel')) continue;

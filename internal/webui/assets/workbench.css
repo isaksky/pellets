@@ -418,6 +418,8 @@ input[type="checkbox"] {
   flex-shrink: 0;
   width: 13px;
   height: 13px;
+  /* Native glyphs ignore field padding; appearance:none checkboxes do not. */
+  padding: 0;
   accent-color: var(--accent);
 }
 :focus-visible {
@@ -762,8 +764,8 @@ input[type="checkbox"] {
 }
 #tasks-title small { display: inline-block; white-space: nowrap; }
 .section-heading:has(#tasks-title) > .create-popover { flex-shrink: 0; }
-.section-heading .primary-button,
-.section-heading summary {
+/* Only the creation disclosure is quiet; its form keeps primary actions. */
+.section-heading .create-popover > summary {
   border: 0;
   background: transparent;
   color: var(--muted);

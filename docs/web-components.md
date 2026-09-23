@@ -15,7 +15,7 @@ native buttons, text fields, or application dialogs.
 | Pattern | Production choice | Difference from the original UI |
 | --- | --- | --- |
 | Text fields and checkboxes | `pl-field`, `pl-checkbox` around existing form controls | No intended visual change. Native names, labels, validation and submission remain authoritative. Planner-specific controls retain their original markup. |
-| Simple creation buttons | `pl-button` around Create pellet / Create memory | No intended visual change. Existing classes and native submit buttons remain. Toolbar, row, editor-footer and planner buttons stay native. |
+| Simple creation buttons | `pl-button` around Create pellet / Create memory | Existing classes and native submit buttons remain. The heading's quiet disclosure rule no longer reaches into these forms: both submitters retain the shared primary background, border and padding, adding 6px to their previous height. Toolbar, row, editor-footer and planner buttons stay native. |
 | Existing custom selects | `pl-select` replaces the old generated wrapper | Same native select, trigger, options and CSS. Accessible names use the associated label instead of a machine field name. Lifecycle cleanup, form reset and validation are owned by the component. Invalid required selects focus the visible trigger; the native select is clipped instead of `display:none` for validation. |
 | Native creation status select | `pl-select native` | Keeps the browser dropdown. Text and a decorative chevron have matching 12px insets, correcting the browser arrow's cramped right spacing. The 31px height and 4px radius are retained in Chromium; macOS WebKit previously forced 20px height and 5px corners, so the correction also normalizes that one control and increases its form height by 11px. The earlier migration incorrectly replaced this with a custom listbox. |
 | Numeric stepping | `pl-number` replaces `.number-control`'s container | Same native input, step buttons, limits, appearance and input/change events. |
@@ -389,6 +389,53 @@ Workbench filter, and group suites retain their full draft/conflict, busy/error,
 retry, source-saving, and keyboard checks. Gallery tests cover unchanged shared
 quiet and busy/disabled variants. All fixture entry points used by this audit
 explicitly initialize their temporary database before project discovery.
+
+### Native-control consistency audit
+
+The shared controls and CSS load order remain unchanged. Two defects were
+reproduced in production in Chromium and WebKit and fixed in `workbench.css`:
+
+- **Shared selector scope:** `.section-heading .primary-button` also reached the
+  submit buttons inside both creation forms. The quiet rule now targets only the
+  creation disclosure's summary. Create pellet and Create memory use the same
+  primary treatment as other form actions; the disclosure keeps its quiet style.
+- **Shared field padding with a local manifestation:** generic input padding
+  expanded the planning new-chat checkbox to 18×16px after its local style set
+  `appearance: none`. The shared checkbox rule now resets padding to zero, keeping
+  the authored 16×16px confirmation control. Native checkboxes already computed
+  to zero padding; their geometry and platform rendering are unchanged.
+
+The audit also inspected creation/detail fields, execution preferences, planning
+and proposal controls, group editors, assignment/recipient menus, settings,
+filters, review scope, execution access and recovery. Existing typography,
+native-select chevrons, numeric step buttons, custom listboxes and quiet links
+already use their matching production patterns. No new wrappers, picker changes,
+or preview composite adoption were needed.
+
+Intentional native exceptions are the open Status picker, input datalist
+suggestions, native validation messages, textarea resize affordances, and the
+13px platform checkboxes in settings, assignments, review scope and recovery.
+Those checkboxes keep `accent-color`, native checked/indeterminate/disabled
+glyphs and label activation. Planning's existing 14px proposal and 16px
+confirmation checkboxes keep their themed decoration and native forced-colors
+fallback. Markdown task checkboxes remain disabled native document markers.
+
+`test-web-native-controls-browser.cjs` covers five themes at 1280, 1092, 800 and
+390px in both engines. It checks the two primary actions, checkbox geometry,
+keyboard/phone touch activation, native Status ownership/reset/validation,
+assignment drafts across live refresh, actual creation submissions, and recovery
+number limits/read-only/disabled/reset. Chromium forced-colors emulation checks
+the native arrow and checkbox fallback; WebKit reports whether it supports that
+emulation. Use `PELLETS_NATIVE_BASELINE=/path/to/pl` for before captures and
+`PELLETS_BROWSER_ARTIFACTS=/absolute/path` for persistent paired crops and computed
+observations. `PELLETS_NATIVE_CASE=behavior` runs just submissions/recovery and
+forced colors. The gallery/component, parity, Workbench, planning, groups,
+settings, recovery and upgrade suites cover the surrounding workflows and states.
+
+The parity suite captures the delivered creation buttons, then restores only
+their previous background, foreground, border, padding and weight to compare
+every other control and form geometry strictly. The native-control suite asserts
+the delivered treatment; no checkbox or broad form exclusions are applied.
 
 ### Completed audit
 

@@ -65,6 +65,13 @@ record dialog's explicit discard. Checkpoint insertion asks before discarding
 edited title/scope, rejects dismissal while submitting, and returns focus to its
 row menu without overriding a later focus choice.
 
+The creation disclosure labels stay quiet; Create pellet and Create memory
+inside their expanded forms retain the shared primary button treatment. Heading
+styles must not override those submitters through their component wrappers.
+Checkboxes reset text-field padding at the shared style layer, including the
+planning new-chat dialog's 16px square control. Platform-native checkbox glyphs
+in settings, assignments, review scope and recovery remain intentional.
+
 Native dialog backdrop gestures must start and end outside the dialog and use
 the same cancelable boundary as Escape. Feature handlers retain ownership of
 dirty guards, pending-operation locks and focus restoration. A diagram backdrop

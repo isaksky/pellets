@@ -69,6 +69,7 @@ async function startServer(root) {
     git('config', 'commit.gpgSign', 'false');
     git('commit', '--allow-empty', '-m', 'initial');
     fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '\n/fake-*\n/.agents/\n');
+    cli('init-db');
     const group = scenario.multiline ? ' Exact\r\nGroup\n<saved>\rend ' : ' Exact Group ';
     const external = scenario.multiline ? 'Exact:\rID\n<saved>\r\nend' : 'Exact:ID';
     const target = cli('add', 'recover this exact target', '--group', group, '--external-id', external);
@@ -77,7 +78,9 @@ async function startServer(root) {
     cli('skill', 'install', '--scope', 'repo', '--agent', 'codex', '--yes');
     const initialHead = git('rev-parse', 'HEAD').trim();
     const modeFile = path.join(root, 'fake-mode');
-    fs.writeFileSync(modeFile, scenario.failure || 'schedule_success');
+    // Complete read-only catalog discovery before installing a gated execution
+    // peer. Otherwise its account/read can impersonate the preflight ready gate.
+    fs.writeFileSync(modeFile, 'schedule_success');
     if (!scenario.failure || scenario.crash) cli('start-next', '--group', group, '--external-id', external);
     let origin = await startServer(root);
     const page = await browser.newPage();
@@ -91,6 +94,14 @@ async function startServer(root) {
       const file = path.join(root, 'fake-events.jsonl');
       return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
     };
+    await until(async () => {
+      const catalog = await (await page.request.get(origin + '/models')).json();
+      return catalog.fetched_at > 0 && !catalog.refreshing;
+    }, 'Initial model discovery did not settle');
+    assert.equal(events().some(event => ['thread/start', 'thread/resume', 'turn/start', 'review/start'].includes(event.method)), false, 'Catalog discovery started work');
+    fs.writeFileSync(modeFile, scenario.failure || 'schedule_success');
+    // Only execution-owned process evidence belongs to the crash assertions.
+    fs.writeFileSync(path.join(root, 'fake-events.jsonl'), '');
     if (scenario.failure) {
       const start = scenario.crash ? resume : page.locator('form[data-schedule]:has(select[name=mode])').first();
       if (scenario.crash) {
