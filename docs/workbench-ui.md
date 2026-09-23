@@ -428,6 +428,14 @@ the existing SSE invalidation stream; browsers re-read on invalidation, panel
 activation and reconnect, without a polling timer. Changing projects, workspaces
 or access modes never clears the catalog.
 
+Initial planning reads show **Loading planning…**. A failed read keeps the
+composer input and offers **Retry loading**; an unknown checkout list is not
+reported as an empty list. This retry only reads the conversation. Send/Create
+retries retain their separate exact-request receipts and explicit-action rules.
+Delayed autosave responses merge newer proposal model/effort choices, including
+clearing them. Background conversation reads are discarded if edits, a mutation,
+an unresolved request, or a different conversation superseded their snapshot.
+
 `GET /models` returns `models`, `fetched_at`, `expires_at` (Unix seconds), `stale`,
 `refreshing`, and an optional sanitized `error`. `POST /models/refresh` accepts
 JSON `{"_csrf": "…"}` and returns 202 without waiting for discovery. The old
@@ -778,6 +786,50 @@ focused divider; Shift uses larger steps, Home/End use the bounds, and double-cl
 resets the width. Widths persist in navigation_width and execution_width settings.
 Resize handles are hidden in the mobile layout.
 
+
+### Status, error, and response feedback audit
+
+Mutation feedback uses the shared request handler in `app.js`. It sits in the
+invoking form, the execution-control group, or the record dialog's fixed footer when that form has external
+save controls. This keeps failed-save messages visible and operable inside the
+modal's top layer. Navigation uses the compact global notice. `workbench.css`
+clears the inherited bottom/left/transform constraints; a short notice no longer
+stretches over most of the viewport. Pending and failed requests retain drafts
+and existing explicit correction/retry rules. Schedule errors keep their
+preflight choices beside Start/Resume, and originally disabled controls stay
+disabled when a failed request unlocks the form.
+Pending Stop actions say **Updating run controls…**; they do not claim to run
+the admission checks reserved for Start/Resume.
+Live invalidations arriving during another read or foreground request coalesce
+into one follow-up read once requests settle, rather than waiting for the
+periodic fallback. This does not replay mutations or bypass draft protection.
+
+The audit classified the notice positioning, body-level placement, and dropped
+in-flight invalidations as shared defects. Feature-local planning defects were a missing initial-read
+retry, an unknown checkout list presented as empty, omitted model/effort fields
+in the response merge, and background reads overwriting newer edits. The existing
+run/schedule presentation, model cache and immediate menus, proposal validation,
+empty-state actions, activity grouping and boundaries, settings retry, and UI
+upgrade handoff already meet these feedback contracts and retain their behavior.
+Failures, questions, approvals, explicit recovery, and reported-event details
+remain visible; no activity or ownership is promoted into execution evidence.
+
+`test-web-feedback-browser.cjs` exercises failed record saves, invocation-time
+preflight rejection, and failed planning reads in Chromium and WebKit across all
+five themes at 1280, 1092 and 390px. It checks native keyboard/touch retry,
+draft/focus/selection preservation, and feedback placement. Set
+`PELLETS_FEEDBACK_BASELINE=/path/to/pl` and `PELLETS_BROWSER_ARTIFACTS=/path` for
+matched focused before/after images. `test-web-planning-feedback-browser.cjs`
+holds real API responses from a disposable deterministic-peer fixture to verify
+newer proposal preference selection/clearing and draft edits survive delayed
+saves and reads, including their saved SQLite values. The model catalog,
+planning, execution-state/activity, runtime/recovery, checkpoint, settings,
+empty-state and upgrade suites retain their deeper workflow checks.
+`PELLETS_FEEDBACK_CASE=refresh` isolates the held-read regression; its next
+invalidation must show the newly added queue row without a reload or timer tick.
+The runtime suite's `watch_waiting` case additionally checks pending Stop captions
+and disabled submitters; `PELLETS_FEEDBACK_STOP_AUDIT=/path` saves their paired
+controls using `PELLETS_NAVIGATION_BASELINE=/path/to/pl` for the original build.
 
 ### Control placement and domain audit
 

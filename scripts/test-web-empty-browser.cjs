@@ -10,7 +10,7 @@ const {chromium, webkit} = require('playwright');
 
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-browser-'));
-const fixture = path.join(temporary, 'browser');
+const fixture = temporary;
 const binary = path.join(temporary, process.platform === 'win32' ? 'pl.exe' : 'pl');
 let server, browser;
 const cli = (...args) => JSON.parse(execFileSync(binary, ['--json', ...args], {cwd: fixture, encoding: 'utf8'}));
@@ -25,10 +25,15 @@ const until = async (predicate, message) => {
 
 (async () => {
   execFileSync('go', ['build', '-o', binary, './cmd/pl'], {cwd: repository});
-  execFileSync(binary, ['init-db'], {cwd: temporary});
-  fs.mkdirSync(fixture);
   execFileSync('git', ['init', '-q'], {cwd: fixture});
-  server = spawn(binary, ['server', '--port', '0', '--no-open'], {cwd: temporary});
+  execFileSync(binary, ['--json', 'init-db'], {cwd: fixture});
+  // Serve the isolated database without discovering/registering its Git project
+  // until the first CLI add. Git discovery stops before the repository root;
+  // Pellets still discovers the explicitly initialized ancestor database.
+  server = spawn(binary, ['server', '--port', '0', '--no-open'], {
+    cwd: path.join(fixture, '.pellets'),
+    env: {...process.env, GIT_CEILING_DIRECTORIES: fs.realpathSync(fixture)},
+  });
   const origin = await new Promise((resolve, reject) => {
     let output = '';
     const timeout = setTimeout(() => reject(new Error('Server did not start')), 10000);

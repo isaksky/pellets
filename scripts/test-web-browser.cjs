@@ -27,6 +27,7 @@ const until = async (predicate, message) => {
   execFileSync('go', ['build', '-o', binary, './cmd/pl'], {cwd: repository});
   fs.mkdirSync(fixture);
   execFileSync('git', ['init', '-q'], {cwd: fixture});
+  cli('init-db');
   const first = cli('add', 'Alpha browser task').data;
   cli('add', 'Zulu browser task');
   server = spawn(binary, ['server', '--port', '0', '--no-open'], {cwd: fixture});

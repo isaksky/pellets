@@ -2032,11 +2032,31 @@ dialog::backdrop {
 #request-feedback {
   position: fixed;
   top: 50px;
+  bottom: auto;
+  left: auto;
   right: 12px;
+  transform: none;
   max-width: min(440px, calc(100vw - 24px));
   z-index: 200;
   padding: 12px 14px;
   font-size: 12px;
+  overflow-wrap: anywhere;
+}
+#request-feedback[data-inline] {
+  position: static;
+  flex: 0 0 100%;
+  grid-column: 1 / -1;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  margin: 0;
+  box-shadow: none;
+}
+#request-feedback button {
+  margin: 6px 6px 0 0;
+}
+.dialog-footer:has(> #request-feedback:not([hidden])) {
+  flex-wrap: wrap;
 }
 .create-popover form {
   background: var(--theme-menu-bg);

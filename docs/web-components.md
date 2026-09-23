@@ -242,6 +242,12 @@ or own project/run state.
 
 ## Styling and verification
 
+Request feedback remains native markup owned by the application. Shared
+`app.js` places mutation notices inside the invoking form, execution controls, or record footer;
+navigation notices stay compact and global. This preserves modal reachability
+without adopting the preview `pl-notice`. See the
+[feedback audit and regression recipes](workbench-ui.md#status-error-and-response-feedback-audit).
+
 The library consumes the existing theme palette. Production control and feature
 styles remain in their original stylesheets. Candidate dialog styles are scoped
 to `pl-dialog`, which production does not use. Most leaf wrappers use

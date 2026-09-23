@@ -11,6 +11,7 @@ const root = document.documentElement;
 const pendingKey = 'pellets-planner-pending';
 let panel, data = null, state = emptyState(), chat = null, load = null;
 let flight = null, timer, dirty = false, conflict = false, failed = null;
+let loadError = '';
 let splitting = null, confirming = false, feedback = '';
 let savingNewChatPreference = false;
 let skipNewChatConfirmation = JSON.parse(document.documentElement.dataset.settings || '{}').skip_new_chat_confirmation === 'true';
@@ -113,8 +114,9 @@ function accept(value) {
   useOnlyWorkspace();
   pin();
 }
-async function ensureLoaded() {
-  if (data || load || !projectCode()) return load;
+async function ensureLoaded(retry = false) {
+  if (data || load || (loadError && !retry) || !projectCode()) return load;
+  loadError = '';
   const code = projectCode(), suffix = pinned?.project === code && pinned.chat ? '?chat=' + encodeURIComponent(pinned.chat) : '';
   load = (async () => {
     try {
@@ -136,9 +138,11 @@ async function ensureLoaded() {
       applyPresentation();
       if(!dirty&&!failed)clearPending();
       if (dirty&&!failed) markDirty();
-    } catch (error) { feedback = error.message; render(); }
-    finally { load = null; }
+    } catch (error) {
+      loadError = error.status ? error.message : 'Could not load planning. Check your connection and retry. Your edits stay here.';
+    } finally { load = null; render(); }
   })();
+  render();
   return load;
 }
 function mergeEdits(server, before, current) {
@@ -151,7 +155,7 @@ function mergeEdits(server, before, current) {
   for (const draft of result.drafts) {
     const a = original.get(draft.id), b = local.get(draft.id);
     if (!a || !b || created(draft)) continue;
-    for (const name of ['title','description','acceptance','group','reason','selected'])
+    for (const name of ['title','description','acceptance','group','reason','selected','model','reasoning_effort'])
       if (JSON.stringify(a[name]) !== JSON.stringify(b[name])) draft[name] = b[name];
   }
   for (const draft of current.drafts)
@@ -275,7 +279,7 @@ function render() {
   panel.dataset.planningProject = p?.code || projectCode() || '';
   panel.querySelector('.plan-context').hidden = !state.messages.length && !state.drafts.length && !state.input.trim();
   const workspace = (data?.routing || []).find(w => w.id === state.workspace_id);
-  const workspaceProblem = !workspace ? (state.workspace_id ? 'The chat’s checkout is unavailable. Restore it or start a new chat.' : data?.routing?.length ? 'Choose a working folder to send this message.' : 'This project has no registered checkout available for planning.') : '';
+  const workspaceProblem = data && !workspace ? (state.workspace_id ? 'The chat’s checkout is unavailable. Restore it or start a new chat.' : data?.routing?.length ? 'Choose a working folder to send this message.' : 'This project has no registered checkout available for planning.') : '';
   const path = workspace?.path || '';
   const folderError = panel.querySelector('.plan-folder-error');
   folderError.hidden = !workspaceProblem;
@@ -400,8 +404,8 @@ function render() {
   const groupHTML = (data?.groups || []).map(g => `<option value="${esc(g)}"></option>`).join('');
   if (groups.innerHTML !== groupHTML) groups.innerHTML = groupHTML;
   const status = panel.querySelector('.plan-status');
-  status.classList.toggle('busy', !!activeOperation);
-  const submissionError = !!failed || conflict || !!handoffError;
+  status.classList.toggle('busy', !!activeOperation || !!load);
+  const submissionError = !!failed || conflict || !!handoffError || !!loadError;
   status.classList.toggle('error', submissionError);
   if (submissionError) {
     if (status.nextElementSibling !== composer) composer.before(status);
@@ -409,16 +413,17 @@ function render() {
     panel.querySelector('.plan-chat-status').append(status);
   }
   composer.querySelector('[type=submit]').title = workspaceProblem || '';
-  const text=handoffError||(activeOperation?.action==='save'||activeOperation?.action==='new'?'':feedback);
+  const text=loadError||(load?'Loading planning…':handoffError||(activeOperation?.action==='save'||activeOperation?.action==='new'?'':feedback));
   status.hidden=!text;
   const pending=panel.querySelector('.plan-pending');
   pending.hidden=activeOperation?.action!=='send';
   const pendingText=activeOperation?.action==='send'?activeOperation.before?.input || activeOperation.payload.state.input:'';
   if(pending.textContent!==pendingText)pending.textContent=pendingText;
   if(following)transcript.scrollTop=transcript.scrollHeight;
-  const statusSignature=JSON.stringify([text,!!failed,conflict]);
+  const statusSignature=JSON.stringify([text,!!failed,conflict,!!loadError]);
   if(status.dataset.signature!==statusSignature){
     status.dataset.signature=statusSignature;status.replaceChildren(document.createTextNode(text));
+    if (loadError) {const retry = document.createElement('button');retry.type='button';retry.dataset.plan='retry-load';retry.textContent='Retry loading';status.append(retry);}
     if (failed && !conflict) {const retry = document.createElement('button');retry.type='button';retry.dataset.plan='retry';retry.textContent='Retry request';status.append(retry);}
     if (conflict) {const reload = document.createElement('button');reload.type='button';reload.dataset.plan='reload';reload.textContent='Reload saved chat';status.append(reload);}
   }
@@ -596,6 +601,7 @@ document.addEventListener('click', async event => {
     return;
   }
   if(action==='cancel-new'){if(savingNewChatPreference)return;confirming=false;render();return;}
+  if(action==='retry-load'){ensureLoaded(true);return;}
   if(action==='retry'){mutate(failed.action,true);return;}
   if(action==='reload'){if(!confirm('Reload the saved chat? Copy any unsaved planning edits you want to keep first.'))return;try{accept(await json(endpoint()+'?chat='+chat.id));failed=null;conflict=false;dirty=false;feedback='';clearPending();render();}catch(error){feedback=error.message;render();}return;}
   if(action==='create'){if(selected().length)await mutate('create');return;}
@@ -616,9 +622,18 @@ document.addEventListener('keydown', event => {
   if(['plan-tab','execution-tab'].includes(event.target.id)&&['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();chooseTab(event.key==='Home'?'plan':event.key==='End'?'execution':selectedTab==='plan'?'execution':'plan',true);}
 });
 document.addEventListener('pellets-refresh', async () => {
-  if(!chat||selectedTab!=='plan'||flight||dirty||conflict||uiVersion.isOutdated()||Date.now()-refreshedAt<1000)return;
+  if(!chat||selectedTab!=='plan'||flight||dirty||failed||conflict||uiVersion.isOutdated()||Date.now()-refreshedAt<1000)return;
   refreshedAt=Date.now();
-  try{accept(await json(endpoint()+'?chat='+chat.id));render();}catch(error){feedback=error.message;render();}
+  const requestedChat=chat;
+  try{
+    const result=await json(endpoint()+'?chat='+requestedChat.id);
+    // A read admitted while clean may finish after an edit, a save, or a new
+    // conversation. Those newer choices take precedence over its old snapshot.
+    if(chat!==requestedChat||flight||dirty||failed||conflict||uiVersion.isOutdated())return;
+    accept(result);render();
+  }catch(error){
+    if(chat===requestedChat&&!flight&&!dirty&&!failed){feedback=error.message;render();}
+  }
 });
 window.addEventListener('resize', sync);
 window.Planner={sync,status,selectExecution:()=>chooseTab('execution'),flush:()=>dirty?mutate(chat?'save':'new'):Promise.resolve(),prepareReload:()=>{const error=storePending(true);render();return error;}};

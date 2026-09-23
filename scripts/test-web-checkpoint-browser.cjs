@@ -70,6 +70,7 @@ async function startServer(root) {
     git('config', 'commit.gpgSign', 'false');
     git('commit', '--allow-empty', '-m', 'initial');
     fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '\n/fake-*\n/.agents/\n');
+    cli('init-db');
     const target = cli('add', 'selected implementation', '--group', 'Implementation <group>');
     const group = cli('group', 'list')[0];
     const source = mode === 'review_findings_invalid' ? '' : capturedSource;

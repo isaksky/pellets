@@ -397,4 +397,14 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   await until(async()=>await page.locator('#plan-message').inputValue()==='', 'Saved preference did not skip confirmation');
   assert.equal(await page.locator('#plan-new-dialog').isVisible(),false);
   console.log('PASS real planning: global eager model catalog, gated reply, retained composer/DOM, explicit selected creation, immediate edit save, split/combine/refine, persistent project pin, created links, confirmed new chat, lost Send/New receipts with exact explicit retry, responsive tabs and keyboard, immutable selected-worktree binding and exact turn cwd, visible busy status, full-access planning, persistent execution access dropdown, unified chat, collapsible tray, ellipsis titles, created links in chat, single/bulk dismissal without Undo');
-})().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(browser)await browser.close();await stop();fs.rmSync(temporary,{recursive:true,force:true});});
+})().catch(async error=>{
+  console.error(error);process.exitCode=1;
+  const artifacts=process.env.PELLETS_BROWSER_ARTIFACTS;
+  if(artifacts&&browser)for(const [index,page] of browser.contexts().flatMap(context=>context.pages()).entries()){
+    console.error('Page:',page.url(),await page.locator('body').innerText());
+    await page.screenshot({path:path.join(artifacts,`${process.env.PLAYWRIGHT_BROWSER||'chromium'}-planning-failure-${index}.png`)});
+  }
+}).finally(async()=>{
+  if(browser){for(const page of browser.contexts().flatMap(context=>context.pages()))await page.unrouteAll({behavior:'ignoreErrors'});await browser.close();}
+  await stop();fs.rmSync(temporary,{recursive:true,force:true});
+});

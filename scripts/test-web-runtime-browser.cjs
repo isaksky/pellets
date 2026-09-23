@@ -59,7 +59,7 @@ async function until(check, message) {
     assert.ok(fs.realpathSync(path.resolve(root, '.git', binding.path)).startsWith(fs.realpathSync(root) + path.sep));
     const queued = mode === 'stop_after_pellet' ? cli('add', 'Leave this queued after stopping') : undefined;
     cli('skill', 'install', '--scope', 'repo', '--agent', 'codex', '--yes');
-    fs.writeFileSync(path.join(root, 'fake-mode'), mode === 'schedule_fresh_choice' ? 'schedule_unfinished' : mode === 'stop_after_pellet' ? 'schedule_gate' : mode === 'watch_waiting' ? 'schedule_activity_gate' : mode);
+    fs.writeFileSync(path.join(root, 'fake-mode'), mode === 'runtime_probe_gate' ? 'schedule_noop' : mode === 'schedule_fresh_choice' ? 'schedule_unfinished' : mode === 'stop_after_pellet' ? 'schedule_gate' : mode === 'watch_waiting' ? 'schedule_activity_gate' : mode);
     if (mode === 'navigation_owned') cli('start', pellet.id);
     let origin = await start(root);
     const page = await browser.newPage({viewport: {width: 1280, height: 1000}, hasTouch: true, deviceScaleFactor: 1});
@@ -74,6 +74,13 @@ async function until(check, message) {
       });
     }
     await page.goto(origin + route);
+    if (mode === 'runtime_probe_gate') {
+      // Startup catalog discovery also probes the runtime. Warm that cache
+      // before gating the invocation so the crash tests the admission custodian.
+      await until(async () => (await (await page.request.get(origin + '/models')).json()).fetched_at > 0, 'Catalog did not finish');
+      fs.writeFileSync(path.join(root, 'fake-events.jsonl'), '');
+      fs.writeFileSync(path.join(root, 'fake-mode'), mode);
+    }
     if (mode === 'navigation_owned') {
       assert.equal(await page.locator('.execution-state-label').textContent(), 'Not running');
       assert.equal(await page.getByRole('button', {name: /Start next/}).count(), 0);
@@ -182,9 +189,37 @@ async function until(check, message) {
       for (const control of ['Stop now', 'Stop after']) {
         const stopForm = page.locator('form[data-schedule]').filter({has: page.getByRole('button', {name: control, exact: true})});
         const endpoint = origin + await stopForm.getAttribute('action');
+        const stopBounds = await stopForm.getByRole('button', {name: control, exact: true}).boundingBox();
         const accepted = page.waitForResponse(response => response.url() === endpoint && response.request().method() === 'POST');
+        let releaseStop;
+        const stopGate = new Promise(resolve => { releaseStop = resolve; });
+        await page.route(endpoint, async route => { await stopGate; await route.continue(); });
         await stopForm.getByRole('button', {name: control, exact: true}).click();
+        const feedback = page.locator('#request-feedback');
+        await feedback.waitFor();
+        if (!baseline) {
+          assert.equal(await feedback.textContent(), 'Updating run controls…');
+          assert.equal(await feedback.evaluate(el => el.parentElement.classList.contains('run-controls')), true);
+          const pendingBounds = await stopForm.getByRole('button', {name: control, exact: true}).boundingBox();
+          assert.equal(pendingBounds.height, stopBounds.height, 'Feedback must not squash a Stop label');
+          assert.equal(pendingBounds.width, stopBounds.width, 'Feedback must not shrink a Stop control');
+        }
+        assert.equal(await stopForm.getByRole('button', {name: control, exact: true}).isDisabled(), true);
+        if (process.env.PELLETS_FEEDBACK_STOP_AUDIT) {
+          const engineName = process.env.PLAYWRIGHT_BROWSER || 'chromium';
+          const directory = path.join(process.env.PELLETS_FEEDBACK_STOP_AUDIT, engineName + '-' + control.toLowerCase().replaceAll(' ', '-'));
+          fs.mkdirSync(directory, {recursive:true});
+          let clip = await page.locator('.run-controls').boundingBox();
+          clip.height = Math.min(clip.height + 210, page.viewportSize().height - clip.y);
+          const metadata = path.join(directory, 'before.json');
+          if (!baseline && fs.existsSync(metadata)) clip = JSON.parse(fs.readFileSync(metadata)).clip;
+          await page.screenshot({path:path.join(directory, baseline?'before.png':'after.png'), clip, animations:'disabled', caret:'hide'});
+          fs.writeFileSync(path.join(directory, baseline?'before.json':'after.json'), JSON.stringify({clip, viewport:page.viewportSize(), scale:1,
+            theme:await page.locator('html').getAttribute('data-theme'), feedback:await feedback.textContent()},null,2));
+        }
+        releaseStop();
         assert.equal((await accepted).status(), 202);
+        await page.unroute(endpoint);
         await until(async () => (await (await page.request.get(endpoint.replace(/\/stop-(now|after)$/, ''))).json()).state === 'stopped', 'Idle Watch did not stop');
         await expectState('Finished', false);
         assert.equal(await page.locator('.schedule-state').count(), 0);
