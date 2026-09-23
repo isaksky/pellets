@@ -52,8 +52,8 @@
 {{define "project-rail"}}<aside class="project-rail live-fragment" id="project-drawer" aria-label="Project navigation" data-refresh-url="{{.CurrentURL}}">
  {{template "area-tabs" .}}
  <div class="workspace-nav-heading"><span>Workspaces</span><button type="button" class="quiet" data-project-settings aria-label="Workspace group settings">···</button></div>
- <nav aria-label="Workspaces">{{range .RunWorkspaces}}<a class="workspace-link {{if eq $.SelectedWorkspace .ID}}active{{end}}" href="{{.URL}}" data-on:click="@navigate('app-content')" title="{{.Root}}" {{if eq $.SelectedWorkspace .ID}}aria-current="page"{{end}}><span class="workspace-dot {{if .Busy}}busy{{end}}" aria-hidden="true">●</span><span class="workspace-name">{{.Name}}</span>{{if or .RecoveryAttention .NoRunResume}}<span class="workspace-attention" aria-label="Needs attention">!</span>{{else if .Run}}{{if or .Run.Awaiting .Run.Attention}}<span class="workspace-attention" aria-label="Needs input">!</span>{{else if .Run.Active}}<small>Running</small>{{end}}{{end}}</a>{{end}}</nav>
- <div class="sidebar-bottom"><code title="{{repositoryPath .Project.GitCommonDir}}">{{repositoryPath .Project.GitCommonDir}}</code></div>
+ <nav aria-label="Workspaces">{{range .RunWorkspaces}}<a class="workspace-link {{if eq $.SelectedWorkspace .ID}}active{{end}}" href="{{.URL}}" data-on:click="@navigate('app-content')" title="{{.ActivityRoot}}{{with .ExecutionStatus}} · {{.Label}}{{end}}" aria-label="{{.Name}}{{with .ExecutionStatus}} · {{.Label}}{{end}}" {{if eq $.SelectedWorkspace .ID}}aria-current="page"{{end}}><span class="workspace-dot {{with .ExecutionStatus}}{{if .Working}}busy{{end}}{{end}}" aria-hidden="true">●</span><span class="workspace-name">{{.Name}}</span>{{with .ExecutionStatus}}<small class="workspace-execution-state" title="{{.Label}}">{{.NavigationLabel}}</small>{{end}}</a>{{end}}</nav>
+ <div class="sidebar-bottom"><code title="Repository location: {{repositoryFullPath .Project.GitCommonDir}}">{{repositoryPath .Project.GitCommonDir}}</code></div>
 </aside>{{end}}
 
 {{define "run-dashboard"}}<section id="run-dashboard" class="run-dashboard live-fragment" aria-labelledby="run-dashboard-title" data-refresh-url="{{.CurrentURL}}">
@@ -61,7 +61,7 @@
   <div class="run-workspaces">{{range .RunWorkspaces}}{{if or (eq $.ExecutionWorkspace 0) (eq $.ExecutionWorkspace .ID)}}<article class="run-workspace" data-workspace-id="{{.ID}}">
     <header>{{if or (eq $.ExecutionWorkspace 0) (not .Run)}}<div>{{if eq $.ExecutionWorkspace 0}}<a class="workspace-name" href="{{.URL}}">{{.Name}}</a>{{end}}<code title="{{.Root}}">{{.Root}} · Workspace {{.ID}}</code></div>{{end}}{{if .ActivePellet}}<a class="current-pellet" href="/projects/{{$.Project.Code}}/tasks/{{.ActivePellet}}?execution={{.ID}}" data-on:click="@navigate('inspector-host')"><span>{{.ActivePellet}} ↗</span><strong>{{.ActiveTitle}}</strong></a>{{else}}<span class="quiet">No active pellet</span>{{end}}</header>
     {{if eq $.ExecutionWorkspace 0}}
-      <p class="workspace-status">{{if .RecoveryAttention}}Needs attention{{else if .Run}}{{runStateLabel .Run.State}}{{else if .ActivePellet}}In progress{{else}}Idle{{end}}</p><a class="quiet-button" href="{{.URL}}">Open workspace</a>
+      <p class="workspace-status">{{with .ExecutionStatus}}{{.Label}}{{else}}Idle{{end}}</p><a class="quiet-button" href="{{.URL}}">Open workspace</a>
     {{else}}
 
     {{if .RecoveryAttention}}<p class="run-notice warning">{{.RecoveryAttention}}</p>{{end}}

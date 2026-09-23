@@ -8,6 +8,27 @@ type executionPresentation struct {
 	ShowOperation bool
 }
 
+// Navigation has a bounded trailing status slot. Keep its visible label concise;
+// the full state remains its accessible name, tooltip and view-menu label.
+func (state executionPresentation) NavigationLabel() string {
+	switch state.Label {
+	case "Waiting for work":
+		return "Waiting"
+	case "Waiting for input":
+		return "Input needed"
+	case "Waiting for approval":
+		return "Approval"
+	case "Preparing execution":
+		return "Preparing"
+	case "Needs attention":
+		return "Attention"
+	case "Failed · needs attention":
+		return "Failed"
+	default:
+		return state.Label
+	}
+}
+
 func (workspace runWorkspaceView) ExecutionStatus() *executionPresentation {
 	run := workspace.Run
 	if workspace.RecoveryAttention != "" || (run != nil && run.UnownedActive) {

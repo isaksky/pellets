@@ -458,3 +458,27 @@ func TestWorkbenchListsEmptyPersistentGroupsAndKeepsRenamedRouting(t *testing.T)
 		t.Fatalf("renamed routing: %+v %v", routing, err)
 	}
 }
+
+func TestWorkbenchNavigationDistinguishesOwnershipFromExecution(t *testing.T) {
+	f, p, main, _ := workbenchFixture(t)
+	pellet := addWorkbenchPellet(t, f, p, "Owned without an execution", nil, domain.PelletOpen)
+	if _, err := f.application.TransitionPellet(context.Background(), p, pellet.Reference, storage.PelletVersion(pellet), storage.PelletLifecycleRequest{Operation: storage.PelletStart}, main); err != nil {
+		t.Fatal(err)
+	}
+	response := performRequest(f.handler, http.MethodGet, "/projects/project1/tasks?workspace="+strconv.FormatInt(main, 10), "", nil)
+	body := response.Body.String()
+	for _, selector := range []string{`<nav aria-label="Workspaces">(.*?)</nav>`, `<details class="switcher" id="view-switcher">(.*?)</details>`} {
+		region := regexp.MustCompile(selector).FindString(body)
+		if !strings.Contains(region, "Not running") || strings.Contains(region, "workspace-dot busy") || strings.Contains(region, "Needs input") {
+			t.Fatalf("ownership misrepresented by navigation: %s", region)
+		}
+	}
+	if !strings.Contains(body, `title="Repository location: `+html.EscapeString(filepath.ToSlash(filepath.Join(f.application.Database.Root, "project1")))) {
+		t.Fatal("navigation lost the absolute repository location")
+	}
+	// Reading navigation must preserve ownership.
+	owned, err := f.application.Pellet(context.Background(), p, pellet.Reference)
+	if err != nil || owned.Workspace == nil || owned.Workspace.ID != main || owned.Status != domain.PelletInProgress {
+		t.Fatalf("navigation changed ownership: %+v %v", owned, err)
+	}
+}

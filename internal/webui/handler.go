@@ -69,10 +69,11 @@ func newHandler(application *app.WebApplication, hub *eventHub, config handlerCo
 			}
 			return n
 		},
-		"text": nullableText,
-		"path": localPath,
-		"repositoryPath": func(value domain.LocalPath) string {
-			return strings.TrimPrefix(strings.TrimSuffix(localPath(value), "/.git"), "./")
+		"text":           nullableText,
+		"path":           localPath,
+		"repositoryPath": repositoryPath,
+		"repositoryFullPath": func(value domain.LocalPath) string {
+			return repositoryFullPath(application.Database.Root, value)
 		},
 		"eqStatus": func(left domain.PelletStatus, right string) bool { return string(left) == right },
 		"sameID":   func(left, right int64) bool { return left == right },

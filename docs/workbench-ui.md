@@ -14,7 +14,10 @@ The status bar shows the folder containing `.pellets`, abbreviating the current
 OS user’s home directory as `~` (for example, `~/src`). Paths outside home stay
 absolute; display separators are `/` on every platform. The full database file
 path remains available on hover. The sidebar shows one project path relative to the database root, without a
-leading `./`, trailing `/.git`, or repeated project name.
+leading `./`, trailing `/.git`, or repeated project name. A checkout at the
+database root says **Database folder**, rather than a bare `.`. Its hover text
+contains the full repository location; nonstandard Git directory names are
+retained rather than guessing a checkout from them.
 
 The first breadcrumb selects the project. The second selects the shared Queue,
 Memories, Groups, or a registered workspace. Workspace links appear in the left sidebar.
@@ -37,6 +40,17 @@ the primary save action on the right. More actions on the left contains lifecycl
 operations and memory approval; queue and scope controls stay beside their fields. They support optimistic conflicts,
 lifecycle operations, recovery, provenance, and explicit human memory approval.
 An owned pellet and a running process remain distinct.
+
+Workspace navigation and the view switcher reuse **Current execution**'s
+state presentation. An idle Watch says **Waiting for work**, including when its
+last run is completed; ownership without a live run says **Not running**.
+Stopped errors say **Needs attention** or **Failed**, rather than **Needs input**.
+Only active work gets the green navigation dot. The sidebar uses compact state
+labels with the full state in its accessible name and tooltip; the view menu
+shows the full state. Phone navigation retains its compact layout, with the
+state available through the link's accessible name and the view menu. Historical
+run state remains explicitly labeled in Run details.
+
 
 Record headers reserve the Unsaved indicator's space in both clean and edited
 states, keeping the title and close control in place. Memory edit conflicts retain
@@ -423,7 +437,8 @@ Sending a message uses the configured Codex runtime in a separate ephemeral
 session with bounded conversation and draft context. Actual runs validate the
 chosen model against their runtime; there are no local template replies or simulated model events.
 The planner can inspect repository files and Git state using shell commands.
-The **Access** dropdown offers **Automatic approval** (the default) and **Full access**. Automatic approval uses a
+The planning **Approval** dropdown offers **Automatic** (the default) and
+**None (full access)**. Automatic approval uses a
 workspace-write sandbox with `on-request` approvals and the runtime's
 `auto_review` reviewer. Network access and additional writable roots are not
 pre-granted in automatic mode. Apps, plugins, MCP tools, browsing, and delegation remain disabled.
@@ -707,14 +722,17 @@ handoff; ordinary draft autosave can continue after restoration, but interrupted
 Send, Create, and other ambiguous requests require explicit retry with their
 original request identity. No restored planning conversation starts execution.
 
-The composer shows Working folder alongside Access, with the selected full path
-beneath. A missing folder selection has an inline error and error border; a project
+The composer keeps Folder and Approval beside Send. The working-folder control
+provides its full path on hover and through its accessible description. A single
+folder is static context; multiple folders use the working-folder selector. A
+missing folder selection has an inline error and error border; a project
 without an available checkout shows an explanation instead of an empty selector.
 Planning progress appears below the messages with an animated busy indicator.
 Submission errors remain immediately above the composer with retry/recovery controls
 and preserve the message. Reduced-motion
-preferences disable the animation. Execution start and resume forms offer the same
-Access dropdown; the browser remembers it per project/workspace. A schedule captures
+preferences disable the animation. Execution start and resume forms offer these
+policies under **Access**, labeled **Automatic approval** and **Full access**;
+the browser remembers the selection per project/workspace. A schedule captures
 the selected mode for its runs, and Run details displays the policy used. Existing
 runs keep their captured policy. Internal checkpoint reviewers remain read-only.
 
@@ -752,3 +770,35 @@ Both sidebar edges can be dragged to resize on desktop. Arrow keys adjust the
 focused divider; Shift uses larger steps, Home/End use the bounds, and double-click
 resets the width. Widths persist in navigation_width and execution_width settings.
 Resize handles are hidden in the mobile layout.
+
+
+### Control placement and domain audit
+
+The placement audit traced navigation, record/group dialogs, browsing filters,
+Receives/recipient editors, planning folder/access controls, scheduler controls,
+and review summaries to their application actions. The remaining defects were a
+shared location formatter's database-root edge case and local navigation templates
+that inferred status from ownership or the latest run instead of the existing
+execution presentation. Routing, ownership, saved selection, optimistic versions,
+and captured execution intent are unchanged.
+
+Record footers retain quiet Cancel and primary Save on the right, lifecycle
+operations on the left, and scope/order actions beside their fields. Receives
+edits routing; group links open details; the removable Group chip filters only
+the visible queue. Planning folder selection remains pinned to its conversation,
+and execution access remains adjacent to Start/Resume. Review counts and status
+remain independent of ownership and visible browsing results. These already-correct
+patterns were preserved.
+
+For focused navigation evidence, run `test-web-runtime-browser.cjs` with
+`PELLETS_RUNTIME_BROWSER_CASE=watch_waiting`, `schedule_runtime_error`, or
+`navigation_owned`, and
+`PELLETS_NAVIGATION_AUDIT=/absolute/artifact/path`. The navigation contract covers
+Chromium/WebKit, all five themes, desktop/intermediate/phone sizes, working,
+waiting with completed history, stopped errors, ownership without a run, full
+path availability, keyboard
+focus and touch menus. `PELLETS_NAVIGATION_BASELINE=/path/to/pl` captures the
+original states without applying the new presentation assertions. Pairs share
+crop metadata; runtime assertions also verify live wake, both stop controls,
+restart without replay, and explicit recovery. Go coverage includes ownership
+without execution and POSIX, drive-root, different-drive and UNC path labels.

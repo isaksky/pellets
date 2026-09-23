@@ -594,7 +594,14 @@ input[type="checkbox"] {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.workspace-dot, .workspace-attention, .workspace-link small { flex-shrink: 0; }
+.workspace-dot, .workspace-attention { flex-shrink: 0; }
+.workspace-link .workspace-execution-state {
+  flex-shrink: 0;
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .workspace-nav-heading {
   display: flex;
   align-items: center;
