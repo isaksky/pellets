@@ -22,7 +22,7 @@ native buttons, text fields, or application dialogs.
 | Creation forms in narrow content panes | Original disclosure and form, constrained to the heading's content width | Fixes an existing overflow when two sidebars leave less than 420px for the queue. The trigger remains right-aligned when the heading wraps. Full-width forms retain their original geometry. |
 | Record, checkpoint and planning dialogs | Original native dialogs and handlers | Generic dialog adoption is deferred. Preserve each existing size, padding, radius, backdrop, dirty guard, navigation and focus behavior. Pellet descriptions and group context use the feature-owned View / Preview and Edit controls described in [Workbench](workbench-ui.md#description-reading-and-editing); the native textarea remains authoritative. |
 | Quiet action links | Shared `.quiet-button` styling | Inline flex centers link and button labels vertically and horizontally; 12px text matches neighboring actions. Existing filter-specific size overrides remain. |
-| Menus, disclosures and filters | Original implementations | Generic composite adoption is deferred. Native navigation, row-action and assignment disclosures use `details-menu-layout.js` for viewport-bounded placement outside scrolling panes; their original dismissal, keyboard, form and draft handlers remain. Filters retain their separate nested top-layer handling. |
+| Menus, disclosures and filters | Original implementations | Generic composite adoption is deferred. Native menus preserve Space/Enter activation and skip hidden or disabled choices during arrow/type-ahead navigation. Navigation, row-action and assignment disclosures use `details-menu-layout.js` for viewport-bounded placement outside scrolling panes; their original dismissal, keyboard, form and draft handlers remain. Filters retain their separate nested top-layer handling. |
 | Mermaid descriptions | Feature-owned `pl-diagram` and native diagram viewer in the shared Markdown renderer | Local strict SVG rendering with source alternatives and a viewport-sized zoom/pan modal. The viewer remaps SVG IDs/styles and preserves native nested-dialog focus and source ownership. See [Mermaid authoring and activation API](workbench-ui.md#mermaid-diagrams). The gallery includes production examples and errors. |
 | Description contents | Feature-owned `pl-description-reader` in pellet and group dialogs | A document-local hierarchical navigation rail, with a collapsible list below 960px. It owns heading anchors and resize/listener cleanup; source fields still own edits. The dialog widens by the rail's width to preserve reading space. The gallery has a page-local outline fixture. See [description reading and editing](workbench-ui.md#description-reading-and-editing) for visibility and navigation rules. |
 | Planning tabs and sidebar resizing | Original implementations | Keep routing, draft preservation, narrow-screen behavior, geometry and saved preferences. |
@@ -291,6 +291,47 @@ comparing preexisting controls. The spacing suite checks the delivered geometry;
 all other styles and positions still compare, with the previously documented
 review-height displacement and preference-row accounting. Focused persistent
 pairs follow [UI evidence guidance](ui-agent-guidance.md#focused-before-and-after-evidence).
+
+### Interaction target regression coverage
+
+`test-web-interaction-browser.cjs` uses a fresh OS-temporary Git repository with an explicitly initialized database, a
+production server and the existing deterministic planning peer. Run it in Chromium and WebKit. It checks
+all five themes at 1280, 1092 and 390px: visible row/proposal actions, stable
+proposal title geometry, independent checkbox labels and menu actions, native
+Space/Enter activation, hover feedback, editor focus return, retained drafts,
+disabled selectors, unobscured 28px proposal actions, full memory-card links,
+and touch menu/checkbox activation. Memory links use native Tab traversal in
+Chromium and Option+Tab in macOS WebKit.
+`PELLETS_INTERACTION_BASELINE=/path/to/pl` records the original behavior without
+asserting the corrected contracts; `PELLETS_BROWSER_ARTIFACTS` chooses the
+persistent screenshot directory. It emits focused before/after images and
+observations. Planning and execution suites retain their real busy/error,
+recovery, live-update, and focus/selection scenarios.
+
+The interaction audit found shared defects in the production native-menu
+keyboard handler (Space consumed as type-ahead), row background delegation
+(checkbox labels and menu padding forwarded to the record), and enabled hover
+styles applied to disabled selectors/actions. Shared native disclosure styling
+also lacked padded hover/focus feedback. Preview menu and component busy
+semantics were already correct and remain unchanged.
+
+Local defects were hidden ordinary-row menus, proposal dismissal columns added
+only on hover/focus, whole-heading/row feedback spanning independent proposal
+actions, and memory metadata/padding outside its native link. Menu targets are
+now always visible and at least 20px by 28px. Proposal dismissal reserves 28px
+in every state; title buttons have 6px side insets and each action owns its
+feedback. Plain review, execution, metadata and settings disclosures gain 3px
+vertical and 6px horizontal insets plus theme-aware hover/focus backgrounds.
+Review text retains its previous available width; the collapsed row adds exactly
+6px of vertical inset. Breadcrumbs, filter/assignment controls, custom selector
+insets, group-card links, dialog controls, and component busy behavior already
+had appropriate targets and retain their interaction model.
+
+The parity suite compares against the supplied baseline's actual selector and
+menu geometry (including baselines after the earlier spacing correction).
+It restores only the specific menu/disclosure and memory-card padding properties
+for strict comparison of the remaining interface. Real screenshots precede that
+restoration; the interaction suite verifies the intentional target changes.
 
 ### Completed audit
 

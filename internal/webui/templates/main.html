@@ -204,8 +204,8 @@
 
 {{define "memory-list"}}<div id="memory-list" class="memory-grid live-fragment" data-live-fragment data-fragment-kind="memories" data-refresh-url="{{.CurrentURL}}">
   {{if .Memories}}{{range .Memories}}<article id="memory-{{.Memory.ID}}" class="memory-card {{if .Selected}}selected{{end}}" data-row-id="memory-{{.Memory.ID}}" data-row-version="{{.Version}}">
-    <a href="{{.URL}}" data-on:click="@navigate('inspector-host')"><span class="memory-id">Memory {{.Memory.ID}}</span><p>{{.Memory.Text}}</p></a>
-    <footer><span class="badge provenance">{{.Memory.CreatedBy}}</span>{{if .Memory.ApprovedAt}}<span class="badge approved">Approved</span>{{else}}<span class="badge unapproved">Needs review</span>{{end}}<time>{{formatTime .Memory.UpdatedAt}}</time></footer>
+    <a href="{{.URL}}" data-on:click="@navigate('inspector-host')"><span class="memory-id">Memory {{.Memory.ID}}</span><p>{{.Memory.Text}}</p>
+    <footer><span class="badge provenance">{{.Memory.CreatedBy}}</span>{{if .Memory.ApprovedAt}}<span class="badge approved">Approved</span>{{else}}<span class="badge unapproved">Needs review</span>{{end}}<time>{{formatTime .Memory.UpdatedAt}}</time></footer></a>
   </article>{{end}}{{else}}<div class="empty-state"><h3>Keep useful project knowledge here</h3><p>Save decisions, conventions, and useful discoveries so future work can build on them.</p><button type="button" data-create-memory>Add first memory</button></div>{{end}}
 </div>{{end}}
 

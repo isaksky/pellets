@@ -197,7 +197,7 @@ const until = async (predicate, message) => {
   cli('add', 'External live update');
   await until(async () => (await page.locator('.task-title').allTextContents()).includes('External live update'), 'CLI commit did not refresh browser');
 
-  assert.match((await page.locator('#project-counts').textContent()).trim(), /^3 open(?: · 0 active · 0 memories)?$/);
+  assert.equal((await page.locator('#project-counts').textContent()).trim(), '3 active in project');
   assert.match((await page.locator('#area-tabs a').first().textContent()).replace(/\s+/g,' ').trim(), /Queue 3$/);
   assert.equal(await page.evaluate(() => window.retainedRow === document.querySelector('.task-row') && window.retainedTable === document.querySelector('#queue-rows') && window.retainedFocus === document.activeElement), true, 'Live update replaced stable DOM or lost focus');
   let refreshRequests = 0;

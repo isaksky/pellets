@@ -10,7 +10,7 @@ const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-ui-parity-'));
 const fixture = path.join(temporary, 'parity'), current = path.join(temporary, 'pl-current');
 const baseline = process.env.PELLETS_UI_BASELINE ? path.resolve(process.env.PELLETS_UI_BASELINE) : path.join(temporary, 'pl-baseline');
-const results = {}, groupAdditions = {}, reviewLayouts = {}, executionPreferences = {};
+const results = {}, groupAdditions = {}, reviewLayouts = {}, executionPreferences = {}, interactionStyles = {};
 let server, browser;
 
 async function start(binary) {
@@ -77,6 +77,20 @@ async function measure(page, scene, build) {
         targets: row.dataset.scope,
       }))};
   });
+  // Retain only the explicitly changed target properties for comparison. Real
+  // screenshots above and the interaction suite verify the delivered targets;
+  // restoration below lets every other size/style remain a strict comparison.
+  if (build === 'before') interactionStyles[scene] = await page.evaluate(() => {
+    const read = (selector, properties) => [...document.querySelectorAll(selector)].map(el =>
+      Object.fromEntries(properties.map(property => [property, getComputedStyle(el).getPropertyValue(property)])));
+    return {
+      menus: read('.row-menu > summary', ['display','min-width','min-height','border-radius']),
+      summaries: read('.project-record > summary, .metadata > summary', ['padding','border-radius']),
+      memories: read('.memory-card', ['padding']), memoryLinks: read('.memory-card > a', ['padding']),
+      inlineSelects: read('.select-trigger', ['padding-left','padding-right']),
+      positionedMenus: read('.switcher-menu,.row-popover,.assignment-form,.recipient-form', ['position']),
+    };
+  });
   // The new, feature-owned preference row intentionally increases form height.
   // Capture its real geometry in the screenshot and separately verify that
   // removing exactly that addition restores every original control unchanged.
@@ -94,20 +108,37 @@ async function measure(page, scene, build) {
   // checks long labels, six widths, hit targets and expanded menus. For parity
   // of preexisting controls, reverse only the two shared spacing changes here:
   // 6px inline-select insets and viewport-positioned details menu surfaces.
-  if (build === 'after') await page.evaluate(() => {
+  if (build === 'after') await page.evaluate(baseline => {
     window.spacingProbe = [];
     const change = (el, properties) => {
       window.spacingProbe.push([el, el.style.cssText]);
       for (const [key, value] of Object.entries(properties)) el.style.setProperty(key, value, 'important');
     };
-    for (const el of document.querySelectorAll('.select-trigger')) {
+    const restore = (selector, saved, verify) => [...document.querySelectorAll(selector)].forEach((el, index) => {
+      if (!saved[index]) throw Error('Changed interaction control count: ' + selector);
+      verify?.(el);
+      change(el, saved[index]);
+    });
+    restore('.row-menu > summary', baseline.menus, el => {
+      if (getComputedStyle(el).minHeight !== '28px' || getComputedStyle(el).opacity !== '1')
+        throw Error('Row menu must keep a visible 28px target');
+    });
+    restore('.project-record > summary, .metadata > summary', baseline.summaries, el => {
+      if (getComputedStyle(el).padding !== '3px 6px') throw Error('Disclosure inset changed');
+    });
+    restore('.memory-card', baseline.memories);
+    restore('.memory-card > a', baseline.memoryLinks, el => {
+      if (!el.contains(el.closest('.memory-card').querySelector('footer'))) throw Error('Memory metadata is outside its link');
+    });
+    for (const [index, el] of [...document.querySelectorAll('.select-trigger')].entries()) {
       if (el.closest('.filters,.assignment-form,.run-controls,.theme-control,.plan-composer-settings,.plan-composer-tools,.record-actions-panel')) continue;
       if (getComputedStyle(el).paddingLeft !== '6px' || getComputedStyle(el).paddingRight !== '6px')
         throw Error('Unexpected inline selector inset: ' + el.outerHTML + ' / ' + getComputedStyle(el).padding);
-      change(el, {'padding-left': '0px', 'padding-right': '0px'});
+      change(el, baseline.inlineSelects[index]);
     }
-    for (const el of document.querySelectorAll('.switcher-menu,.row-popover,.assignment-form,.recipient-form')) {
+    for (const [index, el] of [...document.querySelectorAll('.switcher-menu,.row-popover,.assignment-form,.recipient-form')].entries()) {
       if (getComputedStyle(el).position !== 'fixed') throw Error('Details menu must escape scroll clipping');
+      if (baseline.positionedMenus[index]?.position === 'fixed') continue;
       change(el, {position: 'absolute', inset: 'auto', top: 'calc(100% + 8px)', left: '0px',
         width: el.matches('.assignment-form,.recipient-form') ? '275px' : 'auto',
         'min-width': '220px', 'max-width': 'min(360px, 90vw)', 'max-height': '65vh'});
@@ -115,7 +146,7 @@ async function measure(page, scene, build) {
       if (innerWidth <= 600 && el.matches('.assignment-form')) { el.style.setProperty('left','auto','important'); el.style.setProperty('right','0px','important'); }
       if (innerWidth <= 600 && el.matches('.switcher-menu')) { el.style.setProperty('min-width','190px','important'); el.style.setProperty('max-width','70vw','important'); }
     }
-  });
+  }, interactionStyles[scene]);
   results[build][scene] = await page.evaluate(() => {
     const closed = Array.from(document.querySelectorAll('details:not([open])'));
     const selectors = 'button, input:not([type=hidden]):not(.select-native), textarea, select:not(.select-native), label, summary, dialog[open], .task-row, .checkpoint-row, .memory-card, .section-heading, #main, #right-panel, #project-drawer, .plan-tabs, .create-popover[open] > form, .filter-fields:popover-open, .select-popover, .select-value, .select-chevron, .inspector > header, .dialog-footer';
@@ -157,6 +188,7 @@ async function measure(page, scene, build) {
   // Seed the older schema first. The current build may migrate it after the
   // baseline measurements; an older binary cannot read a newer schema.
   const cli = (...args) => JSON.parse(execFileSync(baseline, ['--json', ...args], {cwd: fixture, encoding: 'utf8'})).data;
+  cli('init-db');
   const first = cli('add', 'Preserve the existing interface', '--group', 'Interface');
   cli('add', 'Keep interactions predictable', '--group', 'Runtime');
   cli('add', 'Review interface work', '--review-targets', first.id);
@@ -169,6 +201,7 @@ async function measure(page, scene, build) {
     results[build] = {}; groupAdditions[build] = {}; reviewLayouts[build] = {};
     const origin = await start(binary), page = await browser.newPage({viewport: {width: 1280, height: 900}});
     page.setDefaultTimeout(12000);
+    await page.addInitScript(() => { window.EventSource = undefined; });
     const tasksURL = origin + '/projects/' + first.project + '/tasks?workspace=1';
     for (const theme of ['icy', 'gruvbox-light', 'gruvbox-dark', 'light', 'dark']) {
     await page.setViewportSize({width: 1280, height: 900});

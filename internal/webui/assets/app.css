@@ -60,17 +60,17 @@ body { background: var(--bg); color: var(--text); }
 button, input, textarea, select { font: inherit; color: inherit; }
 button, input, textarea, select, summary, a { -webkit-tap-highlight-color: transparent; }
 a { color: inherit; text-decoration: none; }
-a:hover { color: var(--accent-strong); }
+a:where(:not([aria-disabled="true"])):hover { color: var(--accent-strong); }
 :focus-visible { outline: 3px solid color-mix(in srgb, var(--focus) 72%, transparent); outline-offset: 2px; }
 ::selection { background: var(--accent-soft); }
 code, pre { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: .88em; }
 button, .primary-button, .quiet-button, .icon-button {
   border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface); padding: .48rem .72rem; cursor: pointer;
 }
-button:not(:disabled):hover, .quiet-button:not(:disabled):hover, .icon-button:hover { background: var(--surface-muted); color: var(--text); }
+button:not(:disabled, [aria-disabled="true"]):hover, .quiet-button:not(:disabled, [aria-disabled="true"]):hover, .icon-button:not(:disabled, [aria-disabled="true"]):hover { background: var(--surface-muted); color: var(--text); }
 button:disabled { cursor: not-allowed; opacity: .48; }
 .primary-button { display: inline-flex; align-items: center; justify-content: center; background: var(--accent); border-color: var(--accent); color: var(--button-text); font-weight: 650; }
-.primary-button:not(:disabled):hover { background: var(--accent-strong); color: var(--button-text); }
+.primary-button:not(:disabled, [aria-disabled="true"]):hover { background: var(--accent-strong); color: var(--button-text); }
 .skip-link { position: fixed; z-index: 100; top: .5rem; left: .5rem; transform: translateY(-160%); background: var(--surface); border: 2px solid var(--focus); border-radius: 6px; padding: .6rem; }
 .skip-link:focus { transform: none; }
 .brand-mark { color: var(--accent); }

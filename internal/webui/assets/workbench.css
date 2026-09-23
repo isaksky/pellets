@@ -389,7 +389,7 @@ button,
   background: var(--lift);
   border: 1px solid var(--line);
 }
-button:not(:disabled):hover {
+button:not(:disabled, [aria-disabled="true"]):hover {
   background: var(--theme-hover);
 }
 .primary-button {
@@ -397,7 +397,7 @@ button:not(:disabled):hover {
   color: var(--theme-on-primary);
   border-color: var(--theme-primary);
 }
-.primary-button:not(:disabled):hover {
+.primary-button:not(:disabled, [aria-disabled="true"]):hover {
   background: var(--theme-primary-hover);
   color: var(--theme-on-primary);
 }
@@ -996,7 +996,12 @@ input[type="checkbox"] {
   color: var(--dim);
   font-size: 14px;
   cursor: pointer;
-  opacity: 0;
+  opacity: 1;
+  display: grid;
+  place-items: center;
+  min-width: 20px;
+  min-height: 28px;
+  border-radius: 4px;
 }
 .pellet-row:hover .row-menu summary,
 .pellet-row:focus-within .row-menu summary,
@@ -1813,7 +1818,7 @@ dialog::backdrop {
   text-align: left;
   text-decoration: none;
 }
-.record-actions-panel button:hover,
+.record-actions-panel button:not(:disabled):hover,
 .record-actions-panel > a:hover {
   background: var(--theme-quiet-hover);
 }
@@ -1951,13 +1956,14 @@ dialog::backdrop {
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--line);
-  padding: 17px 0;
+  padding: 0;
   border-radius: 0;
   box-shadow: none;
 }
 .memory-card > a {
-  padding: 0;
+  padding: 17px 0;
 }
+.memory-card > a:is(:hover, :focus-visible) { background: var(--theme-quiet-hover); }
 .memory-card > a > p {
   font-size: 13px;
   line-height: 1.65;
@@ -2389,7 +2395,7 @@ dialog::backdrop {
   color: var(--muted);
   font-weight: 400;
 }
-.select-trigger:hover {
+.select-trigger:not(:disabled):hover {
   background: var(--theme-quiet-hover);
   color: var(--ink);
 }
@@ -2437,8 +2443,8 @@ dialog::backdrop {
   min-height: 29px;
   font-size: 12px;
 }
-.select-option:hover,
-.select-option.is-focused {
+.select-option:not(:disabled):hover,
+.select-option:not(:disabled).is-focused {
   background: var(--theme-menu-hover);
   outline: 0;
 }
@@ -2901,3 +2907,28 @@ pl-description-reader [data-markdown-heading]:focus-visible { outline: 2px solid
 .select-footer p { margin: 0 0 5px; max-width: 260px; font-size: 12px; color: var(--muted); }
 .select-menu-action { width: 100%; text-align: left; background: transparent; border: 0; }
 .select-menu-action[aria-disabled="true"] { opacity: .6; cursor: default; }
+
+/* Native disclosure targets include their marker/label and a visible inset.
+   Menus with established geometry retain their existing padding. */
+:is(.review-disclosure, .run-details, .schedule-details,
+    .activity-help, .activity-event, .activity-group, .metadata) > summary,
+:is(.conflict-state, .error-state, .run-group-context) details > summary {
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.project-record > summary { padding: 3px 6px; border-radius: 4px; }
+:is(.review-disclosure, .run-details, .schedule-details,
+    .activity-help, .activity-event, .activity-group, .metadata, .project-record,
+    .row-menu) > summary:is(:hover, :focus-visible),
+:is(.conflict-state, .error-state, .run-group-context) details > summary:is(:hover, :focus-visible) {
+  background: var(--theme-quiet-hover);
+}
+/* Keyboard focus identifies the same navigable row as pointer hover. */
+.pellet-row:has(.task-title:focus-visible) {
+  background: var(--theme-quiet-hover);
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+/* Keep the existing review text width while adding its background inset. */
+.review-disclosure > summary { margin-inline: -6px; max-width: calc(100% + 12px); }

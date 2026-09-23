@@ -35,6 +35,15 @@ operations and memory approval; queue and scope controls stay beside their field
 lifecycle operations, recovery, provenance, and explicit human memory approval.
 An owned pellet and a running process remain distinct.
 
+Ordinary queue background clicks open the record; links, checkbox labels, and
+the entire actions menu remain independent. Row menus stay visible without
+hover and retain native Space/Enter activation. Keyboard title focus highlights
+the complete queue row. Review titles, scope disclosures, and actions are
+separate targets; the review row is deliberately not one competing click target.
+Plain disclosures highlight their padded marker-and-label area. Memory cards
+are one native link including text, metadata and padding, with full-card hover
+and visible keyboard focus.
+
 The Filters control shows the selected status and opens a panel for queue filters
 and sorting. It stays anchored beside search without moving the toolbar. The panel
 fits the viewport above the scrolling panes and dismisses on Escape, outside
@@ -685,6 +694,12 @@ with aligned selection, single-line titles truncated with ellipses, and a direct
 a centered editor with autosaved fields, leaving tray rows unchanged. The editor
 supports Escape, restores focus, and preserves unfinished edits across reloads.
 Checkboxes use explicit styling for consistent Safari and Chromium rendering.
+Dismiss actions remain visible and reserve their column at rest, on hover,
+with keyboard focus, and on touch devices, so titles do not shift or change
+truncation. The title/editor button, checkbox, dismiss action, tray toggle,
+and batch actions are independent native controls. Hover/focus feedback belongs
+to the specific action, rather than implying the whole multi-action row or
+heading can be clicked.
 Its header reports the proposal count and can collapse the tray; new proposals
 expand it again. Dismiss all and Create selected controls stay with the tray.
 Dismissal autosaves without an Undo notice. Created pellets leave the tray and

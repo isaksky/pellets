@@ -215,7 +215,7 @@
 
 /* Stable proposal columns and a full-size editor outside the tray's scroll area. */
 .plan-draft-list .plan-card { display:grid; grid-template-columns:18px minmax(0,1fr) 28px; align-items:center; gap:8px; padding:1px 0 1px 4px; }
-.plan-card .plan-open-draft { min-width:0; width:100%; padding:3px 0; border:0; background:transparent; text-align:left; font:inherit; font-size:13px; line-height:22px; }
+.plan-card .plan-open-draft { min-width:0; width:100%; padding:3px 6px; border:0; background:transparent; text-align:left; font:inherit; font-size:13px; line-height:22px; }
 .plan-card .plan-row-title { line-height:22px; }
 .plan-card .plan-dismiss { position:static; width:28px; height:28px; margin:0; }
 .plan-card input.plan-row-select { -webkit-appearance:none; appearance:none; position:static; box-sizing:border-box; width:14px; height:14px; min-height:0; margin:0 2px; padding:0; border:1px solid var(--muted); border-radius:3px; background:transparent; cursor:pointer; }
@@ -273,9 +273,9 @@
 #right-panel .plan-context { padding-bottom:4px; }
 #right-panel .plan-transcript { padding-top:4px; }
 
-.plan-draft-list .plan-card:hover { background:var(--theme-quiet-hover); }
-.plan-draft-list .plan-card > .plan-open-draft:hover,
-.plan-draft-list .plan-card > .plan-dismiss:hover { background:transparent; }
+/* Each independent action owns its feedback; the row is not a competing target. */
+.plan-draft-list .plan-card > .plan-open-draft:is(:hover, :focus-visible):not(:disabled),
+.plan-draft-list .plan-card > .plan-dismiss:is(:hover, :focus-visible):not(:disabled) { background:var(--theme-quiet-hover); }
 
 .plan-create-row [data-plan=dismiss-all] { background:transparent; border-color:transparent; box-shadow:none; color:var(--muted); }
 .plan-create-row [data-plan=dismiss-all]:hover:not(:disabled) { background:var(--theme-quiet-hover); color:var(--ink); }
@@ -288,23 +288,12 @@
 .plan-draft-heading .plan-batch-tools button:hover:not(:disabled) { background:var(--theme-quiet-hover); }
 .plan-batch-tools svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; }
 
-.plan-drafts .plan-draft-heading:hover { background:var(--theme-quiet-hover); border-radius:4px; }
-.plan-draft-heading .plan-tray-toggle:hover,
-.plan-draft-heading .plan-batch-tools button:hover:not(:disabled) { background:transparent; }
+.plan-draft-heading .plan-tray-toggle:is(:hover, :focus-visible):not(:disabled),
+.plan-draft-heading .plan-batch-tools button:is(:hover, :focus-visible):not(:disabled) { background:var(--theme-quiet-hover); color:var(--ink); }
 
-.plan-draft-heading .plan-batch-tools button:hover:not(:disabled),
-.plan-draft-heading .plan-batch-tools button:focus-visible:not(:disabled) { color:var(--ink); }
-
-.plan-draft-list .plan-card { grid-template-columns:18px minmax(0,1fr); }
-.plan-draft-list .plan-card > .plan-dismiss { display:none; }
-.plan-draft-list .plan-card:hover,
-.plan-draft-list .plan-card:focus-within { grid-template-columns:18px minmax(0,1fr) 28px; }
-.plan-draft-list .plan-card:hover > .plan-dismiss,
-.plan-draft-list .plan-card:focus-within > .plan-dismiss { display:block; }
-@media (hover:none) {
-  .plan-draft-list .plan-card { grid-template-columns:18px minmax(0,1fr) 28px; }
-  .plan-draft-list .plan-card > .plan-dismiss { display:block; }
-}
+/* Reserve dismissal space in every pointer/focus state, including touch. */
+.plan-draft-list .plan-card { grid-template-columns:18px minmax(0,1fr) 28px; }
+.plan-draft-list .plan-card > .plan-dismiss { display:block; }
 
 .plan-card .plan-open-draft { display:flex; align-items:center; gap:10px; }
 .plan-card .plan-row-error { flex:none; margin-left:auto; padding-right:6px; color:var(--red); font-size:11px; text-align:right; white-space:nowrap; }

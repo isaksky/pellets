@@ -166,7 +166,7 @@ import { action, actions } from "./datastar-1.0.3.js";
   document.addEventListener("click", function (event) {
     var row = event.target.closest(".task-row");
     if (!row || event.defaultPrevented || event.button !== 0 ||
-        event.target.closest("a, button, input, select, textarea, summary, [contenteditable]")) return;
+        event.target.closest("a, button, input, select, textarea, label, summary, .row-menu, [contenteditable]")) return;
     if (window.getSelection && !window.getSelection().isCollapsed) return;
     var link = row.querySelector(".row-link");
     if (!link) return;

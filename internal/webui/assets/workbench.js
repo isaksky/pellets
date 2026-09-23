@@ -423,10 +423,12 @@ document.addEventListener(
       !(event.key.length === 1 && !event.ctrlKey && !event.metaKey)
     )
       return;
-    if (event.target.matches("input,textarea,select")) return;
+    // Preserve native Space/Enter activation for summaries and menu actions.
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey ||
+        event.key === " " || event.target.matches("input,textarea,select")) return;
     const choices = Array.from(
       menu.querySelectorAll("[role=menuitem],.assignment-form button,.recipient-form button"),
-    ).filter((x) => !x.disabled);
+    ).filter((x) => !x.matches(':disabled, [aria-disabled="true"]') && !x.closest("[hidden]"));
     if (!choices.length) return;
     event.preventDefault();
     menu.open = true;

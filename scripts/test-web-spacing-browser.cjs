@@ -36,6 +36,7 @@ async function openMenu(page, selector) {
   if (!baseline) execFileSync('go', ['build', '-o', binary, './cmd/pl'], {cwd: repository});
   fs.mkdirSync(fixture); execFileSync('git', ['init', '-q'], {cwd: fixture});
   for (const args of [['--help'], ['add', '--help'], ['group', '--help']]) execFileSync(binary, args, {cwd: fixture});
+  cli('init-db');
   const first = cli('add', title, '--group', group);
   cli('add', title, '--review-targets', first.id);
   cli('group', 'create', 'Empty group');
@@ -73,7 +74,9 @@ async function openMenu(page, selector) {
           main: fits('#main')};
       });
       for (const key of ['chrome','names','rows','footer','titles','main']) check(geometry[key], `${theme}/${width}: ${key} ${JSON.stringify(geometry)}`);
-      check(geometry.rowHeight === 37 && geometry.reviewHeight <= 110, 'Compact list rows: ' + JSON.stringify(geometry));
+      // The review disclosure intentionally adds 3px above and below its label.
+      // Keep the previous compact-height ceiling plus exactly that 6px inset.
+      check(geometry.rowHeight === 37 && geometry.reviewHeight <= 116, 'Compact list rows: ' + JSON.stringify(geometry));
       await screenshot(`${theme}-${width}-queue`);
       for (const selector of ['#project-switcher', '#view-switcher', '#assignment-popover', '#assignment-remaining', '.checkpoint-row .row-menu', '.pellet-row .row-menu']) {
         const menu = await openMenu(page, selector);
