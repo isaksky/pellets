@@ -231,7 +231,7 @@ import { action, actions } from "./datastar-1.0.3.js";
     return target && (target.querySelector(".select-trigger[aria-expanded=true], .row-menu[open], .switcher[open], .assignment-popover[open], .record-actions[open]") || (target.id === "project-drawer" && target.classList.contains("open")) ||
       (target.id === "workspace-groups" && target.querySelector(".assignment-form[data-dirty='true'], .recipient-form[data-dirty='true']")) ||
       (target.id === "run-dashboard" && target.querySelector("form[data-no-run-resume][data-dirty='true'], form[data-schedule-pending='true'], form[data-admission-choice='true']")) ||
-      (target.id === "project-record" && target.open));
+      (target.id === "project-record" && (target.open || target.querySelector('form[data-dirty="true"]'))));
   }
 
   async function request(ctx, targetID, kind) {
@@ -732,16 +732,6 @@ import { action, actions } from "./datastar-1.0.3.js";
       if (firstLink) firstLink.focus();
     } else {
       closeDrawer(true);
-    }
-  });
-
-  document.addEventListener("click", function (event) {
-    document.querySelectorAll(".create-popover[open]").forEach(function (popover) {
-      if (!popover.contains(event.target)) popover.open = false;
-    });
-    var projectDetails = document.getElementById("project-record");
-    if (projectDetails && projectDetails.open && !projectDetails.contains(event.target)) {
-      projectDetails.open = false;
     }
   });
 

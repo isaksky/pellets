@@ -247,7 +247,11 @@ dd { margin: 0; overflow-wrap: anywhere; font-size: .76rem; }
 .conflict-state details, .error-state details { margin: 1rem auto; max-width: 680px; }
 .conflict-state dl > div, .error-state dl > div { display: grid; grid-template-columns: 130px 1fr; text-align: left; gap: .7rem; }
 .conflict-state pre, .error-state pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.is-dirty > header::after { content: "Unsaved"; color: var(--warning); font-size: .68rem; font-weight: 700; }
+.inspector > header > :first-child { flex: 1; min-width: 0; }
+.inspector > header .header-actions { order: 1; flex-shrink: 0; }
+/* Reserve the status slot so typing never moves the title or close control. */
+.inspector > header::after { content: "Unsaved"; visibility: hidden; color: var(--warning); font-size: .68rem; font-weight: 700; }
+.inspector.is-dirty > header::after { visibility: visible; }
 
 .state-changed { animation: state-changed 850ms ease-out both; }
 @keyframes state-changed { 0% { opacity: .58; transform: translateY(-2px); background: var(--accent-soft); } 100% { opacity: 1; transform: none; } }

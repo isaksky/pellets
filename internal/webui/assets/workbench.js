@@ -304,6 +304,7 @@ let backdropPress = null;
 function onDialogBackdrop(event) {
   const dialog = event.target;
   if (!(dialog instanceof HTMLDialogElement) || !dialog.open) return false;
+  if (dialog.closest("pl-dialog")) return false; // Preview component owns its requests.
   const bounds = dialog.getBoundingClientRect();
   return (
     event.clientX < bounds.left ||
@@ -311,6 +312,9 @@ function onDialogBackdrop(event) {
     event.clientY < bounds.top ||
     event.clientY > bounds.bottom
   );
+}
+function requestDialogClose(dialog) {
+  if (dialog.dispatchEvent(new Event("cancel", {cancelable: true}))) dialog.close();
 }
 document.addEventListener("pointerdown", (event) => {
   backdropPress =
@@ -323,10 +327,19 @@ document.addEventListener("click", (event) => {
   const dismiss = backdropPress === event.target && onDialogBackdrop(event);
   backdropPress = null;
   if (dismiss) {
-    if (event.target.id === "record-dialog") closeRecord();
-    else event.target.close();
-    return;
+    // Use the same cancelable boundary as native Escape. Feature handlers own
+    // dirty guards, pending operations and nested-viewer cleanup.
+    requestDialogClose(event.target);
+    event.stopPropagation();
   }
+}, true);
+const dismissibleDetails = ".switcher,.row-menu,.assignment-popover,.record-actions,.create-popover,.project-record";
+function closeDetails(details, restoreFocus = false) {
+  const focused = details.contains(document.activeElement);
+  details.open = false;
+  if (restoreFocus || focused) details.querySelector("summary")?.focus({preventScroll: true});
+}
+document.addEventListener("click", (event) => {
   const toggle = event.target.closest("[data-toggle-panel]");
   if (toggle) {
     const key = toggle.dataset.togglePanel;
@@ -384,11 +397,9 @@ document.addEventListener("click", (event) => {
   const move = event.target.closest("[data-move-row]");
   if (move) moveRow(move.closest(".task-row,.checkpoint-row"), move.dataset.moveRow);
   document
-    .querySelectorAll(
-      ".switcher[open],.row-menu[open],.assignment-popover[open],.record-actions[open]",
-    )
+    .querySelectorAll(dismissibleDetails)
     .forEach((el) => {
-      if (!el.contains(event.target) && !(assignment && el.id === "assignment-popover")) el.open = false;
+      if (el.open && !el.contains(event.target) && !(assignment && el.id === "assignment-popover")) closeDetails(el);
     });
 });
 document.addEventListener(
@@ -397,6 +408,11 @@ document.addEventListener(
     if (event.target.id === "record-dialog") {
       event.preventDefault();
       closeRecord();
+    } else if (event.target.id === "insert-dialog") {
+      const form = event.target.querySelector("form");
+      if (form?.getAttribute("aria-busy") === "true" ||
+          (form?.dataset.dirty === "true" && !confirm("Discard unsaved checkpoint changes?")))
+        event.preventDefault();
     }
   },
   true,
@@ -407,17 +423,20 @@ let typed = "",
 document.addEventListener(
   "keydown",
   (event) => {
-    const menu = event.target.closest(
-      ".switcher,.row-menu,.assignment-popover,.record-actions",
-    );
+    let menu = event.target.closest(dismissibleDetails);
+    // Safari may leave focus outside a disclosure after pointer activation.
+    // Escape still dismisses that overlay, but never one behind a modal.
+    if (!menu && event.key === "Escape" && !document.querySelector("dialog[open]"))
+      menu = Array.from(document.querySelectorAll(dismissibleDetails)).findLast(el => el.open);
     if (!menu) return;
     if (event.key === "Escape" && menu.open) {
       event.preventDefault();
       event.stopImmediatePropagation();
-      menu.open = false;
-      menu.querySelector("summary").focus();
+      closeDetails(menu, true);
       return;
     }
+    // Editing disclosures use native field navigation, not menu type-ahead.
+    if (menu.matches(".create-popover,.project-record")) return;
     if (
       !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key) &&
       !(event.key.length === 1 && !event.ctrlKey && !event.metaKey)
@@ -484,7 +503,7 @@ function insertCheckpoint(row, direction) {
   row.querySelector(".row-menu").open = false;
   const form = document.createElement("form");
   form.id = "insert-checkpoint-form";
-  form.className = "insert-form";
+  form.className = "insert-form dirty-track";
   form.action = source.action;
   form.method = "post";
   form.setAttribute("data-on:submit", "@submit()");
@@ -496,7 +515,7 @@ function insertCheckpoint(row, direction) {
   close.type = "button";
   close.textContent = "×";
   close.setAttribute("aria-label", "Cancel insertion");
-  close.onclick = () => dialog.close();
+  close.onclick = () => requestDialogClose(dialog);
   header.append(title, close);
   const body = document.createElement("div");
   body.className = "dialog-body";
@@ -560,7 +579,7 @@ function insertCheckpoint(row, direction) {
   cancel.type = "button";
   cancel.className = "dialog-cancel";
   cancel.textContent = "Cancel";
-  cancel.onclick = () => dialog.close();
+  cancel.onclick = () => requestDialogClose(dialog);
   const submit = document.createElement("button");
   submit.type = "submit";
   submit.className = "primary-button";
@@ -579,6 +598,13 @@ function insertCheckpoint(row, direction) {
   options.addEventListener("change", sync);
   sync();
   dialog.replaceChildren(form);
+  const opener = row.querySelector(".row-menu > summary");
+  const previousFocus = document.activeElement;
+  dialog.onclose = () => {
+    const focused = document.activeElement;
+    if (opener.isConnected && (focused === document.body || focused === previousFocus || dialog.contains(focused)))
+      opener.focus({preventScroll: true});
+  };
   dialog.showModal();
   name.focus();
 }

@@ -28,6 +28,7 @@ const source = examples.map(fence).join('\n\n') + '\n\n```js\nconst ordinary = t
   execFileSync('go', ['build', '-o', binary, './cmd/pl'], {cwd: repository});
   fs.mkdirSync(fixture);
   execFileSync('git', ['init', '-q'], {cwd: fixture});
+  cli('init-db');
   const record = cli('add', 'Markdown fixture', '--description', source);
   const plain = cli('add', 'Plain fixture', '--description', 'Existing plain text.\nAnother line.');
   server = spawn(binary, ['server', '--port', '0', '--no-open'], {cwd: fixture});

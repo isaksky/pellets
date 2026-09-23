@@ -57,6 +57,19 @@ dialogs. The modal navigation drawer is a proposal; the real app keeps its
 existing responsive navigation. Preview availability is not evidence of parity
 or permission to replace an application pattern.
 
+The editing audit keeps those native production patterns. `workbench.js` shares
+cancelable backdrop requests across production dialogs, and Escape/outside-click
+handling across navigation, row, assignment, creation and Settings disclosures.
+Nested custom selectors retain priority. The preview `pl-dialog` owns its separate
+close-request API. `app.css` reserves the inspector's Unsaved slot so record,
+memory and group titles and close controls do not move when a draft becomes dirty.
+The editing browser suite checks clean/dirty geometry in both engines, five themes
+and desktop/intermediate/phone layouts; strict production parity checks retain
+their existing assertions without new exceptions. Feature-owned memory conflicts,
+checkpoint insertion guards and pending new-chat locks are covered by
+`scripts/test-web-editing-browser.cjs` (`PELLETS_EDITING_CASE=headers` runs the
+header matrix; `details` runs the focused dialog journeys).
+
 ## Native semantics and app styling
 
 Controls should feel like part of the app while retaining dependable native form

@@ -382,6 +382,10 @@ function render() {
   for (const field of panel.querySelectorAll('input,textarea,select')) {
     if (!field.closest('.markdown-body')) field.disabled = !!activeOperation?.replace;
   }
+  // Live renders must retain the confirmation's pending-operation lock.
+  newDialog.querySelectorAll('button,input').forEach(control => {
+    control.disabled = savingNewChatPreference || !!flight;
+  });
   panel.querySelector('#plan-workspace').disabled = !!chat?.state.workspace_id || !!flight;
   composer.elements.model.disabled = !!activeOperation?.replace;
   composer.elements.effort.disabled = !!activeOperation?.replace;
@@ -577,6 +581,7 @@ document.addEventListener('click', async event => {
   if(action==='models') {loadModels();return;}
   if(action==='new'){if(!skipNewChatConfirmation&&(state.messages.length||state.drafts.length||state.input)){panel.querySelector('#plan-skip-new-confirmation').checked=false;panel.querySelector('.plan-new-error').hidden=true;confirming=true;render();}else fresh();return;}
   if(action==='confirm-new'){
+    if(savingNewChatPreference)return;
     const dialog=panel.querySelector('#plan-new-dialog'),error=dialog.querySelector('.plan-new-error');
     savingNewChatPreference=true;
     dialog.querySelectorAll('button,input').forEach(control=>control.disabled=true);

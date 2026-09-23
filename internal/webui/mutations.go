@@ -484,6 +484,9 @@ func (h *handler) renderMutationError(response http.ResponseWriter, err error, d
 			data.CloseURL = "/projects/" + url.PathEscape(conflict.Memory.ProjectCode) + "/memories"
 			data.Conflict.Kind = "memory"
 			data.Conflict.Current = fmt.Sprintf("Memory %d · updated %s", conflict.Memory.ID, formatTime(conflict.Memory.UpdatedAt))
+			if _, editing := draft["text"]; editing {
+				data.Conflict.CurrentFields = map[string]string{"text": conflict.Memory.Text}
+			}
 		}
 		h.render(response, http.StatusConflict, "conflict", data)
 		return

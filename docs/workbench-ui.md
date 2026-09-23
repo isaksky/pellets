@@ -38,6 +38,24 @@ operations and memory approval; queue and scope controls stay beside their field
 lifecycle operations, recovery, provenance, and explicit human memory approval.
 An owned pellet and a running process remain distinct.
 
+Record headers reserve the Unsaved indicator's space in both clean and edited
+states, keeping the title and close control in place. Memory edit conflicts retain
+the submitted text in the editor, show the current saved text for comparison, and
+keep the discard guard until an explicit save or discard.
+
+Creation and Settings disclosures close on Escape or an outside click without
+saving or clearing their fields. Escape returns focus to the summary; nested
+selectors consume the first Escape. Closed, unsaved Settings fields retain their
+original version through live refreshes. These are collapsible drafts, unlike a
+record dialog's explicit discard. Checkpoint insertion asks before discarding
+edited title/scope, rejects dismissal while submitting, and returns focus to its
+row menu without overriding a later focus choice.
+
+Native dialog backdrop gestures must start and end outside the dialog and use
+the same cancelable boundary as Escape. Feature handlers retain ownership of
+dirty guards, pending-operation locks and focus restoration. A diagram backdrop
+closes only the viewer and returns to its source, preserving parent edits.
+
 Ordinary queue background clicks open the record; links, checkbox labels, and
 the entire actions menu remain independent. Row menus stay visible without
 hover and retain native Space/Enter activation. Keyboard title focus highlights
@@ -726,6 +744,9 @@ Starting a new chat confirms replacement in a centered dialog with quiet Cancel
 and primary Start new chat actions. “Don’t ask me again”
 is saved as the database-wide boolean setting `skip_new_chat_confirmation` when
 Start new chat is confirmed; Cancel and Escape do not save the checkbox choice.
+While that save is pending, live updates keep the controls disabled and both
+Escape and backdrop dismissal are blocked. A failure leaves the dialog available
+for an explicit retry or cancellation.
 
 Both sidebar edges can be dragged to resize on desktop. Arrow keys adjust the
 focused divider; Shift uses larger steps, Home/End use the bounds, and double-click
