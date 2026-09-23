@@ -98,12 +98,56 @@ Choose checks based on the change:
   failures invalidate them.
 
 Inspect screenshots of affected app screens as well as automated assertions.
-Use disposable fixtures for mutation tests. Check that controls remain visible
+Use disposable fixtures for mutation tests. Create a fresh independent Git
+repository in an OS temporary directory and run `pl --json init-db` there before
+the first project command or server. Check reusable fixtures’ Git database binding
+resolves to their own database before use. A nested repository or linked worktree
+can discover the real shared database; a new directory alone is not isolation.
+Keep screenshot artifacts separate from fixture databases. Fix fixture setup
+problems and continue testing without asking again for already-authorized work.
+Creating legitimate follow-up pellets for distinct out-of-scope findings is
+allowed; complete in-scope work in the current pellet. Check that controls remain visible
 and reachable when panes narrow or scroll. Do not weaken assertions or add broad
 parity exceptions to hide regressions; expected differences need a specific
 reason and evidence. Report what was verified and any remaining limits. Existing
 palette contrast issues are documented and do not justify new accessibility
 regressions or a claim of full accessibility conformance.
+
+### Focused before-and-after evidence
+
+For UI audit/fix pellets, save review evidence under
+`artifacts/ui-review/<pellet-id>/<attempt>/` in the executing checkout. This
+directory is gitignored. Use a unique attempt name (such as a UTC timestamp) and
+retain earlier attempts. Keep the files after testing and finalization.
+
+- Before editing, capture the affected production control or region with enough
+  surrounding context to judge alignment and placement. After the fix, capture
+  the same scenario. Use at least one pair per pellet and additional pairs for
+  distinct fixes or materially different states; full-page screenshots alone do
+  not satisfy this requirement.
+- Store each pair as `<case>/before.png` and `<case>/after.png`. Match the browser
+  engine, theme, viewport, device scale, fixture data, scroll position, interaction
+  state, and crop. Include overlays and nearby controls when they are relevant.
+  For intentional geometry changes, use the same enclosing region so the changed
+  dimensions remain visible. Wait for deterministic state rather than capturing
+  incidental loading or animation frames.
+- Use real browser captures and disposable data. If changes already started,
+  reproduce the original revision in an isolated fixture to obtain the baseline;
+  do not reset the working checkout, alter images to simulate a baseline, or label
+  an after image as before. Report a baseline that cannot be reproduced.
+- Add an attempt-local `README.md` with a table linking each image pair, a short
+  explanation of the defect and change, reproduction steps, browser/theme/viewport/
+  scale/state/crop details, and source revisions (including uncommitted changes).
+  If no defect remains, capture the unchanged audited scenario before and after
+  verification and clearly record that no change was needed.
+- Check that both images exist and are readable. Include absolute links to the
+  evidence directory or index and representative pairs in the completion report.
+  Preserve or copy selected test artifacts here before temporary fixtures are
+  removed. When using another worktree, report its actual artifact path.
+
+These focused pairs are review aids, not a replacement for the required browser,
+theme, layout, accessibility, or interaction checks. For behavior or timing fixes,
+include the relevant assertions or measurements alongside the images.
 
 ## Keep the reference current
 
