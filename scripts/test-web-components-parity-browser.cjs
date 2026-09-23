@@ -90,6 +90,32 @@ async function measure(page, scene, build) {
     assert.ok(row.width>0&&row.height>0&&row.fits,scene+': preference row must fit');
   }
   await page.evaluate(()=>{for(const el of document.querySelectorAll('[data-execution-preferences]')){el.dataset.parityDisplay=el.style.display;el.style.display='none';}});
+  // Screenshots above retain the delivered spacing. The dedicated spacing suite
+  // checks long labels, six widths, hit targets and expanded menus. For parity
+  // of preexisting controls, reverse only the two shared spacing changes here:
+  // 6px inline-select insets and viewport-positioned details menu surfaces.
+  if (build === 'after') await page.evaluate(() => {
+    window.spacingProbe = [];
+    const change = (el, properties) => {
+      window.spacingProbe.push([el, el.style.cssText]);
+      for (const [key, value] of Object.entries(properties)) el.style.setProperty(key, value, 'important');
+    };
+    for (const el of document.querySelectorAll('.select-trigger')) {
+      if (el.closest('.filters,.assignment-form,.run-controls,.theme-control,.plan-composer-settings,.plan-composer-tools,.record-actions-panel')) continue;
+      if (getComputedStyle(el).paddingLeft !== '6px' || getComputedStyle(el).paddingRight !== '6px')
+        throw Error('Unexpected inline selector inset: ' + el.outerHTML + ' / ' + getComputedStyle(el).padding);
+      change(el, {'padding-left': '0px', 'padding-right': '0px'});
+    }
+    for (const el of document.querySelectorAll('.switcher-menu,.row-popover,.assignment-form,.recipient-form')) {
+      if (getComputedStyle(el).position !== 'fixed') throw Error('Details menu must escape scroll clipping');
+      change(el, {position: 'absolute', inset: 'auto', top: 'calc(100% + 8px)', left: '0px',
+        width: el.matches('.assignment-form,.recipient-form') ? '275px' : 'auto',
+        'min-width': '220px', 'max-width': 'min(360px, 90vw)', 'max-height': '65vh'});
+      if (el.matches('.row-popover')) { el.style.setProperty('left','auto','important'); el.style.setProperty('right','0px','important'); el.style.setProperty('min-width','205px','important'); }
+      if (innerWidth <= 600 && el.matches('.assignment-form')) { el.style.setProperty('left','auto','important'); el.style.setProperty('right','0px','important'); }
+      if (innerWidth <= 600 && el.matches('.switcher-menu')) { el.style.setProperty('min-width','190px','important'); el.style.setProperty('max-width','70vw','important'); }
+    }
+  });
   results[build][scene] = await page.evaluate(() => {
     const closed = Array.from(document.querySelectorAll('details:not([open])'));
     const selectors = 'button, input:not([type=hidden]):not(.select-native), textarea, select:not(.select-native), label, summary, dialog[open], .task-row, .checkpoint-row, .memory-card, .section-heading, #main, #right-panel, #project-drawer, .plan-tabs, .create-popover[open] > form, .filter-fields:popover-open, .select-popover, .select-value, .select-chevron, .inspector > header, .dialog-footer';
@@ -109,6 +135,7 @@ async function measure(page, scene, build) {
         };
       });
   });
+  if (build === 'after') await page.evaluate(() => { for (const [el, style] of window.spacingProbe) el.style.cssText = style; delete window.spacingProbe; });
   await page.evaluate(()=>{for(const el of document.querySelectorAll('[data-execution-preferences]')){el.style.display=el.dataset.parityDisplay;delete el.dataset.parityDisplay;}});
 }
 

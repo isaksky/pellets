@@ -4,9 +4,9 @@ Adoption is deliberately incremental. Five form primitives are used in productio
 where they closely match the existing UI. Eight composite components remain
 preview candidates in the development gallery; they are not used in the app.
 
-The existing `app.css`, `workbench.css`, and `planner.css` retain their original
-rules and load order, with one targeted creation-form width guard in
-`workbench.css`. `components.css` adds wrapper behavior and opt-in preview styles,
+The existing `app.css`, `workbench.css`, and `planner.css` retain their load
+order. `workbench.css` owns the production spacing, including narrow creation
+forms, compact review titles, navigation truncation, and inline selector insets. `components.css` adds wrapper behavior and opt-in preview styles,
 plus the native-select spacing correction documented below; it does not restyle
 native buttons, text fields, or application dialogs.
 
@@ -22,12 +22,12 @@ native buttons, text fields, or application dialogs.
 | Creation forms in narrow content panes | Original disclosure and form, constrained to the heading's content width | Fixes an existing overflow when two sidebars leave less than 420px for the queue. The trigger remains right-aligned when the heading wraps. Full-width forms retain their original geometry. |
 | Record, checkpoint and planning dialogs | Original native dialogs and handlers | Generic dialog adoption is deferred. Preserve each existing size, padding, radius, backdrop, dirty guard, navigation and focus behavior. Pellet descriptions and group context use the feature-owned View / Preview and Edit controls described in [Workbench](workbench-ui.md#description-reading-and-editing); the native textarea remains authoritative. |
 | Quiet action links | Shared `.quiet-button` styling | Inline flex centers link and button labels vertically and horizontally; 12px text matches neighboring actions. Existing filter-specific size overrides remain. |
-| Menus, disclosures and filters | Original implementations | Generic outside-click/keyboard behavior is deferred; filters retain nested top-layer handling and assignments retain their specific interactions. |
+| Menus, disclosures and filters | Original implementations | Generic composite adoption is deferred. Native navigation, row-action and assignment disclosures use `details-menu-layout.js` for viewport-bounded placement outside scrolling panes; their original dismissal, keyboard, form and draft handlers remain. Filters retain their separate nested top-layer handling. |
 | Mermaid descriptions | Feature-owned `pl-diagram` and native diagram viewer in the shared Markdown renderer | Local strict SVG rendering with source alternatives and a viewport-sized zoom/pan modal. The viewer remaps SVG IDs/styles and preserves native nested-dialog focus and source ownership. See [Mermaid authoring and activation API](workbench-ui.md#mermaid-diagrams). The gallery includes production examples and errors. |
 | Description contents | Feature-owned `pl-description-reader` in pellet and group dialogs | A document-local hierarchical navigation rail, with a collapsible list below 960px. It owns heading anchors and resize/listener cleanup; source fields still own edits. The dialog widens by the rail's width to preserve reading space. The gallery has a page-local outline fixture. See [description reading and editing](workbench-ui.md#description-reading-and-editing) for visibility and navigation rules. |
 | Planning tabs and sidebar resizing | Original implementations | Keep routing, draft preservation, narrow-screen behavior, geometry and saved preferences. |
 | Badges, notices and icons | Original native markup | Additional wrappers add no needed behavior here and can change child selectors or layout. |
-| Review queue rows | Feature-owned native row, `details` scope disclosure and existing `.row-menu` | Replaces 42px, 11px-title dividers and bracket gutters with readable 13px titles and 12px statuses/target counts. Title/editor navigation is separate from scope expansion. Complete explicit scope and generation-bound outcomes share a bounded scroll region; no layout nesting or inferred contiguous range. Counts include reviews in the project’s active total and label the filtered composition. Native controls retain feature-specific refresh, focus, selection, draft, removal/Undo and history behavior. Generic disclosure/menu adoption remains deferred. The gallery uses the production row with local-only fixture actions. |
+| Review queue rows | Feature-owned native row, `details` scope disclosure and existing `.row-menu` | Replaces 42px, 11px-title dividers and bracket gutters with readable 13px titles and 12px statuses/target counts. Single-line titles truncate with full text in the title attribute and record editor; expanded evidence still wraps. Title/editor navigation is separate from scope expansion. Complete explicit scope and generation-bound outcomes share a bounded scroll region; no layout nesting or inferred contiguous range. Counts include reviews in the project’s active total and label the filtered composition. Native controls retain feature-specific refresh, focus, selection, draft, removal/Undo and history behavior. Generic disclosure/menu adoption remains deferred. The gallery uses the production row with local-only fixture actions. |
 | Current execution | Feature-owned native status summary, message articles and tool/group disclosures | The authoritative state label, working indicator, phase and two-line operation preview remain. Commentary is expanded 14px prose using the shared safe Markdown renderer. Adjacent compatible tools share a native details/summary with operation/path counts, reported outcomes and a current/latest preview; original child disclosures remain available. Tool rows use two-line command/path previews, visible reported exits and failure impact, and complete safe paths in their expanded evidence. Groups retain the last failure alongside the current/latest operation. Grouping is feature-owned, not adoption of the preview composite. Run details collects secondary workspace/schedule/runtime information; the feed explanation has a native disclosure while history/connection warnings remain visible. The composer scrolls on phones and in windows at most 600px tall; in short windows the state summary also scrolls to leave room for content. Only the state label is a live region. See [Live execution](workbench-ui.md#live-execution) and [grouping semantics](execution-activity.md). |
 
 The Groups addition deliberately adds one 35px row and its 2px gap to desktop project navigation
@@ -70,6 +70,10 @@ visible focus indicator and a usable forced-colors treatment.
 | Numeric stepper: `pl-number.number-control` | The `input[type="number"]` owns the value, `min`, `max`, `step`, validation, keyboard editing, and form submission. | The shared `.number-control` styles suppress browser spinner decoration and provide themed decrease/increase buttons, borders, icons, and focus treatment. Buttons use `type="button"` and `data-number-step="down\|up"`, have accessible names, and call the input's native `stepDown()`/`stepUp()`. A changed value emits one input/change event pair. Disabled and read-only inputs cannot be stepped. |
 | Custom dropdown: `pl-select` | The child `select` owns options, selected value, required/disabled state, reset, and submitted data. | The existing controller renders the themed trigger and listbox, including its chevron, option spacing, selection mark, and popup surface. Reuse its labeling, keyboard/typeahead, focus, validation, and dismissal behavior; do not hand-build another trigger/listbox around the same field. |
 | Styled native dropdown: `pl-select native` | The actual select stays visible and opens the browser's picker with its native interaction. | For single selects without `size`, scoped `appearance: none` replaces the closed control's browser arrow with the shared decorative chevron. Text and chevron have matching 12px visible insets; extra end padding reserves room for the icon. The icon does not intercept clicks. Forced colors restore the browser arrow. The open picker remains platform-native. |
+
+Inline custom-select triggers have 6px horizontal insets so their hover
+background does not touch text or carets. Filter and assignment fields, execution
+forms, theme controls, and the planning composer retain their explicit sizing.
 
 Use these choices deliberately:
 
@@ -271,6 +275,22 @@ selects a specific WebKit build. Use `NODE_PATH` when Playwright is outside the
 repository. `web-components-contract.cjs` adds regressions for disabled/busy
 states, fieldset disabling, dynamic options, labels, required fields, keyboard
 menus and preview APIs to the gallery suite.
+
+### Spacing regression coverage
+
+`test-web-spacing-browser.cjs` exercises production navigation, queue/review rows,
+assignment/recipient and row-action menus, planner controls, settings, records,
+group cards, and empty results. It uses long names and titles across five themes
+and six widths (1280, 1092, 800, 678, 601 and 390px), with keyboard, hit-testing,
+checkbox sizing and draft checks. Run it in Chromium and WebKit. Planning, groups,
+review-row and Workbench suites retain their deeper workflow assertions.
+
+The parity suite captures real before/after screens, then temporarily reverses
+only the 6px inline selector inset and fixed disclosure-menu placement when
+comparing preexisting controls. The spacing suite checks the delivered geometry;
+all other styles and positions still compare, with the previously documented
+review-height displacement and preference-row accounting. Focused persistent
+pairs follow [UI evidence guidance](ui-agent-guidance.md#focused-before-and-after-evidence).
 
 ### Completed audit
 

@@ -53,6 +53,23 @@ At phone widths, navigation becomes compact horizontal rows and the shared right
 panel opens over the available content area. Both stay independently collapsible. The status bar remains
 pinned, and the breadcrumb continues to navigate when the left sidebar is hidden.
 
+### Spacing in narrow panes
+
+Workspace navigation and breadcrumb labels truncate within their controls; full
+names remain in their native titles and navigation menus. The status bar keeps
+its labels on one line. Queue titles and collapsed review titles also stay on
+one line with ellipsis and expose the full title on hover and in the record
+editor. Expanded scope evidence, headings, descriptions and group cards continue
+to wrap. Ordinary queue rows remain 37px high; review rows retain a separate
+status and scope disclosure, reserving actions-menu space only in their heading.
+
+Navigation, row-action, assignment and recipient menus keep their native details
+and form ancestry. Shared viewport placement bounds their surfaces and scrolling
+height, flips them above their trigger when needed, and repositions on viewport
+or pane scroll and assignment mode changes. This prevents pane edges from hiding
+controls. Assignment labels wrap without shrinking checkboxes. Filters keep their
+existing top-layer layout and native-select/keyboard behavior is unchanged.
+
 ### Group details and shared context
 
 Each group card is one native link, including its metadata and padding. Hover

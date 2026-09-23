@@ -105,6 +105,37 @@ reason and evidence. Report what was verified and any remaining limits. Existing
 palette contrast issues are documented and do not justify new accessibility
 regressions or a claim of full accessibility conformance.
 
+## Focused before-and-after evidence
+
+For browser UI changes, save persistent review evidence under
+`artifacts/ui-review/<pellet-or-task>/<attempt>/` in the executing checkout.
+Use a unique attempt directory (for example a UTC timestamp), retain earlier
+attempts, and keep the evidence after temporary fixtures and finalization are
+finished. This tree is gitignored; do not commit its screenshots or test data.
+
+Capture the actual production control or region before the change and the same
+scenario afterward as `<case>/before.png` and `<case>/after.png`. Include enough
+surrounding UI to assess placement, spacing, and overlays. Full-page captures
+alone are insufficient. Supply at least one pair and additional pairs for distinct
+fixes or materially different states. Match engine, theme, viewport, device scale,
+fixture data, scroll position, interaction state, and crop; use the same enclosing
+region for intentional layout changes. Wait for reproducible states instead of
+capturing incidental animation or loading frames. Mutations use disposable data.
+
+If implementation has already begun, reproduce the original revision in an
+isolated fixture. Never reset the executing checkout or fabricate a baseline by
+editing images or labeling an after image as before. Explicitly document an
+unreproducible baseline. For an already-correct surface, capture an unchanged
+pair and explain the result.
+
+Add an attempt-local `README.md` linking every pair and describing the defect,
+reproduction steps, engine/theme/viewport/scale/state/crop, and source revisions
+(including uncommitted changes). Verify both files are readable and preserve
+selected test output in the attempt directory before fixture cleanup. Report
+absolute links to the index and representative pairs using the actual checkout
+path. Behavioral or performance claims also require assertions or timings;
+screenshots supplement the required browser and application checks.
+
 ## Keep the reference current
 
 Update the component APIs, adoption/deviation notes, and gallery examples when

@@ -415,6 +415,7 @@ textarea::placeholder {
   color: var(--dim);
 }
 input[type="checkbox"] {
+  flex-shrink: 0;
   width: 13px;
   height: 13px;
   accent-color: var(--accent);
@@ -451,6 +452,7 @@ input[type="checkbox"] {
   color: var(--dim);
 }
 .chrome-end {
+  flex: none;
   margin-left: auto;
   padding-left: 10px;
 }
@@ -470,7 +472,14 @@ input[type="checkbox"] {
 .row-menu summary::-webkit-details-marker {
   display: none;
 }
-.switcher summary span {
+.switcher summary .switcher-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font: inherit;
+  color: inherit;
+}
+.switcher summary span:not(.switcher-label) {
   font-size: 11px;
   color: var(--dim);
 }
@@ -478,10 +487,12 @@ input[type="checkbox"] {
 .row-popover,
 .assignment-form,
 .recipient-form {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  min-width: 220px;
+  /* Fixed to the viewport so scrolling panes cannot clip these menus. */
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  height: auto;
+  min-width: min(220px, calc(100vw - 16px));
   max-width: min(360px, 90vw);
   max-height: 65vh;
   overflow: auto;
@@ -492,6 +503,7 @@ input[type="checkbox"] {
   padding: 5px;
   z-index: 100;
 }
+.switcher-menu, .row-popover { width: max-content; }
 .switcher-menu a {
   display: flex;
   flex-direction: column;
@@ -509,6 +521,7 @@ input[type="checkbox"] {
   overflow-wrap: anywhere;
 }
 .switcher-menu strong {
+  overflow-wrap: anywhere;
   font-weight: 500;
 }
 .app-shell.with-projects,
@@ -575,6 +588,13 @@ input[type="checkbox"] {
   color: var(--dim);
   font-size: 10px;
 }
+.workspace-link .workspace-name {
+  font: inherit;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workspace-dot, .workspace-attention, .workspace-link small { flex-shrink: 0; }
 .workspace-nav-heading {
   display: flex;
   align-items: center;
@@ -639,6 +659,10 @@ input[type="checkbox"] {
 }
 .statusbar .grow {
   flex: 1;
+}
+.statusbar .database-state, .footer-counts, .statusbar .theme-control {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .statusbar .database-state {
   margin-left: 8px;
@@ -982,7 +1006,7 @@ input[type="checkbox"] {
 .row-popover {
   left: auto;
   right: 0;
-  min-width: 205px;
+  min-width: min(205px, calc(100vw - 16px));
   display: grid;
 }
 .row-popover button,
@@ -1002,11 +1026,12 @@ input[type="checkbox"] {
 }
 .checkpoint-row {
   position: relative;
-  padding: 12px 38px 12px 10px;
+  padding: 12px 10px;
   border-bottom: 1px solid var(--line);
   min-width: 0;
 }
 .checkpoint-heading {
+  padding-right: 28px;
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -1018,7 +1043,9 @@ input[type="checkbox"] {
   font-size: 13px;
   font-weight: 500;
   color: var(--text);
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .review-status { font-size: 12px; color: var(--muted); }
 .review-disclosure { margin-top: 5px; }
@@ -1056,6 +1083,7 @@ input[type="checkbox"] {
 .scope-highlight { background: var(--theme-chip-selected) !important; }
 .checkpoint-row.selected { background: var(--theme-chip-selected); }
 .workspace-path {
+  overflow-wrap: anywhere;
   font-family: ui-monospace, monospace;
   font-size: 10px;
   color: var(--dim);
@@ -1096,6 +1124,7 @@ input[type="checkbox"] {
 .assignment-form,
 .recipient-form {
   width: 275px;
+  overflow-wrap: anywhere;
   padding: 14px;
   display: grid;
   gap: 12px;
@@ -2117,6 +2146,7 @@ dialog::backdrop {
     padding-right: 28px;
   }
   .workspace-link {
+    max-width: 100%;
     min-height: 26px;
     padding: 4px 8px;
     font-size: 11px;
@@ -2353,7 +2383,7 @@ dialog::backdrop {
   max-width: 100%;
   background: transparent;
   border: 0;
-  padding: 4px 0;
+  padding: 4px 6px;
   min-height: 23px;
   font-size: 11px;
   color: var(--muted);

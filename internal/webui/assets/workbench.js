@@ -1,3 +1,4 @@
+import { positionMenus } from "./details-menu-layout.js";
 import { highlightCode } from "./code-highlight.js";
 import { renderMarkdown } from "./markdown.js";
 import { activityRows, activityGroupSummary } from "./activity-groups.js";
@@ -277,7 +278,7 @@ function initialize() {
   connectActivity();
   assignmentMode();
   syncQueueFilters();
-  positionRecipients();
+  positionMenus();
   if (restoredReviewFocus) {
     // Keep focus on the restored row once its authoritative patch arrives.
     // A filtered-out row leaves focus on Search; never steal a later user focus.
@@ -289,18 +290,6 @@ function initialize() {
   }
 }
 
-function positionRecipients() {
-  document.querySelectorAll(".category-popover[open]").forEach(menu => {
-    const form = menu.querySelector(".recipient-form");
-    const anchor = menu.getBoundingClientRect();
-    const width = form.getBoundingClientRect().width;
-    form.style.left = Math.max(8 - anchor.left, Math.min(0, innerWidth - width - 8 - anchor.left)) + "px";
-  });
-}
-document.addEventListener("toggle", event => {
-  if (event.target.matches(".category-popover")) positionRecipients();
-}, true);
-window.addEventListener("resize", positionRecipients);
 window.Workbench = {
   applyTheme,
   initialize,
@@ -1056,6 +1045,7 @@ function assignmentMode() {
   if (!form) return;
   const groups = form.querySelector(".explicit-groups");
   if (groups) groups.hidden = form.elements.mode.value !== "explicit";
+  positionMenus();
 }
 document.addEventListener("change", (e) => {
   if (e.target.matches('.assignment-form [name="mode"]')) assignmentMode();
