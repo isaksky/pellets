@@ -115,16 +115,17 @@ regressions or a claim of full accessibility conformance.
 
 ### Focused before-and-after evidence
 
-For UI audit/fix pellets, save review evidence under
-`artifacts/ui-review/<pellet-id>/<attempt>/` in the executing checkout. This
-directory is gitignored. Use a unique attempt name (such as a UTC timestamp) and
-retain earlier attempts. Keep the files after testing and finalization.
+For browser UI changes, including UI audit/fix pellets, save persistent review
+evidence under `artifacts/ui-review/<pellet-or-task>/<attempt>/` in the executing
+checkout. This directory is gitignored; do not commit its screenshots or test
+data. Use a unique attempt name (such as a UTC timestamp) and retain earlier
+attempts. Keep the files after temporary fixture cleanup and finalization.
 
 - Before editing, capture the affected production control or region with enough
   surrounding context to judge alignment and placement. After the fix, capture
-  the same scenario. Use at least one pair per pellet and additional pairs for
-  distinct fixes or materially different states; full-page screenshots alone do
-  not satisfy this requirement.
+  the same scenario. Use at least one pair per pellet or task and additional pairs
+  for distinct fixes or materially different states; full-page screenshots alone
+  do not satisfy this requirement.
 - Store each pair as `<case>/before.png` and `<case>/after.png`. Match the browser
   engine, theme, viewport, device scale, fixture data, scroll position, interaction
   state, and crop. Include overlays and nearby controls when they are relevant.
@@ -142,8 +143,9 @@ retain earlier attempts. Keep the files after testing and finalization.
   verification and clearly record that no change was needed.
 - Check that both images exist and are readable. Include absolute links to the
   evidence directory or index and representative pairs in the completion report.
-  Preserve or copy selected test artifacts here before temporary fixtures are
-  removed. When using another worktree, report its actual artifact path.
+  Preserve or copy selected test artifacts and output here before temporary
+  fixtures are removed. When using another worktree, report its actual artifact
+  path.
 
 These focused pairs are review aids, not a replacement for the required browser,
 theme, layout, accessibility, or interaction checks. For behavior or timing fixes,

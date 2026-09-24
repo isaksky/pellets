@@ -11,6 +11,7 @@ const root = document.documentElement;
 const pendingKey = 'pellets-planner-pending';
 let panel, data = null, state = emptyState(), chat = null, load = null;
 let flight = null, timer, dirty = false, conflict = false, failed = null;
+let loadError = '';
 let splitting = null, confirming = false, feedback = '';
 let savingNewChatPreference = false;
 let skipNewChatConfirmation = JSON.parse(document.documentElement.dataset.settings || '{}').skip_new_chat_confirmation === 'true';
@@ -113,8 +114,9 @@ function accept(value) {
   useOnlyWorkspace();
   pin();
 }
-async function ensureLoaded() {
-  if (data || load || !projectCode()) return load;
+async function ensureLoaded(retry = false) {
+  if (data || load || (loadError && !retry) || !projectCode()) return load;
+  loadError = '';
   const code = projectCode(), suffix = pinned?.project === code && pinned.chat ? '?chat=' + encodeURIComponent(pinned.chat) : '';
   load = (async () => {
     try {
@@ -136,9 +138,11 @@ async function ensureLoaded() {
       applyPresentation();
       if(!dirty&&!failed)clearPending();
       if (dirty&&!failed) markDirty();
-    } catch (error) { feedback = error.message; render(); }
-    finally { load = null; }
+    } catch (error) {
+      loadError = error.status ? error.message : 'Could not load planning. Check your connection and retry. Your edits stay here.';
+    } finally { load = null; render(); }
   })();
+  render();
   return load;
 }
 function mergeEdits(server, before, current) {
@@ -151,7 +155,7 @@ function mergeEdits(server, before, current) {
   for (const draft of result.drafts) {
     const a = original.get(draft.id), b = local.get(draft.id);
     if (!a || !b || created(draft)) continue;
-    for (const name of ['title','description','acceptance','group','reason','selected'])
+    for (const name of ['title','description','acceptance','group','reason','selected','model','reasoning_effort'])
       if (JSON.stringify(a[name]) !== JSON.stringify(b[name])) draft[name] = b[name];
   }
   for (const draft of current.drafts)
@@ -224,7 +228,7 @@ function routes(group) {
 }
 function scaffold() {
   if (panel.querySelector('#plan-content')) return;
-  panel.innerHTML = `<dialog id="plan-new-dialog" aria-labelledby="plan-new-heading" aria-describedby="plan-new-description"><h2 id="plan-new-heading">Start a new chat?</h2><p id="plan-new-description"></p><label class="plan-confirm-preference"><input type="checkbox" id="plan-skip-new-confirmation"> Don’t ask me again</label><p class="plan-new-error" role="alert" hidden></p><div class="plan-new-actions"><button type="button" data-plan="cancel-new" autofocus>Cancel</button><button type="button" class="primary-button" data-plan="confirm-new">Start new chat</button></div></dialog><div id="plan-content"><div class="plan-context"><div data-plan-new><button type="button" class="quiet" data-plan="new">New chat</button></div></div>
+  panel.innerHTML = `<dialog id="plan-new-dialog" aria-labelledby="plan-new-heading" aria-describedby="plan-new-description"><h2 id="plan-new-heading">Start a new chat?</h2><p id="plan-new-description"></p><label class="plan-confirm-preference"><input type="checkbox" id="plan-skip-new-confirmation"> Don’t ask me again</label><p class="plan-new-error" role="alert" hidden></p><div class="plan-new-actions"><button type="button" class="dialog-cancel" data-plan="cancel-new" autofocus>Cancel</button><button type="button" class="primary-button" data-plan="confirm-new">Start new chat</button></div></dialog><div id="plan-content"><div class="plan-context"><div data-plan-new><button type="button" class="quiet" data-plan="new">New chat</button></div></div>
     <div class="plan-transcript" aria-live="polite"><div class="plan-messages"></div><div class="plan-receipts" role="group" aria-label="Created pellets"></div><div class="plan-pending" hidden></div><div class="plan-chat-status"><div class="plan-status" role="status" aria-live="polite" aria-atomic="true" hidden></div></div></div><section class="plan-drafts" aria-label="Proposed pellets"><div class="plan-draft-heading"><button type="button" class="plan-tray-toggle" data-plan="toggle-tray" aria-expanded="true" aria-controls="plan-proposal-list"><svg class="plan-tray-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg><span class="plan-total">0</span> <span data-proposal-label>proposed pellets</span></button><div class="plan-batch-tools" role="group" aria-label="Proposal actions"><button type="button" data-plan="select-all" aria-label="Select all" title="Select all"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="2"/><path d="m5 8 2 2 4-4"/></svg></button><button type="button" data-plan="combine" aria-label="Combine selected" title="Combine selected"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3v2c0 2 5 2 5 4v4M13 3v2c0 2-5 2-5 4m-3 1 3 3 3-3"/></svg></button><button type="button" data-plan="add-draft" aria-label="Add draft" title="Add draft"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg></button></div></div><div class="plan-draft-list" id="plan-proposal-list"></div><div class="plan-create-row"><button type="button" data-plan="dismiss-all">Dismiss all</button><button type="button" class="primary-button" data-plan="create">Create pellets</button></div></section>
     <datalist id="plan-groups"></datalist><div class="plan-bottom"><form id="plan-form" method="post"><input type="hidden" name="version"><div class="plan-refining" hidden></div><div class="plan-composer-settings"><div class="plan-folder"><label class="plan-workspace-label"><pl-select><select data-value-prefix="Folder: " id="plan-workspace" aria-label="Working folder" aria-describedby="plan-folder-error plan-folder-path"></select></pl-select></label><span class="plan-folder-context"></span><p id="plan-folder-error" class="plan-folder-error" role="alert" hidden></p></div><label class="plan-access"><pl-select><select data-value-prefix="Approval: " id="plan-access" name="access_mode" aria-label="Planning access"><option value="automatic">Automatic</option><option value="full">None (full access)</option></select></pl-select></label></div><span id="plan-folder-path" class="plan-path visually-hidden"></span><label class="visually-hidden" for="plan-message">Message planner</label><textarea id="plan-message" name="input" rows="2" placeholder="What should we plan?" maxlength="65536"></textarea><div class="plan-composer-tools"><pl-select><select data-live-options data-menu-action="Refresh models" id="plan-model" name="model" aria-label="Planning model"></select></pl-select><span class="plan-tool-divider"></span><pl-select><select data-live-options data-menu-action="Refresh models" id="plan-effort" name="effort" aria-label="Reasoning effort"></select></pl-select><button type="submit" class="plan-send" aria-label="Send message">↑</button></div></form><button type="button" class="plan-select-models" data-plan="models">Choose a model…</button></div></div>`;
   const dialog=panel.querySelector('#plan-new-dialog');
@@ -248,7 +252,7 @@ function draftNode(draft) {
     node.innerHTML = `<a href="/projects/${encodeURIComponent(projectCode())}/tasks/${encodeURIComponent(reference)}" data-plan-reference><span class="plan-row-check" aria-label="Created">Created</span><span class="plan-row-ref">${esc(reference)}</span><span class="plan-row-title"></span><span class="plan-row-group"></span><span aria-hidden="true">↗</span></a>`;
   } else {
     const id = 'plan-draft-' + draft.id;
-    node.innerHTML = `<input class="plan-row-select" type="checkbox" name="selected" form="${esc(id)}" data-field="selected"><button type="button" class="plan-open-draft" data-plan="edit-draft" aria-haspopup="dialog"><span class="plan-row-title"></span><span class="plan-row-group"></span><span class="plan-row-error" hidden></span></button><dialog class="plan-draft-dialog" id="plan-details-${esc(draft.id)}" aria-labelledby="plan-editor-heading-${esc(draft.id)}"><header><h2 id="plan-editor-heading-${esc(draft.id)}">Edit proposed pellet</h2><button type="button" data-plan="close-editor" aria-label="Close draft editor">×</button></header><div class="plan-row-editor"><form id="${esc(id)}" method="post" class="plan-draft-form"><input type="hidden" name="version"><label class="visually-hidden" for="plan-title-${esc(draft.id)}">Pellet title</label><input class="plan-card-title" id="plan-title-${esc(draft.id)}" name="title" data-field="title" maxlength="4096"><div class="description-field" data-description data-description-key="proposal-${esc(draft.id)}"><div class="description-toolbar" data-ignore-morph></div><label class="plan-field-label">Description<textarea name="description" data-field="description" rows="4" maxlength="65536"></textarea></label><div class="markdown-body" data-ignore-morph hidden></div></div><label class="plan-field-label">Acceptance criteria<textarea class="plan-acceptance" name="acceptance" data-field="acceptance" rows="3" maxlength="65536"></textarea></label><div class="plan-group-row"><label>Group<input name="group" data-field="group" list="plan-groups" placeholder="Ungrouped" maxlength="4096"></label></div>${executionPreferenceFields()}</form><p class="plan-route"></p><p class="plan-reason"></p><div class="plan-card-actions"><button type="button" data-plan="refine">Refine in chat</button><button type="button" data-plan="split">Split pellet</button></div><div class="plan-split" hidden><label>One title per new pellet<textarea rows="3" data-split-titles></textarea></label><p>Each draft keeps the description and acceptance criteria for refinement.</p><button type="button" data-plan="apply-split">Split into drafts</button><button type="button" data-plan="cancel-split">Cancel</button><span data-split-error role="alert"></span></div></div><footer><span class="plan-editor-status" role="status"></span><button type="button" data-plan="close-editor">Done</button></footer></dialog>`;
+    node.innerHTML = `<input class="plan-row-select" type="checkbox" name="selected" form="${esc(id)}" data-field="selected"><button type="button" class="plan-open-draft" data-plan="edit-draft" aria-haspopup="dialog"><span class="plan-row-title"></span><span class="plan-row-group"></span><span class="plan-row-error" hidden></span></button><dialog class="plan-draft-dialog" id="plan-details-${esc(draft.id)}" aria-labelledby="plan-editor-heading-${esc(draft.id)}"><header><h2 id="plan-editor-heading-${esc(draft.id)}">Edit proposed pellet</h2><button type="button" data-plan="close-editor" aria-label="Close draft editor">×</button></header><div class="plan-row-editor"><form id="${esc(id)}" method="post" class="plan-draft-form"><input type="hidden" name="version"><label class="visually-hidden" for="plan-title-${esc(draft.id)}">Pellet title</label><input class="plan-card-title" id="plan-title-${esc(draft.id)}" name="title" data-field="title" maxlength="4096"><div class="description-field" data-description data-description-key="proposal-${esc(draft.id)}"><div class="description-toolbar" data-ignore-morph></div><label class="plan-field-label">Description<textarea name="description" data-field="description" rows="4" maxlength="65536"></textarea></label><div class="markdown-body" data-ignore-morph hidden></div></div><label class="plan-field-label">Acceptance criteria<textarea class="plan-acceptance" name="acceptance" data-field="acceptance" rows="3" maxlength="65536"></textarea></label><div class="plan-group-row"><label>Group<input name="group" data-field="group" list="plan-groups" placeholder="Ungrouped" maxlength="4096"></label></div>${executionPreferenceFields()}</form><p class="plan-route"></p><p class="plan-reason"></p><div class="plan-card-actions"><button type="button" class="quiet" data-plan="refine">Refine in chat</button><button type="button" class="quiet" data-plan="split">Split pellet</button></div><div class="plan-split" hidden><label>One title per new pellet<textarea rows="3" data-split-titles></textarea></label><p>Each draft keeps the description and acceptance criteria for refinement.</p><button type="button" data-plan="apply-split">Split into drafts</button><button type="button" class="quiet" data-plan="cancel-split">Cancel</button><span data-split-error role="alert"></span></div></div><footer><span class="plan-editor-status" role="status"></span><button type="button" data-plan="close-editor">Done</button></footer></dialog>`;
   }
   if (!created(draft)) node.insertAdjacentHTML('beforeend', '<button type="button" class="plan-dismiss" data-plan="remove" title="Dismiss proposal">×</button>');
   const dialog=node.querySelector('dialog');
@@ -275,7 +279,7 @@ function render() {
   panel.dataset.planningProject = p?.code || projectCode() || '';
   panel.querySelector('.plan-context').hidden = !state.messages.length && !state.drafts.length && !state.input.trim();
   const workspace = (data?.routing || []).find(w => w.id === state.workspace_id);
-  const workspaceProblem = !workspace ? (state.workspace_id ? 'The chat’s checkout is unavailable. Restore it or start a new chat.' : data?.routing?.length ? 'Choose a working folder to send this message.' : 'This project has no registered checkout available for planning.') : '';
+  const workspaceProblem = data && !workspace ? (state.workspace_id ? 'The chat’s checkout is unavailable. Restore it or start a new chat.' : data?.routing?.length ? 'Choose a working folder to send this message.' : 'This project has no registered checkout available for planning.') : '';
   const path = workspace?.path || '';
   const folderError = panel.querySelector('.plan-folder-error');
   folderError.hidden = !workspaceProblem;
@@ -382,6 +386,10 @@ function render() {
   for (const field of panel.querySelectorAll('input,textarea,select')) {
     if (!field.closest('.markdown-body')) field.disabled = !!activeOperation?.replace;
   }
+  // Live renders must retain the confirmation's pending-operation lock.
+  newDialog.querySelectorAll('button,input').forEach(control => {
+    control.disabled = savingNewChatPreference || !!flight;
+  });
   panel.querySelector('#plan-workspace').disabled = !!chat?.state.workspace_id || !!flight;
   composer.elements.model.disabled = !!activeOperation?.replace;
   composer.elements.effort.disabled = !!activeOperation?.replace;
@@ -396,8 +404,8 @@ function render() {
   const groupHTML = (data?.groups || []).map(g => `<option value="${esc(g)}"></option>`).join('');
   if (groups.innerHTML !== groupHTML) groups.innerHTML = groupHTML;
   const status = panel.querySelector('.plan-status');
-  status.classList.toggle('busy', !!activeOperation);
-  const submissionError = !!failed || conflict || !!handoffError;
+  status.classList.toggle('busy', !!activeOperation || !!load);
+  const submissionError = !!failed || conflict || !!handoffError || !!loadError;
   status.classList.toggle('error', submissionError);
   if (submissionError) {
     if (status.nextElementSibling !== composer) composer.before(status);
@@ -405,16 +413,17 @@ function render() {
     panel.querySelector('.plan-chat-status').append(status);
   }
   composer.querySelector('[type=submit]').title = workspaceProblem || '';
-  const text=handoffError||(activeOperation?.action==='save'||activeOperation?.action==='new'?'':feedback);
+  const text=loadError||(load?'Loading planning…':handoffError||(activeOperation?.action==='save'||activeOperation?.action==='new'?'':feedback));
   status.hidden=!text;
   const pending=panel.querySelector('.plan-pending');
   pending.hidden=activeOperation?.action!=='send';
   const pendingText=activeOperation?.action==='send'?activeOperation.before?.input || activeOperation.payload.state.input:'';
   if(pending.textContent!==pendingText)pending.textContent=pendingText;
   if(following)transcript.scrollTop=transcript.scrollHeight;
-  const statusSignature=JSON.stringify([text,!!failed,conflict]);
+  const statusSignature=JSON.stringify([text,!!failed,conflict,!!loadError]);
   if(status.dataset.signature!==statusSignature){
     status.dataset.signature=statusSignature;status.replaceChildren(document.createTextNode(text));
+    if (loadError) {const retry = document.createElement('button');retry.type='button';retry.dataset.plan='retry-load';retry.textContent='Retry loading';status.append(retry);}
     if (failed && !conflict) {const retry = document.createElement('button');retry.type='button';retry.dataset.plan='retry';retry.textContent='Retry request';status.append(retry);}
     if (conflict) {const reload = document.createElement('button');reload.type='button';reload.dataset.plan='reload';reload.textContent='Reload saved chat';status.append(reload);}
   }
@@ -577,6 +586,7 @@ document.addEventListener('click', async event => {
   if(action==='models') {loadModels();return;}
   if(action==='new'){if(!skipNewChatConfirmation&&(state.messages.length||state.drafts.length||state.input)){panel.querySelector('#plan-skip-new-confirmation').checked=false;panel.querySelector('.plan-new-error').hidden=true;confirming=true;render();}else fresh();return;}
   if(action==='confirm-new'){
+    if(savingNewChatPreference)return;
     const dialog=panel.querySelector('#plan-new-dialog'),error=dialog.querySelector('.plan-new-error');
     savingNewChatPreference=true;
     dialog.querySelectorAll('button,input').forEach(control=>control.disabled=true);
@@ -591,6 +601,7 @@ document.addEventListener('click', async event => {
     return;
   }
   if(action==='cancel-new'){if(savingNewChatPreference)return;confirming=false;render();return;}
+  if(action==='retry-load'){ensureLoaded(true);return;}
   if(action==='retry'){mutate(failed.action,true);return;}
   if(action==='reload'){if(!confirm('Reload the saved chat? Copy any unsaved planning edits you want to keep first.'))return;try{accept(await json(endpoint()+'?chat='+chat.id));failed=null;conflict=false;dirty=false;feedback='';clearPending();render();}catch(error){feedback=error.message;render();}return;}
   if(action==='create'){if(selected().length)await mutate('create');return;}
@@ -611,9 +622,18 @@ document.addEventListener('keydown', event => {
   if(['plan-tab','execution-tab'].includes(event.target.id)&&['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();chooseTab(event.key==='Home'?'plan':event.key==='End'?'execution':selectedTab==='plan'?'execution':'plan',true);}
 });
 document.addEventListener('pellets-refresh', async () => {
-  if(!chat||selectedTab!=='plan'||flight||dirty||conflict||uiVersion.isOutdated()||Date.now()-refreshedAt<1000)return;
+  if(!chat||selectedTab!=='plan'||flight||dirty||failed||conflict||uiVersion.isOutdated()||Date.now()-refreshedAt<1000)return;
   refreshedAt=Date.now();
-  try{accept(await json(endpoint()+'?chat='+chat.id));render();}catch(error){feedback=error.message;render();}
+  const requestedChat=chat;
+  try{
+    const result=await json(endpoint()+'?chat='+requestedChat.id);
+    // A read admitted while clean may finish after an edit, a save, or a new
+    // conversation. Those newer choices take precedence over its old snapshot.
+    if(chat!==requestedChat||flight||dirty||failed||conflict||uiVersion.isOutdated())return;
+    accept(result);render();
+  }catch(error){
+    if(chat===requestedChat&&!flight&&!dirty&&!failed){feedback=error.message;render();}
+  }
 });
 window.addEventListener('resize', sync);
 window.Planner={sync,status,selectExecution:()=>chooseTab('execution'),flush:()=>dirty?mutate(chat?'save':'new'):Promise.resolve(),prepareReload:()=>{const error=storePending(true);render();return error;}};

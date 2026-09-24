@@ -389,7 +389,7 @@ button,
   background: var(--lift);
   border: 1px solid var(--line);
 }
-button:not(:disabled):hover {
+button:not(:disabled, [aria-disabled="true"]):hover {
   background: var(--theme-hover);
 }
 .primary-button {
@@ -397,7 +397,7 @@ button:not(:disabled):hover {
   color: var(--theme-on-primary);
   border-color: var(--theme-primary);
 }
-.primary-button:not(:disabled):hover {
+.primary-button:not(:disabled, [aria-disabled="true"]):hover {
   background: var(--theme-primary-hover);
   color: var(--theme-on-primary);
 }
@@ -415,8 +415,11 @@ textarea::placeholder {
   color: var(--dim);
 }
 input[type="checkbox"] {
+  flex-shrink: 0;
   width: 13px;
   height: 13px;
+  /* Native glyphs ignore field padding; appearance:none checkboxes do not. */
+  padding: 0;
   accent-color: var(--accent);
 }
 :focus-visible {
@@ -451,6 +454,7 @@ input[type="checkbox"] {
   color: var(--dim);
 }
 .chrome-end {
+  flex: none;
   margin-left: auto;
   padding-left: 10px;
 }
@@ -470,7 +474,14 @@ input[type="checkbox"] {
 .row-menu summary::-webkit-details-marker {
   display: none;
 }
-.switcher summary span {
+.switcher summary .switcher-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font: inherit;
+  color: inherit;
+}
+.switcher summary span:not(.switcher-label) {
   font-size: 11px;
   color: var(--dim);
 }
@@ -478,10 +489,12 @@ input[type="checkbox"] {
 .row-popover,
 .assignment-form,
 .recipient-form {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  min-width: 220px;
+  /* Fixed to the viewport so scrolling panes cannot clip these menus. */
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  height: auto;
+  min-width: min(220px, calc(100vw - 16px));
   max-width: min(360px, 90vw);
   max-height: 65vh;
   overflow: auto;
@@ -492,6 +505,7 @@ input[type="checkbox"] {
   padding: 5px;
   z-index: 100;
 }
+.switcher-menu, .row-popover { width: max-content; }
 .switcher-menu a {
   display: flex;
   flex-direction: column;
@@ -509,6 +523,7 @@ input[type="checkbox"] {
   overflow-wrap: anywhere;
 }
 .switcher-menu strong {
+  overflow-wrap: anywhere;
   font-weight: 500;
 }
 .app-shell.with-projects,
@@ -575,6 +590,20 @@ input[type="checkbox"] {
   color: var(--dim);
   font-size: 10px;
 }
+.workspace-link .workspace-name {
+  font: inherit;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workspace-dot, .workspace-attention { flex-shrink: 0; }
+.workspace-link .workspace-execution-state {
+  flex-shrink: 0;
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .workspace-nav-heading {
   display: flex;
   align-items: center;
@@ -639,6 +668,10 @@ input[type="checkbox"] {
 }
 .statusbar .grow {
   flex: 1;
+}
+.statusbar .database-state, .footer-counts, .statusbar .theme-control {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .statusbar .database-state {
   margin-left: 8px;
@@ -731,8 +764,8 @@ input[type="checkbox"] {
 }
 #tasks-title small { display: inline-block; white-space: nowrap; }
 .section-heading:has(#tasks-title) > .create-popover { flex-shrink: 0; }
-.section-heading .primary-button,
-.section-heading summary {
+/* Only the creation disclosure is quiet; its form keeps primary actions. */
+.section-heading .create-popover > summary {
   border: 0;
   background: transparent;
   color: var(--muted);
@@ -829,6 +862,7 @@ input[type="checkbox"] {
   display: grid;
   gap: 4px;
 }
+.filter-fields > .quiet-button[hidden] { display: none; }
 .filter-fields > .quiet-button {
   display: flex;
   width: fit-content;
@@ -972,7 +1006,12 @@ input[type="checkbox"] {
   color: var(--dim);
   font-size: 14px;
   cursor: pointer;
-  opacity: 0;
+  opacity: 1;
+  display: grid;
+  place-items: center;
+  min-width: 20px;
+  min-height: 28px;
+  border-radius: 4px;
 }
 .pellet-row:hover .row-menu summary,
 .pellet-row:focus-within .row-menu summary,
@@ -982,7 +1021,7 @@ input[type="checkbox"] {
 .row-popover {
   left: auto;
   right: 0;
-  min-width: 205px;
+  min-width: min(205px, calc(100vw - 16px));
   display: grid;
 }
 .row-popover button,
@@ -1002,11 +1041,12 @@ input[type="checkbox"] {
 }
 .checkpoint-row {
   position: relative;
-  padding: 12px 38px 12px 10px;
+  padding: 12px 10px;
   border-bottom: 1px solid var(--line);
   min-width: 0;
 }
 .checkpoint-heading {
+  padding-right: 28px;
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -1018,7 +1058,9 @@ input[type="checkbox"] {
   font-size: 13px;
   font-weight: 500;
   color: var(--text);
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .review-status { font-size: 12px; color: var(--muted); }
 .review-disclosure { margin-top: 5px; }
@@ -1056,6 +1098,7 @@ input[type="checkbox"] {
 .scope-highlight { background: var(--theme-chip-selected) !important; }
 .checkpoint-row.selected { background: var(--theme-chip-selected); }
 .workspace-path {
+  overflow-wrap: anywhere;
   font-family: ui-monospace, monospace;
   font-size: 10px;
   color: var(--dim);
@@ -1096,6 +1139,7 @@ input[type="checkbox"] {
 .assignment-form,
 .recipient-form {
   width: 275px;
+  overflow-wrap: anywhere;
   padding: 14px;
   display: grid;
   gap: 12px;
@@ -1720,7 +1764,7 @@ dialog::backdrop {
   border: 1px solid transparent;
   box-shadow: none;
 }
-.dialog-cancel:hover,
+.dialog-cancel:not(:disabled, [aria-disabled="true"]):hover,
 .record-actions > summary:hover {
   background: var(--theme-quiet-hover);
 }
@@ -1784,7 +1828,7 @@ dialog::backdrop {
   text-align: left;
   text-decoration: none;
 }
-.record-actions-panel button:hover,
+.record-actions-panel button:not(:disabled):hover,
 .record-actions-panel > a:hover {
   background: var(--theme-quiet-hover);
 }
@@ -1905,11 +1949,24 @@ dialog::backdrop {
   margin: 0;
 }
 .checkpoint-composer {
+  grid-template-columns: minmax(0, 1fr);
   background: var(--pane);
   padding: 16px;
   margin: 14px 0;
   border: 1px solid var(--line);
 }
+.checkpoint-composer form {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+}
+.checkpoint-composer form > .form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.checkpoint-composer .checkpoint-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  align-items: center;
+}
+.checkpoint-composer .checkpoint-actions .quiet { padding: 5px 9px; }
 .checkpoint-composer[hidden] {
   display: none;
 }
@@ -1922,13 +1979,14 @@ dialog::backdrop {
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--line);
-  padding: 17px 0;
+  padding: 0;
   border-radius: 0;
   box-shadow: none;
 }
 .memory-card > a {
-  padding: 0;
+  padding: 17px 0;
 }
+.memory-card > a:is(:hover, :focus-visible) { background: var(--theme-quiet-hover); }
 .memory-card > a > p {
   font-size: 13px;
   line-height: 1.65;
@@ -1974,11 +2032,31 @@ dialog::backdrop {
 #request-feedback {
   position: fixed;
   top: 50px;
+  bottom: auto;
+  left: auto;
   right: 12px;
+  transform: none;
   max-width: min(440px, calc(100vw - 24px));
   z-index: 200;
   padding: 12px 14px;
   font-size: 12px;
+  overflow-wrap: anywhere;
+}
+#request-feedback[data-inline] {
+  position: static;
+  flex: 0 0 100%;
+  grid-column: 1 / -1;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  margin: 0;
+  box-shadow: none;
+}
+#request-feedback button {
+  margin: 6px 6px 0 0;
+}
+.dialog-footer:has(> #request-feedback:not([hidden])) {
+  flex-wrap: wrap;
 }
 .create-popover form {
   background: var(--theme-menu-bg);
@@ -2117,6 +2195,7 @@ dialog::backdrop {
     padding-right: 28px;
   }
   .workspace-link {
+    max-width: 100%;
     min-height: 26px;
     padding: 4px 8px;
     font-size: 11px;
@@ -2353,13 +2432,13 @@ dialog::backdrop {
   max-width: 100%;
   background: transparent;
   border: 0;
-  padding: 4px 0;
+  padding: 4px 6px;
   min-height: 23px;
   font-size: 11px;
   color: var(--muted);
   font-weight: 400;
 }
-.select-trigger:hover {
+.select-trigger:not(:disabled):hover {
   background: var(--theme-quiet-hover);
   color: var(--ink);
 }
@@ -2407,8 +2486,8 @@ dialog::backdrop {
   min-height: 29px;
   font-size: 12px;
 }
-.select-option:hover,
-.select-option.is-focused {
+.select-option:not(:disabled):hover,
+.select-option:not(:disabled).is-focused {
   background: var(--theme-menu-hover);
   outline: 0;
 }
@@ -2871,3 +2950,28 @@ pl-description-reader [data-markdown-heading]:focus-visible { outline: 2px solid
 .select-footer p { margin: 0 0 5px; max-width: 260px; font-size: 12px; color: var(--muted); }
 .select-menu-action { width: 100%; text-align: left; background: transparent; border: 0; }
 .select-menu-action[aria-disabled="true"] { opacity: .6; cursor: default; }
+
+/* Native disclosure targets include their marker/label and a visible inset.
+   Menus with established geometry retain their existing padding. */
+:is(.review-disclosure, .run-details, .schedule-details,
+    .activity-help, .activity-event, .activity-group, .metadata) > summary,
+:is(.conflict-state, .error-state, .run-group-context) details > summary {
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.project-record > summary { padding: 3px 6px; border-radius: 4px; }
+:is(.review-disclosure, .run-details, .schedule-details,
+    .activity-help, .activity-event, .activity-group, .metadata, .project-record,
+    .row-menu) > summary:is(:hover, :focus-visible),
+:is(.conflict-state, .error-state, .run-group-context) details > summary:is(:hover, :focus-visible) {
+  background: var(--theme-quiet-hover);
+}
+/* Keyboard focus identifies the same navigable row as pointer hover. */
+.pellet-row:has(.task-title:focus-visible) {
+  background: var(--theme-quiet-hover);
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+/* Keep the existing review text width while adding its background inset. */
+.review-disclosure > summary { margin-inline: -6px; max-width: calc(100% + 12px); }

@@ -481,6 +481,39 @@ func TestHandlerDeferAndMemoryEditApprovalUseVersionedDomainPaths(t *testing.T) 
 	}
 }
 
+func TestHandlerMemoryConflictRetainsEditableDraft(t *testing.T) {
+	t.Parallel()
+	fixture := newHandlerFixture(t, 1)
+	memory, err := fixture.application.CreateMemory(context.Background(), fixture.projects[0], storage.NewMemory{Text: "original", CreatedBy: domain.MemoryCreatedByAgent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := fixture.application.UpdateMemory(context.Background(), fixture.projects[0], memory.ID, storage.MemoryVersion(memory), "saved elsewhere")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/projects/project1/memories/" + strconv.FormatInt(memory.ID, 10)
+	edit := url.Values{"_csrf": {testCSRF}, "version": {storage.MemoryVersion(memory)}, "text": {"unsaved <draft>"}}
+	response := performMutation(fixture.handler, path+"/edit", edit, testOrigin, true, "application/x-www-form-urlencoded")
+	if response.Code != http.StatusConflict {
+		t.Fatalf("conflict response = %d: %s", response.Code, response.Body.String())
+	}
+	for _, marker := range []string{`is-dirty`, `data-dirty="true"`, `required>unsaved &lt;draft&gt;</textarea>`, `Current saved fields`, `<pre>saved elsewhere</pre>`, storage.MemoryVersion(current)} {
+		if !strings.Contains(response.Body.String(), marker) {
+			t.Errorf("conflict missing %q", marker)
+		}
+	}
+	stored, err := fixture.application.Memory(context.Background(), fixture.projects[0], memory.ID)
+	if err != nil || stored.Text != "saved elsewhere" {
+		t.Fatalf("stale edit wrote memory: %+v, %v", stored, err)
+	}
+	// An approval conflict has no editable draft and must not fabricate one.
+	response = performMutation(fixture.handler, path+"/approve", url.Values{"_csrf": {testCSRF}, "version": {storage.MemoryVersion(memory)}}, testOrigin, true, "application/x-www-form-urlencoded")
+	if response.Code != http.StatusConflict || strings.Contains(response.Body.String(), `data-dirty="true"`) {
+		t.Fatalf("approval conflict = %d: %s", response.Code, response.Body.String())
+	}
+}
+
 func TestHandlerMemoryCreationAssignsHumanProvenanceServerSide(t *testing.T) {
 	t.Parallel()
 	fixture := newHandlerFixture(t, 1)

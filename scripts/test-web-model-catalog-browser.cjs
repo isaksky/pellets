@@ -6,6 +6,7 @@ let server,browser,page;
 (async()=>{
  execFileSync('go',['build','-o',binary,'./cmd/pl'],{cwd:root});fs.mkdirSync(fixture);execFileSync('git',['init','-q'],{cwd:fixture});
  const cli=(...args)=>JSON.parse(execFileSync(binary,['--json',...args],{cwd:fixture,encoding:'utf8'})).data;
+ cli('init-db');
  cli('add','Fixture');
  server=spawn(binary,['server','--no-open'],{cwd:fixture,env:{...process.env,PELLETS_CODEX_EXECUTABLE:path.join(tmp,'unavailable')}});
  const origin=await new Promise((resolve,reject)=>{let out='';server.stdout.on('data',d=>{out+=d;if(out.includes('\n'))resolve(out.trim())});server.on('error',reject)});

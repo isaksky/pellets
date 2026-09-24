@@ -18,6 +18,27 @@ import { action, actions } from "./datastar-1.0.3.js";
     saveSetting("theme", choice);
   }
 
+  // Keep mutation feedback with the invoking form, including forms whose save
+  // buttons live in a modal footer. A body-level notice is inert behind dialogs.
+  function requestFeedback(form) {
+    var feedback = document.getElementById("request-feedback");
+    if (!feedback) {
+      feedback = document.createElement("div");
+      feedback.id = "request-feedback";
+      feedback.setAttribute("role", "status");
+      feedback.setAttribute("aria-live", "polite");
+      feedback.hidden = true;
+    }
+    var footer = form && form.closest("[data-inspector]")?.querySelector(".dialog-footer");
+    var parent = footer || (form && form.closest(".run-controls")) || form || document.body;
+    feedback.toggleAttribute("data-inline", !!form);
+    if (feedback.parentElement !== parent) {
+      if (footer) parent.prepend(feedback);
+      else parent.append(feedback);
+    }
+    return feedback;
+  }
+
   document.addEventListener("change", function (event) {
     if (event.target && event.target.id === "theme-select") rememberTheme(event.target.value);
   });
@@ -49,15 +70,15 @@ import { action, actions } from "./datastar-1.0.3.js";
       if ((key === "external_id" || key === "group") && value === "") return;
       body.append(key, value);
     });
-    var feedback = document.getElementById("request-feedback");
-    var buttons = Array.from(form.querySelectorAll("button"));
+    var feedback = requestFeedback(form);
+    var buttons = Array.from(form.querySelectorAll("button:not(:disabled)"));
     var confirmed = false;
     delete form.dataset.admissionChoice;
     form.dataset.schedulePending = "true";
     buttons.forEach(function (button) { button.disabled = true; });
     feedback.hidden = false;
     feedback.classList.remove("request-failed");
-    feedback.textContent = form.matches("form[data-schedule]") ? "Checking the runtime, sign-in, workspace, and saved run…" : "Updating run controls…";
+    feedback.textContent = fields.has("workspace_id") ? "Checking the runtime, sign-in, workspace, and saved run…" : "Updating run controls…";
     uiVersion.beginRequest();
     try {
       // Named action submitters are part of the run receipt and shadow the
@@ -166,7 +187,7 @@ import { action, actions } from "./datastar-1.0.3.js";
   document.addEventListener("click", function (event) {
     var row = event.target.closest(".task-row");
     if (!row || event.defaultPrevented || event.button !== 0 ||
-        event.target.closest("a, button, input, select, textarea, summary, [contenteditable]")) return;
+        event.target.closest("a, button, input, select, textarea, label, summary, .row-menu, [contenteditable]")) return;
     if (window.getSelection && !window.getSelection().isCollapsed) return;
     var link = row.querySelector(".row-link");
     if (!link) return;
@@ -195,6 +216,7 @@ import { action, actions } from "./datastar-1.0.3.js";
   // One foreground request and one background refresh own complete update bundles.
   // Foreground work supersedes refreshes; a pending save cannot be interrupted.
   var pending = new Map();
+  var refreshAgain = false;
   var requests = new WeakMap();
   var editRevision = 0;
   var routeRevision = 0;
@@ -231,7 +253,7 @@ import { action, actions } from "./datastar-1.0.3.js";
     return target && (target.querySelector(".select-trigger[aria-expanded=true], .row-menu[open], .switcher[open], .assignment-popover[open], .record-actions[open]") || (target.id === "project-drawer" && target.classList.contains("open")) ||
       (target.id === "workspace-groups" && target.querySelector(".assignment-form[data-dirty='true'], .recipient-form[data-dirty='true']")) ||
       (target.id === "run-dashboard" && target.querySelector("form[data-no-run-resume][data-dirty='true'], form[data-schedule-pending='true'], form[data-admission-choice='true']")) ||
-      (target.id === "project-record" && target.open));
+      (target.id === "project-record" && (target.open || target.querySelector('form[data-dirty="true"]'))));
   }
 
   async function request(ctx, targetID, kind) {
@@ -246,7 +268,10 @@ import { action, actions } from "./datastar-1.0.3.js";
     }
     if (uiVersion.isOutdated()) return;
     var target = targetID === "live" ? document.body : document.getElementById(targetID);
-    if (automatic && Array.from(pending.values()).some(function (state) { return !state.automatic; })) return;
+    if (automatic && Array.from(pending.values()).some(function (state) { return !state.automatic; })) {
+      refreshAgain = true;
+      return;
+    }
     if (!target || (automatic && (document.hidden || protectedTarget(target)))) return;
     if (automatic && targetID === "inspector-host" && target.querySelector(".conflict-state, .error-state")) return;
     var editing = dirtyInspector();
@@ -261,7 +286,7 @@ import { action, actions } from "./datastar-1.0.3.js";
     // Do not let a poll interrupt a mutation/navigation or submit the same form twice.
     var slot = automatic ? "background" : "foreground";
     var previous = pending.get(slot);
-    if (previous && automatic) return;
+    if (previous && automatic) { refreshAgain = true; return; }
     if (previous && previous.mutation) {
       // Keep only the latest navigation/filter intent while the save completes.
       if (!mutation) previous.next = {ctx: ctx, targetID: targetID, kind: kind};
@@ -294,7 +319,7 @@ import { action, actions } from "./datastar-1.0.3.js";
     var options = {headers: uiVersion.headers({"Pellets-Target": targetID}), requestCancellation: state.controller,
       openWhenHidden: true, retry: "never", retryMaxCount: 0, filterSignals: {include: /^$/}};
     if (mutation || kind === "filter") options.contentType = "form";
-    var feedback = document.getElementById("request-feedback");
+    var feedback = automatic ? null : requestFeedback(mutation ? el : null);
     // Form-associated footer buttons live outside the editing form.
     var buttons = mutation ? Array.from(el.elements).filter(function (button) { return button.matches("button[type=submit], button:not([type])") && !button.disabled; }) : [];
     if (!automatic) {
@@ -327,6 +352,12 @@ import { action, actions } from "./datastar-1.0.3.js";
       if (requests.get(el) === state) requests.delete(el);
       if (state.next && state.next.ctx.el.isConnected && state.completed) {
         request(state.next.ctx, state.next.targetID, state.next.kind);
+      }
+      // An invalidation received during an older read or a foreground request
+      // describes newer state. Coalesce it into one read once requests settle.
+      if (refreshAgain && pending.size === 0) {
+        refreshAgain = false;
+        refreshRegions();
       }
     }
   }
@@ -735,16 +766,6 @@ import { action, actions } from "./datastar-1.0.3.js";
     }
   });
 
-  document.addEventListener("click", function (event) {
-    document.querySelectorAll(".create-popover[open]").forEach(function (popover) {
-      if (!popover.contains(event.target)) popover.open = false;
-    });
-    var projectDetails = document.getElementById("project-record");
-    if (projectDetails && projectDetails.open && !projectDetails.contains(event.target)) {
-      projectDetails.open = false;
-    }
-  });
-
   var source;
   function connectSource() {
     if (!window.EventSource || !documentActive) return;
@@ -762,9 +783,3 @@ import { action, actions } from "./datastar-1.0.3.js";
     if (!document.hidden) refreshRegions();
   });
 }());
-
-document.addEventListener("click", function (event) {
- if (!event.target.closest("[data-create-memory]")) return;
- var form = document.querySelector(".create-popover form[action$='/memories']");
- if (form) { form.closest("details").open = true; form.querySelector("textarea").focus(); }
-});

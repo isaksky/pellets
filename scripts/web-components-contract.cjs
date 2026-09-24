@@ -36,6 +36,17 @@ module.exports = async function checkComponentContracts(page) {
       return {enabledAfterBusy, nativeDisabledPreserved, disabledActivations, restoredLink, activations};
     }), {enabledAfterBusy: true, nativeDisabledPreserved: true, disabledActivations: 0, restoredLink: true, activations: 1});
 
+    for (const variant of ['primary', 'quiet', 'icon']) {
+      const link=page.locator('#contract-link');
+      await link.evaluate((el,variant)=>{el.setAttribute('variant',variant);el.setAttribute('busy','');},variant);
+      const control=link.locator('a');await control.scrollIntoViewIfNeeded();await page.mouse.move(0,0);
+      const colors=await control.evaluate(el=>[getComputedStyle(el).backgroundColor,getComputedStyle(el).color]);
+      await control.hover();
+      assert.deepEqual(await control.evaluate(el=>[getComputedStyle(el).backgroundColor,getComputedStyle(el).color]),colors,variant+' busy link must not show enabled hover feedback');
+      assert.equal(await control.evaluate(el=>getComputedStyle(el).cursor),'not-allowed');
+      await link.evaluate(el=>el.removeAttribute('busy'));
+    }
+
     assert.deepEqual(await page.evaluate(() => {
       const fieldset = document.getElementById('contract-fieldset');
       const field = fieldset.querySelector('pl-field'), select = fieldset.querySelector('pl-select');

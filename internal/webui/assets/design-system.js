@@ -1,5 +1,6 @@
 import { refreshComponents } from "./components.js";
 import "./filters.js";
+import "./details-menu-layout.js";
 import { renderMarkdown } from "./markdown.js";
 import "./description-outline.js";
 

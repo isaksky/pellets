@@ -14,7 +14,10 @@ The status bar shows the folder containing `.pellets`, abbreviating the current
 OS user’s home directory as `~` (for example, `~/src`). Paths outside home stay
 absolute; display separators are `/` on every platform. The full database file
 path remains available on hover. The sidebar shows one project path relative to the database root, without a
-leading `./`, trailing `/.git`, or repeated project name.
+leading `./`, trailing `/.git`, or repeated project name. A checkout at the
+database root says **Database folder**, rather than a bare `.`. Its hover text
+contains the full repository location; nonstandard Git directory names are
+retained rather than guessing a checkout from them.
 
 The first breadcrumb selects the project. The second selects the shared Queue,
 Memories, Groups, or a registered workspace. Workspace links appear in the left sidebar.
@@ -28,18 +31,69 @@ remain independent from scheduler selection.
 Queue rows are 37 pixels high with reference, lifecycle status, title, group, and
 owner. Narrow layouts prioritize reference, status, and title; full metadata stays
 in the dialog. Pellet dialogs open with a formatted Markdown description; title and metadata
-remain editable. Memory dialogs open directly in edit mode. Both close on a backdrop
+remain editable. Memory dialogs open directly in edit mode. Their title identifies the memory once;
+provenance and approval remain beside the text, while IDs and timestamps live in
+**Record details**. The empty list uses the same **New memory** entry point as
+the populated list, without a second creation button. Both close on a backdrop
 click or Escape. Unsaved edits retain the discard guard. A fixed dialog footer places Cancel and
 the primary save action on the right. More actions on the left contains lifecycle
 operations and memory approval; queue and scope controls stay beside their fields. They support optimistic conflicts,
 lifecycle operations, recovery, provenance, and explicit human memory approval.
 An owned pellet and a running process remain distinct.
 
+Workspace navigation and the view switcher reuse **Current execution**'s
+state presentation. An idle Watch says **Waiting for work**, including when its
+last run is completed; ownership without a live run says **Not running**.
+Stopped errors say **Needs attention** or **Failed**, rather than **Needs input**.
+Only active work gets the green navigation dot. The sidebar uses compact state
+labels with the full state in its accessible name and tooltip; the view menu
+shows the full state. Phone navigation retains its compact layout, with the
+state available through the link's accessible name and the view menu. Historical
+run state remains explicitly labeled in Run details.
+
+
+Record headers reserve the Unsaved indicator's space in both clean and edited
+states, keeping the title and close control in place. Memory edit conflicts retain
+the submitted text in the editor, show the current saved text for comparison, and
+keep the discard guard until an explicit save or discard.
+
+Creation and Settings disclosures close on Escape or an outside click without
+saving or clearing their fields. Escape returns focus to the summary; nested
+selectors consume the first Escape. Closed, unsaved Settings fields retain their
+original version through live refreshes. These are collapsible drafts, unlike a
+record dialog's explicit discard. Checkpoint insertion asks before discarding
+edited title/scope, rejects dismissal while submitting, and returns focus to its
+row menu without overriding a later focus choice.
+
+The creation disclosure labels stay quiet; Create pellet and Create memory
+inside their expanded forms retain the shared primary button treatment. Heading
+styles must not override those submitters through their component wrappers.
+Checkboxes reset text-field padding at the shared style layer, including the
+planning new-chat dialog's 16px square control. Platform-native checkbox glyphs
+in settings, assignments, review scope and recovery remain intentional.
+
+Native dialog backdrop gestures must start and end outside the dialog and use
+the same cancelable boundary as Escape. Feature handlers retain ownership of
+dirty guards, pending-operation locks and focus restoration. A diagram backdrop
+closes only the viewer and returns to its source, preserving parent edits.
+
+Ordinary queue background clicks open the record; links, checkbox labels, and
+the entire actions menu remain independent. Row menus stay visible without
+hover and retain native Space/Enter activation. Keyboard title focus highlights
+the complete queue row. Review titles, scope disclosures, and actions are
+separate targets; the review row is deliberately not one competing click target.
+Plain disclosures highlight their padded marker-and-label area. Memory cards
+are one native link including text, metadata and padding, with full-card hover
+and visible keyboard focus.
+
 The Filters control shows the selected status and opens a panel for queue filters
 and sorting. It stays anchored beside search without moving the toolbar. The panel
 fits the viewport above the scrolling panes and dismisses on Escape, outside
 click, or keyboard focus leaving it. A nested selector consumes the first Escape.
-Changes apply immediately; Clear filters preserves the browsing workspace,
+Changes apply immediately; **Clear filters** appears only when search, status,
+group, or external ID differs from the default. Its visibility updates with the
+server-rendered filter summary, including live searches. Sorting alone does not
+show it because clearing preserves sort order. Clear filters preserves the browsing workspace,
 execution sidebar selection, and sort order.
 
 Both sidebars collapse independently using the bottom corner buttons. The theme
@@ -52,6 +106,23 @@ text from the prototype to retain readable contrast.
 At phone widths, navigation becomes compact horizontal rows and the shared right
 panel opens over the available content area. Both stay independently collapsible. The status bar remains
 pinned, and the breadcrumb continues to navigate when the left sidebar is hidden.
+
+### Spacing in narrow panes
+
+Workspace navigation and breadcrumb labels truncate within their controls; full
+names remain in their native titles and navigation menus. The status bar keeps
+its labels on one line. Queue titles and collapsed review titles also stay on
+one line with ellipsis and expose the full title on hover and in the record
+editor. Expanded scope evidence, headings, descriptions and group cards continue
+to wrap. Ordinary queue rows remain 37px high; review rows retain a separate
+status and scope disclosure, reserving actions-menu space only in their heading.
+
+Navigation, row-action, assignment and recipient menus keep their native details
+and form ancestry. Shared viewport placement bounds their surfaces and scrolling
+height, flips them above their trigger when needed, and repositions on viewport
+or pane scroll and assignment mode changes. This prevents pane edges from hiding
+controls. Assignment labels wrap without shrinking checkboxes. Filters keep their
+existing top-layer layout and native-select/keyboard behavior is unchanged.
 
 ### Group details and shared context
 
@@ -122,6 +193,11 @@ Fences labeled `mermaid` render local diagrams (see below). Raw HTML displays as
 text. Unsafe link schemes are disabled,
 images display their alternative text without fetching resources, and links open
 separately so they do not navigate away from unsaved edits.
+
+The shared description toolbar supplies the single visible label in both modes.
+The original native source label remains available to assistive technology,
+including **Shared context (Markdown)** in group forms; source and form ownership
+are unchanged.
 
 The selected mode, source selection, focus, and scroll positions survive live
 updates and reopening a record in the same browser tab. Native source fields and
@@ -352,6 +428,14 @@ the existing SSE invalidation stream; browsers re-read on invalidation, panel
 activation and reconnect, without a polling timer. Changing projects, workspaces
 or access modes never clears the catalog.
 
+Initial planning reads show **Loading planning…**. A failed read keeps the
+composer input and offers **Retry loading**; an unknown checkout list is not
+reported as an empty list. This retry only reads the conversation. Send/Create
+retries retain their separate exact-request receipts and explicit-action rules.
+Delayed autosave responses merge newer proposal model/effort choices, including
+clearing them. Background conversation reads are discarded if edits, a mutation,
+an unresolved request, or a different conversation superseded their snapshot.
+
 `GET /models` returns `models`, `fetched_at`, `expires_at` (Unix seconds), `stale`,
 `refreshing`, and an optional sanitized `error`. `POST /models/refresh` accepts
 JSON `{"_csrf": "…"}` and returns 202 without waiting for discovery. The old
@@ -368,7 +452,8 @@ Sending a message uses the configured Codex runtime in a separate ephemeral
 session with bounded conversation and draft context. Actual runs validate the
 chosen model against their runtime; there are no local template replies or simulated model events.
 The planner can inspect repository files and Git state using shell commands.
-The **Access** dropdown offers **Automatic approval** (the default) and **Full access**. Automatic approval uses a
+The planning **Approval** dropdown offers **Automatic** (the default) and
+**None (full access)**. Automatic approval uses a
 workspace-write sandbox with `on-request` approvals and the runtime's
 `auto_review` reviewer. Network access and additional writable roots are not
 pre-granted in automatic mode. Apps, plugins, MCP tools, browsing, and delegation remain disabled.
@@ -456,7 +541,9 @@ A row action menu or context menu inserts a checkpoint before or after an active
 pellet. The initial scope comes from the authoritative queue since the preceding
 checkpoint, independently of the current display filter or sort. It remains
 editable before submission. Insertion atomically checks the anchor and target row
-versions. A checkpoint needs explicit scope; adjacency never becomes evidence.
+versions. The selected-scope composer uses columns based on the available pane
+width rather than viewport minimums. Its footer places quiet **Clear selection**
+before the primary **Insert review checkpoint** action, including narrow panes. A checkpoint needs explicit scope; adjacency never becomes evidence.
 
 Open, unowned checkpoints can change scope or be removed. Removal defers the
 checkpoint and retains a restore operation; it does not purge data or record a
@@ -650,14 +737,17 @@ handoff; ordinary draft autosave can continue after restoration, but interrupted
 Send, Create, and other ambiguous requests require explicit retry with their
 original request identity. No restored planning conversation starts execution.
 
-The composer shows Working folder alongside Access, with the selected full path
-beneath. A missing folder selection has an inline error and error border; a project
+The composer keeps Folder and Approval beside Send. The working-folder control
+provides its full path on hover and through its accessible description. A single
+folder is static context; multiple folders use the working-folder selector. A
+missing folder selection has an inline error and error border; a project
 without an available checkout shows an explanation instead of an empty selector.
 Planning progress appears below the messages with an animated busy indicator.
 Submission errors remain immediately above the composer with retry/recovery controls
 and preserve the message. Reduced-motion
-preferences disable the animation. Execution start and resume forms offer the same
-Access dropdown; the browser remembers it per project/workspace. A schedule captures
+preferences disable the animation. Execution start and resume forms offer these
+policies under **Access**, labeled **Automatic approval** and **Full access**;
+the browser remembers the selection per project/workspace. A schedule captures
 the selected mode for its runs, and Run details displays the policy used. Existing
 runs keep their captured policy. Internal checkpoint reviewers remain read-only.
 
@@ -668,16 +758,106 @@ with aligned selection, single-line titles truncated with ellipses, and a direct
 a centered editor with autosaved fields, leaving tray rows unchanged. The editor
 supports Escape, restores focus, and preserves unfinished edits across reloads.
 Checkboxes use explicit styling for consistent Safari and Chromium rendering.
+Dismiss actions remain visible and reserve their column at rest, on hover,
+with keyboard focus, and on touch devices, so titles do not shift or change
+truncation. The title/editor button, checkbox, dismiss action, tray toggle,
+and batch actions are independent native controls. Hover/focus feedback belongs
+to the specific action, rather than implying the whole multi-action row or
+heading can be clicked.
 Its header reports the proposal count and can collapse the tray; new proposals
 expand it again. Dismiss all and Create selected controls stay with the tray.
 Dismissal autosaves without an Undo notice. Created pellets leave the tray and
 appear as linked confirmations in the conversation; empty trays disappear.
 
-Starting a new chat confirms replacement in a centered dialog. “Don’t ask me again”
+Proposal editor **Refine in chat**, **Split pellet**, and split **Cancel** actions
+use the established quiet treatment. **Dismiss all** already uses quiet styling;
+**Create selected** retains the primary emphasis.
+
+Starting a new chat confirms replacement in a centered dialog with quiet Cancel
+and primary Start new chat actions. “Don’t ask me again”
 is saved as the database-wide boolean setting `skip_new_chat_confirmation` when
 Start new chat is confirmed; Cancel and Escape do not save the checkbox choice.
+While that save is pending, live updates keep the controls disabled and both
+Escape and backdrop dismissal are blocked. A failure leaves the dialog available
+for an explicit retry or cancellation.
 
 Both sidebar edges can be dragged to resize on desktop. Arrow keys adjust the
 focused divider; Shift uses larger steps, Home/End use the bounds, and double-click
 resets the width. Widths persist in navigation_width and execution_width settings.
 Resize handles are hidden in the mobile layout.
+
+
+### Status, error, and response feedback audit
+
+Mutation feedback uses the shared request handler in `app.js`. It sits in the
+invoking form, the execution-control group, or the record dialog's fixed footer when that form has external
+save controls. This keeps failed-save messages visible and operable inside the
+modal's top layer. Navigation uses the compact global notice. `workbench.css`
+clears the inherited bottom/left/transform constraints; a short notice no longer
+stretches over most of the viewport. Pending and failed requests retain drafts
+and existing explicit correction/retry rules. Schedule errors keep their
+preflight choices beside Start/Resume, and originally disabled controls stay
+disabled when a failed request unlocks the form.
+Pending Stop actions say **Updating run controls…**; they do not claim to run
+the admission checks reserved for Start/Resume.
+Live invalidations arriving during another read or foreground request coalesce
+into one follow-up read once requests settle, rather than waiting for the
+periodic fallback. This does not replay mutations or bypass draft protection.
+
+The audit classified the notice positioning, body-level placement, and dropped
+in-flight invalidations as shared defects. Feature-local planning defects were a missing initial-read
+retry, an unknown checkout list presented as empty, omitted model/effort fields
+in the response merge, and background reads overwriting newer edits. The existing
+run/schedule presentation, model cache and immediate menus, proposal validation,
+empty-state actions, activity grouping and boundaries, settings retry, and UI
+upgrade handoff already meet these feedback contracts and retain their behavior.
+Failures, questions, approvals, explicit recovery, and reported-event details
+remain visible; no activity or ownership is promoted into execution evidence.
+
+`test-web-feedback-browser.cjs` exercises failed record saves, invocation-time
+preflight rejection, and failed planning reads in Chromium and WebKit across all
+five themes at 1280, 1092 and 390px. It checks native keyboard/touch retry,
+draft/focus/selection preservation, and feedback placement. Set
+`PELLETS_FEEDBACK_BASELINE=/path/to/pl` and `PELLETS_BROWSER_ARTIFACTS=/path` for
+matched focused before/after images. `test-web-planning-feedback-browser.cjs`
+holds real API responses from a disposable deterministic-peer fixture to verify
+newer proposal preference selection/clearing and draft edits survive delayed
+saves and reads, including their saved SQLite values. The model catalog,
+planning, execution-state/activity, runtime/recovery, checkpoint, settings,
+empty-state and upgrade suites retain their deeper workflow checks.
+`PELLETS_FEEDBACK_CASE=refresh` isolates the held-read regression; its next
+invalidation must show the newly added queue row without a reload or timer tick.
+The runtime suite's `watch_waiting` case additionally checks pending Stop captions
+and disabled submitters; `PELLETS_FEEDBACK_STOP_AUDIT=/path` saves their paired
+controls using `PELLETS_NAVIGATION_BASELINE=/path/to/pl` for the original build.
+
+### Control placement and domain audit
+
+The placement audit traced navigation, record/group dialogs, browsing filters,
+Receives/recipient editors, planning folder/access controls, scheduler controls,
+and review summaries to their application actions. The remaining defects were a
+shared location formatter's database-root edge case and local navigation templates
+that inferred status from ownership or the latest run instead of the existing
+execution presentation. Routing, ownership, saved selection, optimistic versions,
+and captured execution intent are unchanged.
+
+Record footers retain quiet Cancel and primary Save on the right, lifecycle
+operations on the left, and scope/order actions beside their fields. Receives
+edits routing; group links open details; the removable Group chip filters only
+the visible queue. Planning folder selection remains pinned to its conversation,
+and execution access remains adjacent to Start/Resume. Review counts and status
+remain independent of ownership and visible browsing results. These already-correct
+patterns were preserved.
+
+For focused navigation evidence, run `test-web-runtime-browser.cjs` with
+`PELLETS_RUNTIME_BROWSER_CASE=watch_waiting`, `schedule_runtime_error`, or
+`navigation_owned`, and
+`PELLETS_NAVIGATION_AUDIT=/absolute/artifact/path`. The navigation contract covers
+Chromium/WebKit, all five themes, desktop/intermediate/phone sizes, working,
+waiting with completed history, stopped errors, ownership without a run, full
+path availability, keyboard
+focus and touch menus. `PELLETS_NAVIGATION_BASELINE=/path/to/pl` captures the
+original states without applying the new presentation assertions. Pairs share
+crop metadata; runtime assertions also verify live wake, both stop controls,
+restart without replay, and explicit recovery. Go coverage includes ownership
+without execution and POSIX, drive-root, different-drive and UNC path labels.

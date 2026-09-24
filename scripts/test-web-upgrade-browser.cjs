@@ -99,6 +99,7 @@ async function reloadWithDrafts(page, revision) {
   git('config', 'commit.gpgSign', 'false');
   git('commit', '--allow-empty', '-m', 'initial');
   fs.appendFileSync(path.join(fixture, '.git/info/exclude'), '\n/fake-*\n/.agents/\n');
+  cli('init-db');
   const pellet = cli('add', 'Original pellet before upgrade', '--group', 'web-ui');
   const owned = cli('add', 'Owned without a running process');
   cli('start', owned.id);
@@ -402,7 +403,10 @@ async function reloadWithDrafts(page, revision) {
   assert.equal(posts.length, postsBeforeFilterReload, 'Restoring an unfinished browsing filter automatically submitted a write');
   assert.equal(cli('show', owned.id).status, 'in_progress', 'Upgrade changed existing ownership');
   assert.equal(await cleanPage.locator('.run-state').count(), 0, 'Server restart started an execution run');
-  assert.equal(fs.existsSync(path.join(fixture, 'fake-events.jsonl')), false, 'Server restart contacted the execution peer');
+  // Catalog discovery legitimately contacts the peer without starting work.
+  const peerLog = path.join(fixture, 'fake-events.jsonl');
+  const peerEvents = fs.existsSync(peerLog) ? fs.readFileSync(peerLog, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
+  assert.equal(peerEvents.some(event => ['thread/start', 'thread/resume', 'turn/start', 'review/start'].includes(event.method)), false, 'Server restart started execution through the peer');
   assert.equal(posts.some(url => /\/schedules(?:\/|$)/.test(url)), false, 'Upgrade or draft recovery automatically started a schedule');
   assert.deepEqual(errors, []);
   console.log('PASS real same-origin UI upgrade: revision guard, unchanged old DOM, complete new asset graph, pellet/memory/assignment/planning drafts and old CAS, retained planning request ID and fresh CSRF, composer focus/caret/disclosure/scroll, closed-draft invalidation, explicit conflict/save/retry, no automatic execution');

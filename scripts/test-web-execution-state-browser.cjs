@@ -43,6 +43,7 @@ async function stop() {
   git('init', '-q'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');
   git('config', 'commit.gpgSign', 'false'); git('commit', '--allow-empty', '-qm', 'initial');
   fs.appendFileSync(path.join(repo, '.git', 'info', 'exclude'), '\n/fake-*\n/.agents/\n');
+  cli('init-db');
   cli('add', 'Keep execution state visible');
   cli('skill', 'install', '--scope', 'repo', '--agent', 'codex', '--yes');
   const otherWorkspace = path.join(temporary, 'other-workspace');

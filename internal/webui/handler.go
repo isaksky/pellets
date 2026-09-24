@@ -69,10 +69,11 @@ func newHandler(application *app.WebApplication, hub *eventHub, config handlerCo
 			}
 			return n
 		},
-		"text": nullableText,
-		"path": localPath,
-		"repositoryPath": func(value domain.LocalPath) string {
-			return strings.TrimPrefix(strings.TrimSuffix(localPath(value), "/.git"), "./")
+		"text":           nullableText,
+		"path":           localPath,
+		"repositoryPath": repositoryPath,
+		"repositoryFullPath": func(value domain.LocalPath) string {
+			return repositoryFullPath(application.Database.Root, value)
 		},
 		"eqStatus": func(left domain.PelletStatus, right string) bool { return string(left) == right },
 		"sameID":   func(left, right int64) bool { return left == right },
@@ -1292,7 +1293,7 @@ func (h *handler) renderUpdates(response *datastarResponse, status int, primary 
 		names = append(names, "run-dashboard")
 	}
 	if data.Area == "tasks" {
-		names = append(names, "filter-summary", "queue-order", "queue-title", "active-group-filter")
+		names = append(names, "filter-summary", "clear-filters", "queue-order", "queue-title", "active-group-filter")
 	}
 	if data.Area == "tasks" && primary != "tasks-area" && primary != "task-list" {
 		names = append(names, "task-list")

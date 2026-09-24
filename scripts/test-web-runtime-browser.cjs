@@ -9,7 +9,8 @@ const {execFileSync, spawn} = require('node:child_process');
 const {chromium, webkit} = require('playwright');
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-runtime-browser-'));
-const binary = path.join(temporary, process.platform === 'win32' ? 'pl.exe' : 'pl');
+const baseline = process.env.PELLETS_NAVIGATION_BASELINE;
+const binary = baseline || path.join(temporary, process.platform === 'win32' ? 'pl.exe' : 'pl');
 const peer = path.join(temporary, process.platform === 'win32' ? 'codex.exe' : 'codex');
 const environment = {...process.env, PATH: temporary + path.delimiter + process.env.PATH,
   PELLETS_CODEX_EXECUTABLE: peer, PELLETS_SUPERVISOR_PEER: '1', GORACE: 'atexit_sleep_ms=0'};
@@ -38,11 +39,11 @@ async function until(check, message) {
   throw new Error(message);
 }
 (async () => {
-  execFileSync('go', ['build', '-o', binary, './cmd/pl'], {cwd: repository});
+  if (!baseline) execFileSync('go', ['build', '-o', binary, './cmd/pl'], {cwd: repository});
   execFileSync('go', ['test', '-c', '-o', peer, './internal/app'], {cwd: repository});
   const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
   browser = await engine.launch({headless: true, ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}), ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});
-  const cases = [...(process.platform === 'win32' ? [] : ['runtime_probe_gate']), 'runtime_old', 'schedule_runtime_error', 'schedule_activity_errors_gate', 'schedule_rpc_error', 'schedule_unfinished', 'schedule_fresh_choice', 'schedule_noop', 'stop_after_pellet', 'watch_waiting'];
+  const cases = [...(process.platform === 'win32' ? [] : ['runtime_probe_gate']), 'runtime_old', 'schedule_runtime_error', 'schedule_activity_errors_gate', 'schedule_rpc_error', 'schedule_unfinished', 'schedule_fresh_choice', 'schedule_noop', 'stop_after_pellet', 'watch_waiting', 'navigation_owned'];
   const selectedCase = process.env.PELLETS_RUNTIME_BROWSER_CASE;
   assert.ok(!selectedCase || cases.includes(selectedCase), 'Unknown PELLETS_RUNTIME_BROWSER_CASE');
   for (const mode of cases.filter(mode => !selectedCase || selectedCase === mode)) {
@@ -52,12 +53,16 @@ async function until(check, message) {
     git('init', '-q'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');
     git('config', 'commit.gpgSign', 'false'); git('commit', '--allow-empty', '-m', 'initial');
     fs.appendFileSync(path.join(root, '.git', 'info', 'exclude'), '\n/fake-*\n/.agents/\n');
+    cli('init-db');
     const pellet = cli('add', 'Runtime compatibility regression');
+    const binding = JSON.parse(fs.readFileSync(path.join(root, '.git', 'pellets-database.json')));
+    assert.ok(fs.realpathSync(path.resolve(root, '.git', binding.path)).startsWith(fs.realpathSync(root) + path.sep));
     const queued = mode === 'stop_after_pellet' ? cli('add', 'Leave this queued after stopping') : undefined;
     cli('skill', 'install', '--scope', 'repo', '--agent', 'codex', '--yes');
-    fs.writeFileSync(path.join(root, 'fake-mode'), mode === 'schedule_fresh_choice' ? 'schedule_unfinished' : mode === 'stop_after_pellet' ? 'schedule_gate' : mode === 'watch_waiting' ? 'schedule_activity_gate' : mode);
+    fs.writeFileSync(path.join(root, 'fake-mode'), mode === 'runtime_probe_gate' ? 'schedule_noop' : mode === 'schedule_fresh_choice' ? 'schedule_unfinished' : mode === 'stop_after_pellet' ? 'schedule_gate' : mode === 'watch_waiting' ? 'schedule_activity_gate' : mode);
+    if (mode === 'navigation_owned') cli('start', pellet.id);
     let origin = await start(root);
-    const page = await browser.newPage({viewport: {width: 1280, height: 1000}});
+    const page = await browser.newPage({viewport: {width: 1280, height: 1000}, hasTouch: true, deviceScaleFactor: 1});
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     const route = `/projects/${pellet.project}/workspaces/1`;
     if (mode === 'watch_waiting') {
@@ -69,6 +74,23 @@ async function until(check, message) {
       });
     }
     await page.goto(origin + route);
+    if (mode === 'runtime_probe_gate') {
+      // Startup catalog discovery also probes the runtime. Warm that cache
+      // before gating the invocation so the crash tests the admission custodian.
+      await until(async () => (await (await page.request.get(origin + '/models')).json()).fetched_at > 0, 'Catalog did not finish');
+      fs.writeFileSync(path.join(root, 'fake-events.jsonl'), '');
+      fs.writeFileSync(path.join(root, 'fake-mode'), mode);
+    }
+    if (mode === 'navigation_owned') {
+      assert.equal(await page.locator('.execution-state-label').textContent(), 'Not running');
+      assert.equal(await page.getByRole('button', {name: /Start next/}).count(), 0);
+      if (process.env.PELLETS_NAVIGATION_AUDIT) await require('./web-navigation-contract.cjs')({page, baseline, state: 'Not running'});
+      assert.equal(cli('show', pellet.id).status, 'in_progress');
+      assert.deepEqual(errors, []);
+      await page.close(); await stop();
+      console.log('PASS navigation ownership without a run, explicit Resume retained');
+      continue;
+    }
     const startForm = page.locator('form[data-schedule]').filter({has: page.locator('select[name=mode]')});
     await startForm.getByRole('combobox', {name: 'Execution intention'}).click();
     await page.getByRole('option', {name: mode === 'stop_after_pellet' ? /^Through matching queue/ : mode === 'watch_waiting' ? /^Wait for matching work/ : /^One pellet/}).click();
@@ -127,11 +149,13 @@ async function until(check, message) {
         assert.ok(await activity.locator('.activity-event').count() >= 5, 'Completed activity was removed');
       };
       await waitForWork();
+      if (process.env.PELLETS_NAVIGATION_AUDIT) await require('./web-navigation-contract.cjs')({page, baseline, state: 'Working'});
       const firstRun = await activity.getAttribute('data-run-id');
       await completeAndWait(1);
       assert.equal(cli('show', pellet.id).status, 'closed');
       const firstCommit = git('rev-parse', 'HEAD').toString().trim();
       await expectHistory(pellet.id, firstRun, firstCommit);
+      if (process.env.PELLETS_NAVIGATION_AUDIT) await require('./web-navigation-contract.cjs')({page, baseline, state: 'Waiting for work'});
       assert.equal(await page.locator('.run-details').evaluate(el => el.open), false);
       await reportOperation();
       await expectState('Waiting for work', false);
@@ -165,9 +189,37 @@ async function until(check, message) {
       for (const control of ['Stop now', 'Stop after']) {
         const stopForm = page.locator('form[data-schedule]').filter({has: page.getByRole('button', {name: control, exact: true})});
         const endpoint = origin + await stopForm.getAttribute('action');
+        const stopBounds = await stopForm.getByRole('button', {name: control, exact: true}).boundingBox();
         const accepted = page.waitForResponse(response => response.url() === endpoint && response.request().method() === 'POST');
+        let releaseStop;
+        const stopGate = new Promise(resolve => { releaseStop = resolve; });
+        await page.route(endpoint, async route => { await stopGate; await route.continue(); });
         await stopForm.getByRole('button', {name: control, exact: true}).click();
+        const feedback = page.locator('#request-feedback');
+        await feedback.waitFor();
+        if (!baseline) {
+          assert.equal(await feedback.textContent(), 'Updating run controls…');
+          assert.equal(await feedback.evaluate(el => el.parentElement.classList.contains('run-controls')), true);
+          const pendingBounds = await stopForm.getByRole('button', {name: control, exact: true}).boundingBox();
+          assert.equal(pendingBounds.height, stopBounds.height, 'Feedback must not squash a Stop label');
+          assert.equal(pendingBounds.width, stopBounds.width, 'Feedback must not shrink a Stop control');
+        }
+        assert.equal(await stopForm.getByRole('button', {name: control, exact: true}).isDisabled(), true);
+        if (process.env.PELLETS_FEEDBACK_STOP_AUDIT) {
+          const engineName = process.env.PLAYWRIGHT_BROWSER || 'chromium';
+          const directory = path.join(process.env.PELLETS_FEEDBACK_STOP_AUDIT, engineName + '-' + control.toLowerCase().replaceAll(' ', '-'));
+          fs.mkdirSync(directory, {recursive:true});
+          let clip = await page.locator('.run-controls').boundingBox();
+          clip.height = Math.min(clip.height + 210, page.viewportSize().height - clip.y);
+          const metadata = path.join(directory, 'before.json');
+          if (!baseline && fs.existsSync(metadata)) clip = JSON.parse(fs.readFileSync(metadata)).clip;
+          await page.screenshot({path:path.join(directory, baseline?'before.png':'after.png'), clip, animations:'disabled', caret:'hide'});
+          fs.writeFileSync(path.join(directory, baseline?'before.json':'after.json'), JSON.stringify({clip, viewport:page.viewportSize(), scale:1,
+            theme:await page.locator('html').getAttribute('data-theme'), feedback:await feedback.textContent()},null,2));
+        }
+        releaseStop();
         assert.equal((await accepted).status(), 202);
+        await page.unroute(endpoint);
         await until(async () => (await (await page.request.get(endpoint.replace(/\/stop-(now|after)$/, ''))).json()).state === 'stopped', 'Idle Watch did not stop');
         await expectState('Finished', false);
         assert.equal(await page.locator('.schedule-state').count(), 0);
@@ -276,7 +328,7 @@ async function until(check, message) {
     } else {
       assert.equal(cli('show', pellet.id).status, 'in_progress');
       const check = async () => {
-        const summary = await page.locator('.run-activity').innerText();
+        const summary = await page.locator('.run-activity').textContent();
         if (mode === 'schedule_unfinished' || mode === 'schedule_fresh_choice') {
           assert.match(summary, /Outside-click checks passed; browser test failed on a hidden table cell/);
         } else {
@@ -323,9 +375,10 @@ async function until(check, message) {
       }
       if (mode === 'schedule_runtime_error' && process.env.PELLETS_BROWSER_SCREENSHOT) await page.screenshot({path: process.env.PELLETS_BROWSER_SCREENSHOT, fullPage: true});
       if (mode === 'schedule_runtime_error') {
+        if (process.env.PELLETS_NAVIGATION_AUDIT) await require('./web-navigation-contract.cjs')({page, baseline, state: 'Failed · needs attention'});
         fs.writeFileSync(path.join(root, 'runtime-repair.txt'), 'keep this repair');
         git('add', 'runtime-repair.txt'); git('commit', '-m', 'repair runtime');
-        const baseline = git('rev-parse', 'HEAD').toString().trim();
+        const repairHead = git('rev-parse', 'HEAD').toString().trim();
         fs.writeFileSync(path.join(root, 'fake-mode'), 'schedule_success');
         await page.getByRole('button', {name: 'Resume', exact: true}).click();
         const deadline = Date.now() + 20000;
@@ -343,7 +396,7 @@ async function until(check, message) {
         assert.equal(after.filter(x => x.method === 'thread/start').length, 1);
         assert.equal(after.filter(x => x.method === 'thread/resume').length, 1);
         const prompt = JSON.stringify(after.filter(x => x.method === 'turn/start').at(-1));
-        assert.ok(prompt.includes(baseline)); assert.ok(prompt.includes('Commits landed since your previous attempt'));
+        assert.ok(prompt.includes(repairHead)); assert.ok(prompt.includes('Commits landed since your previous attempt'));
         await page.reload(); assert.match(await page.locator('.run-facts').textContent(), /Completed/);
         console.log('PASS failure → repair commit → Resume at current HEAD');
       }
