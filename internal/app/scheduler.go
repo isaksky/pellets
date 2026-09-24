@@ -403,6 +403,18 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 						return ready, err
 					}
 				}
+				// This callback runs both before runtime preparation and again
+				// inside the final selection transaction, under worktree exclusion.
+				// Do not leave new work claimed when HEAD cannot seed an attempt.
+				if request.ResumeFrom == nil {
+					root, err := executionRoot(ctx, s.options.Database, storage.ExecutionRun{WorkspaceRoot: request.Selected.Workspace.RootPath, WorkspaceGitDir: request.Selected.Workspace.GitDir, GitCommonDir: request.Selected.Project.GitCommonDir})
+					if err != nil {
+						return false, err
+					}
+					if err := requireExecutionStartingCommit(ctx, root); err != nil {
+						return false, err
+					}
+				}
 				return true, nil
 			}
 			// First evaluate eligibility without claiming. Downloads and process

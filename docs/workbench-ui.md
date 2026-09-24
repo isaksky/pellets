@@ -798,6 +798,14 @@ stretches over most of the viewport. Pending and failed requests retain drafts
 and existing explicit correction/retry rules. Schedule errors keep their
 preflight choices beside Start/Resume, and originally disabled controls stay
 disabled when a failed request unlocks the form.
+Execution requires a valid Git HEAD commit. An unborn workspace gets an explicit
+initial-commit message before a pellet is claimed, an attempt is recorded, or a
+conversation starts. The scheduler rechecks this prerequisite when selecting
+work, including after the interactive check. Unrelated uncommitted files keep
+their existing behavior; saved attempts retain their exact recovery checks.
+`scripts/test-web-admission-browser.cjs` covers the initial-commit error,
+preserved choices, keyboard/touch retry, reload/restart, and a corrected
+repository in Chromium and WebKit at desktop and phone widths.
 Pending Stop actions say **Updating run controls…**; they do not claim to run
 the admission checks reserved for Start/Resume.
 Live invalidations arriving during another read or foreground request coalesce

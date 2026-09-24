@@ -144,6 +144,11 @@ func (s *Scheduler) CheckAdmission(ctx context.Context, request ScheduleRequest)
 	if err == nil && request.ResumeFrom == nil {
 		return nil
 	} // Empty queue needs no runtime.
+	if request.ResumeFrom == nil {
+		if err := requireExecutionStartingCommit(ctx, root); err != nil {
+			return err
+		}
+	}
 	probe, err := os.CreateTemp(root, ".pellets-write-check-")
 	if err != nil {
 		return scheduleError("workspace_not_writable", "The workspace is not writable. Fix its permissions and retry.")
@@ -166,6 +171,19 @@ func (s *Scheduler) CheckAdmission(ctx context.Context, request ScheduleRequest)
 	defer func() { resultErr = errors.Join(resultErr, prepared.Client.Close()) }()
 	if request.ResumeFrom != nil && !request.FreshConversation {
 		return supervisor.reconcileConversation(ctx, executionRequest, root, prepared.Client)
+	}
+	return nil
+}
+
+// New execution needs a commit before it can capture a durable attempt. Check
+// before claiming work; saved attempts retain their exact recovery checks.
+func requireExecutionStartingCommit(ctx context.Context, root string) error {
+	head, err := executionGit(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err != nil || !storage.IsFullCommitID(head) {
+		return errors.Join(scheduleError("starting_head_unavailable", "Create an initial Git commit in this workspace before executing pellets. If it already has commits, restore a valid HEAD and try again."), err)
 	}
 	return nil
 }
