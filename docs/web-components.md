@@ -312,6 +312,23 @@ all other styles and positions still compare, with the previously documented
 review-height displacement and preference-row accounting. Focused persistent
 pairs follow [UI evidence guidance](ui-agent-guidance.md#focused-before-and-after-evidence).
 
+Live row feedback animates only the background highlight. A row transform would
+change the containing block of its fixed menu; animated opacity would create a
+stacking context that can place actions beneath neighboring rows. Keep both out
+of the shared `state-changed` animation, including its filled state. Menu DOM,
+keyboard behavior and refresh deferral while a menu is open remain unchanged.
+
+`test-web-row-menu-animation-browser.cjs` covers ordinary and checkpoint rows
+inserted or revised through live refresh, at animation start, midpoint, end and
+after completion. It checks viewport anchoring, bounds, every enabled action's
+hit target, scrolling, keyboard navigation, dismissal, focus return and updates
+deferred while menus are open. Run in Chromium and WebKit; it covers all five
+themes at 1280, 1092 and 390px with normal motion and scrolled panes. Fixtures use
+independent temporary repositories with explicitly initialized databases.
+`PELLETS_MENU_BASELINE=/path/to/pl` captures baseline measurements without geometry
+assertions; `PELLETS_BROWSER_ARTIFACTS=/path` retains matched before/after crops
+and measurements separately from the disposable databases.
+
 ### Interaction target regression coverage
 
 `test-web-interaction-browser.cjs` uses a fresh OS-temporary Git repository with an explicitly initialized database, a
