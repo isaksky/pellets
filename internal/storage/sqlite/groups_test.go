@@ -404,7 +404,7 @@ func TestGroupRenameRetainsExecutionAndCheckpointEvidence(t *testing.T) {
 		t.Fatal("rename rewrote immutable evidence")
 	}
 	current, err := q.ReadPellet(ctx, f.main, checkpoint.Reference)
-	if err != nil || current.Checkpoint.Ready || current.Checkpoint.Targets[0].Reason != "scope_changed" || *current.Checkpoint.Targets[0].Group != g.Name {
+	if err != nil || !current.Checkpoint.Ready || current.Checkpoint.Targets[0].Reason != "ready" || *current.Checkpoint.Targets[0].Group != g.Name {
 		t.Fatalf("checkpoint silently retargeted: %+v %v", current, err)
 	}
 	assertQueryInt(t, q.db, `SELECT COUNT(*) FROM execution_changes WHERE json_extract(old_json,'$.group')='captured' AND json_extract(new_json,'$.group')='renamed'`, 1)

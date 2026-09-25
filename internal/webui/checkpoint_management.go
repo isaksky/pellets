@@ -21,6 +21,7 @@ type checkpointHistoryView struct {
 }
 
 type checkpointManagementView struct {
+	Open    bool
 	Choices []checkpointScopeChoice
 	History []checkpointHistoryView
 }

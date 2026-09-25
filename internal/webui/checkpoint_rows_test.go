@@ -27,7 +27,7 @@ func TestCheckpointRowSeparatesReadinessActivityAndCompletion(t *testing.T) {
 		want                 string
 	}{
 		{"ready", domain.PelletOpen, pending, false, true, false, "Ready"},
-		{"waiting", domain.PelletOpen, pending, false, false, false, "Waiting for 2 pellets"},
+		{"waiting", domain.PelletOpen, pending, false, false, false, "Scope changed"},
 		{"idle claim", domain.PelletInProgress, pending, false, true, false, "Not running"},
 		{"live", domain.PelletInProgress, running, true, true, false, "Reviewing"},
 		{"orphaned running receipt", domain.PelletInProgress, running, false, true, false, "Needs attention"},
@@ -127,4 +127,33 @@ func TestReviewQueueCountsAndHiddenScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("", 1, 0, 1, true) // checkpoint-only active queue
+}
+
+func TestCheckpointReadinessExplainsEachBlocker(t *testing.T) {
+	for _, tc := range []struct {
+		reasons []string
+		label   string
+		phrases []string
+	}{
+		{[]string{"target_incomplete"}, "Waiting for 1 pellet", []string{"completion"}},
+		{[]string{"target_incomplete", "target_incomplete"}, "Waiting for 2 pellets", []string{"2 selected pellets"}},
+		{[]string{"evidence_missing"}, "Evidence missing", []string{"implementation evidence"}},
+		{[]string{"target_missing"}, "Target unavailable", []string{"unavailable", "update scope"}},
+		{[]string{"scope_changed", "scope_changed", "evidence_missing", "target_incomplete"}, "Scope changed", []string{"2 selected pellets", "saved review scope", "implementation evidence", "completion"}},
+		{[]string{"unknown"}, "Review not ready", []string{"could not be confirmed"}},
+	} {
+		cp := &storage.ReviewCheckpoint{}
+		for _, reason := range tc.reasons {
+			cp.Targets = append(cp.Targets, storage.ReviewTarget{Reason: reason})
+		}
+		got := checkpointReadiness(cp)
+		if got.Label != tc.label {
+			t.Fatalf("%v: %+v", tc.reasons, got)
+		}
+		for _, phrase := range tc.phrases {
+			if !strings.Contains(got.Detail, phrase) {
+				t.Errorf("%v: missing %q in %q", tc.reasons, phrase, got.Detail)
+			}
+		}
+	}
 }

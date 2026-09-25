@@ -1062,6 +1062,9 @@ input[type="checkbox"] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.review-scope-link { font-size: 12px; }
+.checkpoint-management details > .form-help { margin: 8px 0; }
+.review-blockers .form-help { margin: 8px 0 12px; font-size: 12px; line-height: 1.5; }
 .review-status { font-size: 12px; color: var(--muted); }
 .review-disclosure { margin-top: 5px; }
 .review-disclosure > summary {

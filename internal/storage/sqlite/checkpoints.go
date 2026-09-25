@@ -78,7 +78,7 @@ const checkpointJSONSQL = `json_object('removed', CASE WHEN p.status='maybe_late
  'project_id', t.project_id, 'number', t.target_number,
  'reference', project.code || '-' || t.target_number,
  'selected_reference', t.selected_reference,
- 'title', t.title, 'description', t.description, 'external_id', t.external_id, 'group', t.group_id,
+ 'title', COALESCE(t.evidence_title,t.title), 'description', COALESCE(t.evidence_description,t.description), 'external_id', t.external_id, 'group', t.group_id,
  'status', t.target_status, 'implementation_revision', t.implementation_revision, 'reason', t.reason,
  'evidence', CASE WHEN t.run_id IS NULL THEN NULL ELSE json_object(
    'run_id',t.run_id,'workspace_id',t.workspace_id,'starting_head',t.starting_head,'result_commit',t.result_commit) END
@@ -91,7 +91,7 @@ func invalidCheckpoint(message string) error {
 
 func requireCheckpointReady(p storage.Pellet) error {
 	if p.Kind == domain.PelletReviewCheckpoint && (p.Checkpoint == nil || !p.Checkpoint.Ready) {
-		return domain.NewError(domain.Conflict, "review_checkpoint_not_ready", "every selected target must retain the selected scope, be closed, and have matching verified implementation evidence", map[string]any{"pellet": p.Reference.String(), "checkpoint": p.Checkpoint})
+		return domain.NewError(domain.Conflict, "review_checkpoint_not_ready", "every selected target must be closed and have retained verified successful implementation evidence", map[string]any{"pellet": p.Reference.String(), "checkpoint": p.Checkpoint})
 	}
 	return nil
 }

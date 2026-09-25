@@ -312,9 +312,10 @@ records retain their existing shape (absent kind means ordinary). The nested
 contract is explicitly versioned: `checkpoint.version` is 1, `ready` is a
 boolean, and `targets` is ordered by stable target number. Each target includes
 `project_id`, `number`, current canonical `reference`, immutable
-`selected_reference`, selected `title`/`description`/nullable `external_id` and
-`group`, current nullable `status` and `implementation_revision`, `reason`, and
-nullable `evidence`. Evidence contains `run_id`, `workspace_id`, `starting_head`,
+`selected_reference`, the evidenced implementation’s `title`/`description` and
+nullable `implementation_revision`, selected nullable `external_id` and `group`,
+current nullable `status`, `reason`, and nullable `evidence`. Without evidence,
+title and description fall back to the original selection. Evidence contains `run_id`, `workspace_id`, `starting_head`,
 and `result_commit`; it identifies exact implementations, never a broad Git
 range inferred from queue positions. Purged targets retain their selected
 identity and scope and report `target_missing`.
@@ -326,15 +327,16 @@ preserving its existing queue-tail semantics. Scope edits in the web UI start
 a new implementation generation; prior execution and review evidence remains
 under its captured generation. See [checkpoint management](checkpoint-management.md).
 
-Readiness requires every selected target to retain its selected scope and be
-closed with a successful completed implementation attempt, verified commit,
-finalization and Codex conversation evidence for its current implementation
-revision. The other waiting reasons are `scope_changed`, `target_incomplete`,
-and `evidence_missing`; a usable target reports `ready`. Closing queue rows
-alone never supplies evidence. Reopen, release, defer, or scope edits invalidate
-earlier implementation evidence. A continuation retains its original revision;
-it cannot turn an old attempt into evidence for a new lifecycle generation.
-Legacy attempts with an unknown revision cannot establish checkpoint readiness.
+Readiness requires every selected target to be closed with retained successful
+completed implementation evidence: a verified commit, finalization, and Codex
+conversation. The latest such implementation supplies the reviewed title,
+description, revision, and exact commits. Later title, description, group, or
+external-ID edits do not block review or require saving a new scope. Reopening
+or deferring a target makes it wait until closed again; closure alone cannot
+supply missing implementation evidence. This reviews completed work, not a claim
+that later unimplemented requirements are satisfied. Missing targets report
+`target_missing`, unfinished targets `target_incomplete`, and absent successful
+implementations `evidence_missing`; otherwise the target reports `ready`.
 
 `next` and `start-next` skip waiting open checkpoints while preserving exact
 filters and workspace ownership rules. Checkpoints use the existing four

@@ -198,3 +198,38 @@ func TestPendingInteractionRendersAfterBrowserReconnectAndDeadProcessRejectsAnsw
 		}
 	}
 }
+
+func TestEmptyStartFeedbackSurvivesScheduleCleanupAndReload(t *testing.T) {
+	f, _ := recoveryHandlerFixture(t)
+	schedule := startHTTPSchedule(t, f, url.Values{"_csrf": {testCSRF}, "workspace_id": {"1"}, "mode": {"run_one"}})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	status, err := schedule.Result(ctx)
+	if err != nil || status.Started != 0 || status.Reason != "queue_empty" {
+		t.Fatalf("empty schedule: %+v %v", status, err)
+	}
+	if _, active := f.application.Scheduler.WorkspaceStatus(1); active {
+		t.Fatal("ended schedule remains active")
+	}
+	latest, ok := f.application.Scheduler.LatestWorkspaceStatus(1)
+	if !ok || latest.ID != status.ID {
+		t.Fatalf("lost no-op receipt: %+v", latest)
+	}
+	for _, live := range []bool{false, true} {
+		headers := make(http.Header)
+		if live {
+			headers.Set("Datastar-Request", "true")
+			headers.Set("Pellets-Target", "live")
+		}
+		r := performRequest(f.handler, http.MethodGet, "/projects/project1/tasks?workspace=1", "", headers)
+		body := r.Body.String()
+		for _, want := range []string{"Nothing started", "No eligible pellet", "Start next"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("live=%v missing %q: %d", live, want, r.Code)
+			}
+		}
+		if strings.Contains(body, ">Stop now<") {
+			t.Fatal("ended schedule offers Stop")
+		}
+	}
+}

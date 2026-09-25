@@ -170,20 +170,20 @@ func TestReviewCheckpointReadinessAcrossWorktreesAndGenerations(t *testing.T) {
 	}
 	transitionReviewTest(t, r, f.main, a, storage.PelletReopen)
 	transitionReviewTest(t, r, f.main, a, storage.PelletClose)
-	if p := read(); p.Checkpoint.Ready || p.Checkpoint.Targets[0].Reason != "evidence_missing" {
-		t.Fatalf("old generation reused: %+v", p.Checkpoint)
+	if p := read(); !p.Checkpoint.Ready || p.Checkpoint.Targets[0].Evidence.RunID != runA.ID {
+		t.Fatalf("completed implementation lost after lifecycle-only edit: %+v", p.Checkpoint)
 	}
 	transitionReviewTest(t, r, f.main, a, storage.PelletReopen)
-	completeReviewTarget(t, r, db, f.linked, a)
-	if !read().Checkpoint.Ready {
-		t.Fatal("fresh evidence did not restore readiness")
+	fresh := completeReviewTarget(t, r, db, f.linked, a)
+	if p := read(); !p.Checkpoint.Ready || p.Checkpoint.Targets[0].Evidence.RunID != fresh.ID {
+		t.Fatal("review did not select the latest completed implementation")
 	}
 	title := "changed scope"
 	if _, err := r.UpdatePellet(ctx, f.main, b.Reference, storage.PelletChanges{Title: &title}); err != nil {
 		t.Fatal(err)
 	}
-	if p := read(); p.Checkpoint.Ready || p.Checkpoint.Targets[1].Reason != "scope_changed" {
-		t.Fatalf("scope edit accepted: %+v", p.Checkpoint)
+	if p := read(); !p.Checkpoint.Ready || p.Checkpoint.Targets[1].Title != "b" {
+		t.Fatalf("live title replaced captured implementation requirements: %+v", p.Checkpoint)
 	}
 	if _, err := r.PurgeClosedPellets(ctx, f.main.Project, storage.PelletPurgeOptions{}); err != nil {
 		t.Fatal(err)
@@ -234,7 +234,7 @@ func TestReviewCheckpointRunRejectsStaleCompletionAndResume(t *testing.T) {
 	assertPelletErrorCode(t, err, "execution_run_conflict")
 }
 
-func TestReviewCheckpointPurgeRetainsExactEvidenceWithoutRevivingStaleGeneration(t *testing.T) {
+func TestReviewCheckpointPurgeRetainsLatestCompletedEvidence(t *testing.T) {
 	ctx := context.Background()
 	f := newPelletRepositoryFixture(t)
 	r := f.open(t)
@@ -257,7 +257,7 @@ func TestReviewCheckpointPurgeRetainsExactEvidenceWithoutRevivingStaleGeneration
 	if err != nil {
 		t.Fatal(err)
 	}
-	if before.Checkpoint.Targets[0].Evidence == nil || before.Checkpoint.Targets[0].Evidence.RunID != latest.ID || before.Checkpoint.Targets[1].Evidence != nil {
+	if before.Checkpoint.Targets[0].Evidence == nil || before.Checkpoint.Targets[0].Evidence.RunID != latest.ID || before.Checkpoint.Targets[1].Evidence == nil {
 		t.Fatalf("invalid pre-purge evidence: %+v", before.Checkpoint)
 	}
 	if _, err := r.PurgeClosedPellets(ctx, f.main.Project, storage.PelletPurgeOptions{}); err != nil {
@@ -296,8 +296,8 @@ func TestReviewCheckpointPurgeRetainsExactEvidenceWithoutRevivingStaleGeneration
 		if !reflect.DeepEqual(p.Checkpoint.Targets[0].Evidence, before.Checkpoint.Targets[0].Evidence) {
 			t.Fatalf("purge replaced exact receipt: got %+v want %+v", p.Checkpoint.Targets[0].Evidence, before.Checkpoint.Targets[0].Evidence)
 		}
-		if p.Checkpoint.Targets[1].Evidence != nil {
-			t.Fatalf("purge revived stale evidence: %+v", p.Checkpoint.Targets[1])
+		if !reflect.DeepEqual(p.Checkpoint.Targets[1].Evidence, before.Checkpoint.Targets[1].Evidence) {
+			t.Fatalf("purge changed completed evidence: %+v", p.Checkpoint.Targets[1])
 		}
 	}
 }
@@ -448,5 +448,62 @@ func TestReviewCheckpointFiltersAndRenameDoNotChangeReviewScope(t *testing.T) {
 	current, err = r.ReadPellet(ctx, selected, cp.Reference)
 	if err != nil || current.Status != domain.PelletClosed {
 		t.Fatalf("atomic completion did not close checkpoint: %+v %v", current, err)
+	}
+}
+
+func TestReviewUsesCompletedRequirementsAcrossDescriptionEdits(t *testing.T) {
+	ctx := context.Background()
+	f := newPelletRepositoryFixture(t)
+	r := f.open(t)
+	defer r.Close()
+	db, err := OpenProjectDatabase(ctx, f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	target := addOrdinary(t, r, f.main, "selected title")
+	cp := addReview(t, r, f.main, target)
+	originalSelection := groupMigrationRows(t, r.db, "SELECT * FROM review_checkpoint_targets")
+	description := "Requirements used by the implementation"
+	title := "implemented title"
+	target, err = r.UpdatePellet(ctx, f.main, target.Reference, storage.PelletChanges{Title: &title, Description: &description})
+	if err != nil {
+		t.Fatal(err)
+	}
+	implementation := completeReviewTarget(t, r, db, f.linked, target)
+	cp, err = r.ReadPellet(ctx, f.main, cp.Reference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cp.Checkpoint.Ready {
+		t.Fatalf("description edit before implementation blocked review: %+v", cp.Checkpoint)
+	}
+	captured := cp.Checkpoint.Targets[0]
+	if captured.Title != title || captured.Description != description || captured.Evidence.RunID != implementation.ID || *captured.ImplementationRevision != implementation.ImplementationRevision {
+		t.Fatalf("review did not capture completed requirements: %+v", captured)
+	}
+	cp = transitionReviewTest(t, r, f.main, cp, storage.PelletStart)
+	capture := runCapture(f.main.Project.ID, f.main.Workspace.ID, cp.Reference.Number)
+	capture.Mode = "review_checkpoint"
+	review, err := db.CreateExecutionRun(ctx, capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	description = "Later notes that were not implemented"
+	if _, err = r.UpdatePellet(ctx, f.main, target.Reference, storage.PelletChanges{Description: &description}); err != nil {
+		t.Fatal(err)
+	}
+	current, err := r.ReadPellet(ctx, f.main, cp.Reference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.ImplementationRevision != cp.ImplementationRevision || !current.Checkpoint.Ready || !storage.SameReviewScope(review.CheckpointScope, current.Checkpoint) {
+		t.Fatalf("later notes invalidated the captured review: %+v", current.Checkpoint)
+	}
+	if _, err := db.ReadReviewTargetGroupContext(ctx, current.Checkpoint.Targets[0]); err != nil {
+		t.Fatal(err)
+	}
+	if got := groupMigrationRows(t, r.db, "SELECT * FROM review_checkpoint_targets"); got != originalSelection {
+		t.Fatal("readiness rewrote the user's selected scope")
 	}
 }

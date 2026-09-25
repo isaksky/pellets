@@ -40,6 +40,13 @@ func (workspace runWorkspaceView) ExecutionStatus() *executionPresentation {
 	if workspace.NoRunResume != nil {
 		return &executionPresentation{Label: "Not running", Detail: "Resume explicitly to continue this pellet."}
 	}
+	if workspace.NoWorkStarted && workspace.Schedule == nil && (run == nil || run.State == "completed" || run.State == "resolved") {
+		detail := "No eligible pellet was found for this workspace. Check workspace assignments and review readiness."
+		if len(workspace.BlockedReviews) > 0 {
+			detail = "No eligible pellet was found. Resolve the review blockers shown above, then choose Start next."
+		}
+		return &executionPresentation{Label: "Nothing started", Detail: detail}
+	}
 	// Watch retains the last run as history while waiting for another pellet.
 	// A newly captured active run or unfinished recovery still takes precedence.
 	if workspace.Schedule != nil && workspace.Schedule.State == "waiting" && (run == nil || run.State == "completed" || run.State == "resolved") {

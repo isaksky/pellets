@@ -204,7 +204,7 @@ func TestWorkbenchCheckpointScopesSurviveFiltersAndUseCurrentTargetRouting(t *te
 		t.Fatalf("checkpoint missing at current target workspace: %v", got)
 	}
 	preserved, err := f.application.Pellet(context.Background(), p, cp.Reference)
-	if err != nil || *preserved.Checkpoint.Targets[0].Group != web || preserved.Checkpoint.Targets[0].Reason != "scope_changed" {
+	if err != nil || *preserved.Checkpoint.Targets[0].Group != web || preserved.Checkpoint.Targets[0].Reason != "target_incomplete" {
 		t.Fatalf("scope evidence changed: %+v %v", preserved, err)
 	}
 }

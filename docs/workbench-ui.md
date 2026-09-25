@@ -531,6 +531,14 @@ links and other dispositions. Only newly created follow-ups count toward the
 result label. Reopened generations show their current readiness and link to
 historical results in the detail view.
 
+Readiness labels distinguish **Evidence missing** and **Target unavailable**
+from **Waiting for N pellets**, which means unfinished targets. Completed targets
+remain **Ready** after description or metadata edits: the review uses requirements
+and commits captured by their latest successful implementations. **Save scope**
+changes explicit membership and starts a new generation; it is not required to
+refresh task text. The editor retains its open state on live updates. Target
+reasons in the inspector use the same readable labels.
+
 Navigation and footer count all project records in open or in-progress state,
 including reviews. The footer labels this **N active in project**. The list heading
 labels the filtered **Queue results** or workspace results and gives the explicit
@@ -613,6 +621,21 @@ indicator continues between reported operations, with animation disabled for
 reduced motion. A concise active command/file operation
 appears when reported; otherwise the phase description explains the current
 work without inventing progress. Stop-after remains a separate schedule intent.
+
+A Start attempt that selects no work shows **Nothing started**, with a reason,
+instead of displaying an older run as its successful outcome. This selection
+receipt survives browser reloads for the foreground server's lifetime. The
+previous run remains explicitly labeled as history, and new execution replaces
+the selection result. Blocked reviews matching workspace routing appear beside
+Start regardless of browsing filters; browsing or following their links does
+not change scope, start work, or relax execution checks.
+
+`scripts/test-web-review-readiness-browser.cjs` covers stale scope, a no-op Start
+with completed run history, reload, keyboard recovery and focus return, live
+editor refresh, explicit scope save, and subsequent review in Chromium/WebKit
+across all five themes and 1280/1092/390px layouts. Use
+`PELLETS_REVIEW_BASELINE=/path/to/pl` and `PELLETS_BROWSER_ARTIFACTS=/path` for
+matched before/after captures from isolated fixtures.
 Agent update/Agent response labels describe messages, never the run outcome.
 Messages are visible by default with 14px Markdown prose, paragraph spacing and
 wrapping. They share the description renderer's local highlighting, literal HTML,

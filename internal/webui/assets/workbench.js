@@ -63,11 +63,12 @@ function updateAttention() {
     dot = button?.querySelector(".execution-dot");
   if (!button || !article) return;
   const state =
+    article.querySelector(".execution-state-label")?.textContent.trim() ||
     article.querySelector(".run-state")?.textContent.trim() ||
     article.querySelector(".schedule-state")?.textContent.trim() ||
     "Idle";
   const attention = !!article.querySelector(
-    ".run-interaction, .run-follow-up, .run-notice.warning, .schedule-state",
+    ".run-interaction, .run-follow-up, .run-notice.warning, .schedule-state, .review-blockers",
   );
   if (dot) dot.hidden = !attention;
   button.title =
@@ -116,7 +117,7 @@ function remember() {
     });
   while (scrolls.size > 96) scrolls.delete(scrolls.keys().next().value);
   document
-    .querySelectorAll("#execution details[id],#main details[id]")
+    .querySelectorAll("#execution details[id],#main details[id],#inspector-host [data-checkpoint-scope-editor][id]")
     .forEach((el) => expansions.set(el.id, el.open));
   const active = document.activeElement;
   const trigger = active?.matches(".select-trigger") ? active : null;
@@ -176,7 +177,7 @@ function restore() {
     }
   }
   document
-    .querySelectorAll("#execution details[id],#main details[id]")
+    .querySelectorAll("#execution details[id],#main details[id],#inspector-host [data-checkpoint-scope-editor][id]")
     .forEach((el) => {
       if (expansions.has(el.id)) el.open = expansions.get(el.id);
     });
@@ -239,6 +240,12 @@ function syncDialog() {
   );
   if (content && !dialog.open) {
     dialog.showModal();
+    const scope = content.querySelector("[data-checkpoint-scope-editor][data-open-scope]");
+    if (scope) {
+      scope.open = true;
+      scope.querySelector("summary")?.focus();
+      return;
+    }
     content
       .querySelector(
         '.record-edit input:not([type="hidden"]),.record-edit textarea',

@@ -119,3 +119,28 @@ func TestWaitingScheduleWithHistoricalRun(t *testing.T) {
 		}
 	}
 }
+
+func TestNoWorkStartedDoesNotLookLikeHistoricalSuccess(t *testing.T) {
+	for _, state := range []string{"", "completed", "resolved"} {
+		w := runWorkspaceView{NoWorkStarted: true}
+		if state != "" {
+			w.Run = &runView{State: state}
+		}
+		got := w.ExecutionStatus()
+		if got.Label != "Nothing started" || got.Working || got.ShowOperation {
+			t.Fatalf("%q: %+v", state, got)
+		}
+		w.NoRunResume = &noRunResumeView{}
+		if got := w.ExecutionStatus(); got.Label != "Not running" {
+			t.Fatalf("ownership hidden: %+v", got)
+		}
+	}
+	for _, state := range []string{"running", "awaiting_input", "needs_attention", "interrupted"} {
+		w := runWorkspaceView{Run: &runView{State: state, Active: state == "running"}}
+		want := *w.ExecutionStatus()
+		w.NoWorkStarted = true
+		if got := w.ExecutionStatus(); *got != want {
+			t.Fatalf("%s: %+v", state, got)
+		}
+	}
+}

@@ -4,7 +4,7 @@
   <p>This checkpoint is removed from the queue and deferred. No review was completed.</p>
 
   {{else if eqStatus .SelectedPellet.Pellet.Status "open"}}
-    {{with .SelectedPellet.CheckpointManagement}}<details data-checkpoint-scope-editor>
+    {{with .SelectedPellet.CheckpointManagement}}<details id="checkpoint-scope-editor-{{$.SelectedPellet.Pellet.Reference}}" data-checkpoint-scope-editor{{if .Open}} open data-open-scope{{end}}>
       <summary>Edit scope</summary>
       <p class="form-help">Choose the exact pellets to review. Saving captures their current versions in a new review generation; earlier evidence and review results remain in history.</p>
       <form id="checkpoint-scope-{{$.SelectedPellet.Pellet.Reference}}" action="/projects/{{$.Project.Code}}/checkpoints/{{$.SelectedPellet.Pellet.Reference}}/scope" method="post" data-on:submit="@submit()" class="stack-form dirty-track" data-checkpoint-scope-form>

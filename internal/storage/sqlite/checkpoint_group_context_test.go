@@ -101,8 +101,8 @@ func TestCheckpointCapturesExactImplementationContexts(t *testing.T) {
 		t.Fatalf("live edits changed evidence: %v", err)
 	}
 	current, err := q.ReadPellet(ctx, f.main, checkpoint.Reference)
-	if err != nil || current.Checkpoint.Ready {
-		t.Fatalf("rename bypassed authoritative readiness: %+v %v", current.Checkpoint, err)
+	if err != nil || !current.Checkpoint.Ready {
+		t.Fatalf("rename invalidated completed implementation: %+v %v", current.Checkpoint, err)
 	}
 	for i, target := range snapshot.Targets {
 		got, err := db.ReadReviewTargetGroupContext(ctx, target)

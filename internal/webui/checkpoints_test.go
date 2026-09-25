@@ -34,7 +34,7 @@ func TestWebCheckpointCreationAndInspectorUseSharedContract(t *testing.T) {
 		t.Fatalf("web creation lost selected scope: %+v", cp)
 	}
 	response = performRequest(f.handler, http.MethodGet, "/projects/project1/tasks/project1-2", "", nil)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Review checkpoint") || !strings.Contains(response.Body.String(), "target_incomplete") || !strings.Contains(response.Body.String(), "Review outcome") || !strings.Contains(response.Body.String(), "Created follow-ups") {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Review checkpoint") || !strings.Contains(response.Body.String(), "Waiting for completion") || !strings.Contains(response.Body.String(), "Review outcome") || !strings.Contains(response.Body.String(), "Created follow-ups") {
 		t.Fatalf("checkpoint inspector %d: %s", response.Code, response.Body.String())
 	}
 	// The shared writer checks readiness even with the current full-row token.

@@ -319,7 +319,8 @@ checkpoint target snapshots and scope history, review evidence, and request and
 planning receipts byte for byte. Updating a member's current name deliberately
 uses the existing implementation-revision trigger: active work gets the normal
 scope-change journal, stale finalization/resume fails its revision or exact-filter
-check, and a checkpoint with the old selected name reports `scope_changed`.
+check. A review checkpoint remains ready using the completed implementation’s
+captured requirements and historical group context.
 A renamed closed pellet does not pretend its old implementation evidence used
 the new name. Ownership never transfers. Exact Resume retains its captured
 policy for its single owned pellet; subsequent scheduler claims resolve current
@@ -786,19 +787,22 @@ neighbors; removal never completes or purges a review. See
 [checkpoint management](checkpoint-management.md) for these boundaries.
 A composite FK cascades when the checkpoint itself is purged. There
 is deliberately no target FK: purged targets remain diagnosable. A before-delete
-trigger captures the exact currently matching execution receipt in
+trigger captures the exact currently selected successful execution receipt in
 `purged_evidence_run_id`, independently of the disappearing target revision.
 Missing targets retain that receipt's run/workspace/commit evidence while
 remaining unready; missing evidence stays missing rather than falling back to
-an earlier lifecycle generation. Insert checks
+a different implementation. Insert checks
 allow only ordinary targets in the same project, and the kind is immutable;
 checkpoint-to-checkpoint edges and cycles cannot be constructed. These rows
 are a narrow review selection, not generic dependencies or an epic graph.
 
-`review_checkpoint_readiness` derives live target state and the newest matching
-successful completed implementation receipt. It requires a verified distinct
-result commit, finalization, conversation identities, no pending operation,
-and the current implementation revision. Both queue eligibility and the
+`review_checkpoint_readiness` derives live target state and the latest retained
+successful completed implementation receipt for each selected identity. Migration
+26 removes comparisons against mutable task text and the live implementation
+revision. Reviewed title, description, and revision come from that receipt,
+alongside the verified result commit, finalization, conversation identities, and
+no pending operation. Targets must exist and be closed. Already-satisfied runs
+may retain their unchanged starting commit with explicit no-change evidence. Both queue eligibility and the
 materialized checkpoint JSON use this view within the same SQLite snapshot.
 Creation and relative insertion/rebalancing share `BEGIN IMMEDIATE`.
 Start/close and review run capture/completion recheck readiness under their

@@ -3,6 +3,8 @@ package webui
 import (
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"pellets/internal/domain"
 	"pellets/internal/storage"
@@ -28,6 +30,71 @@ func checkpointTargetReason(target storage.ReviewTarget) string {
 	default:
 		return "Readiness unavailable"
 	}
+}
+
+type checkpointReadinessView struct {
+	Label, Detail string
+	ScopeChanged  bool
+}
+
+// Readiness is distinct from execution or review outcome. Only unfinished
+// targets are waiting for completion; changed scope needs an explicit edit.
+func checkpointReadiness(checkpoint *storage.ReviewCheckpoint) checkpointReadinessView {
+	if checkpoint.Ready {
+		return checkpointReadinessView{Label: "Ready", Detail: "Reviews the requirements and commits captured by each selected pellet’s latest successful implementation."}
+	}
+	counts := map[string]int{}
+	for _, target := range checkpoint.Targets {
+		counts[target.Reason]++
+	}
+	v := checkpointReadinessView{Label: "Review not ready", ScopeChanged: counts["scope_changed"] > 0}
+	var reasons []string
+	for _, reason := range []string{"scope_changed", "target_missing", "evidence_missing", "target_incomplete"} {
+		n := counts[reason]
+		if n == 0 {
+			continue
+		}
+		noun := "pellets"
+		if n == 1 {
+			noun = "pellet"
+		}
+		var label, detail string
+		switch reason {
+		case "scope_changed":
+			label = "Scope changed"
+			detail = fmt.Sprintf("The saved review scope is out of date for %d selected %s. Review their current versions before saving a new scope.", n, noun)
+		case "target_missing":
+			label = "Target unavailable"
+			detail = fmt.Sprintf("Target records are unavailable for %d selected %s. Inspect the selected targets and update scope.", n, noun)
+		case "evidence_missing":
+			label = "Evidence missing"
+			detail = fmt.Sprintf("Matching successful implementation evidence is missing for %d selected %s. Inspect their execution details.", n, noun)
+		case "target_incomplete":
+			label = fmt.Sprintf("Waiting for %d %s", n, noun)
+			detail = fmt.Sprintf("Review requires completion of %d selected %s.", n, noun)
+		}
+		if len(reasons) == 0 {
+			v.Label = label
+		}
+		reasons = append(reasons, detail)
+	}
+	v.Detail = strings.Join(reasons, " ")
+	if v.Detail == "" {
+		v.Detail = "Inspect the selected targets; their readiness could not be confirmed."
+	}
+	return v
+}
+
+func (p pelletView) NeedsScopeUpdate() bool {
+	return p.Pellet.Checkpoint != nil && p.Pellet.Status == domain.PelletOpen && checkpointReadiness(p.Pellet.Checkpoint).ScopeChanged
+}
+
+func (p pelletView) ScopeEditURL() string {
+	u, _ := url.Parse(p.URL)
+	q := u.Query()
+	q.Set("edit_scope", "1")
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func (h *handler) prepareCheckpointRows(request *http.Request, data *pageData) error {
@@ -96,17 +163,6 @@ func checkpointRowStatus(p storage.Pellet, o *checkpointOutcomeView, live bool) 
 	if p.Status == domain.PelletInProgress {
 		return "Not running", "Claimed by a workspace, with no active review attempt. Use explicit Resume in execution."
 	}
-	if p.Checkpoint.Ready {
-		return "Ready", "All selected pellets have matching successful implementation evidence."
-	}
-	waiting := 0
-	for _, target := range p.Checkpoint.Targets {
-		if target.Reason != "ready" {
-			waiting++
-		}
-	}
-	if waiting == 1 {
-		return "Waiting for 1 pellet", "Expand the scope for each target’s readiness and blocking reason."
-	}
-	return fmt.Sprintf("Waiting for %d pellets", waiting), "Expand the scope for each target’s readiness and blocking reason."
+	readiness := checkpointReadiness(p.Checkpoint)
+	return readiness.Label, readiness.Detail
 }

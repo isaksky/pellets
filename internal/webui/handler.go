@@ -51,11 +51,13 @@ type handler struct {
 
 func newHandler(application *app.WebApplication, hub *eventHub, config handlerConfig) (http.Handler, error) {
 	functions := template.FuncMap{
-		"statusLabel":   statusLabel,
-		"statusSymbol":  statusSymbol,
-		"runStateLabel": runStateLabel,
-		"formatTime":    formatTime,
-		"relativeTime":  relativeTime,
+		"statusLabel":            statusLabel,
+		"statusSymbol":           statusSymbol,
+		"runStateLabel":          runStateLabel,
+		"checkpointReadiness":    checkpointReadiness,
+		"checkpointTargetReason": checkpointTargetReason,
+		"formatTime":             formatTime,
+		"relativeTime":           relativeTime,
 		"filterCount": func(f filterView) int {
 			n := 0
 			if f.Status != "" && f.Status != "active" {
@@ -337,6 +339,8 @@ type runWorkspaceView struct {
 	UngroupedFilter   bool
 	RecoveryAttention string
 	NoRunResume       *noRunResumeView
+	NoWorkStarted     bool
+	BlockedReviews    []pelletView
 }
 
 // Without a crash receipt, filters are suggestions from current metadata.
@@ -682,6 +686,7 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 				if err != nil {
 					return pageData{}, err
 				}
+				data.SelectedPellet.CheckpointManagement.Open = request.URL.Query().Get("edit_scope") == "1"
 			}
 			data.CloseURL = taskURL(code, request.URL.Query(), "", filters.Sort)
 			active, err := h.application.Pellets(request.Context(), selected.Project, storage.WebPelletFilters{})
@@ -780,6 +785,11 @@ func (h *handler) runWorkspaceViews(request *http.Request, project storage.Proje
 			if schedule, ok := h.application.Scheduler.WorkspaceStatus(workspace.ID); ok {
 				view.Schedule = &scheduleView{ID: schedule.ID, Mode: schedule.Mode, State: schedule.State, StopAfter: schedule.StopAfterPellet, Stopping: schedule.StopNowRequested, ExternalID: textOrDash(schedule.ExternalID), Group: textOrDash(schedule.Group)}
 				view.Busy = true
+			}
+			if latest, ok := h.application.Scheduler.LatestWorkspaceStatus(workspace.ID); ok && latest.Started == 0 &&
+				(latest.Reason == "queue_empty" || latest.Reason == "checkpoint_not_ready") &&
+				(latest.State == "completed" || latest.State == "stopped") {
+				view.NoWorkStarted = true
 			}
 		}
 		if !hasOwned && view.Run != nil && view.Run.State == "resolved" {

@@ -81,7 +81,7 @@ func TestPelletPreferencesMigration(t *testing.T) {
 	if err != nil || p.Model != nil || p.ReasoningEffort != nil {
 		t.Fatal(p, err)
 	}
-	assertPragmaInt(t, upgraded, "user_version", 25)
+	assertPragmaInt(t, upgraded, "user_version", LatestSchemaVersion)
 }
 func TestExecutionPreferenceSnapshotRejectsConcurrentEdit(t *testing.T) {
 	f := newPelletRepositoryFixture(t)

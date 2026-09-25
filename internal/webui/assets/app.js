@@ -204,7 +204,7 @@ import { action, actions } from "./datastar-1.0.3.js";
   document.addEventListener("click", function (event) {
     var sorter = event.target.closest(".task-sort");
     if (sorter) sortOpenerID = sorter.id;
-    var opener = event.target.closest(".row-link, .task-title, .memory-card > a, .group-card > a, [data-group-create]");
+    var opener = event.target.closest(".row-link, .review-scope-link, .review-blockers a, .task-title, .memory-card > a, .group-card > a, [data-group-create]");
     if (!opener) return;
     inspectorOpener = opener;
     inspectorOpenerHref = opener.getAttribute("href") || "";
@@ -683,7 +683,7 @@ import { action, actions } from "./datastar-1.0.3.js";
     var table = document.querySelector(".table-scroll");
     if (table) table.scrollLeft = tableScrollLeft;
     if ((!inspectorOpener || !document.contains(inspectorOpener)) && inspectorOpenerHref) {
-      Array.prototype.some.call(document.querySelectorAll(".row-link, .task-title, .memory-card > a, .group-card > a, [data-group-create]"), function (candidate) {
+      Array.prototype.some.call(document.querySelectorAll(".row-link, .review-scope-link, .review-blockers a, .task-title, .memory-card > a, .group-card > a, [data-group-create]"), function (candidate) {
         if (candidate.getAttribute("href") !== inspectorOpenerHref) return false;
         inspectorOpener = candidate;
         return true;

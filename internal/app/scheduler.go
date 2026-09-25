@@ -217,9 +217,9 @@ func (s *Scheduler) WorkspaceStatus(workspaceID int64) (ScheduleStatus, bool) {
 	return h.Status(), true
 }
 
-// WorkspaceAttention retains a failed admission/recovery explanation even
-// when no new durable attempt could safely be created.
-func (s *Scheduler) WorkspaceAttention(workspaceID int64) string {
+// LatestWorkspaceStatus retains the result of selection even when it did not
+// create a run. It must not be mistaken for an active schedule or execution.
+func (s *Scheduler) LatestWorkspaceStatus(workspaceID int64) (ScheduleStatus, bool) {
 	s.mu.Lock()
 	var latest *ScheduleHandle
 	var id int64
@@ -230,9 +230,15 @@ func (s *Scheduler) WorkspaceAttention(workspaceID int64) string {
 	}
 	s.mu.Unlock()
 	if latest == nil {
-		return ""
+		return ScheduleStatus{}, false
 	}
-	status := latest.Status()
+	return latest.Status(), true
+}
+
+// WorkspaceAttention retains a failed admission/recovery explanation even
+// when no new durable attempt could safely be created.
+func (s *Scheduler) WorkspaceAttention(workspaceID int64) string {
+	status, _ := s.LatestWorkspaceStatus(workspaceID)
 	if status.State == "needs_attention" {
 		return status.Detail
 	}

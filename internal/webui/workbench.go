@@ -160,6 +160,23 @@ func (h *handler) prepareWorkbench(request *http.Request, data *pageData) error 
 			data.ScopeCandidates = append(data.ScopeCandidates, makePelletViews([]storage.Pellet{p}, data.Project.Code, request.URL.Query(), "", storage.WebPelletSort{})[0])
 		}
 	}
+	// Execution uses workspace routing, never the queue's browsing filters.
+	// Explain blocked reviews beside Start even when a search hides their rows.
+	for i := range data.RunWorkspaces {
+		w := &data.RunWorkspaces[i]
+		if w.Busy {
+			continue
+		}
+		for _, p := range all {
+			if p.Status != domain.PelletOpen || p.Checkpoint == nil || p.Checkpoint.Ready || p.Checkpoint.Removed || !routing.Accepts(w.ID, p) {
+				continue
+			}
+			v := makePelletViews([]storage.Pellet{p}, data.Project.Code, request.URL.Query(), "", storage.WebPelletSort{})[0]
+			readiness := checkpointReadiness(p.Checkpoint)
+			v.ReviewStatus, v.ReviewHelp = readiness.Label, readiness.Detail
+			w.BlockedReviews = append(w.BlockedReviews, v)
+		}
+	}
 	sort.SliceStable(data.QueueContext, func(i, j int) bool {
 		a, b := data.QueueContext[i].Pellet, data.QueueContext[j].Pellet
 		if a.Priority == nil {

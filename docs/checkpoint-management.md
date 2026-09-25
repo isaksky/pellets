@@ -16,7 +16,8 @@ indentation. Optional focus/hover highlighting identifies only exact visible
 members. Large scopes scroll in a keyboard-focusable panel bounded to 420px or
 55vh; expanding does not duplicate, nest or move actual queue records.
 
-Row labels separate **Ready**, **Waiting for N pellets**, **Not running** (claimed
+Row labels separate **Ready**, **Evidence missing**,
+**Target unavailable**, **Waiting for N pellets** (unfinished targets), **Not running** (claimed
 without execution), **Preparing review**, **Reviewing**, **Checking findings**,
 **Finishing review**, and **Needs attention**. A persisted running attempt alone
 is insufficient: the foreground supervisor must own the exact attempt and the
@@ -52,6 +53,13 @@ review/triage execution policy keep their existing domain contracts.
 
 ## Historical implementation requirements
 
+A review selects explicit pellet identities and reviews each target’s latest
+completed successful implementation. Its title, description, revision, and
+commits come from that execution. Later description or metadata edits do not
+require **Update scope** or **Save scope**. Targets must still exist, be closed,
+and retain successful implementation evidence. Selected membership and saved
+review generations are not rewritten by readiness checks.
+
 New review snapshots use version 2. Each `group_contexts` entry pairs a stable
 project ID, target number, and exact successful implementation run ID with that
 run's captured group context. The reviewer assesses the target's description and
@@ -71,8 +79,8 @@ A captured empty document, explicit ungrouped admission, and a legacy execution
 that predates context capture remain separate states. Version 1 review snapshots
 also predate this association and resume unchanged without backfilling context.
 Missing or corrupt required version 2 evidence requires attention. Group edits
-cannot change retained source; renames and other membership changes still obey
-the existing scope, generation, and readiness checks.
+cannot change retained source. Renames and later task metadata changes do not
+block review of the completed implementation.
 
 The clean-result digest includes the captured context. Migration 23 also binds
 new triage receipts to a SHA-256 digest of the complete review snapshot. Explicit
