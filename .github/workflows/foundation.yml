@@ -11,6 +11,7 @@ permissions:
 jobs:
   foundation-tests:
     name: Foundation tests (${{ matrix.os }})
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     strategy:
@@ -80,9 +81,36 @@ jobs:
           cache-dependency-path: go.sum
       - name: Build and verify target metadata
         run: bash scripts/verify-cross-builds.sh
+      - name: Run routine static analysis
+        if: github.ref_type != 'tag' && github.event_name != 'workflow_dispatch'
+        env:
+          CGO_ENABLED: "0"
+        run: go vet ./...
+      - name: Run routine package tests
+        if: github.ref_type != 'tag' && github.event_name != 'workflow_dispatch'
+        env:
+          CGO_ENABLED: "0"
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=30m -json \
+            ./internal/domain \
+            ./internal/output \
+            ./internal/storage \
+            ./internal/discovery \
+            ./internal/executionlock | tee test-results.jsonl
+      - name: Retain routine test results
+        if: always() && github.ref_type != 'tag' && github.event_name != 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: foundation-test-results-${{ runner.os }}-${{ runner.arch }}
+          path: test-results.jsonl
+          if-no-files-found: warn
+          retention-days: 14
 
   release-archives:
     name: Build and verify release archives on macOS
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
@@ -144,6 +172,7 @@ jobs:
 
   windows-release-smoke:
     name: Smoke-test Windows archive and Scoop bucket
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     needs: release-archives
     runs-on: windows-latest
     timeout-minutes: 15
@@ -218,6 +247,7 @@ jobs:
 
   homebrew-release-check:
     name: Validate and install the Homebrew formula
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     needs: release-archives
     runs-on: macos-latest
     timeout-minutes: 15
@@ -255,19 +285,25 @@ jobs:
       - homebrew-release-check
     runs-on: ubuntu-latest
     steps:
-      - name: Require native tests, cross-builds, packaging, and archive smoke tests
+      - name: Require expected validation results for routine or full runs
         env:
+          FULL_VALIDATION: ${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
           NATIVE_TEST_RESULT: ${{ needs.foundation-tests.result }}
           CROSS_BUILD_RESULT: ${{ needs.cgo-free-cross-builds.result }}
           ARCHIVE_RESULT: ${{ needs.release-archives.result }}
           WINDOWS_SMOKE_RESULT: ${{ needs.windows-release-smoke.result }}
           HOMEBREW_RESULT: ${{ needs.homebrew-release-check.result }}
         run: |
-          test "$NATIVE_TEST_RESULT" = success
           test "$CROSS_BUILD_RESULT" = success
-          test "$ARCHIVE_RESULT" = success
-          test "$WINDOWS_SMOKE_RESULT" = success
-          test "$HOMEBREW_RESULT" = success
+          if [[ "$FULL_VALIDATION" == "true" ]]; then
+            expected_result=success
+          else
+            expected_result=skipped
+          fi
+          test "$NATIVE_TEST_RESULT" = "$expected_result"
+          test "$ARCHIVE_RESULT" = "$expected_result"
+          test "$WINDOWS_SMOKE_RESULT" = "$expected_result"
+          test "$HOMEBREW_RESULT" = "$expected_result"
 
   publish-release:
     name: Publish tagged GitHub Release
