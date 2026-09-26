@@ -166,7 +166,7 @@ Group details show the current raw Markdown context and all member pellets,
 including closed and deferred members. The context and identity survive the last
 member leaving. Shared context starts in **Edit**, ready to type; **Preview** shows
 unsaved Markdown, and an explicitly selected mode is retained. **Edit**, **Preview**,
-**Contents**, Mermaid and the diagram
+the outline toggle, Mermaid and the diagram
 zoom/pan viewer reuse the description components below, with accessible **Shared
 context** labels. The source limit is 1 MiB of UTF-8; form transport accommodates
 URL-encoding expansion. Empty source is valid: delete it and **Save context** to
@@ -238,18 +238,22 @@ fields for comparison. Review them before saving again; nothing is retried
 automatically. CLI output, JSON, search and agent context continue to use the
 original Markdown, with no stored HTML or migration.
 
-Pellet dialogs provide a document-local **Contents** toggle in rendered mode
+Pellet dialogs provide a document-local outline toggle in rendered mode
 whenever at least one Markdown heading exists. At viewport widths of **960px or
 wider**, contents opens automatically exactly when there are **two or more
 headings** and the rendered description's `scrollHeight` exceeds its
 `clientHeight` by **more than 1px**. The 208px rail and 16px gap widen the dialog
 by 224px, retaining the document's reading width. The rail and document scroll
-independently. Short, single-section, and headingless descriptions have no
+independently. The wide rail is unboxed, with a slim marker for the current
+section; the bounded list on narrower screens retains its visible edge. Short,
+single-section, and headingless descriptions have no
 automatic rail; headingless descriptions also have no toggle. A user's explicit
 wide-screen toggle overrides the automatic rule for that record in the current
-browser tab. Below 960px, Contents starts collapsed and opens a bounded list
+browser tab. Below 960px, the outline starts collapsed and opens a bounded list
 above the document. Choosing a section collapses that list. It never overlays
-the text. The compact and wide-screen choices are independent.
+the text. The compact and wide-screen choices are independent. The toggle uses
+the same left-panel glyph as the workbench status bar, sits before the mode tabs,
+and exposes Show/Hide description outline with `aria-expanded` and `aria-controls`.
 
 The outline follows rendered heading nodes in document order, nested beneath
 the nearest preceding lower-level heading; skipped levels do not create empty
@@ -261,7 +265,7 @@ lowercase heading slug. Punctuation becomes separators, empty slugs use
 already end in a number. The same document source produces the same IDs; source
 and database records are never rewritten.
 
-Contents is a labeled navigation landmark with nested lists and native links.
+The outline is a labeled navigation landmark with nested lists and native links.
 Click or Enter focuses the destination heading and scrolls only the description
 viewport, leaving a 12px inset below its edge. The dialog chrome is outside this
 viewport. Navigation preserves the workbench URL, selected pellet and surrounding

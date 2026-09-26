@@ -39,9 +39,14 @@ class DescriptionReader extends HTMLElement {
       this.toggle = document.createElement("button");
       this.toggle.type = "button";
       this.toggle.dataset.descriptionContents = "";
-      this.toggle.textContent = "Contents";
-      host.querySelector(".description-toolbar").append(this.toggle);
     }
+    this.toggle.classList.add("panel-toggle");
+    if (!this.toggle.querySelector("svg")) {
+      this.toggle.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="1"></rect><path d="M6 2v12"></path></svg>';
+    }
+    const toolbar = host.querySelector(".description-toolbar");
+    const firstMode = toolbar.querySelector("[data-description-mode]");
+    if (this.toggle.nextElementSibling !== firstMode) toolbar.insertBefore(this.toggle, firstMode);
     this.toggle.onclick = () => {
       saved[this.media.matches ? "contentsWide" : "contentsCompact"] = this.nav.hidden;
       this.layout();
@@ -115,6 +120,9 @@ class DescriptionReader extends HTMLElement {
     this.nav.hidden = !expanded;
     this.dataset.contentsOpen = String(expanded);
     this.toggle.setAttribute("aria-expanded", String(expanded));
+    const label = (expanded ? "Hide" : "Show") + " description outline";
+    this.toggle.setAttribute("aria-label", label);
+    this.toggle.title = label;
     if (!visible) return;
     if (this.restoreSection) {
       const heading = this.headings.find(node => node.id === this.restoreSection.id);

@@ -75,10 +75,15 @@ const source = '# Overview &amp; *verification*\n\n' + paragraph +
   const host = page.locator('#record-dialog [data-description]');
   const reader = host.locator('pl-description-reader'), view = host.locator('.markdown-body');
   const nav = host.getByRole('navigation', {name:'Description contents', includeHidden:true});
-  const links = nav.locator('a'), toggle = host.getByRole('button', {name:'Contents', exact:true, includeHidden:true});
+  const links = nav.locator('a'), toggle = host.locator('[data-description-contents]');
   const field = host.locator('textarea'), mode = name => host.locator(`[data-description-mode=${name}]`);
   await until(async () => await links.count() === titles.length, 'Outline not built');
   assert.equal(await nav.isVisible(), true, 'Long document opens the desktop outline');
+  assert.equal(await toggle.getAttribute('aria-label'), 'Hide description outline');
+  assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(await toggle.getAttribute('aria-controls'), await nav.getAttribute('id'));
+  assert.equal(await toggle.locator('svg[aria-hidden="true"]').count(), 1);
+  assert.equal(await toggle.evaluate(node => node.nextElementSibling?.dataset.descriptionMode), 'edit');
   assert.deepEqual(await links.allTextContents(), titles, 'Outline uses rendered inline text only');
   assert.deepEqual(await nav.locator('li').evaluateAll(items => items.map(item => Number(item.dataset.headingLevel))), [1,3,2,2,2,4,1,2,2,3]);
   assert.equal(await nav.locator('ol > li > ol > li > a').first().textContent(), 'Skipped level');
@@ -132,8 +137,11 @@ const source = '# Overview &amp; *verification*\n\n' + paragraph +
   await until(async () => await links.first().getAttribute('aria-current') === 'location', 'Scroll tracking failed');
   await toggle.click();
   assert.equal(await nav.isVisible(), false);
+  assert.equal(await toggle.getAttribute('aria-label'), 'Show description outline');
+  assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
   await toggle.focus(); await page.keyboard.press('Space');
   assert.equal(await nav.isVisible(), true);
+  assert.equal(await toggle.getAttribute('aria-label'), 'Hide description outline');
   assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
   // Selection/focus/reading position and one live observer survive repeated SSE morphs.
   await navigate(5);

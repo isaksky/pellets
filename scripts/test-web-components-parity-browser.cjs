@@ -399,10 +399,9 @@ async function measure(page, scene, build) {
       assert.deepEqual(newMargin.slice(1), oldMargin.slice(1));
       after[dialog].style.margin = before[dialog].style.margin;
     }
-    // Description mode buttons moved from a right-aligned row beside the
-    // label to adjacent tabs below it. Account for this toolbar's measured
-    // height and the native dialog's recentering, then keep strict comparison
-    // for every surrounding control.
+    // Older baselines predate the shared description tabs. Account for that
+    // toolbar's measured height and dialog recentering only in those builds;
+    // current baselines retain strict control comparison throughout.
     if ((scene.endsWith('-editor') || scene.endsWith('-record-actions') || scene.endsWith('-checkpoint-scope'))
         && !scene.endsWith('-memory-editor') && after.some(control => control.id === 'record-dialog')) {
       const dialog = after.findIndex(control => control.id === 'record-dialog');
@@ -411,34 +410,36 @@ async function measure(page, scene, build) {
       const tabs = after.map((control, index) => ({control, index})).filter(({control, index}) =>
         index > title && index < external && control.tag === 'BUTTON').map(({index}) => index);
       assert.deepEqual(tabs, [title + 1, title + 2], scene + ': description mode controls changed');
-      const toolbarGrowth = 23;
-      const dialogGrowth = after[dialog].bounds[3] - before[dialog].bounds[3];
-      const capped = Math.abs(dialogGrowth) < .02;
-      assert.ok(capped || Math.abs(dialogGrowth - toolbarGrowth) < .02,
-        scene + ': unexpected description toolbar height');
-      const outerShift = after[dialog].bounds[1] - before[dialog].bounds[1];
-      assert.ok(Math.abs(outerShift - (capped ? 0 : -toolbarGrowth / 2)) < .02,
-        scene + ': unexpected dialog recentering');
-      const footer = after.findIndex((control, index) => index > external && control.tag === 'FOOTER');
-      assert.ok(footer > external);
-      assert.equal(after[tabs[0]].bounds[0], after[title].bounds[0]);
-      assert.ok(Math.abs(after[tabs[1]].bounds[0] - after[tabs[0]].bounds[0] - after[tabs[0]].bounds[2]) < .02);
-      assert.equal(after[tabs[0]].bounds[1], after[tabs[1]].bounds[1]);
-      assert.ok(after[tabs[0]].style.borderRadius.startsWith('4px 4px 0px'));
-      assert.ok(after[tabs[1]].style.borderRadius.startsWith('4px 4px 0px'));
-      for (let i = dialog; i < after.length; i++) {
-        if (tabs.includes(i)) continue;
-        const shift = i < tabs[0] ? outerShift : capped && i >= footer ? 0 : outerShift + toolbarGrowth;
-        assert.ok(Math.abs(after[i].bounds[1] - before[i].bounds[1] - shift) < .02,
-          scene + ': description toolbar displaced an unexpected control');
-        after[i].bounds[1] = before[i].bounds[1];
+      if (!before[tabs[0]].style.borderRadius.startsWith('4px 4px 0px')) {
+        const toolbarGrowth = 23;
+        const dialogGrowth = after[dialog].bounds[3] - before[dialog].bounds[3];
+        const capped = Math.abs(dialogGrowth) < .02;
+        assert.ok(capped || Math.abs(dialogGrowth - toolbarGrowth) < .02,
+          scene + ': unexpected description toolbar height');
+        const outerShift = after[dialog].bounds[1] - before[dialog].bounds[1];
+        assert.ok(Math.abs(outerShift - (capped ? 0 : -toolbarGrowth / 2)) < .02,
+          scene + ': unexpected dialog recentering');
+        const footer = after.findIndex((control, index) => index > external && control.tag === 'FOOTER');
+        assert.ok(footer > external);
+        assert.equal(after[tabs[0]].bounds[0], after[title].bounds[0]);
+        assert.ok(Math.abs(after[tabs[1]].bounds[0] - after[tabs[0]].bounds[0] - after[tabs[0]].bounds[2]) < .02);
+        assert.equal(after[tabs[0]].bounds[1], after[tabs[1]].bounds[1]);
+        assert.ok(after[tabs[0]].style.borderRadius.startsWith('4px 4px 0px'));
+        assert.ok(after[tabs[1]].style.borderRadius.startsWith('4px 4px 0px'));
+        for (let i = dialog; i < after.length; i++) {
+          if (tabs.includes(i)) continue;
+          const shift = i < tabs[0] ? outerShift : capped && i >= footer ? 0 : outerShift + toolbarGrowth;
+          assert.ok(Math.abs(after[i].bounds[1] - before[i].bounds[1] - shift) < .02,
+            scene + ': description toolbar displaced an unexpected control');
+          after[i].bounds[1] = before[i].bounds[1];
+        }
+        after[dialog].bounds[3] = before[dialog].bounds[3];
+        const oldMargin = before[dialog].style.margin.split(' '), newMargin = after[dialog].style.margin.split(' ');
+        assert.ok(Math.abs(Number.parseFloat(oldMargin[0]) - Number.parseFloat(newMargin[0]) + outerShift) < .02);
+        assert.deepEqual(newMargin.slice(1), oldMargin.slice(1));
+        after[dialog].style.margin = before[dialog].style.margin;
+        for (const index of tabs) after[index] = before[index];
       }
-      after[dialog].bounds[3] = before[dialog].bounds[3];
-      const oldMargin = before[dialog].style.margin.split(' '), newMargin = after[dialog].style.margin.split(' ');
-      assert.ok(Math.abs(Number.parseFloat(oldMargin[0]) - Number.parseFloat(newMargin[0]) + outerShift) < .02);
-      assert.deepEqual(newMargin.slice(1), oldMargin.slice(1));
-      after[dialog].style.margin = before[dialog].style.margin;
-      for (const index of tabs) after[index] = before[index];
     }
     // macOS WebKit ignores authored padding on appearance:auto selects. The
     // requested chevron correction now uses the app's 31px form-control height
