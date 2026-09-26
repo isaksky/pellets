@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-runtime-browser-'));
 const baseline = process.env.PELLETS_NAVIGATION_BASELINE;
@@ -41,8 +41,8 @@ async function until(check, message) {
 (async () => {
   if (!baseline) execFileSync('go', ['build', '-o', binary, './cmd/pl'], {cwd: repository});
   execFileSync('go', ['test', '-c', '-o', peer, './internal/app'], {cwd: repository});
-  const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
-  browser = await engine.launch({headless: true, ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}), ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});
+  const engine = chromium;
+  browser = await engine.launch({headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {})});
   const cases = [...(process.platform === 'win32' ? [] : ['runtime_probe_gate']), 'runtime_old', 'schedule_runtime_error', 'schedule_activity_errors_gate', 'schedule_rpc_error', 'schedule_unfinished', 'schedule_fresh_choice', 'schedule_noop', 'stop_after_pellet', 'watch_waiting', 'navigation_owned'];
   const selectedCase = process.env.PELLETS_RUNTIME_BROWSER_CASE;
   assert.ok(!selectedCase || cases.includes(selectedCase), 'Unknown PELLETS_RUNTIME_BROWSER_CASE');
@@ -206,7 +206,7 @@ async function until(check, message) {
         }
         assert.equal(await stopForm.getByRole('button', {name: control, exact: true}).isDisabled(), true);
         if (process.env.PELLETS_FEEDBACK_STOP_AUDIT) {
-          const engineName = process.env.PLAYWRIGHT_BROWSER || 'chromium';
+          const engineName = 'chromium';
           const directory = path.join(process.env.PELLETS_FEEDBACK_STOP_AUDIT, engineName + '-' + control.toLowerCase().replaceAll(' ', '-'));
           fs.mkdirSync(directory, {recursive:true});
           let clip = await page.locator('.run-controls').boundingBox();

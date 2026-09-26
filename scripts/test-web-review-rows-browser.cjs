@@ -1,8 +1,8 @@
-// Production queue, disposable records, no model calls. Set PLAYWRIGHT_BROWSER=webkit.
+// Production queue, disposable records, no model calls.
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-review-rows-'));
 const root = path.join(temporary, 'queue');
@@ -34,8 +34,8 @@ const until = async (fn, message) => {
     server.stderr.on('data', x => errors += x);
     server.once('error', reject); server.once('exit', c => reject(Error(`Server exited ${c}: ${errors}`)));
   });
-  const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
-  browser = await engine.launch({headless: true, ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}), ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});
+  const engine = chromium;
+  browser = await engine.launch({headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {})});
   const page = await browser.newPage({viewport: {width: 1280, height: 900}});
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   const url = origin + `/projects/${project}/tasks`;

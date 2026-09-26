@@ -174,8 +174,8 @@ only presentation.
 five adjacent overlapping reviews, noncontiguous/hidden/deferred/purged members,
 large scopes, native keyboard controls, sorting, live drafts/selection/focus/scroll,
 and shared lifecycle counts. It captures all five themes at 1280, 1092, 800 and
-390px with both sidebars available. Run it in Chromium and again with
-`PLAYWRIGHT_BROWSER=webkit`. The checkpoint browser suite uses the deterministic
+390px with both sidebars available. Run it in Chromium. The checkpoint browser
+suite uses the deterministic
 protocol peer to verify ready/idle/running, interrupted triage, Resume, clean and
 finding outcomes, and reopened generations. Neither suite uses a live model.
 The gallery reuses the production row with local-only fixture actions. The parity

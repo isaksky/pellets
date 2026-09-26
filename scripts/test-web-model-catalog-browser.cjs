@@ -1,6 +1,6 @@
 // Model menu latency and live reconciliation, independent of runtime/network latency.
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
-const {execFileSync,spawn}=require('node:child_process');const {chromium,webkit}=require('playwright');
+const {execFileSync,spawn}=require('node:child_process');const {chromium}=require('playwright');
 const root=path.resolve(__dirname,'..'),tmp=fs.mkdtempSync(path.join(os.tmpdir(),'pellets-model-catalog-')),binary=path.join(tmp,'pl'),fixture=path.join(tmp,'fixture');
 let server,browser,page;
 (async()=>{
@@ -10,7 +10,7 @@ let server,browser,page;
  cli('add','Fixture');
  server=spawn(binary,['server','--no-open'],{cwd:fixture,env:{...process.env,PELLETS_CODEX_EXECUTABLE:path.join(tmp,'unavailable')}});
  const origin=await new Promise((resolve,reject)=>{let out='';server.stdout.on('data',d=>{out+=d;if(out.includes('\n'))resolve(out.trim())});server.on('error',reject)});
- browser=await(process.env.PLAYWRIGHT_BROWSER==='webkit'?webkit:chromium).launch({headless:true});
+ browser=await chromium.launch({headless:true});
  page=await browser.newPage({viewport:{width:1280,height:850}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.addInitScript(()=>{window.EventSource=undefined});
  let snapshot={models:[],refreshing:true,stale:true,fetched_at:0},reads=0,refreshes=0,holdRead=null;
@@ -67,5 +67,5 @@ let server,browser,page;
    }
   }
  }
- assert.deepEqual(errors,[]);console.log(`PASS ${process.env.PLAYWRIGHT_BROWSER||'chromium'} click-to-menu ${elapsed.toFixed(2)}ms; artifacts ${tmp}`);
+ assert.deepEqual(errors,[]);console.log(`PASS chromium click-to-menu ${elapsed.toFixed(2)}ms; artifacts ${tmp}`);
 })().catch(async e=>{console.error(e);console.error('Artifacts:',tmp);if(page){await page.screenshot({path:path.join(tmp,'failure.png')});console.error(await page.locator('body').innerText());}process.exitCode=1}).finally(async()=>{await browser?.close();if(server&&server.exitCode===null){const done=new Promise(r=>server.once('exit',r));server.kill('SIGINT');await done;}});

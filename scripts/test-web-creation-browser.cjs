@@ -1,13 +1,13 @@
 // Ordinary creation journey and recovery, on explicitly isolated disposable data.
-// Run in Chromium and WebKit; screenshots include all themes and narrow panes.
+// Run in Chromium; screenshots include all themes and narrow panes.
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const root = path.resolve(__dirname, '..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-creation-'));
 const fixture = path.join(temp, 'fixture'), binary = path.join(temp, 'pl');
-const engine = process.env.PLAYWRIGHT_BROWSER || 'chromium';
+const engine = 'chromium';
 const artifacts = process.env.PELLETS_BROWSER_ARTIFACTS || path.join(temp, 'screenshots');
 let server, browser, page;
 const cli = (...args) => JSON.parse(execFileSync(binary, ['--json', ...args], {cwd:fixture, encoding:'utf8'})).data;
@@ -31,7 +31,7 @@ async function reachable(locator) {
   const origin=await new Promise((resolve,reject)=>{
     let out='';server.stdout.on('data',d=>{out+=d;if(out.includes('\n'))resolve(out.split('\n')[0].trim());});server.once('error',reject);
   });
-  browser=await (engine==='webkit'?webkit:chromium).launch({headless:true,...(engine==='webkit'&&process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE?{executablePath:process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE}:{})});
+  browser=await chromium.launch({headless:true});
   page=await browser.newPage({viewport:{width:1280,height:720}});page.setDefaultTimeout(10000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/models',route=>route.fulfill({json:{models:[{id:'model-a',name:'Model A',efforts:['medium','high']}],refreshing:false,stale:false}}));

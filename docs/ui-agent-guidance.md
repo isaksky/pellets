@@ -86,8 +86,9 @@ Choose checks based on the change:
 - For shared controls, CSS, or wrapper changes, run the gallery/component checks
   and before/after parity comparison described in
   [Styling and verification](web-components.md#styling-and-verification), plus
-  the affected application browser suites. Cover Chromium and WebKit, all five
+  the affected application browser suites. Cover Chromium, all five
   themes, and desktop, phone, and intermediate widths with sidebars visible.
+  The browser regression runners use Chromium only.
 - For feature interactions, exercise the real workflow and relevant browser
   suite. Check keyboard access, accessible names, focus return, nested Escape,
   validation, unsaved input, and recovery where the change can affect them.

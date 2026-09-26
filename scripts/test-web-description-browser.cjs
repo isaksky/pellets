@@ -1,11 +1,11 @@
 // Markdown rendering and native-source lifecycle against a disposable server.
 // NODE_PATH=/path/to/node_modules node scripts/test-web-description-browser.cjs
-// PLAYWRIGHT_BROWSER=webkit selects the second engine. PELLETS_DESCRIPTION_BASELINE
-// captures the old inspector from an explicit pre-change executable for comparison.
+// PELLETS_DESCRIPTION_BASELINE captures the old inspector from an explicit
+// pre-change executable for comparison.
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-description-browser-'));
 const binary = process.env.PELLETS_DESCRIPTION_BASELINE || path.join(temporary, 'pl');
@@ -34,10 +34,10 @@ const source = '# Delivery &amp; verification\n\nParagraph with **strong**, *emp
     server.once('error', reject);
     server.once('exit', code => reject(Error(`server ${code}: ${error}`)));
   });
-  const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
+  const engine = chromium;
   browser = await engine.launch({headless: true,
-    ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}),
-    ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});
+    ...(process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}),
+  });
   const page = await browser.newPage({viewport: {width: 1280, height: 850}});
   const errors = [], external = [];
   page.on('pageerror', e => errors.push(e.message));
@@ -53,12 +53,8 @@ const source = '# Delivery &amp; verification\n\nParagraph with **strong**, *emp
     assert.deepEqual(await page.evaluate(() => window.cspFailures || []), []);
     await page.screenshot({caret:'initial', path:path.join(temporary, name)});
     await page.waitForTimeout(20);
-    // Playwright's WebKit screenshotter injects exactly one `body {}` style
-    // to synchronize animations, even with animations enabled. Account for
-    // that tool-owned violation only at the screenshot boundary; application
-    // interactions before and after still require zero CSP violations.
     const failures = await page.evaluate(() => (window.cspFailures || []).splice(0));
-    assert.deepEqual(failures, engine === webkit ? ['style-src-elem'] : []);
+    assert.deepEqual(failures, []);
   };
   await page.goto(origin);
   await page.locator(`#task-${record.id} .task-title`).click();

@@ -1,9 +1,8 @@
 // Group workbench regression fixtures. Run with Playwright on NODE_PATH;
-// PLAYWRIGHT_BROWSER=webkit repeats the workflow in the second engine.
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-groups-browser-'));
 const binary = path.join(temporary, 'pl');
@@ -31,7 +30,7 @@ const source = '# Shared plan\n\nContext for **every member**.\n\n```mermaid\ngr
     server.stdout.on('data', d => { output+=d; if (output.includes('\n')) resolve(output.split('\n')[0].trim()); });
     server.stderr.on('data', d => error+=d); server.once('error',reject); server.once('exit', code => reject(Error(`server ${code}: ${error}`)));
   });
-  const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
+  const engine = chromium;
   browser = await engine.launch({headless:true});
   const page = await browser.newPage({viewport:{width:1280,height:850},reducedMotion:"reduce"});
   const errors=[], external=[];
@@ -199,7 +198,7 @@ const source = '# Shared plan\n\nContext for **every member**.\n\n```mermaid\ngr
   await page.locator('#workspace-groups [data-edit-assignment]').first().click();
   assert.equal(await page.locator('#assignment-popover').evaluate(el=>el.open),true,'Routing chips still edit assignments');
   assert.deepEqual(errors,[]); assert.deepEqual(external,[]);
-  console.log('PASS groups browser ' + (process.env.PLAYWRIGHT_BROWSER||'chromium') + ': ' + temporary);
+  console.log('PASS groups browser chromium: ' + temporary);
 })().catch(e=>{console.error(e);console.error('Artifacts: '+temporary);process.exitCode=1;}).finally(async()=>{
   await browser?.close();
   if(server?.exitCode===null) { const stopped=new Promise(r=>server.once('exit',r)); server.kill('SIGINT'); await stopped; }

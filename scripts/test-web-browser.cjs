@@ -1,12 +1,11 @@
 // Optional browser regression suite. Requires Playwright on Node's module path.
 // NODE_PATH=/path/to/node_modules PLAYWRIGHT_CHANNEL=chrome node scripts/test-web-browser.cjs
-// Use PLAYWRIGHT_BROWSER=webkit to check the Safari browser engine.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-browser-'));
@@ -41,8 +40,8 @@ const until = async (predicate, message) => {
     server.once('error', reject);
     server.once('exit', code => { clearTimeout(timeout); reject(new Error(`Server exited: ${code}`)); });
   });
-  const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
-  browser = await engine.launch({headless: true, ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}), ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});
+  const engine = chromium;
+  browser = await engine.launch({headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {})});
   const page = await browser.newPage();
   page.setDefaultTimeout(10000);
   async function choose(select, value) {

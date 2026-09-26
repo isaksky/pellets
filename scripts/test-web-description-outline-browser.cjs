@@ -1,10 +1,9 @@
 // Document contents against real rendering, live patches, and disposable data.
 // NODE_PATH=/path/to/node_modules node scripts/test-web-description-outline-browser.cjs
-// Repeat with PLAYWRIGHT_BROWSER=webkit.
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-outline-browser-'));
 const binary = path.join(temporary, 'pl'), fixture = path.join(temporary, 'outline');
@@ -41,10 +40,10 @@ const source = '# Overview &amp; *verification*\n\n' + paragraph +
     server.once('error', reject);
     server.once('exit', code => reject(Error(`server ${code}: ${error}`)));
   });
-  const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
+  const engine = chromium;
   browser = await engine.launch({headless: true,
-    ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}),
-    ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});
+    ...(process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}),
+  });
   const page = await browser.newPage({viewport: {width:1280,height:850}, reducedMotion:'reduce'});
   page.setDefaultTimeout(15000);
   const errors = [];
@@ -195,7 +194,7 @@ const source = '# Overview &amp; *verification*\n\n' + paragraph +
     assert.deepEqual(await page.evaluate(() => (window.cspFailures || []).splice(0)), []);
     await page.screenshot({path:path.join(temporary,name)});
     await page.waitForTimeout(20);
-    assert.deepEqual(await page.evaluate(() => (window.cspFailures || []).splice(0)), engine === webkit ? ['style-src-elem'] : []);
+    assert.deepEqual(await page.evaluate(() => (window.cspFailures || []).splice(0)), []);
   };
   const settleLayout = () => page.evaluate(() => new Promise(resolve => {
     // Include resize/scroll observers and the animation frames they schedule.

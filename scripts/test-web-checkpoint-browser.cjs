@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-checkpoint-browser-'));
@@ -52,8 +52,8 @@ async function startServer(root) {
 (async () => {
   execFileSync('go', ['build', '-o', binary, './cmd/pl'], {cwd: repository});
   execFileSync('go', ['test', '-c', '-o', peer, './internal/app'], {cwd: repository});
-  const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
-  browser = await engine.launch({headless: true, ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}), ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});
+  const engine = chromium;
+  browser = await engine.launch({headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {})});
   const scenarios = [
     ...['run_one', 'drain', 'watch'].map(scheduleMode => ({mode: 'review_clean', scheduleMode})),
     ...['review_findings_partial', 'review_findings_invalid'].map(mode => ({mode, scheduleMode: 'run_one'})),

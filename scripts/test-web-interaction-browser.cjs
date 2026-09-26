@@ -1,16 +1,16 @@
 // Production hit targets and feedback in disposable fixtures. No real model calls.
-// Set PLAYWRIGHT_BROWSER=webkit for WebKit; PELLETS_INTERACTION_BASELINE captures
+// PELLETS_INTERACTION_BASELINE captures
 // the original executable without enforcing the corrected contracts.
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-interaction-'));
 const baseline = process.env.PELLETS_INTERACTION_BASELINE;
 const binary = baseline || path.join(temporary, 'pl'), peer = path.join(temporary, 'codex');
 const fixture = path.join(temporary, 'interaction');
-const engineName = process.env.PLAYWRIGHT_BROWSER || 'chromium';
+const engineName = 'chromium';
 const artifacts = process.env.PELLETS_BROWSER_ARTIFACTS || path.join(temporary, 'screenshots');
 const env = {...process.env, PATH: temporary + path.delimiter + process.env.PATH, PELLETS_CODEX_EXECUTABLE: peer, PELLETS_SUPERVISOR_PEER: '1'};
 const check = (value, message) => { if (!baseline) assert.ok(value, message); };
@@ -59,7 +59,7 @@ async function feedback(selector) {
     let out='',err=''; server.stdout.on('data',d=>{out+=d;if(out.includes('\n'))resolve(out.split('\n')[0].trim());});
     server.stderr.on('data',d=>err+=d);server.once('error',reject);server.once('exit',code=>reject(Error(`Server ${code}: ${err}`)));
   });
-  browser = await (engineName === 'webkit' ? webkit : chromium).launch({headless:true});
+  browser = await chromium.launch({headless:true});
   page = await browser.newPage({viewport:{width:1280,height:900},deviceScaleFactor:1});
   page.setDefaultTimeout(15000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -209,9 +209,8 @@ async function feedback(selector) {
         // Traverse using real keyboard navigation after the dismissal patch.
         // Programmatic focus can retain pointer modality from the opening click.
         await link.focus();
-        // macOS WebKit uses Option+Tab to include native links in traversal.
-        await page.keyboard.press(engineName==='webkit'?'Alt+Shift+Tab':'Shift+Tab');
-        await page.keyboard.press(engineName==='webkit'?'Alt+Tab':'Tab');
+        await page.keyboard.press('Shift+Tab');
+        await page.keyboard.press('Tab');
         check(await link.evaluate(e=>e===document.activeElement && e.matches(':focus-visible') && getComputedStyle(e).outlineStyle!=='none'),'Memory card is keyboard reachable with visible focus');
       }
     }

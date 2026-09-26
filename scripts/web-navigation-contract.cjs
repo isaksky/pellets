@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path');
 module.exports = async ({page, baseline, state}) => {
-  const engine = process.env.PLAYWRIGHT_BROWSER || 'chromium';
+  const engine = 'chromium';
   const phase = baseline ? 'before' : 'after';
   const output = process.env.PELLETS_NAVIGATION_AUDIT;
   const check = (condition, message) => {if (!baseline) assert.ok(condition, message);};

@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-mode-browser-'));
 const binary = process.env.PELLETS_MODE_BINARY || path.join(temporary, 'pl');
 const baseline = process.env.PELLETS_MODE_BASELINE === '1';
@@ -34,8 +34,8 @@ async function startServer(repo) {
   cli(repo, 'init-db');
   const pellet = cli(repo, 'add', 'Execution preference test');
   let origin = await startServer(repo);
-  const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
-  browser = await engine.launch({headless: true, ...(engine === chromium ? {channel: 'chrome'} : process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});
+  const engine = chromium;
+  browser = await engine.launch({headless: true, channel: 'chrome'});
   const page = await browser.newPage({viewport: {width: 1280, height: 800}, deviceScaleFactor: 1});
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   const route = '/projects/' + pellet.project + '/tasks';
@@ -57,7 +57,7 @@ async function startServer(repo) {
   assert.equal(await mode().inputValue(), baseline ? 'run_one' : 'drain');
   const artifacts = process.env.PELLETS_BROWSER_ARTIFACTS;
   if (artifacts) {
-    const dir = path.join(artifacts, process.env.PLAYWRIGHT_BROWSER || 'chromium'); fs.mkdirSync(dir, {recursive: true});
+    const dir = path.join(artifacts, 'chromium'); fs.mkdirSync(dir, {recursive: true});
     const clip = await page.locator('.run-controls').first().boundingBox();
     assert.ok(clip, 'Execution controls are visible');
     const capture = path.join(dir, baseline ? 'before.png' : 'after.png');

@@ -100,7 +100,7 @@ memory creation keep their existing result flows.
 `scripts/test-web-creation-browser.cjs` covers consecutive creation, draft reset
 after live updates, lost-response retry, typing during save, filtered results,
 focus, nested dismissal, reduced motion, and five themes at desktop, intermediate,
-phone and short-window sizes in Chromium and WebKit.
+phone and short-window sizes in Chromium.
 
 The creation disclosure labels stay quiet; Create pellet and Create memory
 inside their expanded forms retain the shared primary button treatment. Heading
@@ -206,8 +206,7 @@ The normal local-origin, CSRF, field validation and Datastar revision contracts
 apply. Stored context is raw Markdown; local rendering uses the same safe offline
 renderer and diagram limits as pellet descriptions.
 
-Run `node scripts/test-web-groups-browser.cjs` and repeat with
-`PLAYWRIGHT_BROWSER=webkit`. Disposable fixtures cover creation, empty groups,
+Run `node scripts/test-web-groups-browser.cjs` in Chromium. Disposable fixtures cover creation, empty groups,
 members and last-member changes, raw context saving/clearing, 1 MiB documents,
 renaming, stale drafts, offline Markdown/Mermaid, contents, zoom, keyboard guards,
 live refresh, five themes, widths from 390 to 1280px, and distinct routing controls.
@@ -309,7 +308,7 @@ presentation state is never stored. The default label remains Description; the
 native labeled textarea owns the source.
 
 Run `node scripts/test-web-description-browser.cjs` (with Playwright on
-`NODE_PATH`), and repeat with `PLAYWRIGHT_BROWSER=webkit`. It checks Markdown and
+`NODE_PATH`) in Chromium. It checks Markdown and
 plain text, exact create/edit/save/reload/CLI source retrieval, malicious content,
 offline preview, refresh/conflict recovery, source and rendered selection,
 proposal autosave, and five themes at 1280, 1092 and 390 pixels. It saves real
@@ -318,7 +317,7 @@ the original dialog as `before-description.png` for comparison. Fixture commands
 use `--pretty` so historical executables predating `--json` remain supported.
 Run `node --test scripts/test-web-description-fixture.cjs` for the standalone
 historical/current CLI invocation regression checks (no browser required). Also run
-`node scripts/test-web-description-outline-browser.cjs` in both engines for
+`node scripts/test-web-description-outline-browser.cjs` in Chromium for
 hierarchy, duplicate/Unicode/punctuation anchors, every link's local scroll and
 keyboard focus, delayed Mermaid layout, visibility thresholds, draft/save/live
 edits, content inserted above the current section through full live refreshes,
@@ -326,7 +325,7 @@ deferred restoration from Edit, repeated refreshes and observer cleanup. It
 checks all five themes at 1280, 1092, 959, 678 and 390 pixels and saves application
 screenshots.
 
-Run `node scripts/test-web-task-list-browser.cjs` in both engines for compact,
+Run `node scripts/test-web-task-list-browser.cjs` in Chromium for compact,
 text-aligned markers in tight, loose and nested task lists. It checks proposed
 pellets, existing records, creation previews and group context across all five
 themes at 1280, 1092 and 390 pixels, including ordinary planner field sizing
@@ -415,7 +414,7 @@ to build/run the Go application. Upstream references:
 The development-only `/dev/design-system` has editable Mermaid examples and
 malformed, unsafe and oversized source. Run
 `node scripts/test-web-mermaid-browser.cjs` and the description suite above with
-Playwright on `NODE_PATH`, repeating with `PLAYWRIGHT_BROWSER=webkit`. The Mermaid
+Playwright on `NODE_PATH` in Chromium. The Mermaid
 suite checks diagram families, local errors, limits, source alternatives, IDs,
 cleanup, rapid edits, offline rendering and zero application CSP violations,
 plus screenshots/contrast at 1280, 1092 and 390px in all five themes. Its
@@ -630,7 +629,7 @@ authorization or execution permissions.
 `test-web-run-context-browser.cjs` verifies this source view, safe escaping,
 empty/ungrouped states, live refresh, restart, and fresh-conversation recovery
 with a disposable production server. It captures all five themes at desktop,
-intermediate, and phone widths in Chromium and WebKit.
+intermediate, and phone widths in Chromium.
 
 Editing an ordinary pellet during implementation updates its running
 conversation. A fresh, separate `gpt-5.6-terra` agent at `max` reasoning compares
@@ -693,7 +692,7 @@ not change scope, start work, or relax execution checks.
 
 `scripts/test-web-review-readiness-browser.cjs` covers stale scope, a no-op Start
 with completed run history, reload, keyboard recovery and focus return, live
-editor refresh, explicit scope save, and subsequent review in Chromium/WebKit
+editor refresh, explicit scope save, and subsequent review in Chromium
 across all five themes and 1280/1092/390px layouts. Use
 `PELLETS_REVIEW_BASELINE=/path/to/pl` and `PELLETS_BROWSER_ARTIFACTS=/path` for
 matched before/after captures from isolated fixtures.
@@ -739,7 +738,7 @@ events, safe Markdown, long paths/code, empty/pending messages, selection and
 focused links/code across replay and database updates, disclosure choices,
 drafts/caret, scroll anchoring through updates and retention, and normal following
 at the bottom. It captures all five themes at desktop, intermediate and phone
-widths plus 480px-high layouts in Chromium and WebKit. Its
+widths plus 480px-high layouts in Chromium. Its
 `web-activity-groups-contract.cjs` contract additionally checks grouped long feeds
 in every theme/width, repeated paths, interleaved kinds and action boundaries,
 same-ID completions, active/failed summaries, live append, keyboard disclosure,
@@ -796,27 +795,27 @@ execution and evidence scenarios. Go storage/application tests cover atomic clai
 concurrency, project isolation, captured intent, and checkpoint generations.
 The runtime suite's `PELLETS_RUNTIME_BROWSER_CASE=watch_waiting` scenario checks
 Watch waiting alongside completed history on initial rendering and live updates,
-automatic return to work, stale activity, and both idle stop controls in Chromium
-and WebKit, with screenshots of the affected screens.
+automatic return to work, stale activity, and both idle stop controls in Chromium,
+with screenshots of the affected screens.
 `test-web-execution-state-browser.cjs` adds real execution transitions and
 controlled activity delivery: completed history during active work, operation
 and turn completion, input/approval waits, both stop controls, terminal states,
 reconnection and restart, stale snapshots, drafts, all five themes at desktop,
 intermediate and phone widths, reduced motion, and summary accessibility. Run
-it in Chromium and WebKit; it saves screenshots of the actual execution panel.
+it in Chromium; it saves screenshots of the actual execution panel.
 `test-web-upgrade-browser.cjs` builds two distinct embedded UIs and restarts them
 on the same origin and disposable database, testing existing tabs, asset graphs,
 draft reloads, stale conflicts, and the absence of automatic execution. It also
 checks planning drafts, exact retry identities, fresh CSRF, and focus/scroll
 restoration after the planning panel loads. The core
-and Workbench browser runners also support `PLAYWRIGHT_BROWSER=webkit`; filter
+and Workbench browser runners use Chromium; filter
 checks cover intrinsic panel height, nested controls, and short-screen scrolling.
 
 `test-web-planning-browser.cjs` uses the real production planning endpoint and
 SQLite with the deterministic Codex peer. It verifies actual catalog discovery,
 model responses, draft editing and selective creation, split/combine/refinement,
 project pinning, lost-response retries, panel/tab state, and mobile keyboard
-access. It runs with Chrome or WebKit. Planning has its own bounded reload
+access. It runs with Chrome. Planning has its own bounded reload
 handoff; ordinary draft autosave can continue after restoration, but interrupted
 Send, Create, and other ambiguous requests require explicit retry with their
 original request identity. No restored planning conversation starts execution.
@@ -889,7 +888,7 @@ work, including after the interactive check. Unrelated uncommitted files keep
 their existing behavior; saved attempts retain their exact recovery checks.
 `scripts/test-web-admission-browser.cjs` covers the initial-commit error,
 preserved choices, keyboard/touch retry, reload/restart, and a corrected
-repository in Chromium and WebKit at desktop and phone widths.
+repository in Chromium at desktop and phone widths.
 Pending Stop actions say **Updating run controls…**; they do not claim to run
 the admission checks reserved for Start/Resume.
 Live invalidations arriving during another read or foreground request coalesce
@@ -907,7 +906,7 @@ Failures, questions, approvals, explicit recovery, and reported-event details
 remain visible; no activity or ownership is promoted into execution evidence.
 
 `test-web-feedback-browser.cjs` exercises failed record saves, invocation-time
-preflight rejection, and failed planning reads in Chromium and WebKit across all
+preflight rejection, and failed planning reads in Chromium across all
 five themes at 1280, 1092 and 390px. It checks native keyboard/touch retry,
 draft/focus/selection preservation, and feedback placement. Set
 `PELLETS_FEEDBACK_BASELINE=/path/to/pl` and `PELLETS_BROWSER_ARTIFACTS=/path` for
@@ -945,7 +944,7 @@ For focused navigation evidence, run `test-web-runtime-browser.cjs` with
 `PELLETS_RUNTIME_BROWSER_CASE=watch_waiting`, `schedule_runtime_error`, or
 `navigation_owned`, and
 `PELLETS_NAVIGATION_AUDIT=/absolute/artifact/path`. The navigation contract covers
-Chromium/WebKit, all five themes, desktop/intermediate/phone sizes, working,
+Chromium, all five themes, desktop/intermediate/phone sizes, working,
 waiting with completed history, stopped errors, ownership without a run, full
 path availability, keyboard
 focus and touch menus. `PELLETS_NAVIGATION_BASELINE=/path/to/pl` captures the

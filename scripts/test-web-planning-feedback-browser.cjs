@@ -3,14 +3,14 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {spawn, execFileSync} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const root = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-planning-feedback-'));
 const fixture = path.join(temporary, 'planner');
 const baseline = process.env.PELLETS_FEEDBACK_BASELINE;
 const binary = baseline || path.join(temporary, 'pl'), peer = path.join(temporary, 'codex');
 const artifacts = process.env.PELLETS_BROWSER_ARTIFACTS || temporary;
-const engine = process.env.PLAYWRIGHT_BROWSER || 'chromium';
+const engine = 'chromium';
 const env = {...process.env, PATH:temporary + path.delimiter + process.env.PATH,
   PELLETS_CODEX_EXECUTABLE:peer, PELLETS_SUPERVISOR_PEER:'1'};
 let server, browser, page;
@@ -47,7 +47,7 @@ async function holdResponse(matches) {
   fs.writeFileSync(path.join(fixture,'fake-mode'),'planning_full');
   server=spawn(binary,['server','--port','0','--no-open'],{cwd:fixture,env});
   const origin=await new Promise((resolve,reject)=>{let out='',errors='';server.stdout.on('data',d=>{out+=d;if(out.includes('\n'))resolve(out.split('\n')[0].trim());});server.stderr.on('data',d=>errors+=d);server.once('error',reject);server.once('exit',code=>reject(Error(`Server ${code}: ${errors}`)));});
-  browser=await(engine==='webkit'?webkit:chromium).launch({headless:true});
+  browser=await chromium.launch({headless:true});
   page=await browser.newPage({viewport:{width:1280,height:900},deviceScaleFactor:1});page.setDefaultTimeout(15000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.addInitScript(()=>{window.EventSource=undefined;});

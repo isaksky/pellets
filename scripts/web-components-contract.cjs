@@ -1,4 +1,4 @@
-// Shared by the development-gallery browser suite in Chromium and WebKit.
+// Shared by the development-gallery browser suite in Chromium.
 const assert = require('node:assert/strict');
 
 module.exports = async function checkComponentContracts(page) {

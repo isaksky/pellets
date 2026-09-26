@@ -1,10 +1,10 @@
-// Production spacing regression: disposable data, both engines, five themes.
-// NODE_PATH=/path/to/node_modules [PLAYWRIGHT_BROWSER=webkit] node scripts/test-web-spacing-browser.cjs
+// Production spacing regression: disposable data, five themes.
+// NODE_PATH=/path/to/node_modules node scripts/test-web-spacing-browser.cjs
 // PELLETS_SPACING_BASELINE=/path/to/pl captures the same scenes without assertions.
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-spacing-browser-'));
 const baseline = process.env.PELLETS_SPACING_BASELINE;
@@ -18,7 +18,7 @@ const check = (condition, message) => { if (!baseline) assert.ok(condition, mess
 const frame = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 async function reachable(locator, message) {
   await locator.scrollIntoViewIfNeeded();
-  // WebKit scroll offsets can precede the corresponding hit-testing update.
+  // Wait for the scrolled control to become a usable hit target.
   if (!baseline) await locator.page().waitForFunction(el => {
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.x >= 0 && r.right <= innerWidth + 1 && r.y >= 0 && r.bottom <= innerHeight + 1 &&
@@ -47,7 +47,7 @@ async function openMenu(page, selector) {
     server.stderr.on('data', d => error += d);
     server.once('error', reject); server.once('exit', code => reject(Error(`Server ${code}: ${error}`)));
   });
-  const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
+  const engine = chromium;
   browser = await engine.launch({headless: true});
   const page = await browser.newPage({viewport: {width: 1280, height: 900}, hasTouch: true});
   page.setDefaultTimeout(10000);

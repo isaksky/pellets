@@ -3,11 +3,11 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const root = path.resolve(__dirname, '..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-close-'));
 const fixture = path.join(temp, 'fixture'), binary = path.join(temp, 'pl');
-const engine = process.env.PLAYWRIGHT_BROWSER || 'chromium';
+const engine = 'chromium';
 const artifacts = process.env.PELLETS_BROWSER_ARTIFACTS;
 let server, browser, page;
 const cli = (...args) => JSON.parse(execFileSync(binary, ['--json', ...args], {cwd:fixture, encoding:'utf8'})).data;
@@ -26,7 +26,7 @@ const cli = (...args) => JSON.parse(execFileSync(binary, ['--json', ...args], {c
     let out = ''; server.stdout.on('data', data => {out += data; if(out.includes('\n')) resolve(out.split('\n')[0].trim());});
     server.once('error', reject);
   });
-  browser = await (engine === 'webkit' ? webkit : chromium).launch({headless:true});
+  browser = await chromium.launch({headless:true});
   page = await browser.newPage({viewport:{width:1280, height:720}});
   page.setDefaultTimeout(10000);
   const errors = []; page.on('pageerror', error => errors.push(error.message));

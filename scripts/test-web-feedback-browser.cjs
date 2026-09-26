@@ -3,14 +3,14 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const root = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-feedback-'));
 const fixture = path.join(temporary, 'feedback');
 const baseline = process.env.PELLETS_FEEDBACK_BASELINE;
 const binary = baseline || path.join(temporary, 'pl');
 const artifacts = process.env.PELLETS_BROWSER_ARTIFACTS || path.join(temporary, 'screenshots');
-const engine = process.env.PLAYWRIGHT_BROWSER || 'chromium';
+const engine = 'chromium';
 const env = {...process.env, PELLETS_CODEX_EXECUTABLE:path.join(os.tmpdir(), 'pellets-feedback-missing-codex')};
 const cli = (...args) => JSON.parse(execFileSync(binary, ['--json', ...args], {cwd:fixture, env, encoding:'utf8'})).data;
 let server, browser, page;
@@ -64,7 +64,7 @@ async function theme(value) {
   assert.ok(fs.realpathSync(path.resolve(fixture,'.git',binding.path)).startsWith(fs.realpathSync(fixture)+path.sep));
   server=spawn(binary,['server','--port','0','--no-open'],{cwd:fixture,env});
   const origin=await new Promise((resolve,reject)=>{let out='',error='';server.stdout.on('data',d=>{out+=d;if(out.includes('\n'))resolve(out.split('\n')[0].trim());});server.stderr.on('data',d=>error+=d);server.once('error',reject);server.once('exit',code=>reject(Error(`Server ${code}: ${error}`)));});
-  browser=await (engine==='webkit'?webkit:chromium).launch({headless:true});
+  browser=await chromium.launch({headless:true});
   page=await browser.newPage({viewport:{width:1280,height:900},deviceScaleFactor:1,hasTouch:true});
   page.setDefaultTimeout(15000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));

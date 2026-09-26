@@ -2,13 +2,13 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-review-readiness-'));
 const baseline = process.env.PELLETS_REVIEW_BASELINE;
 const binary = path.join(temporary, 'pl'), peer = path.join(temporary, 'codex');
 const artifacts = process.env.PELLETS_BROWSER_ARTIFACTS || temporary;
-const engine = process.env.PLAYWRIGHT_BROWSER || 'chromium';
+const engine = 'chromium';
 const env = {...process.env, PATH: temporary + path.delimiter + process.env.PATH,
   PELLETS_CODEX_EXECUTABLE: peer, PELLETS_SUPERVISOR_PEER: '1'};
 let browser, server;
@@ -43,7 +43,7 @@ const until = async (f, message) => {
     server.stderr.on('data', b => errors+=b);
     server.once('error', reject); server.once('exit', c => reject(Error(`Server ${c}: ${errors}`)));
   });
-  browser = await (engine === 'webkit' ? webkit : chromium).launch({headless:true});
+  browser = await chromium.launch({headless:true});
   const page = await browser.newPage({viewport:{width:1280,height:900}, deviceScaleFactor:1});
   const errors=[]; page.on('pageerror', e=>errors.push(e.message));
   const queue = origin + `/projects/${target.project}/tasks?workspace=1`;

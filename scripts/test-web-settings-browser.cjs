@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {execFileSync,spawn}=require('node:child_process');
-const {chromium,webkit}=require('playwright');
+const {chromium}=require('playwright');
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'pellets-settings-browser-'));
 let browser,server;
 (async()=>{
@@ -13,8 +13,8 @@ let browser,server;
  const pellet=JSON.parse(execFileSync(binary, ['--json', 'add','Settings test'],{cwd:repo,encoding:'utf8'})).data;
  server=spawn(binary,['server','--port','0','--no-open'],{cwd:repo});
  const origin=await new Promise((resolve,reject)=>{let out='';server.stdout.on('data',d=>{out+=d;if(out.includes('\n'))resolve(out.split('\n')[0].trim())});server.once('error',reject);});
- const engine=process.env.PLAYWRIGHT_BROWSER==='webkit'?webkit:chromium;
- browser=await engine.launch({headless:true,...(engine===chromium?{channel:'chrome'}:{executablePath:process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE})});
+ const engine = chromium;
+ browser=await engine.launch({headless:true,channel:'chrome'});
  const context=await browser.newContext();
  await context.addInitScript(()=>localStorage.setItem('pellets-theme','icy'));
  const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));

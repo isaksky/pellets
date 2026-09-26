@@ -1,6 +1,6 @@
 // Native production editing/dismissal audit. Baseline records defects without
 // enforcing fixes; all writes use a fresh explicitly bound disposable database.
-// PLAYWRIGHT_BROWSER=webkit selects WebKit. PELLETS_EDITING_CASE=headers runs
+// PELLETS_EDITING_CASE=headers runs
 // all clean/dirty header consumers; details skips the theme/width popup matrix.
 // PELLETS_EDITING_BASELINE=/path/to/pl records before images in
 // PELLETS_BROWSER_ARTIFACTS (the default artifact directory is temporary).
@@ -8,13 +8,13 @@ const assert = require('node:assert/strict');
 const {createHash} = require('node:crypto');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-editing-'));
 const fixture = path.join(temporary, 'editing');
 const baseline = process.env.PELLETS_EDITING_BASELINE;
 const binary = baseline || path.join(temporary, 'pl');
-const engine = process.env.PLAYWRIGHT_BROWSER || 'chromium';
+const engine = 'chromium';
 const artifacts = process.env.PELLETS_BROWSER_ARTIFACTS || path.join(temporary, 'screenshots');
 const phase = baseline ? 'before' : 'after', observations = [], captures = [];
 let server, browser, page;
@@ -49,7 +49,7 @@ async function refresh() {
   assert.ok(fs.realpathSync(path.resolve(path.dirname(bindingFile),binding.path)).startsWith(fs.realpathSync(fixture)+path.sep));
   server=spawn(binary,['server','--port','0','--no-open'],{cwd:fixture});
   const origin=await new Promise((resolve,reject)=>{let out='',err='';server.stdout.on('data',d=>{out+=d;if(out.includes('\n'))resolve(out.split('\n')[0].trim());});server.stderr.on('data',d=>err+=d);server.once('error',reject);server.once('exit',code=>reject(Error(`Server ${code}: ${err}`)));});
-  browser=await (engine==='webkit'?webkit:chromium).launch({headless:true});
+  browser=await chromium.launch({headless:true});
   page=await browser.newPage({viewport:{width:1280,height:900},deviceScaleFactor:1,reducedMotion:'reduce'});
   page.setDefaultTimeout(12000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));

@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const repository = path.resolve(__dirname, '..'), temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-planning-browser-'));
 const binary = path.join(temporary, 'pl'), peer = path.join(temporary, 'codex'), fixture = path.join(temporary, 'planner');
 const env = {...process.env, PATH:temporary+path.delimiter+process.env.PATH, PELLETS_CODEX_EXECUTABLE:peer, PELLETS_SUPERVISOR_PEER:'1'};
@@ -30,8 +30,8 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   fs.writeFileSync(path.join(fixture,'fake-mode'),'planning_gate');
   server=spawn(binary,['server','--port','0','--no-open'],{cwd:fixture,env});
   const origin=await new Promise((resolve,reject)=>{let out='',err='';server.stdout.on('data',d=>{out+=d;if(out.includes('\n'))resolve(out.split('\n')[0].trim());});server.stderr.on('data',d=>err+=d);server.once('exit',code=>reject(Error('Server '+code+': '+err)));server.once('error',reject);});
-  const engine=process.env.PLAYWRIGHT_BROWSER==='webkit'?webkit:chromium;
-  browser=await engine.launch({headless:true,...(engine===chromium&&process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{}),...(engine===webkit&&process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE?{executablePath:process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE}:{})});
+  const engine = chromium;
+  browser=await engine.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});
   const page=await browser.newPage({viewport:{width:1280,height:850}});page.setDefaultTimeout(15000);
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   const posts=[];page.on('request',request=>{if(request.method()==='POST'&&/\/planning$/.test(request.url()))posts.push(request.postDataJSON());});
@@ -402,7 +402,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   const artifacts=process.env.PELLETS_BROWSER_ARTIFACTS;
   if(artifacts&&browser)for(const [index,page] of browser.contexts().flatMap(context=>context.pages()).entries()){
     console.error('Page:',page.url(),await page.locator('body').innerText());
-    await page.screenshot({path:path.join(artifacts,`${process.env.PLAYWRIGHT_BROWSER||'chromium'}-planning-failure-${index}.png`)});
+    await page.screenshot({path:path.join(artifacts,`chromium-planning-failure-${index}.png`)});
   }
 }).finally(async()=>{
   if(browser){for(const page of browser.contexts().flatMap(context=>context.pages()))await page.unrouteAll({behavior:'ignoreErrors'});await browser.close();}

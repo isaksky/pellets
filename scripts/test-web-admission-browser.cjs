@@ -3,13 +3,13 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const root = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-admission-'));
 const baseline = process.env.PELLETS_ADMISSION_BASELINE;
 const binary = path.join(temporary, 'pl'), peer = path.join(temporary, 'codex');
 const artifacts = process.env.PELLETS_BROWSER_ARTIFACTS || temporary;
-const engine = process.env.PLAYWRIGHT_BROWSER || 'chromium';
+const engine = 'chromium';
 const env = {...process.env, PATH:temporary + path.delimiter + process.env.PATH,
   PELLETS_CODEX_EXECUTABLE:peer, PELLETS_SUPERVISOR_PEER:'1'};
 let server, browser, page;
@@ -33,7 +33,7 @@ async function startServer(fixture) {
   if (baseline) fs.copyFileSync(baseline, binary);
   else execFileSync('go', ['build', '-o', binary, './cmd/pl'], {cwd:root});
   execFileSync('go', ['test', '-c', '-o', peer, './internal/app'], {cwd:root});
-  browser = await (engine === 'webkit' ? webkit : chromium).launch({headless:true});
+  browser = await chromium.launch({headless:true});
   for (const width of [1280, 390]) {
     const fixture = path.join(temporary, String(width), 'admission');
     fs.mkdirSync(fixture, {recursive:true});

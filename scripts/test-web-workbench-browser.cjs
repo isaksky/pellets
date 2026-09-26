@@ -1,7 +1,6 @@
 // Workbench v2 integration against an embedded production build and deterministic
 // Codex protocol peer. Repositories and database are disposable; no network AI.
 // NODE_PATH=/path/to/node_modules PLAYWRIGHT_CHANNEL=chrome node scripts/test-web-workbench-browser.cjs
-// Use PLAYWRIGHT_BROWSER=webkit for Safari's browser engine.
 // Set PELLETS_WORKBENCH_BROWSER_CASE=dialogs to run only the modal regressions.
 // Set PELLETS_WORKBENCH_BROWSER_CASE=filters to run only the filter regressions.
 // Set PELLETS_WORKBENCH_BROWSER_CASE=creation to run creation form sizing checks.
@@ -10,7 +9,7 @@ const fs = require("node:fs"),
   os = require("node:os"),
   path = require("node:path");
 const { execFileSync, spawn } = require("node:child_process");
-const { chromium, webkit } = require("playwright");
+const { chromium } = require("playwright");
 const repository = path.resolve(__dirname, ".."),
   temporary = fs.mkdtempSync(
     path.join(os.tmpdir(), "pellets-workbench-browser-"),
@@ -123,7 +122,7 @@ async function checkFilters(page, project, changedPellet) {
   await page.mouse.wheel(0, 800);
   await until(async () => {
     if (!await panel.evaluate(node => node.scrollTop + node.clientHeight >= node.scrollHeight - 2)) return false;
-    // WebKit's async scroller can update scrollTop before hit testing catches up.
+    // Wait until hit testing catches up with scrolling.
     return lastFilter.evaluate(node => {
       const box = node.getBoundingClientRect(), panel = node.closest('.filter-fields').getBoundingClientRect();
       return box.top >= panel.top - 1 && box.bottom <= panel.bottom + 1 && node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
@@ -359,14 +358,11 @@ async function stop() {
   cli("skill", "install", "--scope", "repo", "--agent", "codex", "--yes");
   fs.writeFileSync(path.join(repo, "fake-mode"), "schedule_activity_gate");
   await start();
-  const engine = process.env.PLAYWRIGHT_BROWSER === "webkit" ? webkit : chromium;
+  const engine = chromium;
   browser = await engine.launch({
     headless: true,
-    ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL
+    ...(process.env.PLAYWRIGHT_CHANNEL
       ? { channel: process.env.PLAYWRIGHT_CHANNEL }
-      : {}),
-    ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE
-      ? { executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE }
       : {}),
   });
   const page = await browser.newPage({

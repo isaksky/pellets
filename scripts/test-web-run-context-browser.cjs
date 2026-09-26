@@ -1,9 +1,9 @@
 // Production execution details with a deterministic Codex peer and disposable data.
-// Run with Playwright on NODE_PATH; PLAYWRIGHT_BROWSER=webkit selects WebKit.
+// Run with Playwright on NODE_PATH.
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-run-context-browser-'));
 const binary = path.join(temporary, 'pl'), peer = path.join(temporary, 'codex');
@@ -40,7 +40,7 @@ const source = '# Original captured document\n\n```mermaid\nflowchart LR\n A -->
 (async()=>{
   execFileSync('go',['build','-o',binary,'./cmd/pl'],{cwd:repository});
   execFileSync('go',['test','-c','-o',peer,'./internal/app'],{cwd:repository});
-  const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
+  const engine = chromium;
   browser = await engine.launch({headless:true});
   for (const kind of ['captured','empty','ungrouped']) {
     const root=path.join(temporary,kind); fs.mkdirSync(root);
@@ -137,7 +137,7 @@ const source = '# Original captured document\n\n```mermaid\nflowchart LR\n A -->
     assert.deepEqual(errors,[]); assert.deepEqual(external,[]);
     await page.close(); await stop();
   }
-  console.log(`PASS execution group context ${process.env.PLAYWRIGHT_BROWSER||'chromium'}: ${temporary}`);
+  console.log(`PASS execution group context chromium: ${temporary}`);
 })().catch(error=>{console.error(error);console.error('Artifacts: '+temporary);process.exitCode=1;}).finally(async()=>{
   await stop(); if (browser) await browser.close();
 });

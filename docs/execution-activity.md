@@ -187,12 +187,12 @@ suppresses automatic following; readers at the end otherwise follow new events.
 runner, verifies command outcomes, missing evidence, relative/long/duplicate and
 outside-workspace paths, redacted values, explicit retry and recovery reports,
 unknown failure impact, failed turns and independent input requests. It checks
-collapsed summaries and expanded evidence in Chromium/WebKit across all five
+collapsed summaries and expanded evidence in Chromium across all five
 themes at desktop, intermediate and phone widths. The containing runner retains
 its short-window, keyboard, live-update, wait/stop and explicit-recovery checks.
 
 The `schedule_activity_errors_gate` case in `test-web-runtime-browser.cjs` uses
 gated protocol notifications to check runtime-error chronology, identical
 repeated errors and command completion through live updates, native SSE
-reconnection and full snapshot replay in Chromium/WebKit. Select it with
+reconnection and full snapshot replay in Chromium. Select it with
 `PELLETS_RUNTIME_BROWSER_CASE=schedule_activity_errors_gate`.

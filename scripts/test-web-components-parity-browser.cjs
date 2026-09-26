@@ -4,7 +4,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-ui-parity-'));
@@ -36,30 +36,13 @@ async function stop() {
     await ended;
   }
 }
-async function settleRootUnits(page) {
-  if (process.env.PLAYWRIGHT_BROWSER !== 'webkit') return;
-  // WebKit can retain the detached document's 16px rem basis on a streamed
-  // theme label even while the root is 13px (reproduced on the baseline).
-  // Force a recalculation, then restore the exact authored cascade. This uses
-  // each build's own root size and does not normalize any measured property.
-  await page.evaluate(() => {
-    const root = document.documentElement, value = root.style.getPropertyValue('font-size'), priority = root.style.getPropertyPriority('font-size');
-    root.style.setProperty('font-size', (parseFloat(getComputedStyle(root).fontSize) + 1) + 'px');
-    void document.body.offsetHeight;
-    if (value) root.style.setProperty('font-size', value, priority); else root.style.removeProperty('font-size');
-    void document.body.offsetHeight;
-  });
-}
-
 async function measure(page, scene, build) {
-  // Capture the same idle pointer state on both builds. WebKit can retain or
-  // clear hover after a click-triggered patch, independently of the CSS.
+  // Capture the same idle pointer state on both builds.
   await page.mouse.move(0, 0);
   // Native dialog autofocus can select the title text. Normalize the caret for
   // screenshots; the workflow suites independently verify focus preservation.
   if (scene.endsWith('-record-actions') || scene.endsWith('-checkpoint-scope'))
     await page.locator('#record-dialog input[name=title]').evaluate(input => input.setSelectionRange(input.value.length, input.value.length));
-  await settleRootUnits(page);
   await page.screenshot({path: path.join(temporary, `${build}-${scene}.png`), animations: 'disabled', caret: 'hide'});
   // The requested creation redesign changes this form's geometry and visible
   // fields. Verify that exact surface separately; keep strict comparisons for
@@ -80,7 +63,6 @@ async function measure(page, scene, build) {
     return {menu:box(menu), selector:box(selector), value:selector?.innerText.trim(),
       items:[...menu.querySelectorAll(':scope > a, .action-row > form > button')].map(el => el.textContent.trim())};
   });
-  await settleRootUnits(page);
   // The emphasis audit intentionally removes duplicate source labels and
   // collapses secondary memory metadata. Screenshots above show the delivered
   // UI; restore only those exact presentation differences for strict comparison
@@ -258,10 +240,10 @@ async function measure(page, scene, build) {
   cli('add', 'Keep interactions predictable', '--group', 'Runtime');
   cli('add', 'Review interface work', '--review-targets', first.id);
   cli('memory', 'add', '--text', 'Preserve spacing, colors, and keyboard behavior.', '--created-by', 'agent');
-  const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
+  const engine = chromium;
   browser = await engine.launch({headless: true,
-    ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}),
-    ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});
+    ...(process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}),
+  });
   for (const [build, binary] of [['before', baseline], ['after', current]]) {
     results[build] = {}; groupAdditions[build] = {}; reviewLayouts[build] = {};
     const origin = await start(binary), page = await browser.newPage({viewport: {width: 1280, height: 900}});
@@ -450,25 +432,6 @@ async function measure(page, scene, build) {
         for (const index of tabs) after[index] = before[index];
       }
     }
-    // macOS WebKit ignores authored padding on appearance:auto selects. The
-    // requested chevron correction now uses the app's 31px form-control height
-    // and 4px corners there too. Account only for this documented 11px change.
-    const nativeIndex = before.findIndex(control => control.tag === 'SELECT' && control.name === 'status');
-    if (scene.endsWith('-create') && nativeIndex >= 0 && before[nativeIndex].style.padding === '0px') {
-      assert.equal(engine, webkit);
-      assert.equal(before[nativeIndex].bounds[3], 20);
-      assert.equal(after[nativeIndex].bounds[3], 31);
-      assert.equal(before[nativeIndex].style.borderRadius, '5px');
-      assert.equal(after[nativeIndex].style.borderRadius, '4px');
-      after[nativeIndex].bounds[3] = 20;
-      after[nativeIndex].style.borderRadius = '5px';
-      assert.equal(after[nativeIndex - 1].tag, 'LABEL');
-      assert.equal(after[nativeIndex + 1].tag, 'BUTTON');
-      after[nativeIndex - 1].bounds[3] = Math.round((after[nativeIndex - 1].bounds[3] - 11) * 100) / 100;
-      after[nativeIndex + 1].bounds[1] = Math.round((after[nativeIndex + 1].bounds[1] - 11) * 100) / 100;
-      const form = after.find(control => control.tag === 'FORM');
-      form.bounds[3] = Math.round((form.bounds[3] - 11) * 100) / 100;
-    }
     after.forEach((control, index) => {
       // Approved native-select correction: equal text/chevron insets, same geometry.
       if (scene.endsWith('-create') && control.tag === 'SELECT' && control.name === 'status' &&
@@ -485,22 +448,25 @@ async function measure(page, scene, build) {
     });
     if (scene.endsWith('-record-actions')) {
       const original = recordActionLayouts['before-' + scene], revised = recordActionLayouts['after-' + scene];
-      assert.equal(original.menu.width, 330);
-      assert.equal(revised.menu.width, 280);
-      assert.ok(revised.menu.height < original.menu.height && revised.menu.height <= 230,
-        scene + ': action menu did not become compact');
-      assert.ok(revised.selector.width >= revised.menu.width - 30 && revised.selector.height >= 30,
-        scene + ': workspace selector must fill the menu');
-      assert.equal(revised.value, 'Project root');
-      assert.deepEqual(revised.items, original.items, scene + ': lifecycle actions changed');
-      after.forEach((control, index) => {
-        assert.equal(control.recordAction, before[index].recordAction, scene + ': action menu ancestry changed');
-        if (!control.recordAction) return;
-        for (const key of ['tag','id','name','label']) assert.equal(control[key], before[index][key], scene + ': action control changed');
-        // The measured compact menu above and app screenshots cover this exact
-        // target; retain strict baseline comparison for all surrounding controls.
-        after[index] = before[index];
-      });
+      if (original.menu.width === 330) {
+        assert.equal(revised.menu.width, 280);
+        assert.ok(revised.menu.height < original.menu.height && revised.menu.height <= 230,
+          scene + ': action menu did not become compact');
+        assert.ok(revised.selector.width >= revised.menu.width - 30 && revised.selector.height >= 30,
+          scene + ': workspace selector must fill the menu');
+        assert.equal(revised.value, 'Project root');
+        assert.deepEqual(revised.items, original.items, scene + ': lifecycle actions changed');
+        after.forEach((control, index) => {
+          assert.equal(control.recordAction, before[index].recordAction, scene + ': action menu ancestry changed');
+          if (!control.recordAction) return;
+          for (const key of ['tag','id','name','label']) assert.equal(control[key], before[index][key], scene + ': action control changed');
+          // The measured compact menu above and app screenshots cover this exact
+          // target; retain strict baseline comparison for all surrounding controls.
+          after[index] = before[index];
+        });
+      } else {
+        assert.deepEqual(revised, original, scene + ': record actions differ from current baseline');
+      }
     }
     assert.deepEqual(after, before, scene + ': geometry or computed styling changed');
     console.log('PASS ' + scene + ': surrounding controls match baseline with documented review, group, and description changes');

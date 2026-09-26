@@ -35,10 +35,7 @@ The Groups addition deliberately adds one 35px row and its 2px gap to desktop pr
 and one 19.5px group-details link below pellet metadata. The parity fixture
 measures those additions, checks only their exact position/height effects, and
 continues to compare all original control sizes and styles. Group dialogs and
-routing separation have their own browser suite in both engines. The WebKit
-comparison forces root-relative units to recalculate and restores the authored
-root style before measuring; this avoids its reproducible detached-document
-16px rem cache on the theme label without ignoring any style differences.
+routing separation have their own Chromium browser suite.
 
 The quality audit also fixed nonvisual interaction defects: implicit and nested
 select labels focus and name the visible control, option replacement/visibility
@@ -64,7 +61,7 @@ handling across navigation, row, assignment, creation and Settings disclosures.
 Nested custom selectors retain priority. The preview `pl-dialog` owns its separate
 close-request API. `app.css` reserves the inspector's Unsaved slot so record,
 memory and group titles and close controls do not move when a draft becomes dirty.
-The editing browser suite checks clean/dirty geometry in both engines, five themes
+The editing browser suite checks clean/dirty geometry in Chromium, five themes
 and desktop/intermediate/phone layouts; strict production parity checks retain
 their existing assertions without new exceptions. Feature-owned memory conflicts,
 checkpoint insertion guards and pending new-chat locks are covered by
@@ -106,7 +103,7 @@ Use these choices deliberately:
 The creation Status control illustrates the last rule: its uneven arrow spacing
 was corrected without replacing the native picker. The documented macOS WebKit
 height normalization is an intentional visual deviation. Verify shared changes
-in Chromium and WebKit, all five themes, and narrow panes; inspect both closed
+in Chromium, all five themes, and narrow panes; inspect both closed
 and expanded states. Keep platform differences explicit instead of assuming the
 two rendering engines supply identical control decoration.
 
@@ -183,7 +180,7 @@ The parity suite captures actual screens and measures the added row, then hides
 only that row to compare every preexisting control against the baseline. The
 preference workflow suite verifies persistence, clearing, missing catalog entries,
 keyboard dismissal, and all five themes at desktop/intermediate/phone widths in
-Chromium and WebKit (`scripts/test-web-pellet-preferences-browser.cjs`).
+Chromium (`scripts/test-web-pellet-preferences-browser.cjs`).
 
 ## Dialogs and tabs
 
@@ -265,7 +262,7 @@ version handoff. These run against compiled binaries and disposable databases.
 `node scripts/test-web-model-catalog-browser.cjs` checks immediate opening with
 delayed discovery, SSE invalidation without polling, live focus/selection
 preservation, stale/error recovery and retry. It captures both menus in all five
-themes at 1280px, 800px and 390px widths; run it in both engines.
+themes at 1280px, 800px and 390px widths in Chromium.
 
 For a before/after comparison against the committed version, run:
 
@@ -288,13 +285,12 @@ vertical displacement from taller reviews plus reclaimed gutter width on ordinar
 rows. Every original control retains the remaining geometry and styles; other
 differences fail. The dedicated review-row suite captures all five themes at
 1280, 1092, 800 and 390px and verifies complete scope, status/count semantics and
-refresh stability in both engines.
+refresh stability in Chromium.
 
-Run the gallery and application suites in both engines with
-`PLAYWRIGHT_BROWSER=webkit` for the second run. Install matching browsers with
-`playwright install chromium webkit`; `PLAYWRIGHT_WEBKIT_EXECUTABLE` optionally
-selects a specific WebKit build. Use `NODE_PATH` when Playwright is outside the
-repository. `web-components-contract.cjs` adds regressions for disabled/busy
+Run the gallery and application suites in Chromium. Install it with
+`playwright install chromium`. Use `NODE_PATH` when Playwright is outside the
+repository. The browser runners have no WebKit selector.
+`web-components-contract.cjs` adds regressions for disabled/busy
 states, fieldset disabling, dynamic options, labels, required fields, keyboard
 menus and preview APIs to the gallery suite.
 
@@ -304,7 +300,7 @@ menus and preview APIs to the gallery suite.
 assignment/recipient and row-action menus, planner controls, settings, records,
 group cards, and empty results. It uses long names and titles across five themes
 and six widths (1280, 1092, 800, 678, 601 and 390px), with keyboard, hit-testing,
-checkbox sizing and draft checks. Run it in Chromium and WebKit. Planning, groups,
+checkbox sizing and draft checks. Run it in Chromium. Planning, groups,
 review-row and Workbench suites retain their deeper workflow assertions.
 
 The parity suite captures real before/after screens, then temporarily reverses
@@ -324,7 +320,7 @@ keyboard behavior and refresh deferral while a menu is open remain unchanged.
 inserted or revised through live refresh, at animation start, midpoint, end and
 after completion. It checks viewport anchoring, bounds, every enabled action's
 hit target, scrolling, keyboard navigation, dismissal, focus return and updates
-deferred while menus are open. Run in Chromium and WebKit; it covers all five
+deferred while menus are open. Run in Chromium; it covers all five
 themes at 1280, 1092 and 390px with normal motion and scrolled panes. Fixtures use
 independent temporary repositories with explicitly initialized databases.
 `PELLETS_MENU_BASELINE=/path/to/pl` captures baseline measurements without geometry
@@ -334,13 +330,13 @@ and measurements separately from the disposable databases.
 ### Interaction target regression coverage
 
 `test-web-interaction-browser.cjs` uses a fresh OS-temporary Git repository with an explicitly initialized database, a
-production server and the existing deterministic planning peer. Run it in Chromium and WebKit. It checks
+production server and the existing deterministic planning peer. Run it in Chromium. It checks
 all five themes at 1280, 1092 and 390px: visible row/proposal actions, stable
 proposal title geometry, independent checkbox labels and menu actions, native
 Space/Enter activation, hover feedback, editor focus return, retained drafts,
 disabled selectors, unobscured 28px proposal actions, full memory-card links,
 and touch menu/checkbox activation. Memory links use native Tab traversal in
-Chromium and Option+Tab in macOS WebKit.
+Chromium.
 `PELLETS_INTERACTION_BASELINE=/path/to/pl` records the original behavior without
 asserting the corrected contracts; `PELLETS_BROWSER_ARTIFACTS` chooses the
 persistent screenshot directory. It emits focused before/after images and
@@ -398,8 +394,8 @@ validation remain visible where needed. The selected-review composer's fixed
 column minimums also clipped fields in narrow panes; it now sizes its columns
 from available width and keeps its primary action last.
 
-`test-web-emphasis-browser.cjs` checks these production surfaces in Chromium and
-WebKit, all five persisted themes, and 1280/1092/390px layouts. It checks native
+`test-web-emphasis-browser.cjs` checks these production surfaces in Chromium,
+all five persisted themes, and 1280/1092/390px layouts. It checks native
 label names, quiet/focus/hover treatment, conditional reset, review form fit,
 keyboard actions, and draft/source preservation. It accepts
 `PELLETS_EMPHASIS_BASELINE=/path/to/pl` and `PELLETS_BROWSER_ARTIFACTS=/path` for
@@ -446,13 +442,13 @@ confirmation checkboxes keep their themed decoration and native forced-colors
 fallback. Markdown task checkboxes remain disabled native document markers.
 
 `test-web-native-controls-browser.cjs` covers five themes at 1280, 1092, 800 and
-390px in both engines. It checks the two primary actions, checkbox geometry,
+390px in Chromium. It checks the two primary actions, checkbox geometry,
 keyboard/phone touch activation, native Status ownership/reset/validation,
 assignment drafts across live refresh, actual creation submissions, and recovery
 number limits/read-only/disabled/reset. Chromium forced-colors emulation checks
-the native arrow and checkbox fallback; WebKit reports whether it supports that
-emulation. Use `PELLETS_NATIVE_BASELINE=/path/to/pl` for before captures and
-`PELLETS_BROWSER_ARTIFACTS=/absolute/path` for persistent paired crops and computed
+the native arrow and checkbox fallback. Use `PELLETS_NATIVE_BASELINE=/path/to/pl`
+for before captures and `PELLETS_BROWSER_ARTIFACTS=/absolute/path` for persistent
+paired crops and computed
 observations. `PELLETS_NATIVE_CASE=behavior` runs just submissions/recovery and
 forced colors. The gallery/component, parity, Workbench, planning, groups,
 settings, recovery and upgrade suites cover the surrounding workflows and states.
@@ -466,7 +462,8 @@ the delivered treatment; no checkbox or broad form exclusions are applied.
 
 The comparison baseline was commit
 `c402741484f7889f985bdf3f77dc6625023a1504`. Checks used compiled servers and
-disposable fixtures, including a real server restart for upgrade recovery.
+disposable fixtures, including a real server restart for upgrade recovery. The
+cross-engine results below are historical; current browser runners use Chromium.
 
 | Check | Result |
 | --- | --- |

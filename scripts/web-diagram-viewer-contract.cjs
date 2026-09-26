@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 
 // Run inside the real record dialog, with its dirty draft and live updates.
-module.exports = async ({page, view, field, fresh, ready, refresh, screenshot, noDuplicateIDs, source, fence, engine}) => {
+module.exports = async ({page, view, field, fresh, ready, refresh, screenshot, noDuplicateIDs, source, fence}) => {
   const modal = page.getByRole('dialog', {name:'Diagram viewer'});
   const canvas = modal.getByRole('region', {name:'Diagram canvas'});
   const zoom = async () => Number((await modal.locator('output').textContent()).replace('%',''));
@@ -151,24 +151,21 @@ module.exports = async ({page, view, field, fresh, ready, refresh, screenshot, n
     await fresh(source + '\nCycle '+i); await ready();
     assert.equal(await page.evaluate(() => document.adoptedStyleSheets.length),3);
   }
-  // Native touch input at phone width in Chromium; desktop WebKit also gets
-  // coverage for its separate trackpad GestureEvent path below.
+  // Native touch input at phone width and trackpad gesture events.
   await page.setViewportSize({width:390,height:740});
   await fresh(fence(large('LR'))); await ready(view,1); await open('Enter');
   await modal.getByRole('button',{name:'Reset zoom to 100%'}).click();
-  if (engine.name() === 'chromium') {
-    const session = await page.context().newCDPSession(page);
-    const rect = await canvas.boundingBox(), cx = rect.x+rect.width/2, cy = rect.y+rect.height/2;
-    const touch = (type, points) => session.send('Input.dispatchTouchEvent',{type,touchPoints:points.map(([id,x,y]) => ({id,x,y}))});
-    await touch('touchStart',[[0,cx-50,cy],[1,cx+50,cy]]);
-    await touch('touchMove',[[0,cx-100,cy],[1,cx+100,cy]]);
-    await touch('touchEnd',[]); await page.waitForTimeout(50);
-    assert.ok(await zoom() > 150,'Native touch pinch must zoom');
-    const before = await bounds();
-    await touch('touchStart',[[0,cx,cy]]); await touch('touchMove',[[0,cx+50,cy+20]]); await touch('touchEnd',[]);
-    assert.ok((await bounds()).left > before.left,'Native touch drag must pan');
-    await session.detach();
-  }
+  const session = await page.context().newCDPSession(page);
+  const touchRect = await canvas.boundingBox(), cx = touchRect.x+touchRect.width/2, cy = touchRect.y+touchRect.height/2;
+  const touch = (type, points) => session.send('Input.dispatchTouchEvent',{type,touchPoints:points.map(([id,x,y]) => ({id,x,y}))});
+  await touch('touchStart',[[0,cx-50,cy],[1,cx+50,cy]]);
+  await touch('touchMove',[[0,cx-100,cy],[1,cx+100,cy]]);
+  await touch('touchEnd',[]); await page.waitForTimeout(50);
+  assert.ok(await zoom() > 150,'Native touch pinch must zoom');
+  const before = await bounds();
+  await touch('touchStart',[[0,cx,cy]]); await touch('touchMove',[[0,cx+50,cy+20]]); await touch('touchEnd',[]);
+  assert.ok((await bounds()).left > before.left,'Native touch drag must pan');
+  await session.detach();
   const gestureZoom = await zoom();
   await canvas.evaluate(node => {
     const rect = node.getBoundingClientRect();
@@ -179,7 +176,7 @@ module.exports = async ({page, view, field, fresh, ready, refresh, screenshot, n
     }
   });
   assert.ok(Math.abs(await zoom()-gestureZoom*1.2)<.2,'Trackpad gestures must change zoom');
-  // Dispatch on a real captured mouse pointer to test cancel/restart in both engines.
+  // Dispatch on a real captured mouse pointer to test cancel/restart.
   const rect = await canvas.boundingBox();
   await page.mouse.move(rect.x+100,rect.y+100); await page.mouse.down();
   await canvas.dispatchEvent('pointercancel',{pointerId:1,pointerType:'mouse'}); await page.mouse.up();

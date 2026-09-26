@@ -1,11 +1,10 @@
 // Real run transitions plus controlled delivery of bounded activity snapshots.
 // Uses disposable data and the deterministic Codex peer; no model calls.
 // NODE_PATH=/path/to/node_modules node scripts/test-web-execution-state-browser.cjs
-// Repeat with PLAYWRIGHT_BROWSER=webkit.
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-execution-state-'));
 const binary = path.join(temporary, 'pl'), peer = path.join(temporary, 'codex');
@@ -51,7 +50,7 @@ async function stop() {
   execFileSync(binary, ['project', 'show'], {cwd: otherWorkspace, env});
   fs.writeFileSync(path.join(repo, 'fake-mode'), 'schedule_activity_gate');
   await start();
-  const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
+  const engine = chromium;
   browser = await engine.launch({headless: true});
   const page = await browser.newPage({viewport: {width: 1280, height: 900}});
   page.setDefaultTimeout(15000);

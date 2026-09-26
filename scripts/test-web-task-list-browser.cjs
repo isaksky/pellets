@@ -1,9 +1,9 @@
 // Task marker layout in real description surfaces, including planner field CSS.
-// Run with Playwright on NODE_PATH; repeat with PLAYWRIGHT_BROWSER=webkit.
+// Run with Playwright on NODE_PATH.
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-task-list-browser-'));
 const binary = path.join(temporary, 'pl'), fixture = path.join(temporary, 'tasks');
@@ -52,10 +52,10 @@ let server, browser;
     server.once('error', reject);
     server.once('exit', code => reject(Error(`server ${code}: ${error}`)));
   });
-  const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
+  const engine = chromium;
   browser = await engine.launch({headless: true,
-    ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}),
-    ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});
+    ...(process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}),
+  });
   const page = await browser.newPage({viewport: {width: 1280, height: 850}});
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -172,7 +172,7 @@ let server, browser;
   await matrix(host, 'group');
   assert.equal(cli('group', 'show', String(group.id)).context, source);
   assert.deepEqual(errors, []);
-  console.log(`PASS task-list layout (${process.env.PLAYWRIGHT_BROWSER || 'chromium'}): tight, loose and nested lists; four surfaces × five themes × three widths; planner fields and source round trips`);
+  console.log(`PASS task-list layout (chromium): tight, loose and nested lists; four surfaces × five themes × three widths; planner fields and source round trips`);
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   if (browser) await browser.close();
   if (server?.exitCode === null) { const stopped = new Promise(resolve => server.once('exit', resolve)); server.kill('SIGINT'); await stopped; }

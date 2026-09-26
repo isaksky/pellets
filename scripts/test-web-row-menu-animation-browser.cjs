@@ -1,17 +1,17 @@
 // Live row-menu regression, with independent disposable databases.
-// NODE_PATH=/path/to/node_modules [PLAYWRIGHT_BROWSER=webkit] node scripts/test-web-row-menu-animation-browser.cjs
+// NODE_PATH=/path/to/node_modules node scripts/test-web-row-menu-animation-browser.cjs
 // PELLETS_MENU_BASELINE=/path/to/pl records failures without assertions.
 // PELLETS_BROWSER_ARTIFACTS=/path stores matched <case>/before.png and after.png.
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-row-menu-'));
 const fixture = path.join(temporary, 'menu-fixture');
 const baseline = process.env.PELLETS_MENU_BASELINE;
 const binary = baseline || path.join(temporary, 'pl');
-const engineName = process.env.PLAYWRIGHT_BROWSER || 'chromium';
+const engineName = 'chromium';
 const artifacts = process.env.PELLETS_BROWSER_ARTIFACTS || fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-row-menu-evidence-'));
 const results = [];
 let browser, server;
@@ -81,7 +81,7 @@ async function open(page, reference) {
     server.stderr.on('data', d => error += d);
     server.once('error', reject); server.once('exit', code => { clearTimeout(timer); reject(Error(`Server ${code}: ${error}`)); });
   });
-  browser = await (engineName === 'webkit' ? webkit : chromium).launch({headless:true});
+  browser = await chromium.launch({headless:true});
   const page = await browser.newPage({viewport:{width:1092,height:800}, reducedMotion:'no-preference', deviceScaleFactor:1});
   page.setDefaultTimeout(10000);
   const errors=[]; page.on('pageerror', e => errors.push(e.message));

@@ -139,7 +139,7 @@ references; changing them requires an explicit design decision and verification.
    expanded, and edited states. Record intentional exceptions and unaffected areas.
 6. Verify according to [UI agent guidance](ui-agent-guidance.md#verify-the-affected-experience).
    Inspect screenshots of the affected production screens, not only assertions.
-   Shared presentation changes require Chromium and WebKit, all five themes, and
+   Shared presentation changes require Chromium, all five themes, and
    desktop, intermediate, and phone layouts, including narrow sidebar panes.
    Use disposable fixtures for mutation checks and preserve accessibility.
 7. Report the root-cause classification, audited surfaces, fixes, intentional

@@ -1,10 +1,9 @@
 // Mermaid security, bounded rendering and lifecycle against a disposable server.
 // NODE_PATH=/path/to/node_modules node scripts/test-web-mermaid-browser.cjs
-// PLAYWRIGHT_BROWSER=webkit selects the second engine.
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {execFileSync, spawn} = require('node:child_process');
-const {chromium, webkit} = require('playwright');
+const {chromium} = require('playwright');
 const repository = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-mermaid-browser-'));
 const binary = path.join(temporary, 'pl');
@@ -39,10 +38,10 @@ const source = examples.map(fence).join('\n\n') + '\n\n```js\nconst ordinary = t
     server.once('error', reject);
     server.once('exit', code => reject(Error(`server ${code}: ${error}`)));
   });
-  const engine = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? webkit : chromium;
+  const engine = chromium;
   browser = await engine.launch({headless: true,
-    ...(engine === chromium && process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}),
-    ...(engine === webkit && process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE ? {executablePath: process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE} : {})});
+    ...(process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {}),
+  });
   const page = await browser.newPage({viewport: {width: 1280, height: 850}});
   const errors = [], external = [];
   page.on('pageerror', e => errors.push(e.message));
@@ -58,12 +57,8 @@ const source = examples.map(fence).join('\n\n') + '\n\n```js\nconst ordinary = t
     assert.deepEqual(await page.evaluate(() => window.cspFailures || []), []);
     await page.screenshot({caret:'initial', path:path.join(temporary, name)});
     await page.waitForTimeout(20);
-    // Playwright's WebKit screenshotter injects exactly one `body {}` style
-    // to synchronize animations, even with animations enabled. Account for
-    // that tool-owned violation only at the screenshot boundary; application
-    // interactions before and after still require zero CSP violations.
     const failures = await page.evaluate(() => (window.cspFailures || []).splice(0));
-    assert.deepEqual(failures, engine === webkit ? ['style-src-elem'] : []);
+    assert.deepEqual(failures, []);
   };
   await page.goto(origin);
   await page.locator(`#task-${record.id} .task-title`).click();
@@ -138,7 +133,7 @@ const source = examples.map(fence).join('\n\n') + '\n\n```js\nconst ordinary = t
   await activation.click();
   assert.equal(await page.evaluate(() => window.activations), 2);
   await page.getByRole('button', {name:'Close diagram viewer'}).click();
-  await require('./web-diagram-viewer-contract.cjs')({page, view, field, fresh, ready, refresh, screenshot, noDuplicateIDs, source, fence, engine});
+  await require('./web-diagram-viewer-contract.cjs')({page, view, field, fresh, ready, refresh, screenshot, noDuplicateIDs, source, fence});
   // All themes and widths; inspect text/shape contrast and preserve SVG ratio.
   for (const theme of ['gruvbox-light', 'gruvbox-dark', 'light', 'dark', 'icy']) {
     await page.evaluate(theme => window.Workbench.applyTheme(theme), theme);
