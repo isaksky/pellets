@@ -36,6 +36,8 @@ func ValidateSetting(key, value string) error {
 		}
 	case "right_panel_tab":
 		valid = value == "plan" || value == "execution"
+	case "execution_mode":
+		valid = value == "run_one" || value == "drain" || value == "watch"
 	}
 	if !valid {
 		return domain.NewError(domain.Usage, "invalid_setting", "Choose a supported presentation setting and value.", nil)

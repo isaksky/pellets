@@ -657,11 +657,31 @@ import { action, actions } from "./datastar-1.0.3.js";
     var form = select.closest('form');
     return 'pellets-execution-access:' + new URL(form.action).pathname + ':' + form.elements.workspace_id.value;
   }
+  // One preference belongs to the database, regardless of the displayed project
+  // or workspace. Receipt-bound recovery controls retain their captured intent.
+  var executionMode = JSON.parse(root.dataset.settings || '{}').execution_mode;
+  function restoreExecutionMode() {
+    if (!['run_one', 'drain', 'watch'].includes(executionMode)) return;
+    document.querySelectorAll('select[data-execution-mode]').forEach(function(select) {
+      if (select.value === executionMode) return;
+      select.value = executionMode;
+      select.closest('pl-select')?.refresh();
+    });
+  }
+  document.addEventListener('change', function(event) {
+    if (!event.target.matches('select[data-execution-mode]')) return;
+    var value = event.target.value;
+    if (!['run_one', 'drain', 'watch'].includes(value)) return;
+    executionMode = value;
+    saveSetting('execution_mode', value);
+    restoreExecutionMode();
+  });
   document.addEventListener('change', function(event) {
     if (!event.target.matches('select[aria-label="Execution access"]')) return;
     try { localStorage.setItem(executionAccessKey(event.target), event.target.value); } catch {}
   });
   function initialize(scope) {
+    restoreExecutionMode();
     document.querySelectorAll('select[aria-label="Execution access"]').forEach(function(select) {
       try { var mode = localStorage.getItem(executionAccessKey(select)); if (mode === 'automatic' || mode === 'full') select.value = mode; } catch {}
     });

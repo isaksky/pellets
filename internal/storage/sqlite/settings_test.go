@@ -16,7 +16,7 @@ func TestSettingsPersistenceAndIndependentWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
-	for key, value := range map[string]string{"navigation_visible": "false", "execution_visible": "true", "right_panel_tab": "plan"} {
+	for key, value := range map[string]string{"navigation_visible": "false", "execution_visible": "true", "right_panel_tab": "plan", "execution_mode": "watch"} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -35,16 +35,16 @@ func TestSettingsPersistenceAndIndependentWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings["theme"] != "icy" || settings["navigation_visible"] != "false" || settings["right_panel_tab"] != "plan" || len(settings) != 4 {
+	if settings["theme"] != "icy" || settings["navigation_visible"] != "false" || settings["right_panel_tab"] != "plan" || settings["execution_mode"] != "watch" || len(settings) != 5 {
 		t.Fatalf("settings: %#v", settings)
 	}
-	for key, value := range map[string]string{"theme": "unknown", "credentials": "secret", "execution_visible": "yes"} {
+	for key, value := range map[string]string{"theme": "unknown", "credentials": "secret", "execution_visible": "yes", "execution_mode": "invalid"} {
 		if err := writer.SaveSetting(ctx, key, value, false); err == nil {
 			t.Fatalf("accepted %s=%s", key, value)
 		}
 	}
 	values, err := reader.ReadSettings(ctx)
-	if err != nil || len(values) != 4 {
+	if err != nil || len(values) != 5 {
 		t.Fatalf("invalid write changed settings: %#v %v", values, err)
 	}
 }

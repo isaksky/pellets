@@ -620,6 +620,14 @@ unavailable Terra/max, or unconfirmed delivery stops visibly for attention and
 preserves the issue and work. Restart never resumes or replays a delivery
 automatically. This handling also covers CLI edits to the same running pellet.
 
+**Execution intention** (One pellet, Through matching queue, or Wait for matching
+work) saves immediately to SQLite as one database-wide preference. All Start next
+selectors and recovery selectors without saved schedule intent reuse it across
+projects, workspaces, live panel updates, browser sessions, and server restarts.
+Recovery with a saved run or preflight receipt retains its captured mode and
+confirmation. Choosing a preference does not start execution; failed saves offer
+Retry.
+
 The execution sidebar uses durable run and schedule state for controls, with a
 separate bounded activity stream for reported events. File operations expand to
 reported source/read output or diffs; source and diffs receive local syntax

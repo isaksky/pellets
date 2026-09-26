@@ -171,6 +171,14 @@ async function startServer(root) {
     } else {
       fs.writeFileSync(modeFile, 'schedule_gate');
     }
+    if (scenario.crash) {
+      const response = await page.request.post(origin + '/settings', {
+        headers: {Origin: origin},
+        data: {_csrf: await page.locator('html').getAttribute('data-csrf'), key: 'execution_mode', value: 'drain'},
+      });
+      assert.equal(response.status(), 200);
+      await page.reload();
+    }
     await resume.waitFor();
     assert.match(await resume.textContent(), scenario.crash ? /recovery receipt preserves the mode/ : /No run or saved schedule intent exists/);
     assert.match(await resume.textContent(), /new conversation/);
