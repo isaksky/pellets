@@ -60,6 +60,9 @@ const source = '# Shared plan\n\nContext for **every member**.\n\n```mermaid\ngr
   assert.match(await dialog.innerText(), /Group member/);
   assert.equal(await field.isVisible(),true,'Shared context opens ready to edit');
   assert.equal(await field.inputValue(),'');
+  assert.equal(await host.locator('[data-description-mode=edit]').innerText(),'Write');
+  assert.equal(await host.locator('[data-description-mode=view]').isEnabled(),true,'Empty saved context retains Preview');
+  assert.equal(await field.getAttribute('placeholder'),'Add shared context… Markdown is supported');
   await close();
   assert.equal(await groupLink('Empty from CLI').count(),1,'Empty groups are discoverable');
   await page.locator('[data-group-create]').focus(); await page.keyboard.press('Enter');

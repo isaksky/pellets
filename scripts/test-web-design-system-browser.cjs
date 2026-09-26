@@ -58,6 +58,12 @@ async function start(binary) {
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => document.querySelector('#contents nav a:last-child[aria-current]')?.textContent.includes('日本語'));
   assert.equal(new URL(page.url()).hash, '', 'Document navigation changed gallery routing');
+  await contents.locator('[data-description-mode=edit]').click();
+  const gallerySource = contents.getByRole('textbox', {name:'Description', exact:true});
+  await gallerySource.fill('## Gallery preview\n\nSource stays on this page.');
+  await contents.locator('[data-description-mode=view]').click();
+  assert.equal(await contents.locator('.markdown-body h2').innerText(), 'Gallery preview');
+  assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('pellets-description-presentation-v1') || '[]').some(([key]) => key === 'gallery-contents')), false, 'Gallery presentation must not persist');
   await require('./web-components-contract.cjs')(page);
   // Exercise the public component API independently of application transport.
   assert.deepEqual(await page.evaluate(() => ['button','field','checkbox','select','number','menu','disclosure','dialog','tabs','badge','notice','icon','resizer'].filter(name => !customElements.get('pl-'+name))), []);
@@ -118,7 +124,7 @@ async function start(binary) {
     return {changes,stepped,submitted,selected,reset,opened,removedClosed,replaced,triggerCount,invalid,invalidFocused,validAgain,disabled,busy,restored,detachedPreserved,reconnectedClosed,guarded,dismissed};
   });
   assert.deepEqual(componentResult, {changes:1,stepped:'2',submitted:{title:'Edited',review:'yes',mode:'one',count:'2'},selected:'All',reset:'One',opened:true,removedClosed:true,replaced:'New options',triggerCount:1,invalid:true,invalidFocused:true,validAgain:true,disabled:true,busy:true,restored:true,detachedPreserved:true,reconnectedClosed:true,guarded:true,dismissed:true});
-  assert.deepEqual(await page.evaluate(() => Array.from(document.querySelectorAll('button, input:not([type=hidden]), textarea, select, dialog, details')).filter(control => !control.closest('pl-button, pl-field, pl-checkbox, pl-select, pl-number, pl-dialog, pl-menu, pl-disclosure, pl-diagram') && !control.matches('#contents [data-description-contents], [data-gallery-review] .review-disclosure, [data-gallery-review] .row-menu, [data-gallery-review] .row-popover button')).map(control => control.outerHTML.slice(0,100))), [], 'Gallery controls must use the component library or the production description/review-row controls');
+  assert.deepEqual(await page.evaluate(() => Array.from(document.querySelectorAll('button, input:not([type=hidden]), textarea, select, dialog, details')).filter(control => !control.closest('pl-button, pl-field, pl-checkbox, pl-select, pl-number, pl-dialog, pl-menu, pl-disclosure, pl-diagram') && !control.matches('#contents .description-toolbar button, [data-gallery-review] .review-disclosure, [data-gallery-review] .row-menu, [data-gallery-review] .row-popover button')).map(control => control.outerHTML.slice(0,100))), [], 'Gallery controls must use the component library or the production description/review-row controls');
   await page.waitForFunction(() => document.querySelectorAll('#ds-diagrams pl-diagram[data-state=ready]').length === 3);
   assert.equal(await page.locator('#ds-diagrams pl-diagram[data-state=error]').count(), 4);
   const diagramTrigger = page.locator('#ds-diagrams .mermaid-canvas').first();

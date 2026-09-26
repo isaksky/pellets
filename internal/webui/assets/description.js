@@ -4,6 +4,7 @@ import "./description-outline.js";
 // Presentation only: source, dirty state, versions and submission remain owned
 // by the existing native forms. Receipts retain presentation, not source copies.
 const receipts = new Map();
+const transientKeys = new Set();
 const rendered = new WeakMap();
 const storageKey = "pellets-description-presentation-v1";
 let focusReceipt = null;
@@ -15,12 +16,13 @@ try {
 function key(host) { return host.dataset.descriptionKey; }
 function receipt(host) {
   const id = key(host);
+  if (host.hasAttribute("data-description-transient")) transientKeys.add(id);
   if (!receipts.has(id)) receipts.set(id, {mode: host.dataset.descriptionDefault || "edit"});
   while (receipts.size > 96) receipts.delete(receipts.keys().next().value);
   return receipts.get(id);
 }
 function persist() {
-  try { sessionStorage.setItem(storageKey, JSON.stringify([...receipts])); } catch {}
+  try { sessionStorage.setItem(storageKey, JSON.stringify([...receipts].filter(([id]) => !transientKeys.has(id)))); } catch {}
 }
 function hosts(scope) { return scope.querySelectorAll("[data-description]"); }
 function scrollState(el) { return {top: el.scrollTop, left: el.scrollLeft}; }
@@ -57,6 +59,9 @@ export function rememberDescriptions(scope = document) {
 function draw(host) {
   const saved = receipt(host), field = host.querySelector("textarea"), label = field.closest("label");
   const titleText = host.dataset.descriptionLabel || "Description";
+  const canExpand = host.hasAttribute("data-description-expandable");
+  const previewRequiresContent = host.hasAttribute("data-description-preview-requires-content");
+  if (previewRequiresContent && !field.value.trim() && saved.mode === "view") saved.mode = "edit";
   let toolbar = host.querySelector(".description-toolbar"), view = host.querySelector(".markdown-body");
   if (!toolbar?.childElementCount) {
     toolbar ||= document.createElement("div");
@@ -71,8 +76,14 @@ function draw(host) {
       const button = document.createElement("button");
       button.type = "button";
       button.dataset.descriptionMode = mode;
-      button.textContent = mode === "edit" ? "Edit" : host.dataset.descriptionDefault === "view" ? "View / Preview" : "Preview";
+      button.textContent = mode === "edit" ? (host.dataset.descriptionEditLabel || "Edit") : host.dataset.descriptionDefault === "view" ? "View / Preview" : "Preview";
       toolbar.append(button);
+    }
+    if (canExpand) {
+      const expand = document.createElement("button");
+      expand.type = "button";
+      expand.dataset.descriptionExpand = "";
+      toolbar.append(expand);
     }
     host.prepend(toolbar);
   }
@@ -91,7 +102,15 @@ function draw(host) {
     const editing = button.dataset.descriptionMode === "edit";
     button.setAttribute("aria-pressed", String(button.dataset.descriptionMode === saved.mode));
     button.setAttribute("aria-controls", editing ? field.id : view.id);
+    if (previewRequiresContent && !editing) button.disabled = !field.value.trim();
   });
+  if (canExpand) {
+    host.dataset.descriptionExpanded = String(!!saved.expanded);
+    const expand = toolbar.querySelector("[data-description-expand]");
+    expand.textContent = saved.expanded ? "Collapse" : "Expand";
+    expand.setAttribute("aria-expanded", String(!!saved.expanded));
+    expand.setAttribute("aria-controls", field.id + " " + view.id);
+  }
   label.hidden = saved.mode !== "edit";
   label.classList.add("description-source");
   // The toolbar supplies the visible heading in both modes. Retain the native
@@ -145,6 +164,15 @@ export function resetDescriptions(scope) {
   persist();
 }
 document.addEventListener("click", event => {
+  const expand = event.target.closest("[data-description-expand]");
+  if (expand) {
+    const host = expand.closest("[data-description]");
+    capture(host);
+    receipt(host).expanded = !receipt(host).expanded;
+    draw(host);
+    persist();
+    return;
+  }
   const button = event.target.closest("[data-description-mode]");
   if (!button) return;
   const host = button.closest("[data-description]"), saved = receipt(host);
@@ -161,6 +189,10 @@ document.addEventListener("selectionchange", () => {
 });
 document.addEventListener("input", event => {
   const host = event.target.closest("[data-description]");
-  if (host) capture(host);
+  if (host) {
+    capture(host);
+    if (host.hasAttribute("data-description-preview-requires-content"))
+      host.querySelector('[data-description-mode="view"]').disabled = !event.target.value.trim();
+  }
 });
 window.addEventListener("pagehide", () => { rememberDescriptions(); persist(); });

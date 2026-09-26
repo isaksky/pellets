@@ -66,6 +66,9 @@ const source = '# Delivery &amp; verification\n\nParagraph with **strong**, *emp
   const field = page.locator('#record-dialog textarea[name=description]');
   const view = host.locator('.markdown-body');
   const mode = (name, container = host) => container.locator(`[data-description-mode=${name}]`);
+  assert.equal(await mode('edit').innerText(), 'Edit');
+  assert.equal(await mode('view').innerText(), 'View / Preview');
+  assert.equal(await field.getAttribute('placeholder'), 'Add a description… Markdown is supported');
   const taskCases = [
     {text: source, checked: [true, false]},
     {text: source.replace('- [x] Done\n- [ ] Pending', '- [ ] Pending\n- [x] Done'), checked: [false, true]},
@@ -289,8 +292,12 @@ const source = '# Delivery &amp; verification\n\nParagraph with **strong**, *emp
   await page.locator('[data-plan=add-draft]').evaluate(button => button.click());
   const proposal = page.locator('.plan-draft-dialog[open]');
   const proposalHost = proposal.locator('[data-description]');
+  assert.equal(await mode('edit', proposalHost).innerText(), 'Write');
+  assert.equal(await mode('view', proposalHost).isDisabled(), true);
+  assert.equal(await proposal.locator('[name=description]').getAttribute('placeholder'), 'Add a description… Markdown is supported');
   await proposal.locator('[name=title]').fill('Markdown proposal');
   await proposal.locator('[name=description]').fill(source);
+  assert.equal(await mode('view', proposalHost).isEnabled(), true);
   await mode('view', proposalHost).click();
   await proposalHost.locator('pl-diagram[data-state=ready]').waitFor();
   await until(async () => (await proposal.locator('.plan-editor-status').innerText()).includes('Changes saved automatically'), 'Proposal did not autosave');
@@ -312,6 +319,17 @@ const source = '# Delivery &amp; verification\n\nParagraph with **strong**, *emp
     const box = await preview.boundingBox();
     assert.ok(box.x >= 0 && box.x + box.width <= width + 1, 'Proposal preview is clipped');
     await screenshot(`proposal-${width}.png`);
+    if (width === 1280 && process.env.PELLETS_DESCRIPTION_PATTERN_ARTIFACTS) {
+      const directory = path.join(process.env.PELLETS_DESCRIPTION_PATTERN_ARTIFACTS, 'chromium-gruvbox-light-1280-proposal-description');
+      fs.mkdirSync(directory, {recursive:true});
+      const stage = process.env.PELLETS_DESCRIPTION_PATTERN_STAGE === 'after' ? 'after' : 'before';
+      const prior = path.join(directory, 'before.json');
+      const clip = stage === 'after' && fs.existsSync(prior)
+        ? JSON.parse(fs.readFileSync(prior)).clip
+        : {...await proposal.boundingBox(), height:440};
+      await page.screenshot({path:path.join(directory, stage+'.png'), clip, caret:'hide', animations:'disabled'});
+      fs.writeFileSync(path.join(directory, stage+'.json'), JSON.stringify({clip, viewport:page.viewportSize(), theme:'gruvbox-light', mode:'view'}, null, 2));
+    }
   }
   await mode('edit', proposalHost).click();
   assert.equal(await proposal.locator('[name=description]').inputValue(), source);

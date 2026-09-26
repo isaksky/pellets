@@ -98,7 +98,7 @@ const source = '# Overview &amp; *verification*\n\n' + paragraph +
   const navigate = async (index, keyboard = false) => {
     if (keyboard) { await links.nth(index).focus(); await page.keyboard.press('Enter'); }
     else await links.nth(index).click();
-    await until(async () => await links.nth(index).getAttribute('aria-current') === 'location', 'Wrong active section ' + index);
+    await page.waitForFunction(target => document.querySelectorAll('#record-dialog [aria-label="Description contents"] a')[target]?.getAttribute('aria-current') === 'location', index, {timeout:15000});
     const reached = () => view.evaluate((node, id) => {
       const heading = document.getElementById(id), box = node.getBoundingClientRect(), section = heading.getBoundingClientRect();
       const expected = Math.max(0, Math.min(node.scrollHeight-node.clientHeight, node.scrollTop + section.top-box.top-node.clientTop-12));

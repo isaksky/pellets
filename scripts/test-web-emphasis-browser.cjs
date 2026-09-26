@@ -130,6 +130,12 @@ async function quiet(selector) {
       assert.match(await field.getAttribute('name'),/description|context/);
       await field.fill('Preserve **source** while changing emphasis.');
       await capture(theme+'-'+width+'-'+kind+'-description',kind==='creation'?'.create-popover form':'#record-dialog');
+      const modeLayout=await host.locator('.description-toolbar').evaluate(toolbar=>{
+        const label=toolbar.querySelector('span').getBoundingClientRect();
+        const [source,preview]=[...toolbar.querySelectorAll('[data-description-mode]')].map(button=>button.getBoundingClientRect());
+        return {labelBottom:label.bottom,sourceTop:source.top,previewTop:preview.top,sourceRight:source.right,previewLeft:preview.left};
+      });
+      check(modeLayout.labelBottom<=modeLayout.sourceTop && Math.abs(modeLayout.sourceTop-modeLayout.previewTop)<1 && modeLayout.previewLeft-modeLayout.sourceRight<=1,'Shared description tabs align below their label: '+JSON.stringify(modeLayout));
       check(await host.locator('.description-source').evaluate(e=>[...e.childNodes].every(n=>n.nodeType!==Node.TEXT_NODE || !n.textContent.trim())),'Shared source label has no duplicate visible text');
       assert.equal(await host.getByRole('textbox',{name:kind==='group'?'Shared context (Markdown)':'Description',exact:true}).count(),1,'Native label remains accessible');
       await host.locator('[data-description-mode=view]').click();await host.locator('[data-description-mode=edit]').click();

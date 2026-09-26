@@ -166,7 +166,7 @@ func TestTaskDescriptionEditorUsesBoundedViewportResponsiveHeight(t *testing.T) 
 	css := embeddedText(t, "assets/app.css")
 	templates := embeddedText(t, "templates/main.html")
 
-	const taskEditor = `<textarea class="task-description-editor" name="description" rows="4">`
+	const taskEditor = `<textarea class="task-description-editor" name="description" rows="4" placeholder="Add a description… Markdown is supported">`
 	if !strings.Contains(templates, taskEditor) || strings.Count(templates, `task-description-editor`) != 1 {
 		t.Fatal("only the task inspector description textarea must opt into responsive sizing")
 	}

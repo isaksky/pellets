@@ -2100,6 +2100,11 @@ dialog::backdrop {
   max-height: none;
   resize: none;
 }
+.pellet-create .description-field[data-description-expanded="true"] textarea,
+.pellet-create .description-field[data-description-expanded="true"] .markdown-body {
+  height: min(60dvh, 560px);
+}
+.pellet-create .description-field { --description-tab-bg: var(--theme-menu-bg); }
 .pellet-create .pellet-create-options > summary {
   display: list-item;
   list-style: disclosure-closed inside;
@@ -2879,16 +2884,21 @@ dialog::backdrop {
 .recipient-form .check { align-items:flex-start; }
 .recipient-form small { display:block; color:var(--dim); font-size:10px; overflow-wrap:anywhere; }
 
-/* Markdown descriptions share native source fields in all three authoring flows. */
-.description-field { min-width: 0; max-width: 100%; }
-.description-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
-.description-toolbar > span { margin-right: auto; color: var(--muted); font-size: 12px; }
+/* Markdown descriptions share native source fields across production flows. */
+.description-field { min-width: 0; max-width: 100%; --description-tab-bg: var(--bg); }
+.description-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0; margin-bottom: 8px; border-bottom: 1px solid var(--line); }
+.description-toolbar > span { flex: 0 0 100%; margin-bottom: 4px; color: var(--muted); font-size: 12px; }
 .description-toolbar button { padding: 4px 9px; font-size: 12px; }
-.description-toolbar button[aria-pressed="true"] { color: var(--ink); background: var(--theme-quiet-hover); border-color: var(--muted); }
+.description-toolbar [data-description-mode] { margin-bottom: -1px; border: 1px solid transparent; border-bottom: 2px solid transparent; border-radius: 4px 4px 0 0; background: transparent; }
+.description-toolbar [data-description-mode][aria-pressed="true"] { color: var(--ink); border-color: var(--line); border-bottom-color: var(--description-tab-bg); background: var(--description-tab-bg); }
+.description-toolbar [data-description-mode]:not(:disabled):hover { background: var(--theme-quiet-hover); }
+.description-toolbar [data-description-expand] { margin-left: auto; border: 0; background: transparent; color: var(--muted); }
+.description-toolbar [data-description-contents] { margin-left: auto; }
+.description-toolbar:has([data-description-expand]) [data-description-contents] { margin-left: 0; }
 .description-field .description-source[hidden], .description-field .markdown-body[hidden] { display: none; }
 .description-field .description-source { font-size: 12px; }
 .description-field .description-source textarea { font-family: var(--mono); }
-.plan-draft-dialog .description-field { margin-bottom: 16px; }
+.plan-draft-dialog .description-field { margin-bottom: 16px; --description-tab-bg: var(--surface); }
 .markdown-body { min-width: 0; max-width: 100%; max-height: 48vh; overflow: auto; overscroll-behavior: contain; padding: 12px; border: 1px solid var(--line); border-radius: 4px; color: var(--ink); background: var(--bg); font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }
 .markdown-body > :first-child { margin-top: 0; }
 .markdown-body > :last-child { margin-bottom: 0; }

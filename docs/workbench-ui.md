@@ -66,7 +66,13 @@ edited title/scope, rejects dismissal while submitting, and returns focus to its
 row menu without overriding a later focus choice.
 
 Ordinary **New pellet** focuses Title on opening. Its writing surface grows to
-640px where the queue pane permits it; Edit and Preview keep the same height.
+640px where the queue pane permits it. Its Description uses GitHub-style
+**Write** and **Preview** tabs; the empty textarea placeholder mentions Markdown
+without adding permanent help copy. Preview is unavailable until the description
+has non-whitespace text. **Expand** gives either mode more height and **Collapse**
+restores the compact height. The selected size survives dismissal and live
+refreshes until a confirmed creation resets the form. Both modes keep the same
+height.
 External ID, Group, execution preferences, and Status live in **More options**.
 The body scrolls within the available viewport while **Create pellet** stays in
 the footer. Nested selectors and More options each consume their own Escape.
@@ -195,10 +201,17 @@ live refresh, five themes, widths from 390 to 1280px, and distinct routing contr
 
 ### Description reading and editing
 
-Existing pellet descriptions open in **View / Preview**. Choose **Edit** to work
-on the original Markdown source, then **View / Preview** to inspect unsaved
-changes. New-pellet forms and proposed-pellet dialogs start in **Edit** and offer
-**Preview**. Switching modes never saves or changes source. Use **Save changes**
+Creation, record, group-context, and proposal descriptions use the same two-mode
+toolbar, with the label above adjacent mode tabs. Existing pellet descriptions
+open in **View / Preview**. Choose **Edit** to work on the original Markdown
+source, then **View / Preview** to inspect unsaved changes. New-pellet forms,
+group context, and proposed-pellet dialogs start in **Write** and offer
+**Preview**. Empty Preview is disabled for new pellets and proposals; empty saved
+records and group context retain their reading view. Each textarea uses a
+contextual placeholder to mention Markdown only when its source is empty.
+Creation alone offers **Expand / Collapse**, because its source field has a fixed
+height; record and group fields grow with content, while proposal source can be
+resized natively. Switching modes never saves or changes source. Use **Save changes**
 for a pellet, **Create pellet** for a new record, or the proposal editor’s existing
 autosave and explicit Create action. Cancel and navigation retain the dirty-discard
 guard; accepting discard removes the draft.
@@ -271,7 +284,12 @@ package integrity are in `MARKED-LICENSE.txt` and `MARKED-NOTICE.txt`.
 presentation receipts without storing a second copy of the source. Optional
 `data-description-label` and `data-description-empty` customize the shared toolbar,
 preview/contents accessible labels, and empty-state copy for group context.
-The default remains Description; the native labeled textarea owns the source.
+`data-description-edit-label="Write"` changes the source tab's caption on
+authoring surfaces, `data-description-preview-requires-content` disables empty
+Preview for new drafts, and `data-description-expandable` enables the creation
+form's two-height control. The gallery uses `data-description-transient` so its
+presentation state is never stored. The default label remains Description; the
+native labeled textarea owns the source.
 
 Run `node scripts/test-web-description-browser.cjs` (with Playwright on
 `NODE_PATH`), and repeat with `PLAYWRIGHT_BROWSER=webkit`. It checks Markdown and
