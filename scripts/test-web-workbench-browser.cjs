@@ -263,6 +263,24 @@ async function checkDialogFooter(page, saveLabel) {
     const box = node.getBoundingClientRect(), inspector = node.closest("[data-inspector]").getBoundingClientRect();
     return Math.abs(box.bottom - inspector.bottom) <= 2;
   }), true, "Footer must stay at the bottom of the record dialog");
+  const actions = footer.locator("details.record-actions");
+  await actions.locator("summary").click();
+  assert.equal(await actions.evaluate(node => node.open), true, "Pointer activation must open More actions");
+  const menu = actions.locator(".record-actions-panel");
+  const menuBounds = await menu.boundingBox(), dialogBounds = await page.locator("#record-dialog").boundingBox();
+  assert.ok(menuBounds.x >= dialogBounds.x && menuBounds.x + menuBounds.width <= dialogBounds.x + dialogBounds.width,
+    "More actions must fit horizontally inside the dialog");
+  assert.ok(menuBounds.y >= 0 && menuBounds.y + menuBounds.height <= more.y - 8,
+    "More actions must open above the fixed footer");
+  const workspace = menu.locator(".select-trigger");
+  if (await workspace.count()) {
+    const selectorBounds = await workspace.boundingBox();
+    assert.ok(selectorBounds.width >= menuBounds.width - 30 && selectorBounds.height >= 30,
+      "Claim workspace must have a full-width visible selector");
+    assert.equal((await workspace.innerText()).trim(), "Project root", "A root checkout needs a readable workspace name");
+  }
+  await page.keyboard.press("Escape");
+  assert.equal(await actions.evaluate(node => node.open), false, "Escape must dismiss More actions");
   await scroller.evaluate(node => {node.scrollTop = 0;});
 }
 async function start() {

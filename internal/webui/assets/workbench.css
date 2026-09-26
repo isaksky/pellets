@@ -1793,35 +1793,53 @@ dialog::backdrop {
   position: absolute;
   left: 0;
   bottom: calc(100% + 10px);
-  width: min(330px, calc(100vw - 66px));
+  width: min(220px, calc(100vw - 66px));
   max-height: min(45dvh, 360px);
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 8px;
+  padding: 5px;
   border: 1px solid var(--theme-menu-border);
   border-radius: 5px;
   background: var(--theme-menu-bg);
-  box-shadow: var(--theme-dialog-shadow);
+  box-shadow: var(--shadow);
   color: var(--ink);
 }
+.record-actions-panel:has(form select) { width: min(280px, calc(100vw - 66px)); }
+.record-actions-panel:has(.recovery) { width: min(330px, calc(100vw - 66px)); }
 .record-actions-panel .action-row,
 .record-actions-panel .action-form {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 4px;
+  gap: 0;
   width: 100%;
   margin: 0;
 }
-.record-actions-panel form > label {
-  padding: 8px;
+.record-actions-panel form > label:has(select) {
+  display: grid;
+  gap: 5px;
+  padding: 4px 8px 3px;
+  color: var(--muted);
   font-size: 11px;
+}
+.record-actions-panel .select-control,
+.record-actions-panel .select-trigger { width: 100%; }
+.record-actions-panel .select-trigger {
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--theme-field);
+  color: var(--ink);
+  font-size: 12px;
 }
 .record-actions-panel button,
 .record-actions-panel > a {
-  display: block;
+  display: flex;
+  align-items: center;
   width: 100%;
-  padding: 8px;
+  min-height: 30px;
+  padding: 6px 9px;
   margin: 0;
   border: 0;
   border-radius: 3px;
@@ -1833,12 +1851,12 @@ dialog::backdrop {
 }
 .record-actions-panel button:not(:disabled):hover,
 .record-actions-panel > a:hover {
-  background: var(--theme-quiet-hover);
+  background: var(--theme-menu-hover);
 }
 .record-actions-panel .action-row > form:has(select) {
   border-block: 1px solid var(--line);
-  margin-block: 5px;
-  padding-block: 5px;
+  margin-block: 4px;
+  padding-block: 4px;
 }
 .record-actions-panel .recovery {
   max-width: 100%;

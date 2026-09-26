@@ -37,9 +37,22 @@ provenance and approval remain beside the text, while IDs and timestamps live in
 the populated list, without a second creation button. Both close on a backdrop
 click or Escape. Unsaved edits retain the discard guard. A fixed dialog footer places Cancel and
 the primary save action on the right. More actions on the left contains lifecycle
-operations and memory approval; queue and scope controls stay beside their fields. They support optimistic conflicts,
-lifecycle operations, recovery, provenance, and explicit human memory approval.
+operations and memory approval; queue and scope controls stay beside their fields.
+Those actions retain optimistic conflict checks, recovery, provenance, and
+explicit human memory approval. The compact menu sizes to its actions; Claim
+keeps a full-width
+workspace selector, showing the current checkout as **Project root** instead of
+`.`. The native disclosure retains pointer, keyboard, Escape, and outside-click
+behavior through live updates.
 An owned pellet and a running process remain distinct.
+
+Successful **More actions → Close pellet** (including confirmed workspace
+recovery with Close pellet) dismisses the record dialog and returns to the same
+queue filters, sorting and workspace context. It selects no other pellet, even
+when the closed record remains visible under All states. Failed or conflicting
+requests retain the inspector; unsaved edits keep their existing discard guard.
+`scripts/test-web-close-browser.cjs` covers this flow, ordinary dialog dismissal,
+keyboard activation, phone layout and subsequent live refresh.
 
 Workspace navigation and the view switcher reuse **Current execution**'s
 state presentation. An idle Watch says **Waiting for work**, including when its

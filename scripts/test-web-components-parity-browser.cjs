@@ -11,7 +11,7 @@ const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-ui-parity-'));
 const fixture = path.join(temporary, 'parity'), current = path.join(temporary, 'pl-current');
 const baseline = process.env.PELLETS_UI_BASELINE ? path.resolve(process.env.PELLETS_UI_BASELINE) : path.join(temporary, 'pl-baseline');
 const emphasis = {};
-const results = {}, groupAdditions = {}, reviewLayouts = {}, executionPreferences = {}, interactionStyles = {};
+const results = {}, groupAdditions = {}, reviewLayouts = {}, executionPreferences = {}, interactionStyles = {}, recordActionLayouts = {};
 const creationLayouts = {};
 let server, browser;
 
@@ -73,6 +73,13 @@ async function measure(page, scene, build) {
       footer: !!form.querySelector('.pellet-create-footer button[type=submit]'),
     }));
   }
+  if (scene.endsWith('-record-actions')) recordActionLayouts[build + '-' + scene] = await page.evaluate(() => {
+    const menu = document.querySelector('#record-dialog .record-actions-panel');
+    const selector = menu.querySelector('.select-trigger');
+    const box = el => {const r = el.getBoundingClientRect();return {width:r.width,height:r.height};};
+    return {menu:box(menu), selector:box(selector), value:selector?.innerText.trim(),
+      items:[...menu.querySelectorAll(':scope > a, .action-row > form > button')].map(el => el.textContent.trim())};
+  });
   await settleRootUnits(page);
   // The emphasis audit intentionally removes duplicate source labels and
   // collapses secondary memory metadata. Screenshots above show the delivered
@@ -214,6 +221,7 @@ async function measure(page, scene, build) {
         const precedingReviews = row ? [...row.parentElement.children].slice(0, [...row.parentElement.children].indexOf(row)).filter(el => el.matches('.checkpoint-row')).reduce((height, el) => height + el.getBoundingClientRect().height, 0) : 0;
         return {
           creationControl: !!el.closest('#tasks-area .create-popover form'),
+          recordAction: !!el.closest('.record-actions-panel'),
           queueRow: row?.id || '', rowBox: el === row, precedingReviews,
           tag: el.tagName, id: el.id.replace(/workbench-select-\d+/g, 'generated-select'),
           name: el.getAttribute('name'), label: el.getAttribute('aria-label'),
@@ -324,6 +332,7 @@ async function measure(page, scene, build) {
   fs.writeFileSync(path.join(temporary, 'review-layouts.json'), JSON.stringify(reviewLayouts, null, 2));
   fs.writeFileSync(path.join(temporary, 'execution-preferences.json'),JSON.stringify(executionPreferences,null,2));
   fs.writeFileSync(path.join(temporary, 'group-additions.json'), JSON.stringify(groupAdditions, null, 2));
+  fs.writeFileSync(path.join(temporary, 'record-action-layouts.json'), JSON.stringify(recordActionLayouts, null, 2));
   console.log('Visual artifacts: ' + temporary);
   const labels = {status: ['Status'], sort: ['Sort'], direction: ['Direction', 'Move'], group: ['Group'], target: ['Task'], workspace_id: ['Workspace']};
   for (const scene of Object.keys(results.before)) {
@@ -474,6 +483,25 @@ async function measure(page, scene, build) {
         control.label = before[index].label;
       }
     });
+    if (scene.endsWith('-record-actions')) {
+      const original = recordActionLayouts['before-' + scene], revised = recordActionLayouts['after-' + scene];
+      assert.equal(original.menu.width, 330);
+      assert.equal(revised.menu.width, 280);
+      assert.ok(revised.menu.height < original.menu.height && revised.menu.height <= 230,
+        scene + ': action menu did not become compact');
+      assert.ok(revised.selector.width >= revised.menu.width - 30 && revised.selector.height >= 30,
+        scene + ': workspace selector must fill the menu');
+      assert.equal(revised.value, 'Project root');
+      assert.deepEqual(revised.items, original.items, scene + ': lifecycle actions changed');
+      after.forEach((control, index) => {
+        assert.equal(control.recordAction, before[index].recordAction, scene + ': action menu ancestry changed');
+        if (!control.recordAction) return;
+        for (const key of ['tag','id','name','label']) assert.equal(control[key], before[index][key], scene + ': action control changed');
+        // The measured compact menu above and app screenshots cover this exact
+        // target; retain strict baseline comparison for all surrounding controls.
+        after[index] = before[index];
+      });
+    }
     assert.deepEqual(after, before, scene + ': geometry or computed styling changed');
     console.log('PASS ' + scene + ': surrounding controls match baseline with documented review, group, and description changes');
   }

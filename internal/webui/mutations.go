@@ -376,6 +376,12 @@ func (h *handler) transitionPellet(response http.ResponseWriter, request *http.R
 		h.renderMutationError(response, err, submittedDraft(request.PostForm))
 		return
 	}
+	if operation == storage.PelletClose {
+		// Closing completes this interaction. Clear the routed inspector rather
+		// than returning an editor for a record that just left the active queue.
+		h.renderPelletDestination(response, request, project.Code, "", http.StatusOK)
+		return
+	}
 	h.renderPelletResult(response, request, project.Code, result.Pellet, http.StatusOK)
 }
 
@@ -440,7 +446,14 @@ func (h *handler) approveMemory(response http.ResponseWriter, request *http.Requ
 }
 
 func (h *handler) renderPelletResult(response http.ResponseWriter, request *http.Request, code string, pellet storage.Pellet, status int) {
-	path := "/projects/" + url.PathEscape(code) + "/tasks/" + url.PathEscape(pellet.Reference.String())
+	h.renderPelletDestination(response, request, code, pellet.Reference.String(), status)
+}
+
+func (h *handler) renderPelletDestination(response http.ResponseWriter, request *http.Request, code, reference string, status int) {
+	path := "/projects/" + url.PathEscape(code) + "/tasks"
+	if reference != "" {
+		path += "/" + url.PathEscape(reference)
+	}
 	refresh := request.Clone(request.Context())
 	refresh.URL.Path = path
 	data, err := h.loadPage(refresh, code, "tasks", pathSegments(path))
@@ -448,7 +461,11 @@ func (h *handler) renderPelletResult(response http.ResponseWriter, request *http
 		h.renderError(response, statusForError(err), err, nil)
 		return
 	}
-	response.Header().Set("Content-Location", path)
+	location := path
+	if reference == "" {
+		location = data.CurrentURL
+	}
+	response.Header().Set("Content-Location", location)
 	h.render(response, status, "inspector", data)
 }
 
