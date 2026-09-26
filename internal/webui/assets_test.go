@@ -149,7 +149,7 @@ func scheduleFormMarkup(t *testing.T, templates, marker string) string {
 func TestTaskTitleColumnUsesAvailableWidthBeforeTruncating(t *testing.T) {
 	t.Parallel()
 	css := embeddedText(t, "assets/workbench.css")
-	for _, required := range []string{`grid-template-columns:63px 27px minmax(0,1fr)`, `grid-template-columns:62px 24px minmax(0,1fr)`, `.task-title{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis`, `.group-name,.owner-label{`} {
+	for _, required := range []string{`grid-template-columns:24px 63px 27px minmax(0,1fr)`, `grid-template-columns:24px 62px 24px minmax(0,1fr)`, `.task-title{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis`, `.group-name,.owner-label{`} {
 		if !strings.Contains(compactCSS(css), compactCSS(required)) {
 			t.Fatalf("compact row must give title flexible space at both widths: %q", required)
 		}

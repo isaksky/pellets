@@ -8,6 +8,7 @@ import { refreshComponents } from "./components.js";
 import { saveSetting } from "./settings.js";
 import { syncQueueFilters } from "./filters.js";
 import * as uiVersion from "./ui-version.js";
+import { submitRelative } from "./queue-reorder.js";
 import "./planner.js";
 import "./sidebar-resize.js";
 // Presentation state is ephemeral and never supplies queue/execution authority.
@@ -627,32 +628,7 @@ function insertCheckpoint(row, direction) {
   name.focus();
 }
 function moveRow(row, direction) {
-  const rows = Array.from(
-      document.querySelectorAll(".queue-rows>[data-row-id]"),
-    ).filter((x) => x.dataset.checkpointPriority),
-    index = rows.indexOf(row),
-    target = rows[index + (direction === "before" ? -1 : 1)];
-  if (!target) return;
-  const menu = row.querySelector(".row-menu");
-  menu.open = false;
-  menu.querySelector("summary").focus({preventScroll: true});
-  const form = document.createElement("form");
-  form.action =
-    document.querySelector("[data-checkpoint-form]").action +
-    "/" +
-    row.dataset.rowId +
-    "/move";
-  form.method = "post";
-  form.setAttribute("data-on:submit", "@submit()");
-  for (const [name, value] of Object.entries({
-    _csrf: document.querySelector('[name="_csrf"]').value,
-    version: row.dataset.rowVersion,
-    target: target.dataset.rowId,
-    direction,
-  }))
-    form.append(input(name, value));
-  document.body.append(form);
-  requestAnimationFrame(() => form.requestSubmit());
+  submitRelative(row, direction);
 }
 function highlight(row, enabled) {
   if (!row) return;

@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -605,6 +606,104 @@ func TestPelletRepositoryMovesInBothDirectionsAndExcludesMovingPellet(t *testing
 	}
 	assertActiveOrder(t, repository, fixture.main, created[1].Reference, created[2].Reference, created[3].Reference, created[0].Reference)
 	assertActivePriorityInvariants(t, repository.db, fixture.main.Project.ID, 4)
+}
+
+func TestWebQueueMoveChecksBothVersionsBeforeAnyPriorityWrite(t *testing.T) {
+	t.Parallel()
+	fixture := newPelletRepositoryFixture(t)
+	repository := fixture.open(t)
+	defer repository.Close()
+	ctx := context.Background()
+	create := func(title string) storage.Pellet {
+		p, err := repository.CreatePellet(ctx, fixture.main, storage.NewPellet{Title: title})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	a, b, c := create("first"), create("anchor"), create("last")
+	staleTarget := storage.PelletVersion(b)
+	if _, err := repository.MovePellet(ctx, fixture.main, b.Reference, storage.PelletPlacement{Target: c.Reference}); err != nil {
+		t.Fatal(err)
+	}
+	before := captureRepositoryPelletState(t, repository.db, fixture.main.Project.ID)
+	_, err := repository.MoveWebPellet(ctx, fixture.main, a.Reference, storage.PelletVersion(a), storage.PelletPlacement{Target: b.Reference, TargetVersion: staleTarget})
+	var conflict *storage.OptimisticConflict
+	if !errors.As(err, &conflict) || conflict.Pellet == nil || conflict.Pellet.Reference != b.Reference {
+		t.Fatalf("stale target = %v", err)
+	}
+	if after := captureRepositoryPelletState(t, repository.db, fixture.main.Project.ID); !reflect.DeepEqual(after, before) {
+		t.Fatalf("stale target changed rows: %v != %v", after, before)
+	}
+	b, err = repository.ReadPellet(ctx, fixture.main, b.Reference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.MoveWebPellet(ctx, fixture.main, a.Reference, storage.PelletVersion(a), storage.PelletPlacement{Target: b.Reference, TargetVersion: storage.PelletVersion(b)}); err != nil {
+		t.Fatal(err)
+	}
+	assertActiveOrder(t, repository, fixture.main, c.Reference, b.Reference, a.Reference)
+	deferred := transitionPellet(t, repository, fixture.main, b.Reference, storage.PelletDefer, nil).Pellet
+	a, err = repository.ReadPellet(ctx, fixture.main, a.Reference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before = captureRepositoryPelletState(t, repository.db, fixture.main.Project.ID)
+	_, err = repository.MoveWebPellet(ctx, fixture.main, a.Reference, storage.PelletVersion(a), storage.PelletPlacement{Target: b.Reference, TargetVersion: storage.PelletVersion(deferred)})
+	assertPelletErrorCode(t, err, "invalid_placement_target")
+	if after := captureRepositoryPelletState(t, repository.db, fixture.main.Project.ID); !reflect.DeepEqual(after, before) {
+		t.Fatalf("inactive target changed rows: %v != %v", after, before)
+	}
+}
+
+func TestWebQueueMoveRetainsReviewScopeAndNextSelectionUsesPriority(t *testing.T) {
+	t.Parallel()
+	fixture := newPelletRepositoryFixture(t)
+	repository := fixture.open(t)
+	defer repository.Close()
+	ctx := context.Background()
+	a, err := repository.CreatePellet(ctx, fixture.main, storage.NewPellet{Title: "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := repository.CreatePellet(ctx, fixture.main, storage.NewPellet{Title: "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := repository.CreatePellet(ctx, fixture.main, storage.NewPellet{Kind: domain.PelletReviewCheckpoint, Title: "review", ReviewTargets: []domain.PelletReference{a.Reference, b.Reference}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved, err := repository.MoveWebPellet(ctx, fixture.main, review.Reference, storage.PelletVersion(review), storage.PelletPlacement{Target: a.Reference, Before: true, TargetVersion: storage.PelletVersion(a)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved.Checkpoint == nil || !reflect.DeepEqual(moved.Checkpoint.Targets, review.Checkpoint.Targets) {
+		t.Fatalf("review scope changed: %+v", moved.Checkpoint)
+	}
+	assertActiveOrder(t, repository, fixture.main, review.Reference, a.Reference, b.Reference)
+	// A waiting review keeps its readiness gate even at the queue head. The
+	// ordinary open work below it remains the next eligible selection.
+	selection, err := repository.StartNextPellet(ctx, fixture.main, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.Pellet.Reference != a.Reference {
+		t.Fatalf("next after review move = %s", selection.Pellet.Reference)
+	}
+	anchor, err := repository.ReadPellet(ctx, fixture.main, b.Reference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned, err := repository.MoveWebPellet(ctx, fixture.main, a.Reference, storage.PelletVersion(*selection.Pellet), storage.PelletPlacement{
+		Target: b.Reference, TargetVersion: storage.PelletVersion(anchor),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owned.Status != domain.PelletInProgress || owned.Workspace == nil || selection.Pellet.Workspace == nil || owned.Workspace.ID != selection.Pellet.Workspace.ID {
+		t.Fatalf("queue move changed the active owner: %+v", owned)
+	}
 }
 
 func TestPelletRepositoryRejectsInvalidMoveAndPlacementParticipants(t *testing.T) {

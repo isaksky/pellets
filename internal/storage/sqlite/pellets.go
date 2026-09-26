@@ -238,6 +238,11 @@ func (repository *PelletRepository) MoveWebPellet(
 	if err := validateWebVersion(expectedVersion); err != nil {
 		return storage.Pellet{}, err
 	}
+	if placement.TargetVersion != "" {
+		if err := validateWebVersion(placement.TargetVersion); err != nil {
+			return storage.Pellet{}, err
+		}
+	}
 	return repository.movePellet(ctx, project, reference, expectedVersion, placement)
 }
 
@@ -297,6 +302,21 @@ func (repository *PelletRepository) movePellet(
 	}
 	if !activePelletStatus(moving.Status) || moving.Priority == nil || *moving.Priority <= 0 {
 		return storage.Pellet{}, invalidMoveSource(moving)
+	}
+	if placement.TargetVersion != "" {
+		anchor, err := loadPellet(ctx, connection, project.Project.ID, placement.Target.Number)
+		if errors.Is(err, sql.ErrNoRows) {
+			return storage.Pellet{}, pelletNotFound(placement.Target)
+		}
+		if err != nil {
+			return storage.Pellet{}, pelletStorageError("read move target", err)
+		}
+		if placement.TargetVersion != storage.PelletVersion(anchor) {
+			return storage.Pellet{}, &storage.OptimisticConflict{Pellet: &anchor}
+		}
+		if !activePelletStatus(anchor.Status) || anchor.Priority == nil || *anchor.Priority <= 0 {
+			return storage.Pellet{}, domain.NewError(domain.Conflict, "invalid_placement_target", "a pellet may only be positioned relative to active work", map[string]any{"target": placement.Target.String(), "status": anchor.Status})
+		}
 	}
 
 	priority, err := allocatePlacedPriority(ctx, connection, project, placement, reference.Number)

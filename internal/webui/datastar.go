@@ -18,6 +18,7 @@ type datastarResponse struct {
 	stream        *datastar.ServerSentEventGenerator
 	err           error
 	createdPellet string
+	queueError    string
 }
 
 func (response *datastarResponse) render(status int, name, path, elements string) {
@@ -78,6 +79,9 @@ func (response *datastarResponse) result(status int, path string) {
 	}
 	if response.createdPellet != "" {
 		receipt["createdPellet"] = response.createdPellet
+	}
+	if response.queueError != "" {
+		receipt["queueError"] = response.queueError
 	}
 	result, err := json.Marshal(map[string]any{"_webResult": receipt})
 	if err != nil {

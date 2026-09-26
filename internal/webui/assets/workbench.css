@@ -909,8 +909,12 @@ input[type="checkbox"] {
 .queue-order {
   font-size: 10px;
   color: var(--dim);
-  display: none;
+  display: inline;
 }
+.queue-order[hidden], .queue-move-feedback[hidden] { display: none; }
+.queue-order a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.queue-move-feedback { margin: 5px 0 7px; padding: 6px 9px; border-radius: 4px; background: var(--theme-quiet-hover); color: var(--ink); font-size: 11px; }
+.queue-move-feedback.request-failed { color: var(--danger); }
 .table-frame {
   border: 0;
   box-shadow: none;
@@ -929,14 +933,14 @@ input[type="checkbox"] {
   display: grid;
   grid-template-columns: 90px minmax(100px, 1fr) 84px 90px;
   gap: 0;
-  padding: 9px 10px 6px 16px;
+  padding: 9px 10px 6px 40px;
   border-bottom: 1px solid var(--line);
   font-size: 10px;
   color: var(--dim);
 }
 .pellet-row {
   display: grid;
-  grid-template-columns: 63px 27px minmax(0, 1fr) 84px 70px 20px;
+  grid-template-columns: 24px 63px 27px minmax(0, 1fr) 84px 70px 20px;
   gap: 0;
   align-items: center;
   height: 37px;
@@ -947,6 +951,18 @@ input[type="checkbox"] {
   cursor: pointer;
   position: relative;
 }
+.queue-grip-slot { display: flex; align-items: center; justify-content: center; width: 24px; height: 30px; }
+.queue-grip { display: grid; place-items: center; width: 22px; height: 26px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--dim); opacity: .66; cursor: grab; touch-action: none; }
+.queue-grip:hover, .queue-grip:focus-visible, .pellet-row:hover .queue-grip, .checkpoint-row:hover .queue-grip, .pellet-row:focus-within .queue-grip, .checkpoint-row:focus-within .queue-grip { opacity: 1; color: var(--ink); }
+.queue-grip:hover { background: var(--theme-quiet-hover); }
+.queue-grip:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.queue-grip[aria-pressed="true"], .queue-dragging .queue-grip { cursor: grabbing; }
+.queue-drag-source > :not(.row-menu):not(.queue-grip-slot) { opacity: .48; }
+.queue-insertion { position: absolute; left: 0; right: 0; height: 2px; z-index: 3; background: var(--focus); pointer-events: none; }
+.queue-insertion::before { content: ""; position: absolute; left: 2px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--focus); }
+.queue-drag-preview { position: fixed; z-index: 1000; max-width: min(320px, calc(100vw - 24px)); padding: 7px 10px; border: 1px solid var(--line); border-radius: 5px; box-shadow: 0 5px 18px var(--line); background: var(--surface-raised); color: var(--ink); font-size: 12px; pointer-events: none; }
+.queue-drag-preview strong, .queue-drag-preview small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue-drag-preview small { margin-top: 3px; color: var(--dim); font-size: 11px; }
 .pellet-row:hover,
 .pellet-row.selected {
   background: var(--theme-quiet-hover);
@@ -1041,10 +1057,11 @@ input[type="checkbox"] {
 }
 .checkpoint-row {
   position: relative;
-  padding: 12px 10px;
+  padding: 12px 10px 12px 34px;
   border-bottom: 1px solid var(--line);
   min-width: 0;
 }
+.checkpoint-row > .queue-grip-slot { position: absolute; left: 6px; top: 7px; }
 .checkpoint-heading {
   padding-right: 28px;
   display: flex;
@@ -2164,7 +2181,7 @@ dialog::backdrop {
     padding: 25px 20px;
   }
   .pellet-row {
-    grid-template-columns: 62px 24px minmax(0, 1fr) 65px 0px 18px;
+    grid-template-columns: 24px 62px 24px minmax(0, 1fr) 65px 0px 18px;
   }
   .queue-caption {
     grid-template-columns: 86px minmax(80px, 1fr) 83px;
@@ -2189,7 +2206,7 @@ dialog::backdrop {
     padding: 24px 16px;
   }
   .pellet-row {
-    grid-template-columns: 58px 23px minmax(0, 1fr) 0 0 16px;
+    grid-template-columns: 24px 58px 23px minmax(0, 1fr) 0 0 16px;
   }
   .group-name {
     visibility: hidden;
@@ -2311,10 +2328,10 @@ dialog::backdrop {
   }
   .queue-caption {
     font-size: 9px;
-    padding-left: 14px;
+    padding-left: 38px;
   }
   .pellet-row {
-    grid-template-columns: 62px 24px minmax(0, 1fr) 0 0 18px;
+    grid-template-columns: 24px 62px 24px minmax(0, 1fr) 0 0 18px;
     font-size: 12px;
   }
   .pellet-row .task-title {

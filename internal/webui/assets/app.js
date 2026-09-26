@@ -1,4 +1,5 @@
 import * as uiVersion from "./ui-version.js";
+import * as queueReorder from "./queue-reorder.js";
 import "./workbench.js";
 import "./components.js";
 import { saveSetting } from "./settings.js";
@@ -261,19 +262,24 @@ import { action, actions } from "./datastar-1.0.3.js";
     if (!documentActive) return;
     var el = ctx.el;
     var automatic = kind === "refresh";
-    var mutation = kind === "submit";
+    var queueMove = kind === "queueMove";
+    var mutation = kind === "submit" || queueMove;
+    if (!automatic && !queueMove) queueReorder.cancelGesture("Reordering canceled.", false);
     if (kind === "navigate") {
       var evt = ctx.evt;
       if (evt && (evt.button !== 0 || evt.metaKey || evt.ctrlKey || evt.shiftKey || evt.altKey)) return;
       if (evt) evt.preventDefault();
     }
-    if (uiVersion.isOutdated()) return;
+    if (uiVersion.isOutdated()) { if (queueMove) queueReorder.unsentMove("Reload the updated interface before reordering."); return; }
     var target = targetID === "live" ? document.body : document.getElementById(targetID);
     if (automatic && Array.from(pending.values()).some(function (state) { return !state.automatic; })) {
       refreshAgain = true;
       return;
     }
-    if (!target || (automatic && (document.hidden || protectedTarget(target)))) return;
+    if (!target || (automatic && (document.hidden || protectedTarget(target)))) {
+      if (queueMove) queueReorder.unsentMove("Queue is unavailable. Refresh and try again.");
+      return;
+    }
     if (automatic && targetID === "inspector-host" && target.querySelector(".conflict-state, .error-state")) return;
     var editing = dirtyInspector();
     var discard = false;
@@ -291,16 +297,21 @@ import { action, actions } from "./datastar-1.0.3.js";
     if (previous && previous.mutation) {
       // Keep only the latest navigation/filter intent while the save completes.
       if (!mutation) previous.next = {ctx: ctx, targetID: targetID, kind: kind};
+      if (queueMove) queueReorder.unsentMove("Finish the current save before reordering.");
       return;
     }
-    if (mutation && !el.checkValidity()) { el.reportValidity(); return; }
+    if (mutation && !el.checkValidity()) {
+      el.reportValidity();
+      if (queueMove) queueReorder.unsentMove("Queue move details are incomplete. Refresh and try again.");
+      return;
+    }
     if (previous) previous.controller.abort();
     if (!automatic) {
       routeRevision += 1;
       var background = pending.get("background");
       if (background) background.controller.abort();
     }
-    var state = {slot: slot, el: el, targetID: targetID, automatic: automatic, mutation: mutation, navigation: kind === "navigate",
+    var state = {slot: slot, el: el, targetID: targetID, automatic: automatic, mutation: mutation, queueMove: queueMove, navigation: kind === "navigate",
       revision: editRevision, route: routeRevision, controller: new AbortController(), applied: false, discard: discard};
     pending.set(slot, state);
     requests.set(el, state);
@@ -320,10 +331,10 @@ import { action, actions } from "./datastar-1.0.3.js";
     var options = {headers: uiVersion.headers({"Pellets-Target": targetID}), requestCancellation: state.controller,
       openWhenHidden: true, retry: "never", retryMaxCount: 0, filterSignals: {include: /^$/}};
     if (mutation || kind === "filter") options.contentType = "form";
-    var feedback = automatic ? null : requestFeedback(mutation ? el : null);
+    var feedback = automatic || queueMove ? null : requestFeedback(mutation ? el : null);
     // Form-associated footer buttons live outside the editing form.
     var buttons = mutation ? Array.from(el.elements).filter(function (button) { return button.matches("button[type=submit], button:not([type])") && !button.disabled; }) : [];
-    if (!automatic) {
+    if (!automatic && !queueMove) {
       feedback.hidden = false;
       feedback.textContent = mutation ? "Saving…" : "Loading…";
       feedback.classList.remove("request-failed");
@@ -342,7 +353,8 @@ import { action, actions } from "./datastar-1.0.3.js";
       uiVersion.endRequest();
       buttons.forEach(function (button) { button.disabled = uiVersion.isOutdated(); });
       if (requests.get(el) === state) el.removeAttribute("aria-busy");
-      if (!automatic && pending.get(slot) === state && state.route === routeRevision && !state.controller.signal.aborted) {
+      if (queueMove && !state.completed) queueReorder.uncertainMove();
+      if (!automatic && !queueMove && pending.get(slot) === state && state.route === routeRevision && !state.controller.signal.aborted) {
         feedback.hidden = !!state.completed;
         if (!state.completed) {
           feedback.classList.add("request-failed");
@@ -366,6 +378,7 @@ import { action, actions } from "./datastar-1.0.3.js";
   action({name: "navigate", apply: function (ctx, target) { return request(ctx, target, "navigate"); }});
   action({name: "saveLayout", apply: function (ctx) { return request(ctx, "app-content", "submit"); }});
   action({name: "submit", apply: function (ctx) { return request(ctx, ctx.el.matches("[data-pellet-create]") ? "task-list" : "inspector-host", "submit"); }});
+  action({name: "queueMove", apply: function (ctx) { return request(ctx, "task-list", "queueMove"); }});
   action({name: "filter", apply: function (ctx) { return request(ctx, "task-list", "filter"); }});
   action({name: "refresh", apply: function (ctx, target) { return request(ctx, target || ctx.el.id, "refresh"); }});
 
@@ -379,11 +392,13 @@ import { action, actions } from "./datastar-1.0.3.js";
       var patchID = (detail.argsRaw.selector || "").replace(/^#/, "");
       var target = document.getElementById(patchID);
       var inspector = patchID === "inspector-host";
+      var queuePatch = patchID === "task-list" || patchID === "tasks-area" || patchID === "app-content";
       // A navigation bundle describes one destination. If newer edits reject its
       // first (inspector) patch, its list selection must not move there either.
       if (inspector && state.navigation && state.revision !== editRevision) state.rejected = true;
       if (state.rejected || state.controller.signal.aborted || pending.get(state.slot) !== state || state.route !== routeRevision ||
           (!state.applied && !state.el.isConnected) ||
+          (queuePatch && queueReorder.protectsQueue() && !state.queueMove) ||
           (protectedTarget(target) && (state.automatic || patchID !== state.targetID)) ||
           (inspector && ((state.automatic && (dirtyInspector() || target.querySelector(".conflict-state, .error-state"))) || state.revision !== editRevision))) {
         event.stopImmediatePropagation();
@@ -400,19 +415,22 @@ import { action, actions } from "./datastar-1.0.3.js";
       state.applied = true;
       if (patchID === state.targetID) state.primaryApplied = true;
       if (patchID === "app-content") state.bootstrapApplied = true;
-      queueMicrotask(function () { afterPatch(document.getElementById(patchID) || document); });
+      queueMicrotask(function () {
+        afterPatch(document.getElementById(patchID) || document);
+        if (queuePatch) queueReorder.afterQueuePatch();
+      });
     } else if (detail.type === "datastar-patch-signals") {
-      if (!state.applied || state.controller.signal.aborted || state.route !== routeRevision) {
+      if ((!state.applied && !state.queueMove) || state.controller.signal.aborted || state.route !== routeRevision) {
         event.stopImmediatePropagation();
         return;
       }
-      state.completed = true;
       var result = JSON.parse(detail.argsRaw.signals)._webResult;
-      if (!result) return;
+      if (!result) { if (state.queueMove) queueReorder.uncertainMove(); return; }
+      state.completed = true;
       if (result.status < 400) {
         if (state.el.matches("[data-pellet-create]") && result.createdPellet) {
           completePelletCreation(state.el, result.createdPellet, state.revision === editRevision);
-        } else window.Workbench.saved(state.el);
+        } else if (!state.queueMove) window.Workbench.saved(state.el);
         var projectShell = document.querySelector(".app-shell[data-project]");
         document.title = projectShell ? projectShell.dataset.project + " · Pellets" : "Pellets";
       }
@@ -424,6 +442,7 @@ import { action, actions } from "./datastar-1.0.3.js";
         if (requestID) requestID.value = "";
         clearCheckpointSelection();
       }
+      if (state.queueMove) queueReorder.moveResult(result, state.primaryApplied);
       if (state.automatic && state.bootstrapApplied && result.status < 400 && result.url) {
         var destination = new URL(result.url, location.href);
         if (destination.origin === location.origin) {
@@ -432,7 +451,7 @@ import { action, actions } from "./datastar-1.0.3.js";
       }
       // Related regions can refresh even when newer edits reject the inspector.
       // Advance history only if the requested destination was actually accepted.
-      if (!state.automatic && state.primaryApplied && result.status < 400 && result.url) {
+      if (!state.automatic && !state.queueMove && state.primaryApplied && result.status < 400 && result.url) {
         var next = new URL(result.url, location.href);
         if (next.origin === location.origin && next.pathname + next.search !== location.pathname + location.search) {
           currentHistoryIndex += 1;

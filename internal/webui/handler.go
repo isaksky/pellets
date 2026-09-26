@@ -416,6 +416,7 @@ type pelletView struct {
 	Version              string
 	URL                  string
 	Selected             bool
+	ReorderEnabled       bool
 	Group                string
 	ExternalID           string
 	Priority             string
@@ -957,11 +958,13 @@ func (h *handler) projectViews(request *http.Request, projects []storage.WebProj
 
 func makePelletViews(pellets []storage.Pellet, code string, query url.Values, selected string, sort storage.WebPelletSort) []pelletView {
 	views := make([]pelletView, 0, len(pellets))
+	sort = storage.NormalizeWebPelletSort(sort)
 	for _, pellet := range pellets {
 		view := pelletView{
 			Pellet: pellet, Version: storage.PelletVersion(pellet),
 			URL: taskURL(code, query, pellet.Reference.String(), sort), Selected: pellet.Reference.String() == selected,
-			Group: textOrDash(pellet.Group), ExternalID: textOrDash(pellet.ExternalID), Priority: "—",
+			ReorderEnabled: sort.Column == storage.WebPelletSortPriority && sort.Direction == storage.WebPelletSortAscending && pellet.Priority != nil && (pellet.Status == domain.PelletOpen || pellet.Status == domain.PelletInProgress),
+			Group:          textOrDash(pellet.Group), ExternalID: textOrDash(pellet.ExternalID), Priority: "—",
 		}
 		if pellet.Priority != nil {
 			view.Priority = strconv.FormatInt(*pellet.Priority, 10)

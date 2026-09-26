@@ -133,6 +133,29 @@ server-rendered filter summary, including live searches. Sorting alone does not
 show it because clearing preserves sort order. Clear filters preserves the browsing workspace,
 execution sidebar selection, and sort order.
 
+### Queue reordering
+
+Priority ascending exposes a quiet six-dot grip on each open or in-progress
+pellet and review row. Drag the grip with mouse, touch, or pen, or focus it and
+press Space or Enter to pick up, Up/Down to choose an insertion gap, Space or
+Enter to commit, or Escape to cancel. The insertion line and announcement name
+the exact destination. A drop before a visible row places the moved record
+immediately before that row in the full project queue; the final gap places it
+after the last visible eligible row. Hidden records retain their order. Queue
+menus use the same relative move contract. The record dialog's explicit
+Before/After controls remain available independently of the display sort.
+
+Other sorts show a quiet **Queue order** link beside the filters. Switching to
+that sort retains search, status, group, workspace, and execution context.
+Closed and maybe-later rows have no grip. Moving owned work retains its owner;
+moving a review does not change its explicit scope or readiness. A queue move
+updates the list and related counts without opening or replacing the inspector,
+changing the URL, or losing drafts, selection, expansion, focus, and scroll.
+The browser submits versions for both the source and destination; a stale move
+is rejected and the queue refreshed. If a response is lost, reordering stays
+blocked until an authoritative refresh confirms the displayed order. The
+dedicated `scripts/test-web-queue-reorder-browser.cjs` suite covers these flows.
+
 Both sidebars collapse independently using the bottom corner buttons. Without a
 saved visibility preference, the right sidebar starts collapsed and navigation
 starts expanded. The theme

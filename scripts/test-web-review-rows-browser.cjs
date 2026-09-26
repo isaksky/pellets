@@ -161,9 +161,9 @@ const until = async (fn, message) => {
   await row(2).locator('.review-disclosure > summary').click();
   await row(2).locator('.row-menu > summary').click();
   await row(2).getByRole('menuitem', {name: 'Move review up', exact: true}).click();
-  await page.locator('#record-dialog[open]').waitFor();
-  await page.getByRole('link', {name: 'Close inspector', exact: true}).click();
-  await page.locator('#record-dialog').waitFor({state: 'hidden'});
+  await until(async () => (await page.locator('#queue-rows > article').evaluateAll(rows => rows.map(el => el.dataset.rowId))).indexOf(reviews[2].id) === originalIndex - 1, 'review menu move did not update queue');
+  assert.equal(await page.locator('#record-dialog').evaluate(el => el.open), false);
+  assert.equal(page.url(), url);
   const movedOrder = await page.locator('#queue-rows > article').evaluateAll(rows => rows.map(el => el.dataset.rowId));
   assert.equal(movedOrder.indexOf(reviews[2].id), originalIndex - 1);
   assert.equal(await row(2).locator('.review-disclosure').evaluate(el => el.open), true);
@@ -178,7 +178,7 @@ const until = async (fn, message) => {
   await row(1).getByRole('menuitem', {name: 'Restore review', exact: true}).click();
   await page.locator('#record-dialog[open]').waitFor();
   await counts(44, 41, 5);
-  assert.match(await row(1).locator('.review-status').textContent(), /Waiting/);
+  assert.equal(await row(1).locator('.review-status').textContent(), 'Evidence missing');
   await page.getByRole('link', {name: 'Close inspector', exact: true}).click();
   await page.locator('#record-dialog').waitFor({state: 'hidden'});
   cli('purge', '--project', project, '--yes');

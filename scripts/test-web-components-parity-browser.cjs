@@ -11,7 +11,7 @@ const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-ui-parity-'));
 const fixture = path.join(temporary, 'parity'), current = path.join(temporary, 'pl-current');
 const baseline = process.env.PELLETS_UI_BASELINE ? path.resolve(process.env.PELLETS_UI_BASELINE) : path.join(temporary, 'pl-baseline');
 const emphasis = {};
-const results = {}, groupAdditions = {}, reviewLayouts = {}, executionPreferences = {}, interactionStyles = {}, recordActionLayouts = {};
+const results = {}, groupAdditions = {}, reviewLayouts = {}, gripLayouts = {}, executionPreferences = {}, interactionStyles = {}, recordActionLayouts = {};
 const creationLayouts = {};
 let server, browser;
 
@@ -112,6 +112,10 @@ async function measure(page, scene, build) {
         targets: row.dataset.scope,
       }))};
   });
+  gripLayouts[build + '-' + scene] = await page.locator('#queue-rows .queue-grip').evaluateAll(grips => grips.map(grip => {
+    const box = grip.getBoundingClientRect();
+    return {label: grip.getAttribute('aria-label'), width: box.width, height: box.height, visible: grip.checkVisibility()};
+  }));
   // Retain only the explicitly changed target properties for comparison. Real
   // screenshots above and the interaction suite verify the delivered targets;
   // restoration below lets every other size/style remain a strict comparison.
@@ -256,6 +260,7 @@ async function measure(page, scene, build) {
     await page.locator('#theme-select-trigger').click();
     await page.locator(`[role=option][data-value="${theme}"]`).click();
     const capture = scene => measure(page, `${theme}-${scene}`, build);
+    if (!await page.locator('#execution-tab').isVisible()) await page.locator('#toggle-execution').click();
     await page.locator('#execution-tab').click();
     await page.getByRole('button', {name: '▷ Start next', exact: true}).waitFor();
     await capture('queue');
@@ -312,6 +317,7 @@ async function measure(page, scene, build) {
   }
   fs.writeFileSync(path.join(temporary, 'measurements.json'), JSON.stringify(results, null, 2));
   fs.writeFileSync(path.join(temporary, 'review-layouts.json'), JSON.stringify(reviewLayouts, null, 2));
+  fs.writeFileSync(path.join(temporary, 'grip-layouts.json'), JSON.stringify(gripLayouts, null, 2));
   fs.writeFileSync(path.join(temporary, 'execution-preferences.json'),JSON.stringify(executionPreferences,null,2));
   fs.writeFileSync(path.join(temporary, 'group-additions.json'), JSON.stringify(groupAdditions, null, 2));
   fs.writeFileSync(path.join(temporary, 'record-action-layouts.json'), JSON.stringify(recordActionLayouts, null, 2));
@@ -328,7 +334,15 @@ async function measure(page, scene, build) {
       assert.equal(newCreation.options, false);assert.equal(newCreation.footer, true);
     }
     const before = structuredClone(results.before[scene]).filter(control => !control.creationControl);
-    const after = structuredClone(results.after[scene]).filter(control => !control.creationControl);
+    const after = structuredClone(results.after[scene]).filter(control => !control.creationControl && !control.label?.startsWith('Reorder '));
+    const grips = gripLayouts['after-' + scene];
+    assert.equal(gripLayouts['before-' + scene].length, 0, scene + ': baseline already has queue grips');
+    assert.equal(grips.length, after.filter(control => control.rowBox).length + reviewLayouts.after[scene].rows.length,
+      scene + ': each queue row needs a grip');
+    for (const grip of grips) {
+      assert.ok(grip.label?.startsWith('Reorder ') && grip.visible, scene + ': grip must be named and visible');
+      assert.ok(grip.width >= 22 && grip.height >= 26, scene + ': grip target shrank');
+    }
     // Review rows deliberately replace 42px dividers and their bracket gutters.
     // Check this exact adoption separately, then account only for its measured
     // displacement of ordinary rows and their existing controls.

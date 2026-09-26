@@ -101,6 +101,9 @@ type ReviewEvidence struct {
 type PelletPlacement struct {
 	Target domain.PelletReference
 	Before bool
+	// TargetVersion is required by queue gestures. CLI and explicit dialog moves
+	// leave it empty, preserving their existing placement contract.
+	TargetVersion string
 }
 
 // NullableTextChange distinguishes an omitted edit from setting a nullable

@@ -315,28 +315,102 @@ func (h *handler) editPellet(response http.ResponseWriter, request *http.Request
 }
 
 func (h *handler) movePellet(response http.ResponseWriter, request *http.Request, project storage.Project, reference domain.PelletReference) {
-	if err := requireFields(request.PostForm, []string{"_csrf", "version", "target", "direction"}); err != nil {
-		h.renderError(response, http.StatusUnprocessableEntity, err, submittedDraft(request.PostForm))
+	queue := request.PostForm.Get("mode") == "queue"
+	fields := []string{"_csrf", "version", "target", "direction"}
+	if queue {
+		fields = append(fields, "mode", "target_version", "return_to")
+	}
+	returnTo := request.PostForm.Get("return_to")
+	if err := requireFields(request.PostForm, fields); err != nil {
+		h.renderMoveError(response, queue, returnTo, err, submittedDraft(request.PostForm))
 		return
+	}
+	if queue {
+		if err := validateQueueMoveRoute(project, returnTo); err != nil {
+			h.renderMoveError(response, true, returnTo, err, nil)
+			return
+		}
+		_, filters, err := parseFilters(mustQueueURL(returnTo).Query())
+		if err != nil || filters.Sort != "priority" || filters.Direction != "asc" || !validVersion(request.PostForm.Get("target_version")) {
+			h.renderMoveError(response, true, returnTo, requestError("refresh the Queue order before reordering"), nil)
+			return
+		}
 	}
 	version := request.PostForm.Get("version")
 	target, err := domain.ParsePelletReference(request.PostForm.Get("target"))
 	if !validVersion(version) || err != nil || !projectAcceptsCode(project, target.ProjectCode) {
-		h.renderError(response, http.StatusUnprocessableEntity, requestError("the reorder request is invalid"), submittedDraft(request.PostForm))
+		h.renderMoveError(response, queue, returnTo, requestError("the reorder request is invalid"), submittedDraft(request.PostForm))
 		return
 	}
 	target.ProjectCode = project.Code
 	direction := request.PostForm.Get("direction")
 	if direction != "before" && direction != "after" {
-		h.renderError(response, http.StatusUnprocessableEntity, requestError("the reorder direction must be before or after"), submittedDraft(request.PostForm))
+		h.renderMoveError(response, queue, returnTo, requestError("the reorder direction must be before or after"), submittedDraft(request.PostForm))
 		return
 	}
-	pellet, err := h.application.MovePellet(request.Context(), project, reference, version, storage.PelletPlacement{Target: target, Before: direction == "before"})
+	pellet, err := h.application.MovePellet(request.Context(), project, reference, version, storage.PelletPlacement{Target: target, Before: direction == "before", TargetVersion: request.PostForm.Get("target_version")})
 	if err != nil {
-		h.renderMutationError(response, err, submittedDraft(request.PostForm))
+		h.renderMoveError(response, queue, returnTo, err, submittedDraft(request.PostForm))
+		return
+	}
+	if queue {
+		h.renderQueueMoveResult(response, request, project.Code, returnTo)
 		return
 	}
 	h.renderPelletResult(response, request, project.Code, pellet, http.StatusOK)
+}
+
+func mustQueueURL(raw string) *url.URL {
+	parsed, _ := url.ParseRequestURI(raw)
+	return parsed
+}
+
+func validateQueueMoveRoute(project storage.Project, raw string) error {
+	parsed, err := url.ParseRequestURI(raw)
+	if err != nil || parsed == nil || parsed.IsAbs() || parsed.Host != "" || parsed.Fragment != "" {
+		return requestError("the queue context is invalid")
+	}
+	segments := pathSegments(parsed.Path)
+	if len(segments) < 3 || len(segments) > 4 || segments[0] != "projects" || segments[2] != "tasks" || !projectAcceptsCode(project, segments[1]) {
+		return requestError("the queue context is invalid")
+	}
+	if len(segments) == 4 {
+		ref, err := domain.ParsePelletReference(segments[3])
+		if err != nil || !projectAcceptsCode(project, ref.ProjectCode) {
+			return requestError("the queue context is invalid")
+		}
+	}
+	return nil
+}
+
+func (h *handler) renderMoveError(response http.ResponseWriter, queue bool, returnTo string, err error, draft map[string]string) {
+	if !queue {
+		if statusForError(err) == http.StatusConflict {
+			h.renderMutationError(response, err, draft)
+		} else {
+			h.renderError(response, statusForError(err), err, draft)
+		}
+		return
+	}
+	if stream, ok := response.(*datastarResponse); ok {
+		stream.queueError = domain.PublicError(err).Message
+		stream.start()
+		stream.result(statusForError(err), returnTo)
+		return
+	}
+	h.renderError(response, statusForError(err), err, draft)
+}
+
+func (h *handler) renderQueueMoveResult(response http.ResponseWriter, request *http.Request, code, returnTo string) {
+	refresh := request.Clone(request.Context())
+	refresh.URL = mustQueueURL(returnTo)
+	data, err := h.loadPage(refresh, code, "tasks", pathSegments(refresh.URL.Path))
+	if err != nil {
+		h.renderMoveError(response, true, returnTo, err, nil)
+		return
+	}
+	response.Header().Set("Content-Location", data.CurrentURL)
+	h.render(response, http.StatusOK, "task-list", data)
 }
 
 func (h *handler) transitionPellet(response http.ResponseWriter, request *http.Request, project storage.Project, reference domain.PelletReference) {
