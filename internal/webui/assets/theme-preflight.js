@@ -10,5 +10,6 @@
   if(!["gruvbox-light","gruvbox-dark","light","dark","icy"].includes(choice)) choice="gruvbox-light";
   document.documentElement.dataset.themeChoice=choice;
   document.documentElement.dataset.theme=choice;
+  if(panels.execution === undefined) panels.execution = false;
   for(var key of ["navigation","execution"]) document.documentElement.classList.toggle(key+"-collapsed",panels[key]===false);
 }());

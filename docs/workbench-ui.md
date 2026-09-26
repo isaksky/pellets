@@ -133,7 +133,9 @@ server-rendered filter summary, including live searches. Sorting alone does not
 show it because clearing preserves sort order. Clear filters preserves the browsing workspace,
 execution sidebar selection, and sort order.
 
-Both sidebars collapse independently using the bottom corner buttons. The theme
+Both sidebars collapse independently using the bottom corner buttons. Without a
+saved visibility preference, the right sidebar starts collapsed and navigation
+starts expanded. The theme
 selector immediately precedes the execution toggle and offers Gruvbox Light,
 Gruvbox Dark, Light, Dark, and Icy. Theme, panel visibility, and the Plan/Execution tab are database-wide SQLite settings, initialized from existing browser preferences only when unset. Saved database values take precedence on reload. Changes apply immediately without rebuilding dialogs or execution; failed saves offer Retry. Browser localStorage values are fallback
 presentation values applied before first paint. Theme updates do not navigate,
