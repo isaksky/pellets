@@ -80,7 +80,7 @@ async function checkCreationWidths(page) {
     const disclosure = page.locator(".create-popover");
     for (const width of [1280, 1092, 800, 678, 601, 600, 390]) {
       await page.setViewportSize({width, height: 859});
-      await disclosure.locator("summary").click();
+      await disclosure.locator(":scope > summary").click();
       const form = disclosure.locator("form");
       const bounds = await form.evaluate(node => {
         const box = node.getBoundingClientRect(), main = node.closest("#main").getBoundingClientRect();
@@ -94,7 +94,7 @@ async function checkCreationWidths(page) {
         const box = node.getBoundingClientRect();
         return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
       }), true, area + " creation button is reachable at " + width + "px");
-      await disclosure.locator("summary").click();
+      await disclosure.locator(":scope > summary").click();
     }
   }
   await page.setViewportSize({width: 1280, height: 800});

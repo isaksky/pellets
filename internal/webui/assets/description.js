@@ -134,6 +134,16 @@ export function refreshDescriptions(scope = document) {
     }
   }
 }
+// A confirmed new record ends this draft, including its preview/caret receipt.
+// Ordinary refreshes and disclosure dismissal continue to preserve presentation.
+export function resetDescriptions(scope) {
+  for (const host of hosts(scope)) {
+    receipts.delete(key(host));
+    if (focusReceipt?.key === key(host)) focusReceipt = null;
+    draw(host);
+  }
+  persist();
+}
 document.addEventListener("click", event => {
   const button = event.target.closest("[data-description-mode]");
   if (!button) return;

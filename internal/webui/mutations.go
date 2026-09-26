@@ -252,7 +252,30 @@ func (h *handler) createPellet(response http.ResponseWriter, request *http.Reque
 		h.renderMutationError(response, err, submittedDraft(request.PostForm))
 		return
 	}
+	if pellet.Kind != domain.PelletReviewCheckpoint {
+		h.renderCreatedPellet(response, request, project.Code, pellet)
+		return
+	}
 	h.renderPelletResult(response, request, project.Code, pellet, http.StatusCreated)
+}
+
+// Ordinary creation returns to the same queue scope. The receipt identifies the
+// saved row even when current filters exclude it; the browser never guesses it
+// from the last row or opens an editor as a second step of creation.
+func (h *handler) renderCreatedPellet(response http.ResponseWriter, request *http.Request, code string, pellet storage.Pellet) {
+	path := "/projects/" + url.PathEscape(code) + "/tasks"
+	refresh := request.Clone(request.Context())
+	refresh.URL.Path = path
+	data, err := h.loadPage(refresh, code, "tasks", pathSegments(path))
+	if err != nil {
+		h.renderError(response, statusForError(err), err, nil)
+		return
+	}
+	if stream, ok := response.(*datastarResponse); ok {
+		stream.createdPellet = pellet.Reference.String()
+	}
+	response.Header().Set("Content-Location", data.CurrentURL)
+	h.render(response, http.StatusCreated, "task-list", data)
 }
 
 func (h *handler) editPellet(response http.ResponseWriter, request *http.Request, project storage.Project, reference domain.PelletReference) {

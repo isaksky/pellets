@@ -2,6 +2,7 @@ import * as uiVersion from "./ui-version.js";
 import "./workbench.js";
 import "./components.js";
 import { saveSetting } from "./settings.js";
+import { completePelletCreation, refreshCreationHighlights } from "./pellet-create.js";
 import { action, actions } from "./datastar-1.0.3.js";
 
 (function () {
@@ -29,7 +30,7 @@ import { action, actions } from "./datastar-1.0.3.js";
       feedback.setAttribute("aria-live", "polite");
       feedback.hidden = true;
     }
-    var footer = form && form.closest("[data-inspector]")?.querySelector(".dialog-footer");
+    var footer = form && (form.querySelector(".pellet-create-footer") || form.closest("[data-inspector]")?.querySelector(".dialog-footer"));
     var parent = footer || (form && form.closest(".run-controls")) || form || document.body;
     feedback.toggleAttribute("data-inline", !!form);
     if (feedback.parentElement !== parent) {
@@ -364,7 +365,7 @@ import { action, actions } from "./datastar-1.0.3.js";
 
   action({name: "navigate", apply: function (ctx, target) { return request(ctx, target, "navigate"); }});
   action({name: "saveLayout", apply: function (ctx) { return request(ctx, "app-content", "submit"); }});
-  action({name: "submit", apply: function (ctx) { return request(ctx, "inspector-host", "submit"); }});
+  action({name: "submit", apply: function (ctx) { return request(ctx, ctx.el.matches("[data-pellet-create]") ? "task-list" : "inspector-host", "submit"); }});
   action({name: "filter", apply: function (ctx) { return request(ctx, "task-list", "filter"); }});
   action({name: "refresh", apply: function (ctx, target) { return request(ctx, target || ctx.el.id, "refresh"); }});
 
@@ -409,7 +410,9 @@ import { action, actions } from "./datastar-1.0.3.js";
       var result = JSON.parse(detail.argsRaw.signals)._webResult;
       if (!result) return;
       if (result.status < 400) {
-        window.Workbench.saved(state.el);
+        if (state.el.matches("[data-pellet-create]") && result.createdPellet) {
+          completePelletCreation(state.el, result.createdPellet, state.revision === editRevision);
+        } else window.Workbench.saved(state.el);
         var projectShell = document.querySelector(".app-shell[data-project]");
         document.title = projectShell ? projectShell.dataset.project + " · Pellets" : "Pellets";
       }
@@ -608,7 +611,7 @@ import { action, actions } from "./datastar-1.0.3.js";
   });
 
   document.addEventListener("submit", function (event) {
-    var form = event.target && event.target.closest("form[data-checkpoint-form]");
+    var form = event.target && event.target.closest("form[data-checkpoint-form], form[data-pellet-create]");
     if (!form) return;
     var requestID = form.querySelector("input[name=request_id]");
     if (!requestID.value) requestID.value = newCheckpointRequestID();
@@ -664,6 +667,7 @@ import { action, actions } from "./datastar-1.0.3.js";
     });
     applyTheme(root.dataset.themeChoice || "gruvbox-light");
     rememberAndMarkRows(scope);
+    refreshCreationHighlights();
     synchronizeCheckpointSelection();
     configureInspector(scope);
     window.Workbench.initialize();

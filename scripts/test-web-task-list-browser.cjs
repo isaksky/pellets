@@ -157,7 +157,7 @@ let server, browser;
   await matrix(host, 'record');
   await dialog.getByRole('link', {name: 'Close inspector', exact: true}).click();
   assert.equal(cli('show', record.id).description, source);
-  await page.locator('.create-popover summary').click();
+  await page.locator('.create-popover > summary').click();
   const create = page.locator('.create-popover form'), createHost = create.locator('[data-description]');
   await create.locator('[name=title]').fill('Created task lists');
   await create.locator('[name=description]').fill(source);

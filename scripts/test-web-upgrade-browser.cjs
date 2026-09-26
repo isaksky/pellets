@@ -138,6 +138,7 @@ async function reloadWithDrafts(page, revision) {
   await creationPage.getByText('+ New pellet', {exact: true}).click();
   const creationForm = creationPage.locator('.create-popover form');
   await creationForm.locator('[name=title]').fill('Unsubmitted creation draft');
+  if (await creationForm.locator('.pellet-create-options').count()) await creationForm.locator('.pellet-create-options > summary').click();
   await creationForm.locator('[name=status]').selectOption('maybe_later');
   await creationForm.locator('[name=description]').fill('Keep the open creation form too.');
   await creationForm.locator('[name=description]').press('ArrowLeft');

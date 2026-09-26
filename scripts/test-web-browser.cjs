@@ -330,7 +330,9 @@ const until = async (predicate, message) => {
   await page.locator('#tasks-area .create-popover > summary').click();
   await page.locator('.create-popover input[name=title]').fill('Browser created task');
   await page.getByRole('button', {name: 'Create pellet', exact: true}).click();
-  await until(async () => await page.locator('#inspector-host form.dirty-track input[name=title]').inputValue() === 'Browser created task', 'Task creation did not render');
+  await page.locator('.task-title').filter({hasText:'Browser created task'}).waitFor();
+  assert.equal(await page.locator('#record-dialog').evaluate(el=>el.open),false,'Creation must stay in the queue');
+  assert.equal(await page.locator('.create-popover').evaluate(el=>el.open),false,'Creation must close the form');
   assert.ok((await page.evaluate(() => window.results)).includes(201));
 
   await page.goto(origin + `/projects/${first.project}/memories`);

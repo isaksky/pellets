@@ -88,6 +88,7 @@ async function nativeCheckboxes(selector) {
     const scene=value+'-'+width;await page.setViewportSize({width,height:900});await page.goto(url);await theme(value);await panel(true);await page.locator('#execution-tab').click();if(width===390)await panel(false);
     await page.getByText('+ New pellet',{exact:true}).click();
     const form=page.locator('.create-popover form'),title=form.locator('[name=title]'),status=form.locator('[name=status]');
+    if(await form.locator('.pellet-create-options').count())await form.locator('.pellet-create-options > summary').click();
     await title.fill('Unsubmitted native control draft');await status.selectOption('maybe_later');
     await page.evaluate(()=>document.dispatchEvent(new CustomEvent('pellets-refresh')));await frame();
     assert.equal(await title.inputValue(),'Unsubmitted native control draft');assert.equal(await status.inputValue(),'maybe_later');
@@ -120,7 +121,7 @@ async function nativeCheckboxes(selector) {
   }
   // Exercise actual submission after the presentation-only matrix.
   await page.setViewportSize({width:1280,height:900});await page.goto(url);await theme('gruvbox-light');await panel(true);await page.locator('#execution-tab').click();
-  await page.getByText('+ New pellet',{exact:true}).click();await page.locator('.create-popover [name=title]').fill('Created through native controls');await page.locator('.create-popover [name=status]').selectOption('maybe_later');
+  await page.getByText('+ New pellet',{exact:true}).click();await page.locator('.create-popover [name=title]').fill('Created through native controls');if(await page.locator('.pellet-create-options').count())await page.locator('.pellet-create-options > summary').click();await page.locator('.create-popover [name=status]').selectOption('maybe_later');
   const saved=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname.endsWith('/pellets')&&r.ok());
   await page.locator('.create-popover button[type=submit]').click();await saved;
   assert.ok(cli('list','--all').some(p=>p.title==='Created through native controls'&&p.status==='maybe_later'));

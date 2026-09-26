@@ -14,9 +14,10 @@ import (
 // actionable application errors retain their status in the result signal.
 type datastarResponse struct {
 	http.ResponseWriter
-	request *http.Request
-	stream  *datastar.ServerSentEventGenerator
-	err     error
+	request       *http.Request
+	stream        *datastar.ServerSentEventGenerator
+	err           error
+	createdPellet string
 }
 
 func (response *datastarResponse) render(status int, name, path, elements string) {
@@ -72,9 +73,13 @@ func (response *datastarResponse) result(status int, path string) {
 	if response.err != nil {
 		return
 	}
-	result, err := json.Marshal(map[string]any{"_webResult": map[string]any{
+	receipt := map[string]any{
 		"status": status, "url": path, "revision": uiRevision,
-	}})
+	}
+	if response.createdPellet != "" {
+		receipt["createdPellet"] = response.createdPellet
+	}
+	result, err := json.Marshal(map[string]any{"_webResult": receipt})
 	if err != nil {
 		response.recordError(err)
 		return

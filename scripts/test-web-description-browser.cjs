@@ -226,10 +226,11 @@ const source = '# Delivery &amp; verification\n\nParagraph with **strong**, *emp
   assert.match(await view.innerText(), /Existing plain text\.\s+Another line\./);
   await page.getByRole('link', {name:'Close inspector', exact:true}).click();
   // Creation preview survives live morphs and never serializes rendered text.
-  await page.locator('.create-popover summary').click();
+  await page.locator('.create-popover > summary').click();
   const create = page.locator('.create-popover form');
   const createHost = create.locator('[data-description]');
   await create.locator('[name=title]').fill('Created from Markdown');
+  if (await create.locator('.pellet-create-options').count()) await create.locator('.pellet-create-options > summary').click();
   await create.locator('[name=status]').selectOption('maybe_later');
   for (const {text, checked} of taskCases) {
     await mode('edit', createHost).click();

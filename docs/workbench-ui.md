@@ -65,6 +65,24 @@ record dialog's explicit discard. Checkpoint insertion asks before discarding
 edited title/scope, rejects dismissal while submitting, and returns focus to its
 row menu without overriding a later focus choice.
 
+Ordinary **New pellet** focuses Title on opening. Its writing surface grows to
+640px where the queue pane permits it; Edit and Preview keep the same height.
+External ID, Group, execution preferences, and Status live in **More options**.
+The body scrolls within the available viewport while **Create pellet** stays in
+the footer. Nested selectors and More options each consume their own Escape.
+Successful creation closes and resets the confirmed draft, returns focus to the
+opener, and briefly highlights the exact new queue row without opening an editor.
+Reduced motion uses a static temporary highlight. Search, sort, filters and
+workspace selection stay intact; if they exclude the row, a notice links to the
+saved pellet. Failed or unconfirmed saves retain their draft and retry ID, while
+input changed during a pending save remains an unfinished draft. Checkpoint and
+memory creation keep their existing result flows.
+
+`scripts/test-web-creation-browser.cjs` covers consecutive creation, draft reset
+after live updates, lost-response retry, typing during save, filtered results,
+focus, nested dismissal, reduced motion, and five themes at desktop, intermediate,
+phone and short-window sizes in Chromium and WebKit.
+
 The creation disclosure labels stay quiet; Create pellet and Create memory
 inside their expanded forms retain the shared primary button treatment. Heading
 styles must not override those submitters through their component wrappers.

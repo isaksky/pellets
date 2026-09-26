@@ -2074,6 +2074,61 @@ dialog::backdrop {
 .create-popover[open] > form {
   max-width: 100cqw;
 }
+/* Pellet creation favors writing; optional metadata stays in the same native
+   form. Edit and Preview occupy the same space, above a stationary submitter. */
+.pellet-create[open] > form {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: min(640px, calc(100vw - 2rem));
+  max-height: var(--creation-height, calc(100dvh - 120px));
+  padding: 0;
+  overflow: hidden;
+}
+.pellet-create-fields {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.pellet-create .description-field textarea,
+.pellet-create .description-field .markdown-body {
+  height: clamp(160px, 32dvh, 280px);
+  min-height: 0;
+  max-height: none;
+  resize: none;
+}
+.pellet-create .pellet-create-options > summary {
+  display: list-item;
+  list-style: disclosure-closed inside;
+  width: fit-content;
+  padding: 4px 0;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.pellet-create .pellet-create-options[open] > summary { list-style: disclosure-open inside; }
+.pellet-create-options > .stack-form { margin-top: 10px; }
+.pellet-create-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+}
+.creation-notice { font-size: 12px; color: var(--muted); }
+.creation-notice a { text-decoration: underline; }
+.pellet-created { animation: pellet-created 1800ms ease-out both; }
+@keyframes pellet-created {
+  0%, 25% { background-color: var(--accent-soft); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pellet-created { animation: none; background-color: var(--accent-soft); }
+}
 @media (max-width: 1100px) {
   :root[data-theme] {
     --rail: 160px;

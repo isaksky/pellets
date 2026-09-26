@@ -12,6 +12,7 @@ const fixture = path.join(temporary, 'parity'), current = path.join(temporary, '
 const baseline = process.env.PELLETS_UI_BASELINE ? path.resolve(process.env.PELLETS_UI_BASELINE) : path.join(temporary, 'pl-baseline');
 const emphasis = {};
 const results = {}, groupAdditions = {}, reviewLayouts = {}, executionPreferences = {}, interactionStyles = {};
+const creationLayouts = {};
 let server, browser;
 
 async function start(binary) {
@@ -60,6 +61,18 @@ async function measure(page, scene, build) {
     await page.locator('#record-dialog input[name=title]').evaluate(input => input.setSelectionRange(input.value.length, input.value.length));
   await settleRootUnits(page);
   await page.screenshot({path: path.join(temporary, `${build}-${scene}.png`), animations: 'disabled', caret: 'hide'});
+  // The requested creation redesign changes this form's geometry and visible
+  // fields. Verify that exact surface separately; keep strict comparisons for
+  // every surrounding control and all other forms.
+  if (scene.endsWith('-create')) {
+    creationLayouts[build + '-' + scene] = await page.locator('#tasks-area .create-popover form').evaluate(form => ({
+      width: form.getBoundingClientRect().width,
+      editorHeight: form.querySelector('textarea').getBoundingClientRect().height,
+      fields: [...form.elements].filter(el => el.name && el.type !== 'hidden' && el.getClientRects().length && !el.closest('details:not([open])')).map(el => el.name),
+      options: form.querySelector('.pellet-create-options')?.open,
+      footer: !!form.querySelector('.pellet-create-footer button[type=submit]'),
+    }));
+  }
   await settleRootUnits(page);
   // The emphasis audit intentionally removes duplicate source labels and
   // collapses secondary memory metadata. Screenshots above show the delivered
@@ -200,6 +213,7 @@ async function measure(page, scene, build) {
         const row = el.closest('.task-row');
         const precedingReviews = row ? [...row.parentElement.children].slice(0, [...row.parentElement.children].indexOf(row)).filter(el => el.matches('.checkpoint-row')).reduce((height, el) => height + el.getBoundingClientRect().height, 0) : 0;
         return {
+          creationControl: !!el.closest('#tasks-area .create-popover form'),
           queueRow: row?.id || '', rowBox: el === row, precedingReviews,
           tag: el.tagName, id: el.id.replace(/workbench-select-\d+/g, 'generated-select'),
           name: el.getAttribute('name'), label: el.getAttribute('aria-label'),
@@ -313,7 +327,15 @@ async function measure(page, scene, build) {
   console.log('Visual artifacts: ' + temporary);
   const labels = {status: ['Status'], sort: ['Sort'], direction: ['Direction', 'Move'], group: ['Group'], target: ['Task'], workspace_id: ['Workspace']};
   for (const scene of Object.keys(results.before)) {
-    const before = structuredClone(results.before[scene]), after = structuredClone(results.after[scene]);
+    if (scene.endsWith('-create')) {
+      const oldCreation = creationLayouts['before-' + scene], newCreation = creationLayouts['after-' + scene];
+      assert.ok(newCreation.width >= oldCreation.width, scene + ': creation got narrower');
+      assert.ok(newCreation.editorHeight >= 160 && newCreation.editorHeight > oldCreation.editorHeight, scene + ': writing space did not grow');
+      assert.deepEqual(newCreation.fields, ['title','description'], scene + ': optional fields should start collapsed');
+      assert.equal(newCreation.options, false);assert.equal(newCreation.footer, true);
+    }
+    const before = structuredClone(results.before[scene]).filter(control => !control.creationControl);
+    const after = structuredClone(results.after[scene]).filter(control => !control.creationControl);
     // Review rows deliberately replace 42px dividers and their bracket gutters.
     // Check this exact adoption separately, then account only for its measured
     // displacement of ordinary rows and their existing controls.

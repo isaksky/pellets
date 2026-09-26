@@ -136,19 +136,26 @@
 
 {{define "tasks-area"}}<section class="area-content" id="tasks-area" aria-labelledby="tasks-title">
   <div class="section-heading"><div>{{template "queue-title" .}}</div>
-    <details class="create-popover"><summary class="primary-button">+ New pellet</summary>
-      <form action="/projects/{{.Project.Code}}/pellets" method="post" data-on:submit="@submit()" class="stack-form">
+    <details class="create-popover pellet-create"><summary class="primary-button">+ New pellet</summary>
+      <form action="/projects/{{.Project.Code}}/pellets" method="post" data-on:submit="@submit()" class="stack-form" data-pellet-create>
         <input type="hidden" name="_csrf" value="{{.CSRF}}">
 		<input type="hidden" name="request_id" value="">
-        <label>Title <pl-field><input name="title" required autofocus></pl-field></label>
-        <div class="description-field" data-description data-description-key="create-{{.Project.Code}}"><div class="description-toolbar" id="description-toolbar-create-{{.Project.Code}}" data-ignore-morph></div><label>Description <pl-field><textarea name="description" rows="4"></textarea></pl-field></label><div class="markdown-body" id="description-view-create-{{.Project.Code}}" data-ignore-morph hidden></div></div>
+        <div class="pellet-create-fields">
+        <label>Title <pl-field><input name="title" required></pl-field></label>
+        <div class="description-field" data-description data-description-key="create-{{.Project.Code}}"><div class="description-toolbar" id="description-toolbar-create-{{.Project.Code}}" data-ignore-morph></div><label>Description <pl-field><textarea name="description" rows="12"></textarea></pl-field></label><div class="markdown-body" id="description-view-create-{{.Project.Code}}" data-ignore-morph hidden></div></div>
+        <details class="pellet-create-options" id="pellet-create-options-{{.Project.Code}}"><summary>More options</summary>
+        <div class="stack-form">
         <div class="form-grid"><label>External ID <pl-field><input name="external_id"></pl-field></label><label>Group <pl-field><input name="group"></pl-field></label></div>
         <div class="form-grid" data-execution-preferences><label>Execution model <pl-select><select name="model" data-execution-preference="model" data-live-options><option value="">Use execution default</option></select></pl-select></label><label>Reasoning effort <pl-select><select name="reasoning_effort" data-execution-preference="reasoning_effort" data-live-options><option value="">Use execution default</option></select></pl-select></label></div>
         <label>Status <pl-select native><select name="status"><option value="open">Open</option><option value="maybe_later">Maybe later</option></select></pl-select></label>
-        <pl-button><button class="primary-button" type="submit">Create pellet</button></pl-button>
+        </div>
+        </details>
+        </div>
+        <div class="pellet-create-footer"><pl-button><button class="primary-button" type="submit">Create pellet</button></pl-button></div>
       </form>
     </details>
   </div>
+  <p id="pellet-created" class="creation-notice" role="status" hidden></p>
   {{template "workspace-groups" .}}
   <form class="filters" action="{{.TasksURL}}" method="get" data-on:submit="@filter()" data-on:change="evt.target.matches('select') &amp;&amp; @filter()" data-on:input__debounce.300ms="evt.target.matches('input') &amp;&amp; @filter()">
     {{if .SelectedWorkspace}}<input type="hidden" name="workspace" value="{{.SelectedWorkspace}}">{{end}}<input type="hidden" name="execution" value="{{.ExecutionWorkspace}}">

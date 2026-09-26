@@ -21,6 +21,7 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await new P
  const tasks=origin+'/projects/'+original.project+'/tasks';await page.goto(tasks);
  await page.locator('.create-popover > summary').click();const create=page.locator('.create-popover form');
  await until(()=>create.locator('[name=model] option[value="model-a"]').count());
+ await create.locator('.pellet-create-options > summary').click();
  const modelButton=create.getByRole('combobox',{name:'Execution model',exact:true});await modelButton.click();
  await page.getByRole('option',{name:'Model A',exact:true}).click();await create.getByRole('combobox',{name:'Reasoning effort',exact:true}).click();await page.getByRole('option',{name:'high',exact:true}).click();
  await create.locator('[name=title]').fill('Browser preference');await create.getByRole('button',{name:'Create pellet',exact:true}).click();
@@ -43,7 +44,7 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await new P
     const button=edit.getByRole('combobox',{name:label,exact:true});await button.click();const box=await button.boundingBox();assert.ok(box.x>=0&&box.x+box.width<=width+1,`${theme} ${width} ${label} clipped`);
     const menu=page.locator('.select-popover:visible');const b=await menu.boundingBox();assert.ok(b.x>=0&&b.x+b.width<=width+1);await page.screenshot({path:path.join(tmp,`${theme}-${width}-${label.replaceAll(' ','-')}.png`)});await page.keyboard.press('Escape');
    }
-   await page.goto(tasks);await page.evaluate(theme=>window.Workbench.applyTheme(theme),theme);await page.locator('.create-popover > summary').click();await create.getByRole('combobox',{name:'Execution model',exact:true}).click();await page.keyboard.press('Escape');await page.screenshot({path:path.join(tmp,`${theme}-${width}-create.png`)});
+   await page.goto(tasks);await page.evaluate(theme=>window.Workbench.applyTheme(theme),theme);await page.locator('.create-popover > summary').click();await create.locator('.pellet-create-options > summary').click();await create.getByRole('combobox',{name:'Execution model',exact:true}).click();await page.keyboard.press('Escape');await page.screenshot({path:path.join(tmp,`${theme}-${width}-create.png`)});
    assert.equal(await create.evaluate(el=>el.scrollWidth<=el.clientWidth+1),true,'creation form overflows');
   }
  }

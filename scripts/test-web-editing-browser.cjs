@@ -86,17 +86,17 @@ async function refresh() {
     await page.setViewportSize({width,height:900});
     await page.evaluate(theme=>window.Workbench.applyTheme(theme),theme);
     const create=page.locator('.create-popover'), title=create.locator('[name=title]');
-    await create.locator('summary').click();
+    await create.locator(':scope > summary').click();
     await title.fill('Unfinished creation'); await title.focus();
     await title.evaluate(e=>e.setSelectionRange(2,7));
     await page.keyboard.press('Escape');
     check(!await create.evaluate(e=>e.open),'Creation Escape collapses without discarding');
     await capture(`${theme}-${width}-creation-escape`,{x:0,y:35,width,height:Math.min(710,865)});
-    if (!await create.evaluate(e=>e.open)) await create.locator('summary').click();
+    if (!await create.evaluate(e=>e.open)) await create.locator(':scope > summary').click();
     assert.equal(await title.inputValue(),'Unfinished creation');
     await page.mouse.click(2,2);await settle();
     check(!await create.evaluate(e=>e.open),'Creation outside click collapses without discarding');
-    if(await create.evaluate(e=>e.open)) await create.locator('summary').click();
+    if(await create.evaluate(e=>e.open)) await create.locator(':scope > summary').click();
     const settings=page.locator('#project-record');
     await settings.locator('summary').click();await settings.locator('summary').focus();
     await page.keyboard.press('Escape');
@@ -121,10 +121,10 @@ async function refresh() {
     await enabled.check();await settings.locator('summary').click();
     // Memory creation uses the same disclosure behavior and retains required validation.
     await page.locator('.area-tabs a').filter({hasText:'Memories'}).click();
-    const creation=page.locator('.create-popover');await creation.locator('summary').click();
+    const creation=page.locator('.create-popover');await creation.locator(':scope > summary').click();
     await creation.locator('[name=text]').fill('Unfinished new memory');
     await page.keyboard.press('Escape');assert.equal(await creation.evaluate(e=>e.open),false);
-    await creation.locator('summary').click();assert.equal(await creation.locator('[name=text]').inputValue(),'Unfinished new memory');
+    await creation.locator(':scope > summary').click();assert.equal(await creation.locator('[name=text]').inputValue(),'Unfinished new memory');
     await creation.locator('[name=text]').fill('');await creation.locator('button[type=submit]').click();
     assert.equal(await creation.locator('[name=text]').evaluate(e=>e===document.activeElement&&!e.validity.valid),true);
     await page.keyboard.press('Escape');await page.locator('.area-tabs a').filter({hasText:'Queue'}).click();

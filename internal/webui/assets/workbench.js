@@ -81,7 +81,9 @@ function updateAttention() {
   window.Planner?.status(state, attention);
 }
 function formKey(form) {
-  const req = form.querySelector('[name="request_id"]')?.value || "";
+  // Ordinary creation is one persistent draft surface. Its retry key is added
+  // on submit; changing that key must not leave an older draft to resurrect.
+  const req = form.matches("[data-pellet-create]") ? "" : form.querySelector('[name="request_id"]')?.value || "";
   const workspace = form.closest(".run-workspace")?.dataset.workspaceId || "";
   return form.getAttribute("action") + "|" + workspace + "|" + req + "|" + (form.id || "");
 }
@@ -227,6 +229,8 @@ function saved(form) {
       el.value = "";
   }
   drafts.delete(formKey(form));
+  if (form.matches("[data-pellet-create]"))
+    form.querySelectorAll("details[id]").forEach(details => expansions.delete(details.id));
   if (form.matches("[data-insert-form]"))
     document.getElementById("insert-dialog")?.close();
   if (form.matches(".assignment-form, .recipient-form")) form.closest("details").open = false;
@@ -436,6 +440,13 @@ document.addEventListener(
     if (!menu && event.key === "Escape" && !document.querySelector("dialog[open]"))
       menu = Array.from(document.querySelectorAll(dismissibleDetails)).findLast(el => el.open);
     if (!menu) return;
+    const options = event.target.closest(".pellet-create-options[open]");
+    if (event.key === "Escape" && options) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      closeDetails(options, true);
+      return;
+    }
     if (event.key === "Escape" && menu.open) {
       event.preventDefault();
       event.stopImmediatePropagation();
