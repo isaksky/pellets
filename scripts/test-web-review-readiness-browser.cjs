@@ -48,6 +48,7 @@ const until = async (f, message) => {
   const errors=[]; page.on('pageerror', e=>errors.push(e.message));
   const queue = origin + `/projects/${target.project}/tasks?workspace=1`;
   await page.goto(queue);
+  if (!await page.locator('#right-panel').isVisible()) await page.locator('#toggle-execution').click();
   await page.locator('#execution-tab').click();
   let scheduleID=0;
   async function start() {
