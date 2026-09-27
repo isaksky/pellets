@@ -1,6 +1,7 @@
 # Drag-and-drop queue ordering
 
-Status: proposed implementation plan, 2026-09-26. No feature code changed.
+Implementation is tracked in `pellets-54`; use that pellet for current scope and
+status. This document retains the agreed design reference from 2026-09-26.
 
 ## Product decisions
 
@@ -12,6 +13,8 @@ Confirmed with the user:
   pellet directly before that pellet in the full project queue.
 - Include active review checkpoints as draggable rows. Their explicit review
   membership stays unchanged by movement.
+- Use the approved six-dot grip at the left of each eligible row, subtly visible
+  at rest and more prominent on hover or keyboard focus.
 
 Other implementation defaults:
 
@@ -28,11 +31,20 @@ Other implementation defaults:
 
 ## Interaction
 
-Give each eligible row a compact, consistently placed drag handle. Reserve its
-space so hover does not shift the title. Preserve ordinary row height, title
-ellipsis, status, independent links, actions, and selection controls. Review rows
-use the same handle beside their heading; their expanded contents
-remain independently interactive.
+Give each eligible row a small six-dot grip (two columns of three dots) in a
+narrow reserved column immediately before the pellet ID. Keep the grip subtly
+visible at rest; darken it when the row is hovered or contains keyboard focus.
+Hovering the handle adds a quiet background, and keyboard focus retains a clear
+focus indicator. Use the app's theme tokens for every state. Its interactive
+area is larger than the dots, with an accessible name such as **Reorder pl-42**
+and supplementary tooltip **Drag to reorder**.
+
+Reserve the handle's space in every state so hover and focus never shift the ID
+or title. Preserve ordinary row height, title ellipsis, status, independent links,
+actions, and selection controls. Review rows use the same grip aligned in the
+left column beside their heading; their expanded contents remain independently
+interactive. Show a grab cursor over an enabled handle and a grabbing cursor
+during a drag.
 
 Use a feature-owned Pointer Events controller, following the app's existing
 pointer-capture approach in `assets/sidebar-resize.js`. No new drag library is
@@ -40,10 +52,11 @@ expected. Start only from the handle after a small movement threshold. Apply
 touch gesture suppression only to the handle so the rest of the queue scrolls
 normally. Support mouse, touch, and pen.
 
-During dragging, show a lightweight title preview and insertion marker, with a
-clear destination such as **Before project-42**. Scroll the queue pane near its
-edges. Hit testing uses actual row geometry, including expanded reviews. Do not
-transform production row ancestors: row menus use fixed positioning.
+During dragging, dim the source row, show a lightweight floating title preview,
+and mark the destination with a thin horizontal insertion line. Include a clear
+destination such as **Before project-42**. Scroll the queue pane near its edges.
+Hit testing uses actual row geometry, including expanded reviews. Do not transform
+production row ancestors: row menus use fixed positioning.
 
 Define every insertion gap deterministically: insert immediately before the next
 visible eligible row; the final gap inserts immediately after the last visible
@@ -135,7 +148,9 @@ Inspect real-app screenshots across all five themes at desktop, intermediate,
 and phone widths, including narrow panes with sidebars visible. Run the affected
 Workbench, review-row, interaction, live-menu, and parity suites; use gallery
 checks for the changed presentation and document only intended handle geometry
-differences. Update [Workbench behavior](workbench-ui.md),
+differences. Verify the grip remains discoverable at rest, focus stays visible,
+hover/focus cause no layout shift, and the preview and insertion line remain
+legible during dragging. Update [Workbench behavior](workbench-ui.md),
 [component adoption notes](web-components.md), and relevant gallery examples.
 
 Suggested implementation order: queue move response and concurrency contract;
