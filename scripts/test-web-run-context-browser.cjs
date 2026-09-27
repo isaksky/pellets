@@ -64,6 +64,7 @@ const source = '# Original captured document\n\n```mermaid\nflowchart LR\n A -->
     page.on('request',r=>{if (!r.url().startsWith(origin)) external.push(r.url());});
     const route=`/projects/${pellet.project}/workspaces/1`;
     await page.goto(origin+route);
+    if (!await page.locator('#right-panel').isVisible()) await page.locator('#toggle-execution').click();
     await page.getByRole('button',{name:/Start next/}).click();
     await page.getByRole('button',{name:'Resume',exact:true}).waitFor();
     const panel=page.getByRole('region',{name:'Captured group context',exact:true});

@@ -720,6 +720,10 @@ async function stop() {
   // Actual deterministic notifications: highlighted source/diff, stream keeps
   // steering text/caret, disclosure and older-scroll position during queue patches.
   await page.locator("[aria-label=Workspaces] .workspace-link").first().click();
+  // The filter scenarios persist Drain. These execution cases intentionally
+  // run one pellet so completion cannot claim the next scenario's work.
+  await page.getByRole("combobox", {name: "Execution intention"}).click();
+  await page.getByRole("option", {name: /^One pellet/}).click();
   await page.getByRole("button", { name: "▷ Start next", exact: true }).click();
   await until(
     () =>

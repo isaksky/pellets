@@ -54,7 +54,9 @@ async function openMenu(page, selector) {
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   const url = origin + '/projects/' + first.project + '/tasks?workspace=1';
   await page.goto(url);
-  const screenshot = name => page.screenshot({path: path.join(temporary, name + '.png'), animations: 'disabled'});
+  const artifacts = process.env.PELLETS_BROWSER_ARTIFACTS || temporary;
+  fs.mkdirSync(artifacts, {recursive: true});
+  const screenshot = name => page.screenshot({path: path.join(artifacts, name + '.png'), animations: 'disabled'});
   for (const theme of ['gruvbox-light', 'gruvbox-dark', 'light', 'dark', 'icy']) {
     await page.locator('#theme-select-trigger').click();
     await page.locator(`[role=option][data-value="${theme}"]`).click();
@@ -69,15 +71,19 @@ async function openMenu(page, selector) {
         return {chrome: fits('.chrome'), names: names.length && names.every(e => e.getBoundingClientRect().right <= e.closest('a').getBoundingClientRect().right),
           rows: oneLine('.task-title,.checkpoint-open'), rowHeight: document.querySelector('.pellet-row').getBoundingClientRect().height,
           reviewHeight: document.querySelector('.checkpoint-row').getBoundingClientRect().height,
+          scopeLineHeight: parseFloat(getComputedStyle(document.querySelector('.review-disclosure > summary')).lineHeight),
           footer: [...document.querySelectorAll('.statusbar > span,.statusbar .theme-control')].filter(e=>e.checkVisibility()).every(e=>e.getBoundingClientRect().height<=24),
           titles: [...document.querySelectorAll('.task-title,.checkpoint-open')].every(e=>e.title===e.textContent),
           main: fits('#main')};
       });
       for (const key of ['chrome','names','rows','footer','titles','main']) check(geometry[key], `${theme}/${width}: ${key} ${JSON.stringify(geometry)}`);
-      // The review disclosure intentionally adds 3px above and below its label.
-      // Keep the previous compact-height ceiling plus exactly that 6px inset.
-      check(geometry.rowHeight === 37 && geometry.reviewHeight <= 116, 'Compact list rows: ' + JSON.stringify(geometry));
+      // The disclosure adds 3px above and below its label. At 601px with both
+      // sidebars open, the new 24px reorder column wraps "Review · 1 pellet"
+      // onto one extra line. Allow exactly that line only at this narrow case;
+      // keep the original ceiling at every other width.
       await screenshot(`${theme}-${width}-queue`);
+      const reviewCeiling = 116 + (width === 601 ? geometry.scopeLineHeight : 0);
+      check(geometry.rowHeight === 37 && geometry.reviewHeight <= reviewCeiling, 'Compact list rows: ' + JSON.stringify(geometry));
       for (const selector of ['#project-switcher', '#view-switcher', '#assignment-popover', '#assignment-remaining', '.checkpoint-row .row-menu', '.pellet-row .row-menu']) {
         const menu = await openMenu(page, selector);
         const panel = menu.locator(':scope > :not(summary)').first();

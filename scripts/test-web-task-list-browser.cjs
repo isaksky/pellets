@@ -170,6 +170,7 @@ let server, browser;
   assert.equal(cli('show', created.id).description, source);
   if (await dialog.evaluate(el => el.open)) await dialog.getByRole('link', {name: 'Close inspector', exact: true}).click();
   await page.locator(`#task-${record.id} .group-name`).click();
+  await mode(host, 'view');
   await matrix(host, 'group');
   assert.equal(cli('group', 'show', String(group.id)).context, source);
   assert.deepEqual(errors, []);
