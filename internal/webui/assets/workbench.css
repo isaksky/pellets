@@ -952,7 +952,7 @@ input[type="checkbox"] {
   position: relative;
 }
 .queue-grip-slot { display: flex; align-items: center; justify-content: center; width: 24px; height: 30px; }
-.queue-grip { display: grid; place-items: center; width: 22px; height: 26px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--dim); opacity: .66; cursor: grab; touch-action: none; }
+.queue-grip { display: grid; place-items: center; width: 22px; height: 26px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--dim); opacity: .66; cursor: grab; touch-action: none; scale: .75; }
 .queue-grip:hover, .queue-grip:focus-visible, .pellet-row:hover .queue-grip, .checkpoint-row:hover .queue-grip, .pellet-row:focus-within .queue-grip, .checkpoint-row:focus-within .queue-grip { opacity: 1; color: var(--ink); }
 .queue-grip:hover { background: var(--theme-quiet-hover); }
 .queue-grip:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }

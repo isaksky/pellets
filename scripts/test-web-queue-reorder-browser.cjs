@@ -237,9 +237,19 @@ async function drag(page, source, target, position = 'before') {
       await page.setViewportSize({width, height: 850});
       await page.locator('#tasks-area').screenshot({path: path.join(artifacts, `${theme}-${width}.png`)});
       const ordinary = page.locator('#queue-rows > .task-row').first();
-      const geometry = await ordinary.evaluate(row => ({row: row.getBoundingClientRect().height, grip: row.querySelector('[data-queue-handle]')?.getBoundingClientRect().width, overflow: row.scrollWidth > row.clientWidth + 1, id: row.querySelector('.row-reference').getBoundingClientRect().x, title: row.querySelector('.task-title').getBoundingClientRect().x}));
+      const geometry = await ordinary.evaluate(row => {
+        const handle = row.querySelector('[data-queue-handle]');
+        const grip = handle.getBoundingClientRect();
+        const dots = handle.querySelector('svg').getBoundingClientRect();
+        return {row: row.getBoundingClientRect().height, grip: {width: grip.width, height: grip.height}, dots: {width: dots.width, height: dots.height}, overflow: row.scrollWidth > row.clientWidth + 1, id: row.querySelector('.row-reference').getBoundingClientRect().x, title: row.querySelector('.task-title').getBoundingClientRect().x};
+      });
       assert.equal(geometry.row, 37, 'ordinary row changed height');
-      assert.ok(geometry.grip >= 20 && !geometry.overflow, `${theme}/${width} grip is cramped or overflows: ${JSON.stringify(geometry)}`);
+      const gripScale = geometry.grip.width / 22;
+      assert.ok(gripScale >= .7 && gripScale <= .8 &&
+        Math.abs(geometry.grip.height / 26 - gripScale) < .01 &&
+        Math.abs(geometry.dots.width / 12 - gripScale) < .01 &&
+        Math.abs(geometry.dots.height / 18 - gripScale) < .01 && !geometry.overflow,
+        `${theme}/${width} grip did not scale uniformly or overflows: ${JSON.stringify(geometry)}`);
       await ordinary.locator('[data-queue-handle]').hover();
       await ordinary.locator('[data-queue-handle]').focus();
       await page.keyboard.press('Tab');
