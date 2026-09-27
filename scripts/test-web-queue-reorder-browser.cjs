@@ -65,7 +65,30 @@ async function drag(page, source, target, position = 'before') {
   await page.goto(origin + originPath + `?group=${encodeURIComponent(group)}&sort=priority&direction=asc`);
   assert.deepEqual(await order(page), [a.id, b.id, c.id, review.id]);
   assert.equal(await page.locator('[data-queue-handle]').count(), 4);
+  assert.equal(await page.locator('#queue-reorder-live[role=status][aria-live=polite]').count(), 1);
+  assert.equal(await page.locator('#queue-move-feedback[role],#queue-move-feedback[aria-live]').count(), 0,
+    'visible feedback duplicates live announcements');
   const browseURL = page.url();
+  // Picking up and committing at the same full-queue gap is a true no-op.
+  // The full order lives inside #scope-order's template content.
+  const unchangedOrder = activeOrder(), moveRequests = [];
+  const countMoves = request => { if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/move')) moveRequests.push(request.url()); };
+  page.on('request', countMoves);
+  await handle(page, b.id).focus();
+  await page.keyboard.press('Space'); await page.keyboard.press('Enter');
+  assert.match(await page.locator('#queue-move-feedback').innerText(), /Queue position unchanged/);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(moveRequests.length, 0, 'unchanged pickup submitted a move');
+  assert.deepEqual(activeOrder(), unchangedOrder, 'unchanged pickup changed hidden order');
+  for (const key of ['Tab', 'Shift+Tab']) {
+    await handle(page, b.id).focus();
+    await page.keyboard.press('Space');
+    assert.equal(await page.locator('.queue-insertion').count(), 1, 'keyboard pickup did not start');
+    await page.keyboard.press(key);
+    assert.equal(await page.locator('.queue-insertion,.queue-drag-preview').count(), 0, `${key} left a keyboard drag active`);
+    assert.equal(moveRequests.length, 0, `${key} submitted a move`);
+  }
+  page.off('request', countMoves);
   // A filtered before-gap moves only the source; hidden records retain order.
   await drag(page, c.id, b.id);
   assert.deepEqual(activeOrder().slice(0, 5), [a.id, hidden.id, c.id, b.id, review.id]);
@@ -141,7 +164,7 @@ async function drag(page, source, target, position = 'before') {
   assert.equal(await page.locator(`#task-${target} .task-title`).innerText(), oldTitle, 'live response replaced a guarded row');
   await page.mouse.move(targetBox.x + 15, targetBox.y + 3, {steps: 4}); await page.mouse.up();
   await wait(async () => (await page.locator(`#task-${target} .task-title`).innerText()) === 'Changed while dragging', 'conflict did not refresh authoritative queue');
-  assert.match(await page.locator('#queue-move-feedback').innerText(), /Queue move was not applied/);
+  assert.match(await page.locator('#queue-move-feedback').innerText(), /Queue move could not be confirmed/);
   // If a write succeeds but its response is lost, reconcile instead of replaying.
   let posts = 0;
   await page.route('**/move*', async route => {

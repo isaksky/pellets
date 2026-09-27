@@ -138,7 +138,8 @@ execution sidebar selection, and sort order.
 Priority ascending exposes a quiet six-dot grip on each open or in-progress
 pellet and review row. Drag the grip with mouse, touch, or pen, or focus it and
 press Space or Enter to pick up, Up/Down to choose an insertion gap, Space or
-Enter to commit, or Escape to cancel. The insertion line and announcement name
+Enter to commit, or Escape to cancel. Leaving the grip with Tab also cancels a
+keyboard pickup. The insertion line and announcement name
 the exact destination. A drop before a visible row places the moved record
 immediately before that row in the full project queue; the final gap places it
 after the last visible eligible row. Hidden records retain their order. Queue

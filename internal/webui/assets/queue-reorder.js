@@ -36,7 +36,8 @@ function snapshot(source) {
   const rows = eligibleRows();
   const context = document.getElementById("task-list");
   if (!context || context.dataset.queueSortable !== "true" || !rows.includes(source) || rows.length < 2) return null;
-  const full = Array.from(document.querySelectorAll("#scope-order [data-row-id]"), node => node.dataset.rowId);
+  const orderTemplate = document.getElementById("scope-order");
+  const full = Array.from(orderTemplate?.content.querySelectorAll("[data-row-id]") || [], node => node.dataset.rowId);
   return {
     source, handle: source.querySelector("[data-queue-handle]"),
     sourceID: source.dataset.rowId, sourceVersion: source.dataset.rowVersion,
@@ -251,6 +252,9 @@ document.addEventListener("pointercancel", event => {
 document.addEventListener("lostpointercapture", event => {
   if (gesture?.pointer === event.pointerId) cancelGesture();
 });
+document.addEventListener("focusout", event => {
+  if (gesture && gesture.pointer === undefined && gesture.handle === event.target) cancelGesture();
+});
 
 document.addEventListener("keydown", event => {
   if (event.key === "Escape" && gesture) {
@@ -312,7 +316,7 @@ export function moveResult(result, applied) {
     refresh();
   } else {
     reconciling = true;
-    say(`Queue move was not applied: ${result.queueError || "the queue changed"}. Refreshing before another move.`, true);
+    say(`Queue move could not be confirmed: ${result.queueError || "the queue changed"}. Refreshing before another move.`, true);
     refresh();
   }
 }
