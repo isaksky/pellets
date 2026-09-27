@@ -515,6 +515,8 @@ retries retain their separate exact-request receipts and explicit-action rules.
 Delayed autosave responses merge newer proposal model/effort choices, including
 clearing them. Background conversation reads are discarded if edits, a mutation,
 an unresolved request, or a different conversation superseded their snapshot.
+Accepted background reads do not invalidate one another: overlapping reads retain
+the largest saved revision for the same chat, regardless of completion order.
 
 `GET /models` returns `models`, `fetched_at`, `expires_at` (Unix seconds), `stale`,
 `refreshing`, and an optional sanitized `error`. `POST /models/refresh` accepts
@@ -900,7 +902,10 @@ Resize handles are hidden in the mobile layout.
 
 ### Status, error, and response feedback audit
 
-Mutation feedback uses the shared request handler in `app.js`. It sits in the
+Mutation feedback uses `request-feedback.js`, shared by `app.js` and checkpoint
+Remove/Undo handlers. Missing notices are recreated after authoritative patches.
+Checkpoint failures stay in the action form, retain refresh and explicit retry,
+and the Undo notice wraps within narrow viewports. It sits in the
 invoking form, the execution-control group, or the record dialog's fixed footer when that form has external
 save controls. This keeps failed-save messages visible and operable inside the
 modal's top layer. Navigation uses the compact global notice. `workbench.css`
@@ -933,6 +938,12 @@ upgrade handoff already meet these feedback contracts and retain their behavior.
 Failures, questions, approvals, explicit recovery, and reported-event details
 remain visible; no activity or ownership is promoted into execution evidence.
 
+`test-web-checkpoint-feedback-browser.cjs` saves assignments and refreshes execution
+controls before forcing Remove and Undo failures. It checks recovery, duplicate
+submission protection, keyboard focus return, and five-theme responsive notice
+placement. Use `PELLETS_BROWSER_ENGINE=webkit` for WebKit and optionally
+`PELLETS_BROWSER_EXECUTABLE` to select an installed browser binary.
+
 `test-web-feedback-browser.cjs` exercises failed record saves, invocation-time
 preflight rejection, and failed planning reads in Chromium across all
 five themes at 1280, 1092 and 390px. It checks native keyboard/touch retry,
@@ -941,7 +952,10 @@ draft/focus/selection preservation, and feedback placement. Set
 matched focused before/after images. `test-web-planning-feedback-browser.cjs`
 holds real API responses from a disposable deterministic-peer fixture to verify
 newer proposal preference selection/clearing and draft edits survive delayed
-saves and reads, including their saved SQLite values. The model catalog,
+saves and reads, including their saved SQLite values. It also admits two reads
+more than one second apart and completes them in either order, checks completed
+and failed saves and conversation replacement, and supports the same WebKit
+engine/executable options as the checkpoint feedback suite. The model catalog,
 planning, execution-state/activity, runtime/recovery, checkpoint, settings,
 empty-state and upgrade suites retain their deeper workflow checks.
 `PELLETS_FEEDBACK_CASE=refresh` isolates the held-read regression; its next

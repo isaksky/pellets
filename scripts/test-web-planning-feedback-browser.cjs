@@ -3,24 +3,28 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const {spawn, execFileSync} = require('node:child_process');
-const {chromium} = require('playwright');
+const engines = require('playwright');
 const root = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pellets-planning-feedback-'));
 const fixture = path.join(temporary, 'planner');
 const baseline = process.env.PELLETS_FEEDBACK_BASELINE;
 const binary = baseline || path.join(temporary, 'pl'), peer = path.join(temporary, 'codex');
-const artifacts = process.env.PELLETS_BROWSER_ARTIFACTS || temporary;
-const engine = 'chromium';
+const artifacts = process.env.PELLETS_BROWSER_ARTIFACTS;
+const engine = process.env.PELLETS_BROWSER_ENGINE || 'chromium';
 const env = {...process.env, PATH:temporary + path.delimiter + process.env.PATH,
   PELLETS_CODEX_EXECUTABLE:peer, PELLETS_SUPERVISOR_PEER:'1'};
 let server, browser, page;
 async function capture(name) {
+  if (!artifacts) return;
   const directory = path.join(artifacts, engine + '-' + name);
   fs.mkdirSync(directory, {recursive:true});
-  const clip = name==='planning-refresh-race' ? {x:280, y:330, width:720, height:550} : {x:280, y:450, width:720, height:430};
-  await page.screenshot({path:path.join(directory, baseline?'before.png':'after.png'), clip, animations:'disabled', caret:'hide'});
+  const clip = name.startsWith('overlapping-') ? {x:280,y:65,width:720,height:650} : name==='planning-refresh-race' ? {x:280, y:330, width:720, height:550} : {x:280, y:450, width:720, height:430};
+  const screenshot=await page.screenshot({path:path.join(directory, baseline?'before.png':'after.png'), clip, animations:'disabled', caret:'hide'});
+  assert.ok(screenshot.length>8 && screenshot.subarray(1,4).toString()==='PNG','Capture must contain a readable PNG');
   fs.writeFileSync(path.join(directory, baseline?'before.json':'after.json'), JSON.stringify({clip,
-    theme:await page.locator('html').getAttribute('data-theme'), viewport:page.viewportSize(), scale:1},null,2));
+    theme:await page.locator('html').getAttribute('data-theme'), viewport:page.viewportSize(), scale:1,
+    version:await page.locator('#plan-form [name=version]').inputValue(),
+    title:await page.locator('.plan-draft-dialog[open] [name=title]').inputValue()},null,2));
 }
 async function holdResponse(matches) {
   let release, arrived, held = false;
@@ -33,7 +37,7 @@ async function holdResponse(matches) {
     arrived(); await gate; await route.fulfill({response});
   });
   return {release, ready:() => Promise.race([ready, new Promise((_,reject) => {
-    const timer=setTimeout(() => reject(Error('Expected planning request did not arrive')),15000);timer.unref();
+    const timer=setTimeout(() => reject(Error('Expected planning request did not arrive')),60000);timer.unref();
   })])};
 }
 (async () => {
@@ -47,8 +51,8 @@ async function holdResponse(matches) {
   fs.writeFileSync(path.join(fixture,'fake-mode'),'planning_full');
   server=spawn(binary,['server','--port','0','--no-open'],{cwd:fixture,env});
   const origin=await new Promise((resolve,reject)=>{let out='',errors='';server.stdout.on('data',d=>{out+=d;if(out.includes('\n'))resolve(out.split('\n')[0].trim());});server.stderr.on('data',d=>errors+=d);server.once('error',reject);server.once('exit',code=>reject(Error(`Server ${code}: ${errors}`)));});
-  browser=await chromium.launch({headless:true});
-  page=await browser.newPage({viewport:{width:1280,height:900},deviceScaleFactor:1});page.setDefaultTimeout(15000);
+  browser=await engines[engine].launch({headless:true,...(process.env.PELLETS_BROWSER_EXECUTABLE?{executablePath:process.env.PELLETS_BROWSER_EXECUTABLE}:{})});
+  page=await browser.newPage({viewport:{width:1280,height:900},deviceScaleFactor:1});await page.bringToFront();page.setDefaultTimeout(30000);page.setDefaultNavigationTimeout(60000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.addInitScript(()=>{window.EventSource=undefined;});
   // Background invalidations are controlled explicitly in this race fixture.
@@ -59,7 +63,8 @@ async function holdResponse(matches) {
   }
   const endpoint=origin+'/projects/'+first.project+'/planning';
   const savedDraft=async()=>(await(await page.request.get(endpoint)).json()).chat.state.drafts[0];
-  await page.goto(origin+'/projects/'+first.project+'/tasks');await page.locator('#plan-tab').click();
+  await page.goto(origin+'/projects/'+first.project+'/tasks');if(!await page.locator('#right-panel').isVisible())await page.locator('#toggle-execution').click();await page.locator('#plan-tab').click();
+  await page.locator('.plan-folder-context').waitFor();
   await page.locator('#plan-message').fill('Propose feedback checks');await page.locator('.plan-send').click();
   await page.locator('.plan-card').first().waitFor();await page.evaluate(()=>window.Planner.flush());
   await page.locator('.plan-open-draft').first().click();const editor=page.locator('.plan-draft-dialog[open]');
@@ -77,7 +82,7 @@ async function holdResponse(matches) {
     const value=await savedDraft();assert.equal(value.model,'test-model');assert.equal(value.reasoning_effort,'high');
   }
   await page.unrouteAll({behavior:'wait'});
-  if(!baseline){
+  {
     const gate=await holdResponse(saving);
     await editor.locator('[name=title]').fill('Keep explicitly cleared preferences');await gate.ready();
     await model.selectOption('');await effort.selectOption('');gate.release();await saved();
@@ -107,8 +112,97 @@ async function holdResponse(matches) {
   }
   save.release();await saved();await page.unrouteAll({behavior:'wait'});
   if(!baseline)assert.equal((await savedDraft()).acceptance,'Keep these newer acceptance criteria');
+
+  // Two clean reads are admitted more than a throttle interval apart, with
+  // different real saved versions, and completed in both possible orders.
+  const csrf=await page.locator('input[name=_csrf]').first().inputValue();
+  async function externalTitle(title) {
+    const current=await(await page.request.get(endpoint)).json();
+    current.chat.state.drafts[0].title=title;
+    const response=await page.request.post(endpoint,{headers:{Origin:origin},data:{_csrf:csrf,action:'save',chat_id:current.chat.id,
+      version:current.chat.version,request_id:require('node:crypto').randomUUID(),state:current.chat.state}});
+    assert.equal(response.ok(),true,await response.text());
+    return (await response.json()).chat.version;
+  }
+  const renderedVersion=()=>page.locator('#plan-form [name=version]').inputValue();
+  const settleRead=async gate=>{
+    const response=page.waitForResponse(response=>response.request().method()==='GET'&&response.url().includes('/planning?'));
+    gate.release();await(await response).finished();
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  };
+  for(const order of ['older-first','newer-first']) {
+    await externalTitle('Earlier authoritative proposal');
+    await page.waitForTimeout(1100);
+    const earlier=await holdResponse(request=>request.method()==='GET');
+    await page.evaluate(()=>document.dispatchEvent(new CustomEvent('pellets-refresh')));await earlier.ready();
+    const latestVersion=await externalTitle('Newest authoritative proposal');
+    await page.waitForTimeout(1100);
+    const latest=await holdResponse(request=>request.method()==='GET');
+    await page.evaluate(()=>document.dispatchEvent(new CustomEvent('pellets-refresh')));await latest.ready();
+    await field.focus();await field.evaluate(el=>el.setSelectionRange(5,10));
+    await settleRead(order==='older-first'?earlier:latest);
+    await settleRead(order==='older-first'?latest:earlier);
+    await capture('overlapping-'+order);
+    console.log(`${engine}/${order}: rendered ${await renderedVersion()}, newest ${latestVersion}`);
+    if(!baseline){
+      assert.equal(await renderedVersion(),String(latestVersion),'Newest authoritative response must win without another invalidation');
+      assert.equal(await editor.locator('[name=title]').inputValue(),'Newest authoritative proposal');
+      assert.equal(await field.inputValue(),'Keep these newer acceptance criteria');
+      assert.deepEqual(await field.evaluate(el=>[document.activeElement===el,el.selectionStart,el.selectionEnd]),[true,5,10]);
+    }
+    await page.unrouteAll({behavior:'wait'});
+  }
+
+  if(!baseline) {
+    // A read must remain invalid after the intervening local save has settled.
+    await page.waitForTimeout(1100);
+    const oldRead=await holdResponse(request=>request.method()==='GET');
+    await page.evaluate(()=>document.dispatchEvent(new CustomEvent('pellets-refresh')));await oldRead.ready();
+    await field.fill('Saved after this read started');await page.evaluate(()=>window.Planner.flush());await saved();
+    const version=await renderedVersion();
+    await field.focus();await field.evaluate(el=>el.setSelectionRange(2,8));
+    await settleRead(oldRead);
+    assert.equal(await renderedVersion(),version);
+    assert.equal(await field.inputValue(),'Saved after this read started');
+    assert.deepEqual(await field.evaluate(el=>[document.activeElement===el,el.selectionStart,el.selectionEnd]),[true,2,8]);
+    await page.unrouteAll({behavior:'wait'});
+
+    // Failed saves retain their draft and recovery UI while an old read ends.
+    await page.waitForTimeout(1100);
+    const beforeFailure=await holdResponse(request=>request.method()==='GET');
+    await page.evaluate(()=>document.dispatchEvent(new CustomEvent('pellets-refresh')));await beforeFailure.ready();
+    const rejectSave=route=>saving(route.request())?route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Fixture save unavailable'})}):route.fallback();
+    await page.route('**/planning*',rejectSave);
+    await field.fill('Keep the draft after a failed save');await page.evaluate(()=>window.Planner.flush());
+    await settleRead(beforeFailure);
+    assert.equal(await field.inputValue(),'Keep the draft after a failed save');
+    assert.match(await page.locator('.plan-status').innerText(),/Fixture save unavailable/);
+    await page.unrouteAll({behavior:'wait'});
+    await editor.getByRole('button',{name:'Done',exact:true}).click();
+    await page.locator('.plan-status [data-plan=retry]').click();
+    await page.waitForFunction(()=>!document.querySelector('.plan-status.error'));
+    await page.locator('.plan-open-draft').first().click();await saved();
+    assert.equal(await field.inputValue(),'Keep the draft after a failed save');
+    assert.equal((await savedDraft()).acceptance,'Keep the draft after a failed save');
+
+    // Replacing the conversation also invalidates reads of the prior chat.
+    await editor.getByRole('button',{name:'Done',exact:true}).click();
+    await page.waitForTimeout(1100);
+    const priorChat=await holdResponse(request=>request.method()==='GET');
+    await page.evaluate(()=>document.dispatchEvent(new CustomEvent('pellets-refresh')));await priorChat.ready();
+    const previousVersion=await renderedVersion();
+    await page.locator('[data-plan=new]').click();await page.locator('[data-plan=confirm-new]').click();
+    await page.waitForFunction(previous=>document.querySelector('#plan-form [name=version]').value.split(':')[0]!==previous.split(':')[0],previousVersion);
+    const newVersion=await renderedVersion();
+    await settleRead(priorChat);
+    assert.equal(await renderedVersion(),newVersion);
+    assert.equal(await page.locator('.plan-card').count(),0);
+    assert.equal(await page.locator('#plan-message').inputValue(),'');
+    assert.equal(await page.locator('#plan-message').evaluate(el=>el===document.activeElement),true);
+    await page.unrouteAll({behavior:'wait'});
+  }
   assert.deepEqual(errors,[]);
-  console.log('PASS planning response races: newer selection, clearing, draft, focus/caret and persisted values');
+  console.log(baseline?'Recorded original planning response races':'PASS planning response races: overlapping reads in both orders, local edits, completed/failed saves, conversation switch, draft/focus and persisted values');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   if(page)await page.unrouteAll({behavior:'ignoreErrors'});await browser?.close();
   if(server?.exitCode===null){const done=new Promise(resolve=>server.once('exit',resolve));server.kill('SIGINT');await done;}

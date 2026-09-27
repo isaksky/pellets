@@ -36,6 +36,7 @@ async function stop(){if(server&&server.exitCode===null){const done=new Promise(
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   const posts=[];page.on('request',request=>{if(request.method()==='POST'&&/\/planning$/.test(request.url()))posts.push(request.postDataJSON());});
   await page.goto(origin+'/projects/'+original.project+'/tasks');
+  if(!await page.locator('#right-panel').isVisible())await page.locator('#toggle-execution').click();
   for(const [name, selector, direction] of [['navigation','#project-drawer',1],['execution','#right-panel',-1]]) {
     const handle=page.locator('[data-sidebar='+name+']');
     await handle.waitFor();

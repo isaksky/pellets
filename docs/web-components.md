@@ -240,7 +240,7 @@ or own project/run state.
 ## Styling and verification
 
 Request feedback remains native markup owned by the application. Shared
-`app.js` places mutation notices inside the invoking form, execution controls, or record footer;
+`request-feedback.js` places mutation notices inside the invoking form, execution controls, or record footer;
 navigation notices stay compact and global. This preserves modal reachability
 without adopting the preview `pl-notice`. See the
 [feedback audit and regression recipes](workbench-ui.md#status-error-and-response-feedback-audit).
@@ -289,7 +289,9 @@ refresh stability in Chromium.
 
 Run the gallery and application suites in Chromium. Install it with
 `playwright install chromium`. Use `NODE_PATH` when Playwright is outside the
-repository. The browser runners have no WebKit selector.
+repository. Most runners use Chromium; the checkpoint-feedback and
+planning-feedback runners also accept `PELLETS_BROWSER_ENGINE=webkit` and an
+optional `PELLETS_BROWSER_EXECUTABLE` override.
 `web-components-contract.cjs` adds regressions for disabled/busy
 states, fieldset disabling, dynamic options, labels, required fields, keyboard
 menus and preview APIs to the gallery suite.

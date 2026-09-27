@@ -2694,8 +2694,13 @@ dialog::backdrop {
   font-size: 12px;
   white-space: nowrap;
 }
+.undo-toast:has(#request-feedback:not([hidden])) {
+  max-width: calc(100vw - 24px);
+  white-space: normal;
+}
 .undo-toast form {
   margin: 0;
+  min-width: 0;
 }
 .undo-toast button {
   border: 0;

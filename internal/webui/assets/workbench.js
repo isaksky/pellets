@@ -1,3 +1,4 @@
+import { requestFeedback } from "./request-feedback.js";
 import { positionMenus } from "./details-menu-layout.js";
 import { highlightCode } from "./code-highlight.js";
 import { renderMarkdown } from "./markdown.js";
@@ -990,6 +991,7 @@ document.addEventListener(
     const button = form.querySelector("button");
     const submittedWithFocus = form.contains(document.activeElement);
     button.disabled = true;
+    requestFeedback(form).hidden = true;
     uiVersion.beginRequest();
     try {
       const response = await fetch(form.action, {
@@ -1048,10 +1050,13 @@ document.addEventListener(
       }
       document.dispatchEvent(new CustomEvent("pellets-refresh"));
     } catch (error) {
-      const feedback = document.getElementById("request-feedback");
+      const feedback = requestFeedback(form);
       feedback.hidden = false;
-      feedback.textContent = error.message;
+      feedback.textContent = error.message === "Failed to fetch" || error instanceof TypeError
+        ? "Checkpoint action could not be confirmed. Refresh its details before trying again."
+        : error.message;
       feedback.classList.add("request-failed");
+      positionMenus();
       document.dispatchEvent(new CustomEvent("pellets-refresh"));
     } finally {
       uiVersion.endRequest();

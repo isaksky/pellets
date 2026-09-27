@@ -333,10 +333,11 @@ async function measure(page, scene, build) {
       assert.deepEqual(newCreation.fields, ['title','description'], scene + ': optional fields should start collapsed');
       assert.equal(newCreation.options, false);assert.equal(newCreation.footer, true);
     }
-    const before = structuredClone(results.before[scene]).filter(control => !control.creationControl);
+    const before = structuredClone(results.before[scene]).filter(control => !control.creationControl && !control.label?.startsWith('Reorder '));
     const after = structuredClone(results.after[scene]).filter(control => !control.creationControl && !control.label?.startsWith('Reorder '));
     const grips = gripLayouts['after-' + scene];
-    assert.equal(gripLayouts['before-' + scene].length, 0, scene + ': baseline already has queue grips');
+    const originalGrips = gripLayouts['before-' + scene];
+    if (originalGrips.length) assert.deepEqual(grips, originalGrips, scene + ': existing queue grips changed');
     assert.equal(grips.length, after.filter(control => control.rowBox).length + reviewLayouts.after[scene].rows.length,
       scene + ': each queue row needs a grip');
     for (const grip of grips) {

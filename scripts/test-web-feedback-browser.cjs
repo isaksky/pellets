@@ -71,7 +71,7 @@ async function theme(value) {
   const url=origin+'/projects/'+pellet.project+'/tasks?workspace=1';
   // Both revisions start with the same empty saved chat. Retry checks below
   // restore this input so subsequent screenshots also have identical data.
-  await page.goto(url);await page.locator('#plan-tab').click();
+  await page.goto(url);if(!await page.locator('#right-panel').isVisible())await page.locator('#toggle-execution').click();await page.locator('#plan-tab').click();
   await page.locator('.plan-folder-context').waitFor();
   await page.locator('#plan-message').fill('Initialize fixture chat');await page.evaluate(()=>window.Planner.flush());
   await page.locator('#plan-message').fill('');await page.evaluate(()=>window.Planner.flush());

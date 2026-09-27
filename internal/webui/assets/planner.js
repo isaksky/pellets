@@ -16,7 +16,7 @@ let splitting = null, confirming = false, feedback = '';
 let savingNewChatPreference = false;
 let skipNewChatConfirmation = JSON.parse(document.documentElement.dataset.settings || '{}').skip_new_chat_confirmation === 'true';
 let trayCollapsed = false;
-let refreshedAt = 0;
+let refreshedAt = 0, localRevision = 0;
 let catalog = {models:[],refreshing:false,stale:true}, catalogFlight=null, catalogLoaded=false, catalogVisible=false, catalogAgain=false, catalogForce=false;
 let activeOperation = null, handoffError = '', lastPlannerFocus = null, presentationToRestore = null;
 let selectedTab = (document.documentElement.dataset.rightPanelTab || saved('pellets-right-panel-tab')) === 'plan' ? 'plan' : 'execution';
@@ -74,6 +74,7 @@ function storePending(force = false) {
 }
 function clearPending() { try { sessionStorage.removeItem(pendingKey); } catch {} }
 function markDirty() {
+  localRevision++;
   if(failed?.safeToReplace){failed=null;feedback='';}
   dirty = true;
   storePending();
@@ -104,7 +105,8 @@ function useOnlyWorkspace() {
     if (chat) dirty = true;
   }
 }
-function accept(value) {
+function accept(value, backgroundRead = false) {
+  if (!backgroundRead) localRevision++;
   if (value.chat?.state?.drafts?.some(d=>!created(d)&&!state.drafts.some(existing=>existing.id===d.id))) trayCollapsed=false;
   if ((chat && value.chat?.id !== chat.id) || (data && value.project?.code !== data.project?.code)) {trayCollapsed=false;}
   data = {...data, ...value};
@@ -175,6 +177,7 @@ async function mutate(action, retry = false, replacement = null) {
     chat_id:chat?.id, version:chat?.version, request_id:crypto.randomUUID(), state:before,
     ...(action === 'create' ? {draft_ids:selected().map(d => d.id)} : {})}});
   operation.payload._csrf=csrf();
+  localRevision++;
   activeOperation=operation;
   if (action === 'send' && !retry) { state.input = ''; dirty = true; }
   feedback = action === 'send' ? 'Planning…' : action === 'create' ? 'Creating selected pellets…' : 'Saving…';
@@ -624,15 +627,21 @@ document.addEventListener('keydown', event => {
 document.addEventListener('pellets-refresh', async () => {
   if(!chat||selectedTab!=='plan'||flight||dirty||failed||conflict||uiVersion.isOutdated()||Date.now()-refreshedAt<1000)return;
   refreshedAt=Date.now();
-  const requestedChat=chat;
+  const requestedChat=chat, requestedProject=projectCode(), requestedRevision=localRevision;
+  const stillCurrent=()=>localRevision===requestedRevision && chat?.id===requestedChat.id &&
+    projectCode()===requestedProject && !flight && !dirty && !failed && !conflict && !uiVersion.isOutdated();
   try{
-    const result=await json(endpoint()+'?chat='+requestedChat.id);
-    // A read admitted while clean may finish after an edit, a save, or a new
-    // conversation. Those newer choices take precedence over its old snapshot.
-    if(chat!==requestedChat||flight||dirty||failed||conflict||uiVersion.isOutdated())return;
-    accept(result);render();
+    const result=await json(endpoint(requestedProject)+'?chat='+requestedChat.id);
+    // Accepted reads do not invalidate other reads. Local edits and mutations
+    // do, even if their save has finished before this response arrives.
+    if(!stillCurrent() || result.chat?.id!==requestedChat.id)return;
+    // Storage versions are <chat ID>:<monotonic revision>. Compare revisions as
+    // integers (including 9 -> 10), never by response order or token spelling.
+    const revision=value=>BigInt(value.version.split(':')[1]);
+    if(revision(result.chat)<revision(chat))return;
+    accept(result,true);render();
   }catch(error){
-    if(chat===requestedChat&&!flight&&!dirty&&!failed){feedback=error.message;render();}
+    if(stillCurrent() && chat.version===requestedChat.version){feedback=error.message;render();}
   }
 });
 window.addEventListener('resize', sync);
