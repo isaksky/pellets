@@ -341,8 +341,8 @@ async function measure(page, scene, build) {
       scene + ': each queue row needs a grip');
     for (const grip of grips) {
       assert.ok(grip.label?.startsWith('Reorder ') && grip.visible, scene + ': grip must be named and visible');
-      assert.ok(grip.width >= 15.4 && grip.width <= 17.6 && grip.height >= 18.2 && grip.height <= 20.8,
-        scene + ': grip is outside the requested 20–30% smaller size');
+      assert.ok(grip.width >= 10.5 && grip.width <= 11.5 && grip.height >= 12.5 && grip.height <= 13.5,
+        scene + ': grip is outside the requested uniformly scaled size');
     }
     // Review rows deliberately replace 42px dividers and their bracket gutters.
     // Check this exact adoption separately, then account only for its measured

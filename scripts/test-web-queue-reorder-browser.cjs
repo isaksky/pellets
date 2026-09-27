@@ -245,7 +245,7 @@ async function drag(page, source, target, position = 'before') {
       });
       assert.equal(geometry.row, 37, 'ordinary row changed height');
       const gripScale = geometry.grip.width / 22;
-      assert.ok(gripScale >= .7 && gripScale <= .8 &&
+      assert.ok(gripScale >= .48 && gripScale <= .52 &&
         Math.abs(geometry.grip.height / 26 - gripScale) < .01 &&
         Math.abs(geometry.dots.width / 12 - gripScale) < .01 &&
         Math.abs(geometry.dots.height / 18 - gripScale) < .01 && !geometry.overflow,
