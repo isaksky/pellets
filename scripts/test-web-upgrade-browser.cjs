@@ -148,6 +148,7 @@ async function reloadWithDrafts(page, revision) {
   const planningContext = await browser.newContext({viewport: {width: 1280, height: 850}});
   observeContext(planningContext);
   const planningPage = await openPage(planningContext, origin + queuePath);
+  if (!await planningPage.locator('#right-panel').isVisible()) await planningPage.locator('#toggle-execution').click();
   await planningPage.locator('#plan-tab').click();
   await planningPage.locator('#plan-message').waitFor();
   // Seed the manual draft through the real planner action; the empty tray is hidden.

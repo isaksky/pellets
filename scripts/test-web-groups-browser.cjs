@@ -52,6 +52,7 @@ const source = '# Shared plan\n\nContext for **every member**.\n\n```mermaid\ngr
   const groupLink=name=>page.locator('.group-card').getByRole('link',{name,exact:true});
   const save=async()=>{ await dialog.getByRole('button',{name:'Save context',exact:true}).click(); await until(async()=>!(await dialog.locator('.is-dirty').count()),'Save remained dirty'); };
   await page.goto(origin);
+  if (!await page.locator('#right-panel').isVisible()) await page.locator('#toggle-execution').click();
   await page.locator("#plan-tab").click();
   await page.locator(`#task-${member.id} .group-name`).click();
   await dialog.locator('.group-members').waitFor();

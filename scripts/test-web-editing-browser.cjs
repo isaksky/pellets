@@ -179,6 +179,7 @@ async function refresh() {
   await dialog.getByRole('button',{name:'Cancel',exact:true}).click();await dialog.waitFor({state:'hidden'});
   // A pending new-chat preference must not hide or replace the current chat.
   await page.locator('.area-tabs a').filter({hasText:'Queue'}).click();
+  if (!await page.locator('#right-panel').isVisible()) await page.locator('#toggle-execution').click();
   await page.locator('#plan-tab').click();await page.locator('#plan-message').fill('Keep this chat');
   await page.evaluate(()=>window.Planner.flush());
   await page.locator('[data-plan=new]').click();await page.locator('#plan-new-dialog[open]').waitFor();

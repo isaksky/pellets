@@ -81,6 +81,7 @@ async function stop() {
     new MessageEvent('pellets-activity', {data: JSON.stringify(snapshot)})), snapshot);
   const running = {id: 'operation', sequence: 100, kind: 'command', status: 'running', title: 'Command', command: 'go test ./internal/webui'};
   await page.goto(origin + '/projects/state/tasks?workspace=1');
+  if (!await page.locator('#right-panel').isVisible()) await page.locator('#toggle-execution').click();
   await page.getByRole('button', {name: '▷ Start next', exact: true}).click();
   await until(() => page.locator('.activity-event').count().then(count => count >= 5), 'Reported history');
   await expectState('Working', true);

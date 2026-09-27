@@ -133,6 +133,7 @@ let server, browser;
   };
   await page.goto(origin);
   // Start with the affected proposal flow, including a real autosave/reopen.
+  if (!await page.locator('#right-panel').isVisible()) await page.locator('#toggle-execution').click();
   await page.locator('#plan-tab').click();
   // The empty proposal tray hides its actions; seed through the real handler.
   await page.locator('[data-plan=add-draft]').evaluate(button => button.click());

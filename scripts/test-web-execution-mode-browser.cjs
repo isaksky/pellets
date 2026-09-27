@@ -44,6 +44,7 @@ async function startServer(repo) {
   async function visit(url = route) {
     await page.goto(origin + url);
     await page.waitForFunction(() => !document.documentElement.hasAttribute('data-nonce'));
+    if (!await page.locator('#right-panel').isVisible()) await page.locator('#toggle-execution').click();
   }
   async function choose(value) {
     await mode().locator('..').getByRole('combobox').click();

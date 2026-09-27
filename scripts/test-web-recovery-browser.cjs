@@ -89,6 +89,7 @@ async function startServer(root) {
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(origin + `/projects/${target.project}/workspaces/1`);
     await page.waitForFunction(() => !document.documentElement.hasAttribute('data-nonce'));
+    if (!await page.locator('#right-panel').isVisible()) await page.locator('#toggle-execution').click();
     const resume = page.locator('form[data-no-run-resume]');
     const events = () => {
       const file = path.join(root, 'fake-events.jsonl');

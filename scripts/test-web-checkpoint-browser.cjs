@@ -85,6 +85,8 @@ async function startServer(root) {
     await page.goto(origin);
     const controls = await browser.newPage();
     await controls.goto(origin + `/projects/${target.project}/workspaces/1`);
+    if (await controls.locator('#toggle-execution').getAttribute('aria-expanded') === 'false')
+      await controls.locator('#toggle-execution').click();
     const endpoint = `/projects/${target.project}/schedules`;
     let scheduleID = 0;
     async function schedule(button, inspectLive) {

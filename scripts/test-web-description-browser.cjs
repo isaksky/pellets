@@ -284,6 +284,7 @@ const source = '# Delivery &amp; verification\n\nParagraph with **strong**, *emp
   assert.equal(cli('show', created.id || created.reference).description, source);
   // Proposed pellet source and preview share the same control and autosave.
   if (await page.locator('#record-dialog').evaluate(el => el.open)) await page.getByRole('link', {name:'Close inspector', exact:true}).click();
+  if (!await page.locator('#right-panel').isVisible()) await page.locator('#toggle-execution').click();
   await page.locator('#plan-tab').click();
   await page.locator('[data-plan=add-draft]').evaluate(button => button.click());
   const proposal = page.locator('.plan-draft-dialog[open]');

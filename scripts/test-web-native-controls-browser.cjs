@@ -82,7 +82,7 @@ async function nativeCheckboxes(selector) {
   page=await browser.newPage({viewport:{width:1280,height:900},deviceScaleFactor:1,hasTouch:true});page.setDefaultTimeout(15000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   const url=origin+'/projects/'+first.project+'/tasks?workspace=1';
-  await page.goto(url);await page.locator('#plan-tab').click();await page.locator('#plan-message').fill('Propose native control checks');await page.locator('.plan-send').click();
+  await page.goto(url);await panel(true);await page.locator('#plan-tab').click();await page.locator('#plan-message').fill('Propose native control checks');await page.locator('.plan-send').click();
   await page.locator('.plan-card').first().waitFor();await page.evaluate(()=>window.Planner.flush());
   for(const value of (process.env.PELLETS_NATIVE_CASE==='behavior'?[]:themes))for(const width of widths) {
     const scene=value+'-'+width;await page.setViewportSize({width,height:900});await page.goto(url);await theme(value);await panel(true);await page.locator('#execution-tab').click();if(width===390)await panel(false);

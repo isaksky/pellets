@@ -209,6 +209,8 @@ const until = async (predicate, message) => {
   await page.waitForTimeout(250);
   page.off('request', countRefresh);
   assert.equal(refreshRequests, 1, 'One invalidation must use one bundled request');
+  if (await page.locator('#toggle-execution').getAttribute('aria-expanded') === 'false')
+    await page.locator('#toggle-execution').click();
   const executionMode=page.locator('#execution .select-trigger').first();
   const modeLabel=await executionMode.getAttribute('aria-label');
   await executionMode.focus();

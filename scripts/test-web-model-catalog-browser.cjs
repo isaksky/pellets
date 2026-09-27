@@ -16,7 +16,9 @@ let server,browser,page;
  let snapshot={models:[],refreshing:true,stale:true,fetched_at:0},reads=0,refreshes=0,holdRead=null;
  await page.route('**/models',async route=>{reads++;const captured=snapshot;const hold=holdRead;holdRead=null;if(hold)await hold;await route.fulfill({json:captured})});
  await page.route('**/models/refresh',async route=>{refreshes++;await route.fulfill({status:202,json:{refreshing:true}})});
- await page.goto(origin);await page.locator('#plan-tab').click();await page.locator('#plan-model-trigger').waitFor();
+ await page.goto(origin);
+ if (!await page.locator('#right-panel').isVisible()) await page.locator('#toggle-execution').click();
+ await page.locator('#plan-tab').click();await page.locator('#plan-model-trigger').waitFor();
  await page.waitForFunction(()=>document.querySelector('#plan-model')?.dataset.menuStatus?.includes('Loading'));
  // Measure actual synchronous DOM response, excluding automation round-trip latency.
  const elapsed=await page.evaluate(()=>{const t=performance.now();document.querySelector('#plan-model-trigger').click();if(!document.querySelector('#plan-model-listbox'))throw Error('Menu did not open synchronously');return performance.now()-t});

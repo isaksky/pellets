@@ -74,6 +74,7 @@ async function until(check, message) {
       });
     }
     await page.goto(origin + route);
+    if (!await page.locator('#right-panel').isVisible()) await page.locator('#toggle-execution').click();
     if (mode === 'runtime_probe_gate') {
       // Startup catalog discovery also probes the runtime. Warm that cache
       // before gating the invocation so the crash tests the admission custodian.

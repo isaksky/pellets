@@ -75,7 +75,9 @@ async function quiet(selector) {
   page=await browser.newPage({viewport:{width:1280,height:900},deviceScaleFactor:1,hasTouch:true});page.setDefaultTimeout(15000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   const url=origin+'/projects/'+first.project+'/tasks?workspace=1';
-  await page.goto(url);await page.locator('#plan-tab').click();await page.locator('#plan-message').waitFor();
+  await page.goto(url);
+  if (!await page.locator('#right-panel').isVisible()) await page.locator('#toggle-execution').click();
+  await page.locator('#plan-tab').click();await page.locator('#plan-message').waitFor();
   assert.equal(await page.locator('[data-plan=new]').isVisible(),false,'Empty chat has no reset');
   await page.locator('#plan-message').fill('Propose action hierarchy checks');await page.locator('.plan-send').click();
   await page.locator('.plan-card').first().waitFor();await page.evaluate(()=>window.Planner.flush());

@@ -94,6 +94,7 @@ async function openMenu(page, selector) {
         await menu.locator('summary').focus(); await page.keyboard.press('Escape');
         check(!(await menu.evaluate(e => e.open)), 'Escape closes native menu');
       }
+      if (!await page.locator('#right-panel').isVisible()) await page.locator('#toggle-execution').click();
       await page.locator('#plan-tab').click(); await page.locator('#plan-message').waitFor();
       await page.locator('#plan-message').fill('Preserve this spacing audit draft');
       await reachable(page.locator('.plan-send'), 'Planning send is reachable');
