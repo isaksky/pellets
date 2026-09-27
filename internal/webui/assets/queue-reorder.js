@@ -163,7 +163,7 @@ export function cancelGesture(message = "Reordering canceled.", shouldRefresh = 
   if (!gesture) return;
   const state = gesture;
   clearGesture(state, shouldRefresh);
-  say(message);
+  say(message, false, false);
 }
 
 function submit(state, target) {
@@ -200,7 +200,7 @@ function commit(state) {
   const target = destination(state);
   if (unchanged(state, target)) {
     clearGesture(state, true);
-    say("Queue position unchanged.");
+    say("Queue position unchanged.", false, false);
     return;
   }
   submit(state, target);

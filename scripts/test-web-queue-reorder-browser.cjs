@@ -76,7 +76,8 @@ async function drag(page, source, target, position = 'before') {
   page.on('request', countMoves);
   await handle(page, b.id).focus();
   await page.keyboard.press('Space'); await page.keyboard.press('Enter');
-  assert.match(await page.locator('#queue-move-feedback').innerText(), /Queue position unchanged/);
+  assert.match(await page.locator('#queue-reorder-live').textContent(), /Queue position unchanged/);
+  assert.equal(await page.locator('#queue-move-feedback').isHidden(), true, 'no-op shifted the queue with a visible notice');
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(moveRequests.length, 0, 'unchanged pickup submitted a move');
   assert.deepEqual(activeOrder(), unchangedOrder, 'unchanged pickup changed hidden order');
@@ -87,6 +88,7 @@ async function drag(page, source, target, position = 'before') {
     await page.keyboard.press(key);
     assert.equal(await page.locator('.queue-insertion,.queue-drag-preview').count(), 0, `${key} left a keyboard drag active`);
     assert.equal(moveRequests.length, 0, `${key} submitted a move`);
+    assert.equal(await page.locator('#queue-move-feedback').isHidden(), true, `${key} shifted the queue with a visible notice`);
   }
   page.off('request', countMoves);
   // A filtered before-gap moves only the source; hidden records retain order.
@@ -106,7 +108,10 @@ async function drag(page, source, target, position = 'before') {
   await wait(async () => (await order(page))[1] === a.id, 'keyboard move did not persist');
   assert.equal(await handle(page, a.id).evaluate(el => el === document.activeElement), true);
   const beforeCancel = activeOrder();
+  const noticeBeforeCancel = await page.locator('#queue-move-feedback').evaluate(el => ({hidden: el.hidden, text: el.textContent}));
   await handle(page, a.id).focus(); await page.keyboard.press('Space'); await page.keyboard.press('Escape');
+  assert.deepEqual(await page.locator('#queue-move-feedback').evaluate(el => ({hidden: el.hidden, text: el.textContent})),
+    noticeBeforeCancel, 'cancel replaced the previous queue notice');
   await handle(page, a.id).click();
   assert.deepEqual(activeOrder(), beforeCancel, 'cancel or untouched click submitted a move');
   // Existing menu actions use the same queue-local contract.
@@ -147,6 +152,26 @@ async function drag(page, source, target, position = 'before') {
   await page.goto(origin + originPath + `?group=${encodeURIComponent(group)}&sort=title&direction=asc`);
   assert.equal(await page.locator('[data-queue-handle]').count(), 0);
   assert.match(await page.locator('#queue-order').innerText(), /Drag to reorder in Queue order/);
+  for (const theme of ['gruvbox-light', 'gruvbox-dark', 'light', 'dark', 'icy']) {
+    await page.evaluate(theme => window.Workbench.applyTheme(theme), theme);
+    for (const width of [1280, 800, 390]) {
+      await page.setViewportSize({width, height: 850});
+      if (width !== 1280) await page.locator('#toggle-execution').click();
+      const layout = await page.locator('.filters').evaluate(filters => {
+        const search = filters.querySelector('#search').getBoundingClientRect();
+        const explanation = filters.querySelector('#queue-order').getBoundingClientRect();
+        const bounds = filters.getBoundingClientRect();
+        return {search: search.toJSON(), explanation: explanation.toJSON(), bounds: bounds.toJSON(), overflow: filters.scrollWidth > filters.clientWidth + 1};
+      });
+      assert.ok(layout.search.width >= 120 && layout.search.right <= layout.bounds.right + 1,
+        `Search disappeared beside Queue order in ${theme} at ${width}px: ${JSON.stringify(layout)}`);
+      assert.ok(layout.explanation.width > 0 && layout.explanation.right <= layout.bounds.right + 1 && !layout.overflow,
+        `Queue order explanation overflows in ${theme} at ${width}px: ${JSON.stringify(layout)}`);
+      await page.locator('#tasks-area').screenshot({path: path.join(artifacts, `${theme}-title-sort-${width}.png`)});
+      if (width !== 1280) await page.locator('#toggle-execution').click();
+    }
+  }
+  await page.setViewportSize({width: 1280, height: 900});
   await page.locator('#queue-order a').click();
   await wait(() => Promise.resolve(new URL(page.url()).searchParams.get('sort') === 'priority'), 'Queue order link lost navigation');
   assert.equal(new URL(page.url()).searchParams.get('group'), group);

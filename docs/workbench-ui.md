@@ -148,6 +148,8 @@ Before/After controls remain available independently of the display sort.
 
 Other sorts show a quiet **Queue order** link beside the filters. Switching to
 that sort retains search, status, group, workspace, and execution context.
+In narrow panes, the explanation wraps below the search and filter controls so
+Search remains available.
 Closed and maybe-later rows have no grip. Moving owned work retains its owner;
 moving a review does not change its explicit scope or readiness. A queue move
 updates the list and related counts without opening or replacing the inspector,
