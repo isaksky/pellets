@@ -19,6 +19,7 @@ const until = async (fn, message) => {
   execFileSync('go', ['build', '-o', binary, './cmd/pl'], {cwd: repository});
   execFileSync('git', ['init', '-q'], {cwd: root});
   const cli = (...args) => JSON.parse(execFileSync(binary, ['--json', ...args], {cwd: root, encoding: 'utf8'})).data;
+  cli('init-db');
   const targets = Array.from({length: 40}, (_, i) => cli('add', `Implementation ${i + 1}: readable Markdown and diagrams`, '--group', i % 2 ? 'runtime' : 'rich-descriptions'));
   const names = ['Review Markdown and diagrams', 'Review CLI interaction and output', 'Review shared group context', 'Review execution feedback', 'Custom title; create follow-up pellets'];
   const scopes = [[targets[0], targets[2]], [targets[2], targets[5]], [targets[1], targets[5], targets[9]], [targets[0]], targets];

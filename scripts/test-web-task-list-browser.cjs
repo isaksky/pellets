@@ -41,6 +41,7 @@ let server, browser;
   execFileSync('go', ['build', '-o', binary, './cmd/pl'], {cwd: repository});
   fs.mkdirSync(fixture);
   execFileSync('git', ['init', '-q'], {cwd: fixture});
+  cli('init-db');
   const record = cli('add', 'Task-list fixture', '--description', source, '--group', 'Task lists');
   const group = cli('group', 'list')[0];
   cli('group', 'edit', String(group.id), '--context', source);

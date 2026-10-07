@@ -9,7 +9,7 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await new P
  const cli=(...args)=>JSON.parse(execFileSync(binary,['--json',...args],{cwd:fixture,encoding:'utf8'})).data;
  cli('init-db');
  const original=cli('add','Fixture','--model','unlisted-model','--reasoning-effort','custom-effort');
- server=spawn(binary,['server','--no-open'],{cwd:fixture,env:{...process.env,PELLETS_CODEX_EXECUTABLE:path.join(tmp,'unavailable')}});
+ server=spawn(binary,['server','--port','0','--no-open'],{cwd:fixture,env:{...process.env,PELLETS_CODEX_EXECUTABLE:path.join(tmp,'unavailable')}});
  const origin=await new Promise((resolve,reject)=>{let out='';server.stdout.on('data',d=>{out+=d;if(out.includes('\n'))resolve(out.trim())});server.on('error',reject)});
  const engine = chromium;
  browser=await engine.launch({headless:true});page=await browser.newPage({viewport:{width:1280,height:900}});page.setDefaultTimeout(15000);

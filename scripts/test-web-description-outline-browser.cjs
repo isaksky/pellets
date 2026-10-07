@@ -27,6 +27,7 @@ const source = '# Overview &amp; *verification*\n\n' + paragraph +
   execFileSync('go', ['build', '-o', binary, './cmd/pl'], {cwd: repository});
   fs.mkdirSync(fixture);
   execFileSync('git', ['init', '-q'], {cwd: fixture});
+  cli('init-db');
   const record = cli('add', 'Long nested document', '--description', source, '--group', 'docs', '--external-id', 'outline:fixture');
   const short = cli('add', 'Short sections', '--description', '# One\n\nBrief.\n\n## Two\n\nBrief.');
   const single = cli('add', 'One long section', '--description', '# Only heading\n\n' + paragraph.repeat(5));

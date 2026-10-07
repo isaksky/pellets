@@ -99,6 +99,14 @@ Choose checks based on the change:
   failures invalidate them.
 
 Inspect screenshots of affected app screens as well as automated assertions.
+Follow the [running-instance protection rules](../AGENTS.md#protect-the-users-running-pellets-instance)
+for all browser verification. Launch a separate test server with
+`server --port 0 --no-open` and navigate to its printed URL. Never stop an
+existing listener to obtain a port or use the user's open Pellets tab for
+mutation tests. Cleanup must target only the child started for this test.
+Use the [isolated local preview recipe](../README.md#isolated-local-previews)
+for manual inspection.
+
 Use disposable fixtures for mutation tests. Create a fresh independent Git
 repository in an OS temporary directory and run `pl --json init-db` there before
 the first project command or server. Check reusable fixtures’ Git database binding

@@ -47,6 +47,7 @@ const source = '# Original captured document\n\n```mermaid\nflowchart LR\n A -->
     const git=(...args)=>execFileSync('git',args,{cwd:root,stdio:'pipe'});
     const cli=(...args)=>JSON.parse(execFileSync(binary,['--json',...args],{cwd:root,env,encoding:'utf8'})).data;
     git('init','-q'); git('config','user.name','Test'); git('config','user.email','test@example.invalid');
+    cli('init-db');
     git('config','commit.gpgSign','false'); git('commit','--allow-empty','-m','initial');
     fs.appendFileSync(path.join(root,'.git','info','exclude'),'\n/fake-*\n/.agents/\n');
     const pellet=cli('add','Inspect captured group context',...(kind==='ungrouped'?[]:['--group','Original <group>']));

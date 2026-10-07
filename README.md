@@ -791,8 +791,13 @@ skill files are a separate artifact that the user may choose to commit.
 
 ## Build, test, and release maintenance
 
+Keep development work separate from any running Pellets instance. Build test
+binaries in temporary directories, use disposable databases, and start test
+servers with `--port 0 --no-open`. Use each server's printed URL. Never kill an
+existing listener to make room for a test, and stop only processes started by
+that test. Installing a new `pl` is a separate, deliberate action.
+
 ```text
-go build ./cmd/pl
 go test ./...
 ./scripts/verify-cross-builds.sh
 ```
@@ -813,6 +818,36 @@ outcomes, partial triage and recovery, follow-up navigation, server restart,
 later workspace runs, narrow inspectors, and generation isolation.
 Node and Playwright are development tools only; `pl server` serves embedded
 assets and works offline.
+
+### Isolated local previews
+
+Run this from the source checkout in a POSIX shell to build and preview the
+current code with disposable data:
+
+```sh
+(
+  set -eu
+  unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
+  pellets_fixture="$(mktemp -d "${TMPDIR:-/tmp}/pellets-dev.XXXXXX")"
+  printf 'Disposable preview directory: %s\n' "$pellets_fixture"
+  go build -o "$pellets_fixture/pl" ./cmd/pl
+  git -C "$pellets_fixture" init -q
+  cd "$pellets_fixture"
+  export PELLETS_CODEX_EXECUTABLE="$pellets_fixture/unavailable-codex"
+  ./pl --json init-db
+  ./pl --json add 'Disposable preview task'
+  ./pl server --port 0 --no-open
+)
+```
+
+Open the printed URL and use Ctrl+C in this preview's terminal to stop it.
+The temporary directory remains available for inspection; remove only that
+directory after the preview exits. Execution is intentionally unavailable in
+this preview; execution tests use the deterministic Codex peer. A new linked
+worktree is not a disposable database: it shares the original repository's
+database binding. Do not run a test server from the working source checkout.
+
+### Execution and release checks
 
 The foreground execution integration is part of `go test ./...`. Its scripted
 app-server runs only in disposable Git repositories and databases and makes no

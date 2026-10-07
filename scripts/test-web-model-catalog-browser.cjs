@@ -8,7 +8,7 @@ let server,browser,page;
  const cli=(...args)=>JSON.parse(execFileSync(binary,['--json',...args],{cwd:fixture,encoding:'utf8'})).data;
  cli('init-db');
  cli('add','Fixture');
- server=spawn(binary,['server','--no-open'],{cwd:fixture,env:{...process.env,PELLETS_CODEX_EXECUTABLE:path.join(tmp,'unavailable')}});
+ server=spawn(binary,['server','--port','0','--no-open'],{cwd:fixture,env:{...process.env,PELLETS_CODEX_EXECUTABLE:path.join(tmp,'unavailable')}});
  const origin=await new Promise((resolve,reject)=>{let out='';server.stdout.on('data',d=>{out+=d;if(out.includes('\n'))resolve(out.trim())});server.on('error',reject)});
  browser=await chromium.launch({headless:true});
  page=await browser.newPage({viewport:{width:1280,height:850}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
