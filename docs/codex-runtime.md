@@ -1,6 +1,6 @@
 # Managed Codex runtime
 
-Pellets manages **Codex CLI 0.154.0**, including its app-server and companion
+Pellets manages **Codex CLI 0.160.1**, including its app-server and companion
 executables, for every Pellets release target: macOS ARM64, macOS AMD64, and
 Windows AMD64. Homebrew, npm/Node, a Codex entry on PATH, and the Codex desktop
 app are unnecessary. Ordinary queue, memory, and browser inspection never fetch
@@ -14,8 +14,9 @@ GitHub release binaries, and the full CLI and app-server release packages.
 [Official CLI setup](https://learn.chatgpt.com/docs/codex/cli) supports standalone
 installation; the [app-server contract](https://learn.chatgpt.com/docs/app-server)
 describes the stdio protocol and generated schemas. The
-[0.154.0 release](https://github.com/openai/codex/releases/tag/rust-v0.154.0)
-explicitly adds GPT-6 Astra support.
+[0.160.1 release](https://github.com/openai/codex/releases/tag/rust-v0.160.1)
+includes the GPT-6.1 Sol catalog added in 0.159.1. Available models still depend
+on the runtime's account and client configuration.
 
 Pellets downloads `codex-package-TARGET.tar.gz` from that exact official GitHub
 release. The package includes `bin/codex`, the code-mode host, and target-specific
@@ -66,9 +67,10 @@ or the managed default. Internal settings clients can clear the saved
 `executable` to select managed execution on every operating system.
 
 Both managed and override binaries must report a stable version at least
-0.154.0 and pass the required generated-schema checks. This is a conservative
-Pellets compatibility floor, not a claim that OpenAI guarantees every model on
-that version. Model enumeration validates effort choices; it does **not** prove
+0.154.0 and pass the required generated-schema checks. This protocol compatibility
+floor is deliberately separate from the 0.160.1 managed pin, so compatible
+explicit overrides keep working. Older overrides can omit newer models such as
+GPT-6.1 Sol. Model enumeration validates effort choices; it does **not** prove
 client-version compatibility. Future server-side restrictions can still reject
 a turn, and that error is retained for diagnosis.
 
@@ -122,10 +124,15 @@ upgrade during a run. Old cached versions remain on disk until the operator
 removes them. Arbitrary versions and download URLs are not accepted by the
 managed resolver; use an explicit CLI override for an advanced deployment.
 
-Maintainers update `ManagedVersion`, the minimum-version policy, and every
-supported target's SHA-256 together in `internal/codex/managed_runtime.go` and
-`runtime.go`, verify the release package layout/companions and generated schema,
+Maintainers update `ManagedVersion` and every supported target's SHA-256 together
+in `internal/codex/managed_runtime.go`, review the separate minimum-version policy
+in `runtime.go`, verify the release package layout/companions and generated schema,
 and run installer, scheduler, native smoke, browser, and cross-build checks.
+
+The browser catalog is cached in SQLite for seven days. After changing the
+runtime, use **Refresh models** in a model menu to discover its current choices
+immediately. Updating a separate Codex installation does not change the managed
+pin or automatically invalidate this cache.
 
 Portable default settings retain an empty `codex.executable`; Pellets no longer
 writes a resolved absolute cache/PATH path back into that configuration. Each

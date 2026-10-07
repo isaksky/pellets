@@ -182,6 +182,12 @@ preference workflow suite verifies persistence, clearing, missing catalog entrie
 keyboard dismissal, and all five themes at desktop/intermediate/phone widths in
 Chromium (`scripts/test-web-pellet-preferences-browser.cjs`).
 
+Start next reuses the same native model/effort controls in a compact two-column
+row above its action. A short note explains pellet preference precedence. Its
+application draft restoration retains selected catalog values even before the
+options have loaded into a replacement form. The execution-model browser suite
+checks this row in all five themes and three viewport widths.
+
 ## Dialogs and tabs
 
 ```html

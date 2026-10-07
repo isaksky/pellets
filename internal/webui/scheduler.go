@@ -14,7 +14,7 @@ import (
 
 func (h *handler) startSchedule(w http.ResponseWriter, r *http.Request, project storage.Project) {
 	fields := []string{"_csrf", "workspace_id", "mode"}
-	for _, optional := range []string{"external_id", "group", "group_scope", "resume_pellet", "resume_from", "limit", "preflight_receipt", "admission", "fresh_conversation", "use_managed_runtime", "access_mode"} {
+	for _, optional := range []string{"external_id", "group", "group_scope", "resume_pellet", "resume_from", "limit", "preflight_receipt", "admission", "fresh_conversation", "use_managed_runtime", "access_mode", "model", "reasoning_effort"} {
 		if _, exists := r.PostForm[optional]; exists {
 			fields = append(fields, optional)
 		}
@@ -29,6 +29,21 @@ func (h *handler) startSchedule(w http.ResponseWriter, r *http.Request, project 
 		return
 	}
 	request := app.ScheduleRequest{Mode: r.PostForm.Get("mode")}
+	// Empty controls inherit the workspace defaults; they must not become an
+	// explicit empty override, which would reset to the runtime's own defaults.
+	for key, target := range map[string]**string{"model": &request.Overrides.Model, "reasoning_effort": &request.Overrides.ReasoningEffort} {
+		if value := r.PostForm.Get(key); value != "" {
+			*target = &value
+		}
+	}
+	if len(r.PostForm.Get("model")) > 512 || len(r.PostForm.Get("reasoning_effort")) > 128 {
+		h.renderError(w, http.StatusUnprocessableEntity, requestError("execution model or reasoning effort exceeds its limit"), nil)
+		return
+	}
+	if _, err := codex.ResolveRunSettings(storage.CodexRunSettings{}, request.Overrides); err != nil {
+		h.renderError(w, http.StatusUnprocessableEntity, requestError("invalid execution model or reasoning effort"), nil)
+		return
+	}
 	if values, present := r.PostForm["access_mode"]; present {
 		if !storage.ValidAccessMode(values[0]) {
 			h.renderError(w, http.StatusUnprocessableEntity, requestError("invalid access mode"), nil)

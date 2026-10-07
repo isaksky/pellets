@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -98,6 +99,79 @@ func TestScheduleHTTPExplicitWorkspaceExactFieldsAndSecurity(t *testing.T) {
 		response = performMutation(f.handler, path, mismatch, testOrigin, true, "application/x-www-form-urlencoded")
 		if response.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("accepted mismatched group scope: %d %s", response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestScheduleHTTPModelChoicesReachExecution(t *testing.T) {
+	for _, tc := range []struct {
+		name, model, effort, savedModel, savedEffort, pelletModel, pelletEffort, wantModel, wantEffort string
+	}{
+		{name: "explicit", model: "test-model", effort: "high", savedModel: "workspace-model", savedEffort: "medium", wantModel: "test-model", wantEffort: "high"},
+		{name: "inherit", savedModel: "test-model", savedEffort: "medium", wantModel: "test-model", wantEffort: "medium"},
+		{name: "effort only", effort: "high", savedModel: "test-model", savedEffort: "medium", wantModel: "test-model", wantEffort: "high"},
+		{name: "model only", model: "test-model", savedModel: "workspace-model", savedEffort: "medium", wantModel: "test-model", wantEffort: "medium"},
+		{name: "pellet precedence", model: "schedule-model", effort: "high", savedModel: "workspace-model", savedEffort: "high", pelletModel: "test-model", pelletEffort: "medium", wantModel: "test-model", wantEffort: "medium"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, root := recoveryHandlerFixture(t)
+			ctx := context.Background()
+			workspace := f.projects[0].Workspaces[0].ID
+			settings := app.WorkspaceRunSettingsManager{Open: func(ctx context.Context, path string) (storage.WorkspaceRunSettingsDatabase, error) {
+				return sqlite.OpenWorkspaceRunSettingsDatabase(ctx, path)
+			}}
+			saved, err := settings.Load(ctx, f.application.Database, workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			version := storage.WorkspaceRunSettingsVersion(saved)
+			saved.Settings.Model, saved.Settings.ReasoningEffort = tc.savedModel, tc.savedEffort
+			if _, err := settings.Save(ctx, f.application.Database, storage.SaveWorkspaceRunSettingsRequest{WorkspaceID: workspace, Settings: saved.Settings, ExpectedVersion: version}); err != nil {
+				t.Fatal(err)
+			}
+			pellet := storage.NewPellet{Title: "Execution model selection"}
+			if tc.pelletModel != "" {
+				pellet.Model, pellet.ReasoningEffort = &tc.pelletModel, &tc.pelletEffort
+			}
+			if _, err := f.application.CreatePellet(ctx, f.projects[0], pellet); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "fake-mode"), []byte("schedule_success"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			status := awaitHTTPSchedule(t, f, url.Values{"_csrf": {testCSRF}, "workspace_id": {strconv.FormatInt(workspace, 10)}, "mode": {"run_one"}, "admission": {"interactive"}, "model": {tc.model}, "reasoning_effort": {tc.effort}})
+			if status.Completed != 1 {
+				t.Fatalf("execution did not complete: %+v", status)
+			}
+			runs, err := f.application.WorkspaceRuns(ctx, workspace)
+			if err != nil || len(runs) != 1 {
+				t.Fatalf("runs: %+v %v", runs, err)
+			}
+			if got := runs[0].Settings.Codex; got.Model != tc.wantModel || got.ReasoningEffort != tc.wantEffort {
+				t.Fatalf("captured model/effort: %+v", got)
+			}
+			unchanged, err := settings.Load(ctx, f.application.Database, workspace)
+			if err != nil || unchanged.Settings.Model != tc.savedModel || unchanged.Settings.ReasoningEffort != tc.savedEffort {
+				t.Fatalf("schedule changed workspace defaults: %+v %v", unchanged, err)
+			}
+		})
+	}
+}
+
+func TestScheduleHTTPRejectsInvalidModelChoicesBeforeAdmission(t *testing.T) {
+	f := newHandlerFixture(t, 1)
+	for _, tc := range []struct {
+		key    string
+		values []string
+	}{
+		{"model", []string{"one", "two"}}, {"reasoning_effort", []string{"high", "low"}},
+		{"model", []string{" padded "}}, {"reasoning_effort", []string{"high\n"}},
+		{"model", []string{strings.Repeat("m", 513)}}, {"reasoning_effort", []string{strings.Repeat("e", 129)}},
+	} {
+		form := url.Values{"_csrf": {testCSRF}, "workspace_id": {"1"}, "mode": {"run_one"}, tc.key: tc.values}
+		response := performMutation(f.handler, "/projects/project1/schedules", form, testOrigin, true, "application/x-www-form-urlencoded")
+		if response.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("invalid %s reached scheduling: %d %s", tc.key, response.Code, response.Body.String())
 		}
 	}
 }

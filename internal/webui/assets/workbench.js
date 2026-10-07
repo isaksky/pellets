@@ -177,7 +177,15 @@ function restore() {
       );
       if (!field) continue;
       if (el.type === "checkbox") el.checked = field.checked;
-      else el.value = field.value;
+      else {
+        // Catalog options arrive asynchronously. Restore a chosen value before
+        // the catalog reconciles a freshly rendered execution/creation form.
+        if (el.matches('select[data-execution-preference]') && field.value &&
+            !Array.from(el.options).some(option => option.value === field.value)) {
+          el.add(new Option(field.value, field.value));
+        }
+        el.value = field.value;
+      }
     }
   }
   document

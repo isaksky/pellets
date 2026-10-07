@@ -19,17 +19,17 @@ import (
 )
 
 // ManagedVersion and hashes are reviewed together when updating the runtime.
-// Source: openai/codex release rust-v0.154.0, GitHub asset SHA-256 digests.
-const ManagedVersion = "0.154.0"
+// Source: openai/codex release rust-v0.160.1, GitHub asset SHA-256 digests.
+const ManagedVersion = "0.160.1"
 const maxRuntimeArchive = 512 << 20
 const maxRuntimeExpanded = 2 << 30
 
 type runtimeAsset struct{ Target, SHA256 string }
 
 var runtimeAssets = map[string]runtimeAsset{
-	"darwin/arm64":  {"aarch64-apple-darwin", "427ca74c027049e0cd1a330d611e7f8d1fe0f1eb6a6d85ac16f61bcf2cb4a485"},
-	"darwin/amd64":  {"x86_64-apple-darwin", "8052c6accbe0361bfbd424a10aa5f2226636ed8afb6dcbd5e6437993e57b16d8"},
-	"windows/amd64": {"x86_64-pc-windows-msvc", "94cc5b3632769504c809f6c0364b693c0dfddc5c30c8361095d2263a07ac45a4"},
+	"darwin/arm64":  {"aarch64-apple-darwin", "f73527ee09c6db869acbb37b709866b339ea74ef91d2de255e9c74ec960c6314"},
+	"darwin/amd64":  {"x86_64-apple-darwin", "a98f330c9b1652cef2edc7bc2ee4c47a0fe19fa098b686381be3c8842abf0ac0"},
+	"windows/amd64": {"x86_64-pc-windows-msvc", "25c6fe4e46d5bff939312fc46de67ace37561f6f1f89b409af63fd8cc6098425"},
 }
 
 // ResolveManagedRuntime installs only a reviewed release, without invoking a

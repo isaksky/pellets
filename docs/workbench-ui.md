@@ -692,6 +692,20 @@ Recovery with a saved run or preflight receipt retains its captured mode and
 confirmation. Choosing a preference does not start execution; failed saves offer
 Retry.
 
+Before **Start next**, **Execution model** and **Reasoning effort** select defaults
+for the requested run, drain, or watch session. **Use execution default** inherits
+the workspace setting independently for each field. Explicit pellet preferences
+still take precedence. These controls share the catalog and refresh/retry behavior
+of the pellet editors; they do not change the planning model or saved workspace
+settings. Unsaved choices survive tab switches, navigation, live updates, and
+failed admission while the page remains open. Successful submission consumes the
+choices; a reload returns to workspace defaults. Run details shows the effective
+model and effort captured for the admitted pellet.
+
+`scripts/test-web-execution-model-browser.cjs` covers the Start next selectors,
+keyboard access, catalog failures, preserved drafts, request fields, and failed
+admission across all five themes at desktop, intermediate, and phone widths.
+
 The execution sidebar uses durable run and schedule state for controls, with a
 separate bounded activity stream for reported events. File operations expand to
 reported source/read output or diffs; source and diffs receive local syntax

@@ -120,13 +120,13 @@ async function measure(page, scene, build) {
   // screenshots above and the interaction suite verify the delivered targets;
   // restoration below lets every other size/style remain a strict comparison.
   if (build === 'before') interactionStyles[scene] = await page.evaluate(() => {
-    const read = (selector, properties) => [...document.querySelectorAll(selector)].map(el =>
+    const read = (selector, properties, excluded) => [...document.querySelectorAll(selector)].filter(el => !excluded || !el.closest(excluded)).map(el =>
       Object.fromEntries(properties.map(property => [property, getComputedStyle(el).getPropertyValue(property)])));
     return {
       menus: read('.row-menu > summary', ['display','min-width','min-height','border-radius']),
       summaries: read('.project-record > summary, .metadata > summary', ['padding','border-radius']),
       memories: read('.memory-card', ['padding']), memoryLinks: read('.memory-card > a', ['padding']),
-      inlineSelects: read('.select-trigger', ['padding-left','padding-right']),
+      inlineSelects: read('.select-trigger', ['padding-left','padding-right'], '.filters,.assignment-form,.run-controls,.theme-control,.plan-composer-settings,.plan-composer-tools,.record-actions-panel,[data-execution-preferences]'),
       positionedMenus: read('.switcher-menu,.row-popover,.assignment-form,.recipient-form', ['position']),
       creationActions: read('.create-popover form button.primary-button', ['background-color','color','border','padding','font-weight']),
     };
@@ -178,8 +178,12 @@ async function measure(page, scene, build) {
       if (style.padding !== '5px 9px' || style.borderTopWidth !== '1px')
         throw Error('Creation submitter lost its primary geometry');
     });
-    for (const [index, el] of [...document.querySelectorAll('.select-trigger')].entries()) {
-      if (el.closest('.filters,.assignment-form,.run-controls,.theme-control,.plan-composer-settings,.plan-composer-tools,.record-actions-panel')) continue;
+    // Match only the controls being compared. The separately measured model
+    // row adds selectors, so indexing every selector shifts unrelated controls.
+    const inlineSelects = [...document.querySelectorAll('.select-trigger')].filter(el =>
+      !el.closest('.filters,.assignment-form,.run-controls,.theme-control,.plan-composer-settings,.plan-composer-tools,.record-actions-panel,[data-execution-preferences]'));
+    if (inlineSelects.length !== baseline.inlineSelects.length) throw Error('Changed inline selector count');
+    for (const [index, el] of inlineSelects.entries()) {
       if (getComputedStyle(el).paddingLeft !== '6px' || getComputedStyle(el).paddingRight !== '6px')
         throw Error('Unexpected inline selector inset: ' + el.outerHTML + ' / ' + getComputedStyle(el).padding);
       change(el, baseline.inlineSelects[index]);

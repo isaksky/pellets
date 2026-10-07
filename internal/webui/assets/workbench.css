@@ -2775,6 +2775,16 @@ dialog::backdrop {
 
 .execution-access { display:flex; align-items:center; gap:8px; margin:8px 0; font-size:12px; }
 
+.run-controls .execution-model-settings {
+  flex: 1 0 100%;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.run-controls .execution-model-settings > p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 /* Execution forms share control sizing and wrap by available panel width. */
 .run-controls form[data-no-run-resume] {
   display: grid;

@@ -124,7 +124,7 @@ func TestRuntimeVersionFloor(t *testing.T) {
 			t.Fatalf("accepted %s", v)
 		}
 	}
-	for _, v := range []string{"codex-cli 0.154.0", "codex-cli 0.155.1", "codex-cli 1.0.0"} {
+	for _, v := range []string{"codex-cli 0.154.0", "codex-cli 0.155.1", "codex-cli " + ManagedVersion, "codex-cli 1.0.0"} {
 		if err := checkRuntimeVersion(v); err != nil {
 			t.Fatal(err)
 		}

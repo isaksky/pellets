@@ -383,12 +383,13 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 }
 func (b *tailBuffer) String() string { b.mu.Lock(); defer b.mu.Unlock(); return string(b.data) }
 
-// Pellets uses a reviewed stable release explicitly supporting GPT-6 Astra as a
-// conservative floor for all models, including runtime-selected defaults.
+// The protocol compatibility floor remains 0.154.0 for explicit overrides.
+// The managed pin is newer and includes the current model catalog; accepting an
+// older override does not guarantee availability of newer models on it.
 func checkRuntimeVersion(version string) error {
 	var major, minor, patch int
 	if _, err := fmt.Sscanf(version, "codex-cli %d.%d.%d", &major, &minor, &patch); err != nil || major == 0 && minor < 154 || strings.Contains(strings.TrimPrefix(version, "codex-cli "), "-") {
-		return fmt.Errorf("%w: %s; Pellets requires stable Codex CLI %s or newer (including GPT-6 Astra support); clear the executable override to use the managed runtime, or upgrade the override", ErrUnsupported, version, ManagedVersion)
+		return fmt.Errorf("%w: %s; Pellets requires stable Codex CLI 0.154.0 or newer; clear the executable override to use managed Codex %s, or upgrade the override", ErrUnsupported, version, ManagedVersion)
 	}
 	return nil
 }

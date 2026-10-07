@@ -648,7 +648,7 @@ with Playwright on `NODE_PATH`, like the other optional browser suites.
 `pl web` remains a deprecated compatibility alias with the same options and
 foreground behavior. New scripts and documentation must use `pl server`.
 
-Codex execution automatically installs the reviewed 0.154.0 runtime for macOS
+Codex execution automatically installs the reviewed 0.160.1 runtime for macOS
 AMD64/ARM64 and Windows AMD64, independently of Homebrew, Node, PATH, or the
 Codex desktop app. Runtime compatibility is checked before claiming eligible
 work. Explicit executable overrides, cache/offline setup, authentication, updates,
