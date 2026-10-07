@@ -478,8 +478,14 @@ func (db *ProjectDatabase) InterruptExecutionRun(ctx context.Context, id, revisi
 		progress := current.RunProgress
 		progress.State, progress.Outcome, progress.ErrorCode = "interrupted", outcome, "supervisor_stopped"
 		stamp := runUpdateTime(current).Format(runTimeFormat)
-		progress.Interaction = nil
-		_, err = conn.ExecContext(ctx, `UPDATE execution_runs SET state='interrupted', outcome=?, error_code='supervisor_stopped', interaction_json='null', revision=revision+1, updated_at=?, finished_at=? WHERE run_id=?`, outcome, stamp, stamp, id)
+		if !storage.IsAsyncQuestion(progress.Interaction) {
+			progress.Interaction = nil
+		}
+		interaction, err := json.Marshal(progress.Interaction)
+		if err != nil {
+			return err
+		}
+		_, err = conn.ExecContext(ctx, `UPDATE execution_runs SET state='interrupted', outcome=?, error_code='supervisor_stopped', interaction_json=?, revision=revision+1, updated_at=?, finished_at=? WHERE run_id=?`, outcome, string(interaction), stamp, stamp, id)
 		if err != nil {
 			return err
 		}
@@ -614,7 +620,9 @@ func (db *ProjectDatabase) FinishExecutionOperation(ctx context.Context, result 
 			}
 		} else if storage.RunActive(current.State) {
 			progress.State, progress.Outcome, progress.ErrorCode = "needs_attention", "unknown", result.ErrorCode
-			progress.Interaction = nil
+			if !storage.IsAsyncQuestion(progress.Interaction) {
+				progress.Interaction = nil
+			}
 			progress.Summary = result.Summary
 			finished = &now
 		}

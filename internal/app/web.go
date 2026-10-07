@@ -103,9 +103,9 @@ func (application *WebApplication) StartSchedule(ctx context.Context, project st
 	return nil, scheduleError("schedule_workspace_unavailable", "choose an existing workspace in this project")
 }
 
-// SubmitRunInteraction routes only to the exact live process after checking
-// project ownership against durable evidence. A browser cannot substitute a
-// different run, thread, turn, or server request.
+// SubmitRunInteraction checks project ownership and the exact request. Live
+// answers route to their process; stopped async questions explicitly resume
+// their saved conversation with the answer before any new model work.
 func (application *WebApplication) SubmitRunInteraction(ctx context.Context, project storage.Project, submission InteractionSubmission) (storage.ExecutionRun, error) {
 	if application.Executions == nil || application.Database.Path == "" {
 		return storage.ExecutionRun{}, scheduleError("run_process_unavailable", "foreground execution is unavailable")
@@ -116,6 +116,13 @@ func (application *WebApplication) SubmitRunInteraction(ctx context.Context, pro
 	}
 	if run.ProjectID != project.ID {
 		return run, storage.ExecutionRunConflict(run.ID)
+	}
+	if !storage.RunActive(run.State) && storage.IsAsyncQuestion(run.Interaction) {
+		if _, err := asyncAnswer(run, submission); err != nil {
+			return run, err
+		}
+		_, err = application.StartSchedule(ctx, project, run.WorkspaceID, ScheduleRequest{Mode: run.ScheduleMode, ResumeFrom: &run.ID, ResumePellet: &run.PelletNumber, ResumeAnswer: &submission})
+		return run, err
 	}
 	return application.Executions.SubmitInteraction(ctx, application.Database, submission)
 }

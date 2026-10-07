@@ -374,6 +374,7 @@ type runView struct {
 	Group            string
 	PelletNumber     int64
 	CanResume        bool
+	CanResumeMessage bool
 	UnownedActive    bool
 	ResumeMode       string
 	ResumeLimit      int
@@ -866,6 +867,10 @@ func makeRunView(run storage.ExecutionRun) runView {
 	view.Interrupted = run.State == "interrupted"
 	view.Attention = run.State == "needs_attention"
 	view.CanResume = !storage.RunActive(run.State) && run.State != "completed" && run.PelletPresent
+	view.CanResumeMessage = view.CanResume && run.Finalization == nil && run.Mode != "review_checkpoint"
+	if storage.IsAsyncQuestion(run.Interaction) {
+		view.CanResume = false
+	}
 	view.ResumeMode, view.ResumeLimit = run.ScheduleMode, run.ScheduleRemaining
 	lowerActivity := strings.ToLower(activity)
 	view.AutoReview = strings.Contains(lowerActivity, "automatic approval review is in progress") || strings.Contains(lowerActivity, "automatic approval review requires attention") || strings.Contains(lowerActivity, "explicit human decision")

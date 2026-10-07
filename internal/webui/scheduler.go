@@ -14,7 +14,7 @@ import (
 
 func (h *handler) startSchedule(w http.ResponseWriter, r *http.Request, project storage.Project) {
 	fields := []string{"_csrf", "workspace_id", "mode"}
-	for _, optional := range []string{"external_id", "group", "group_scope", "resume_pellet", "resume_from", "limit", "preflight_receipt", "admission", "fresh_conversation", "use_managed_runtime", "access_mode", "model", "reasoning_effort"} {
+	for _, optional := range []string{"external_id", "group", "group_scope", "resume_pellet", "resume_from", "limit", "preflight_receipt", "admission", "fresh_conversation", "use_managed_runtime", "access_mode", "model", "reasoning_effort", "resume_message"} {
 		if _, exists := r.PostForm[optional]; exists {
 			fields = append(fields, optional)
 		}
@@ -28,7 +28,7 @@ func (h *handler) startSchedule(w http.ResponseWriter, r *http.Request, project 
 		h.renderError(w, http.StatusUnprocessableEntity, requestError("an explicit workspace_id is required"), nil)
 		return
 	}
-	request := app.ScheduleRequest{Mode: r.PostForm.Get("mode")}
+	request := app.ScheduleRequest{Mode: r.PostForm.Get("mode"), ResumeMessage: r.PostForm.Get("resume_message")}
 	// Empty controls inherit the workspace defaults; they must not become an
 	// explicit empty override, which would reset to the runtime's own defaults.
 	for key, target := range map[string]**string{"model": &request.Overrides.Model, "reasoning_effort": &request.Overrides.ReasoningEffort} {

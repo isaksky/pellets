@@ -75,6 +75,7 @@ func Run() bool {
 	scanner.Buffer(make([]byte, 4096), 2<<20)
 	write := func(value any) { must(json.NewEncoder(os.Stdout).Encode(value)) }
 	var scheduledTurn json.RawMessage
+	var asyncOriginal json.RawMessage
 	reviewStarted := false
 	triageCount := 0
 	change := &changePeer{mode: mode}
@@ -311,6 +312,10 @@ func Run() bool {
 			write(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "review-thread", "turn": map[string]any{"id": "review-turn", "status": turnStatus}}})
 			continue
 		}
+		if message.Method == "turn/steer" && mode == "schedule_async_live" {
+			writeScheduledCompletion(write, "schedule_success", asyncOriginal)
+			continue
+		}
 		if message.Method == "turn/steer" && mode == "schedule_followup_live" {
 			writeScheduledCompletion(write, mode, scheduledTurn)
 			continue
@@ -318,6 +323,26 @@ func Run() bool {
 		if message.Method == "turn/start" && strings.HasPrefix(mode, "schedule_") {
 			if mode == "schedule_exit" {
 				os.Exit(9)
+			}
+			if mode == "schedule_async_question" || mode == "schedule_async_live" || mode == "schedule_async_two" {
+				var input struct{ Input []struct{ Text string } }
+				must(json.Unmarshal(message.Params, &input))
+				if strings.Contains(input.Input[0].Text, "User answers") {
+					if len(asyncOriginal) == 0 {
+						asyncOriginal = scheduledTurn
+					}
+					writeScheduledCompletion(write, "schedule_success", asyncOriginal)
+				} else {
+					asyncOriginal = append(asyncOriginal[:0], message.Params...)
+					write(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread", "turnId": "turn", "item": map[string]any{"id": "async-question", "type": "agentMessage", "phase": "final_answer", "text": "", "questions": []any{map[string]any{"title": "May I upload the test sources?", "options": []string{"Approve this test-source upload", "Skip Windows verification"}}}}}})
+					if mode == "schedule_async_two" {
+						write(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread", "turnId": "turn", "item": map[string]any{"id": "second-question", "type": "agentMessage", "text": "", "questions": []any{map[string]any{"title": "Any additional constraint?"}}}}})
+					}
+					if mode != "schedule_async_live" {
+						write(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread", "turn": map[string]any{"id": "turn", "status": "completed"}}})
+					}
+				}
+				continue
 			}
 			if mode == "schedule_input_live" {
 				write(map[string]any{"id": 41, "method": "item/tool/requestUserInput", "params": map[string]any{"threadId": "thread", "turnId": "turn", "itemId": "question-item", "isBlocking": true, "questions": []any{map[string]any{"id": "choice", "header": "Scope", "question": "Which scope should be used?", "options": []any{map[string]any{"label": "Focused", "description": "Change only the target."}, map[string]any{"label": "Broad", "description": "Change related code."}}, "isOther": true, "isSecret": false}, map[string]any{"id": "note", "header": "Note", "question": "Any concise constraint?", "options": nil, "isOther": false, "isSecret": false}}}})

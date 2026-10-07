@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -16,6 +17,10 @@ import (
 const DefaultScheduleLimit = 100
 
 type ScheduleRequest struct {
+	// Resume input is transient and belongs only to the first resumed attempt.
+	// Question answers also bind the exact stored revision and question group.
+	ResumeMessage           string                      `json:"resume_message,omitempty"`
+	ResumeAnswer            *InteractionSubmission      `json:"resume_answer,omitempty"`
 	UseWorkspaceAssignments bool                        `json:"use_workspace_assignments,omitempty"`
 	SavedWorkspaceSelection *storage.WorkspaceSelection `json:"saved_workspace_selection,omitempty"`
 	InteractiveAdmission    bool                        `json:"interactive_admission,omitempty"`
@@ -136,6 +141,12 @@ func (s *Scheduler) Start(ctx context.Context, request ScheduleRequest) (*Schedu
 	if request.ResumePellet != nil && *request.ResumePellet < 1 || request.ResumeFrom != nil && (request.ResumePellet == nil || *request.ResumeFrom < 1) {
 		return nil, storage.InvalidExecutionRun("Resume requires the exact positive pellet and optional attempt ID")
 	}
+	if request.ResumeAnswer != nil && request.ResumeFrom == nil {
+		return nil, storage.InvalidExecutionRun("answers require the exact saved attempt")
+	}
+	if request.ResumeMessage != "" && (request.ResumeFrom == nil || len(request.ResumeMessage) > 16384 || !utf8.ValidString(request.ResumeMessage) || strings.ContainsRune(request.ResumeMessage, 0)) {
+		return nil, storage.InvalidExecutionRun("resume instructions require an exact saved attempt and at most 16384 bytes of UTF-8 text")
+	}
 	if request.ResumeFrom != nil {
 		previous, err := s.options.Supervisor.options.Recorder.Read(ctx, s.options.Database, *request.ResumeFrom)
 		if err != nil {
@@ -143,6 +154,20 @@ func (s *Scheduler) Start(ctx context.Context, request ScheduleRequest) (*Schedu
 		}
 		if previous.ProjectID != request.Selected.Project.ID || previous.WorkspaceID != request.Selected.Workspace.ID || previous.PelletNumber != *request.ResumePellet {
 			return nil, storage.ExecutionRunConflict(previous.ID)
+		}
+		if storage.IsAsyncQuestion(previous.Interaction) {
+			if request.ResumeAnswer == nil || request.FreshConversation {
+				return nil, storage.InvalidExecutionRun("answer the pending questions before resuming")
+			}
+			request.ResumeMessage, err = asyncAnswer(previous, *request.ResumeAnswer)
+			if err != nil {
+				return nil, err
+			}
+		} else if request.ResumeAnswer != nil {
+			return nil, storage.ExecutionRunConflict(previous.ID)
+		}
+		if request.ResumeMessage != "" && (previous.Finalization != nil || previous.Mode == "review_checkpoint") {
+			return nil, storage.InvalidExecutionRun("this recovery phase cannot accept implementation instructions")
 		}
 		request.Mode, request.Limit = previous.ScheduleMode, previous.ScheduleRemaining
 		request.ExternalID, request.Group = copyScheduleFilter(previous.ExternalID), copyScheduleFilter(previous.Group)
@@ -333,7 +358,9 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 		}
 		h.status.State, h.status.Reason = "selecting", ""
 		reason := storage.NextNone
-		execution, err := s.options.Supervisor.start(h.ctx, ExecutionRequest{Database: s.options.Database, Selected: request.Selected, Capture: storage.RunCapture{ProjectID: request.Selected.Project.ID, WorkspaceID: request.Selected.Workspace.ID, ResumeFrom: request.ResumeFrom, FreshConversation: request.FreshConversation}, Overrides: request.Overrides, ResumePellet: request.ResumePellet, PreflightReceipt: request.PreflightReceipt}, s.drive, func(ctx context.Context) (*storage.RunCapture, error) {
+		execution, err := s.options.Supervisor.start(h.ctx, ExecutionRequest{Database: s.options.Database, Selected: request.Selected, Capture: storage.RunCapture{ProjectID: request.Selected.Project.ID, WorkspaceID: request.Selected.Workspace.ID, ResumeFrom: request.ResumeFrom, FreshConversation: request.FreshConversation}, Overrides: request.Overrides, ResumePellet: request.ResumePellet, PreflightReceipt: request.PreflightReceipt}, func(ctx context.Context, e *WorkspaceExecution) error {
+			return s.driveWithMessage(ctx, e, request.ResumeMessage)
+		}, func(ctx context.Context) (*storage.RunCapture, error) {
 			queue, err := s.options.OpenQueue(ctx, s.options.Database.Path)
 			if err != nil {
 				return nil, err
@@ -361,6 +388,10 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 				if err != nil {
 					queue.Close()
 					return nil, err
+				}
+				if request.ResumeAnswer != nil && previous.Revision != request.ResumeAnswer.Revision {
+					queue.Close()
+					return nil, storage.ExecutionRunConflict(previous.ID)
 				}
 				if previous.ProjectID != request.Selected.Project.ID || previous.WorkspaceID != request.Selected.Workspace.ID || previous.PelletNumber != *request.ResumePellet {
 					queue.Close()
@@ -547,6 +578,7 @@ func (s *Scheduler) run(h *ScheduleHandle, request ScheduleRequest) {
 			return
 		}
 		request.ResumePellet, request.ResumeFrom = nil, nil
+		request.ResumeMessage, request.ResumeAnswer = "", nil
 		request.PreflightReceipt = ""
 		request.SavedWorkspaceSelection = nil
 	}

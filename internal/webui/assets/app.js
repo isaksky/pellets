@@ -693,9 +693,11 @@ import { action, actions } from "./datastar-1.0.3.js";
   }
   initialize(document);
   uiVersion.restoreDrafts();
+  refreshResumeLabels();
   function afterPatch(scope) {
     initialize(scope);
     window.Workbench.afterPatch();
+    refreshResumeLabels();
     if (sortOpenerID) {
       var sorter = document.getElementById(sortOpenerID);
       if (sorter) sorter.focus({preventScroll: true});
@@ -806,3 +808,25 @@ import { action, actions } from "./datastar-1.0.3.js";
     if (!document.hidden) refreshRegions();
   });
 }());
+
+// Suggested answers only fill the composer; submitting is an explicit action.
+document.addEventListener("click", function(event) {
+  var choice = event.target.closest("[data-answer-choice]");
+  if (!choice) return;
+  var form = choice.closest("form"), input = form && form.elements.namedItem(choice.dataset.answerName);
+  if (!input) return;
+  input.value = choice.dataset.answerChoice;
+  input.dispatchEvent(new Event("input", {bubbles: true}));
+  input.focus();
+});
+
+function refreshResumeLabels() {
+  document.querySelectorAll("[data-resume-label]").forEach(function(button) {
+    var input = button.form?.elements.namedItem("resume_message");
+    var label = input?.value.trim() ? "Send and resume" : "Resume";
+    if (button.textContent !== label) button.textContent = label;
+  });
+}
+document.addEventListener("input", function(event) {
+  if (event.target.matches('textarea[name="resume_message"]')) refreshResumeLabels();
+});

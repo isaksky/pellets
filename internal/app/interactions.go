@@ -270,6 +270,17 @@ func (execution *WorkspaceExecution) applyInteraction(ctx context.Context, actio
 	if interaction == nil || submission.RequestID != interaction.RequestID || submission.Action == "" {
 		return run, false, storage.ExecutionRunConflict(run.ID)
 	}
+	if storage.IsAsyncQuestion(interaction) {
+		text, err := asyncAnswer(run, submission)
+		if err != nil {
+			return run, false, err
+		}
+		// Clear only in the local value until delivery succeeds. A failed call
+		// retains the durable question and cannot silently consume an answer.
+		run.Interaction = nil
+		run.State = "running"
+		return execution.applyFollowUp(ctx, run, text)
+	}
 	var response any
 	switch interaction.Method {
 	case "item/tool/requestUserInput":
@@ -440,6 +451,7 @@ func (execution *WorkspaceExecution) applyFollowUpWithLimit(ctx context.Context,
 		return run, false, err
 	}
 	progress := run.RunProgress
+	progress.Interaction = nil
 	progress.Phase, progress.State, progress.Summary = "implementation", "running", "Follow-up instructions started a new turn after the prior turn became idle."
 	run, err = execution.Save(ctx, progress, run.Revision)
 	return run, true, err

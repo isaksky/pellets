@@ -713,6 +713,26 @@ highlighting. Commands include output and exit codes when reported. Progress,
 questions, approvals, steering, stopping, and explicit Resume retain the existing
 application checks.
 
+Async Codex questions carried by `agentMessage.questions` appear in the execution
+composer with explicit suggested-answer buttons and a free-text field. Selecting
+a suggestion fills the field; only **Send exact answers** submits it. Independent
+work can continue while the question is visible. After the turn ends, the run
+waits for the answer instead of interpreting the question as an invalid result or
+finalizing the pellet. Answers steer the exact live turn or start one new turn
+with the answer when that conversation is idle.
+
+Unanswered async questions remain stored through a stop or server restart.
+**Send and resume** validates the saved attempt and question revision and delivers
+the answer in the first resumed turn. Bare Resume cannot substitute for an answer
+or approval. Other stopped implementation runs offer optional instructions before
+resuming; entering them changes the button to **Send and resume**. Finalization
+and review recovery retain their existing recovery policies and do not accept new
+implementation instructions. Answers are not copied into run summaries.
+
+`scripts/test-web-async-questions-browser.cjs` verifies choices, free-text input,
+turn completion, restart recovery, and answer-before-resume protocol ordering in
+an isolated repository with the deterministic Codex peer.
+
 **Current execution** stays visible beside the feed while reading older events.
 It shows Working, Waiting for work/input/approval, Stopping, Needs attention,
 Interrupted, or Finished from the authoritative record. Failed outcomes and

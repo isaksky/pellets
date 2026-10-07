@@ -643,7 +643,10 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 				// when lifecycle changes have replaced this implementation.
 				progress := run.RunProgress
 				progress.State, progress.Outcome, progress.ErrorCode = "interrupted", outcome, "supervisor_stopped"
-				progress.Summary, progress.Interaction = diagnostic, nil
+				progress.Summary = diagnostic
+				if !storage.IsAsyncQuestion(progress.Interaction) {
+					progress.Interaction = nil
+				}
 				run, readErr = execution.recorder.Save(finalCtx, request.Database, storage.UpdateExecutionRun{ID: run.ID, ExpectedRevision: run.Revision, Progress: progress})
 			} else {
 				run, readErr = execution.recorder.markInterrupted(finalCtx, request.Database, run.ID, run.Revision, outcome)
@@ -651,7 +654,9 @@ func (supervisor *ExecutionSupervisor) execute(handle *ExecutionHandle, request 
 		} else if storage.RunActive(run.State) {
 			progress := run.RunProgress
 			progress.State, progress.Outcome, progress.ErrorCode, progress.Summary = "needs_attention", "unknown", failureCode, ""
-			progress.Interaction = nil
+			if !storage.IsAsyncQuestion(progress.Interaction) {
+				progress.Interaction = nil
+			}
 			switch failureCode {
 			case "codex_input_required":
 				progress.Summary = "Codex is awaiting explicit input."

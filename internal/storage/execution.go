@@ -111,7 +111,8 @@ type RunProgress struct {
 	// Finalization is immutable evidence captured after the implementation
 	// turn succeeds and before staging/commit. It survives explicit resumes.
 	Finalization *FinalizationEvidence `json:"finalization,omitempty"`
-	// Interaction is the one outstanding app-server request, if any. It keeps
+	// Interaction is an outstanding app-server request or unanswered async
+	// agent-message questions, if any. It keeps
 	// only the bounded fields needed to render and correlate a response; answers,
 	// credentials, command text, and transcript content are never retained.
 	Interaction *RunInteraction `json:"interaction,omitempty"`
@@ -187,6 +188,10 @@ type ReviewFinding struct {
 	File     string `json:"file,omitempty"`
 	Line     int    `json:"line,omitempty"`
 }
+
+const AsyncQuestionMethod = "agentMessage/questions"
+
+func IsAsyncQuestion(q *RunInteraction) bool { return q != nil && q.Method == AsyncQuestionMethod }
 
 type RunInteraction struct {
 	RequestID string                `json:"request_id"`
@@ -395,7 +400,7 @@ func ValidateRunProgress(p RunProgress) error {
 	if err := ValidateRunInteraction(p.Interaction); err != nil {
 		return err
 	}
-	if p.Interaction != nil && p.State != "awaiting_input" {
+	if p.Interaction != nil && p.State != "awaiting_input" && !(IsAsyncQuestion(p.Interaction) && p.State != "completed") {
 		return InvalidExecutionRun("a pending interaction requires awaiting-input state")
 	}
 	if p.Finalization != nil {
@@ -566,6 +571,10 @@ func ValidateRunInteraction(interaction *RunInteraction) error {
 		return InvalidExecutionRun("invalid pending interaction identity or display content")
 	}
 	switch interaction.Method {
+	case AsyncQuestionMethod:
+		if interaction.TurnID == "" || interaction.ItemID == "" || len(interaction.Questions) == 0 || len(interaction.Questions) > 64 || len(interaction.RequestedPermissions) != 0 {
+			return InvalidExecutionRun("invalid async question interaction")
+		}
 	case "item/tool/requestUserInput":
 		if interaction.TurnID == "" || len(interaction.Questions) == 0 || len(interaction.Questions) > 3 || len(interaction.RequestedPermissions) != 0 {
 			return InvalidExecutionRun("invalid user-input interaction")
