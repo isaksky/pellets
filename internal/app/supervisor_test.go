@@ -46,7 +46,10 @@ func installSupervisorPeer(t *testing.T) string {
 		name += ".exe"
 	}
 	target := filepath.Join(dir, name)
-	if err := os.Link(executable, target); err != nil {
+	// Windows may refuse to remove a hard link to the still-running test
+	// executable during TempDir cleanup. Give the peer its own file there.
+	linked := runtime.GOOS != "windows" && os.Link(executable, target) == nil
+	if !linked {
 		input, err := os.Open(executable)
 		if err != nil {
 			t.Fatal(err)
@@ -79,7 +82,10 @@ func installSupervisorSkill(t *testing.T, root string) {
 func supervisorFixture(t *testing.T, executable string) (*ExecutionSupervisor, ExecutionRequest) {
 	t.Helper()
 	recorder, database, selected, capture := executionFixture(t)
-	if err := os.WriteFile(filepath.Join(database.Root, ".git", "info", "exclude"), []byte("/pellets.db*\n/fake-*\n/.agents/\n"), 0600); err != nil {
+	// This fixture keeps its database at the worktree root instead of inside
+	// the ignored .pellets directory. Exclude its sibling guards too: Windows
+	// locks prevent review snapshots from reading an active guard's contents.
+	if err := os.WriteFile(filepath.Join(database.Root, ".git", "info", "exclude"), []byte("/pellets.db*\n/workspace-guards/\n/fake-*\n/.agents/\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	gitForExecutionTest(t, database.Root, "config", "user.name", "Test")
