@@ -1,11 +1,11 @@
 {
-    "version": "0.5.0",
+    "version": "0.6.0",
     "homepage": "https://github.com/isaksky/pellets",
     "license": "Apache-2.0",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/isaksky/pellets/releases/download/v0.5.0/pellets_0.5.0_windows_amd64.zip",
-            "hash": "57b1e598313fd76ad77c946d5102e1ae0a17792b9da31a030e60ddbd572ce984"
+            "url": "https://github.com/isaksky/pellets/releases/download/v0.6.0/pellets_0.6.0_windows_amd64.zip",
+            "hash": "630ba670ad3cb3e8124f55e13af4f08a0b76605c8bdf1381e7b0bddd95fc5936"
         }
     },
     "bin": "pl.exe"

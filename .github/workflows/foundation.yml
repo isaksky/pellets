@@ -230,6 +230,8 @@ jobs:
           $env:NO_PROXY = ""
           Push-Location $smokeRoot
           try {
+            & $executable --json init-db | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "pl init-db smoke failed" }
             $added = & $executable --json add "release archive smoke" | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($added.data.id)) { throw "pl add smoke failed" }
             $started = & $executable --json start-next | ConvertFrom-Json
