@@ -1245,7 +1245,7 @@ func ensureStoredProjectWorkspace(ctx context.Context, query projectQuery, proje
 	err := query.QueryRowContext(ctx, `
 		SELECT workspace_id
 		FROM project_workspaces
-		WHERE project_id = ? AND workspace_id = ?`, project.Project.ID, project.Workspace.ID).Scan(&workspaceID)
+		WHERE project_id = ? AND workspace_id = ? AND pruned = 0`, project.Project.ID, project.Workspace.ID).Scan(&workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.NewError(
 			domain.NotFound,

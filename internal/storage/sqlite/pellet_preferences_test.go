@@ -65,11 +65,10 @@ func TestPelletPreferencesMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pd := ProjectDatabase{db: db}
-	_, _, err = pd.RegisterProject(ctx, projectRegistration("old", "repository/.git", "repository", "repository/.git"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Seed historical SQL directly: current registration reads the latest schema.
+	mustExec(t, db, `INSERT INTO projects(project_id,code,git_common_dir,git_common_dir_relative,created_at,updated_at) VALUES(1,'old','repository/.git',1,2460000,2460000);
+        INSERT INTO project_workspaces(workspace_id,project_id,root_path,root_path_relative,git_dir,git_dir_relative,created_at,updated_at) VALUES(1,1,'repository',1,'repository/.git',1,2460000,2460000);`)
+
 	mustExec(t, db, `INSERT INTO pellets(project_id,number,title,priority,created_at,updated_at) VALUES(1,1,'legacy',1024,2460000,2460000); INSERT INTO pellets_fts(rowid,title,description,external_id) SELECT rowid,title,description,external_id FROM pellets;`)
 	db.Close()
 	upgraded, err := Open(ctx, path)

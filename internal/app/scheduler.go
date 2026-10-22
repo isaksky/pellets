@@ -202,6 +202,7 @@ func (s *Scheduler) Start(ctx context.Context, request ScheduleRequest) (*Schedu
 	if s.workspaces[frozen.Selected.Workspace.ID] != nil {
 		return nil, scheduleError("workspace_schedule_busy", "this workspace already has an active schedule")
 	}
+	guard, guardErr := workspaceScheduleGuard(s.options.Database, frozen.Selected.Workspace.ID)
 	s.nextID++
 	workCtx, cancel := context.WithCancel(context.Background())
 	h := &ScheduleHandle{ctx: workCtx, cancel: cancel, wake: make(chan struct{}, 1), done: make(chan struct{}), status: ScheduleStatus{ID: s.nextID, WorkspaceID: frozen.Selected.Workspace.ID, ProjectID: frozen.Selected.Project.ID, Mode: frozen.Mode, ExternalID: frozen.ExternalID, Group: frozen.Group, Limit: frozen.Limit, State: "selecting"}}
@@ -209,8 +210,16 @@ func (s *Scheduler) Start(ctx context.Context, request ScheduleRequest) (*Schedu
 	s.wait.Add(1)
 	go func() {
 		defer s.wait.Done()
+		if guard != nil {
+			defer guard.Close()
+		}
 		defer cancel()
-		s.run(h, frozen)
+		if guardErr != nil {
+			h.attention(guardErr)
+		} else {
+			s.run(h, frozen)
+			guard.Close()
+		}
 		s.mu.Lock()
 		delete(s.workspaces, frozen.Selected.Workspace.ID)
 		s.mu.Unlock()

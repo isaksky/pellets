@@ -919,3 +919,12 @@ Repository-owned Pellets source and binaries use the same
 [the consolidated third-party notices](THIRD_PARTY_NOTICES.txt). The license
 and exact archive contract are recorded in
 [ADR 0003](docs/decisions/0003-distribution-license-and-release-notices.md).
+
+### Prune missing agent workspaces
+
+After removing temporary agent worktrees, use `pl workspace prune --dry-run` to
+preview stale registrations, then `pl workspace prune` to remove them from the
+workspace list. Use `--project CODE` to select a registered project and `--json`
+for structured results. The browser offers the same operation under **All
+workspaces → Prune missing workspaces**. Existing checkouts and work needing
+attention are kept; execution history and files are preserved.

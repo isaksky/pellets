@@ -154,6 +154,9 @@ func (database *ProjectDatabase) RegisterProject(ctx context.Context, registrati
 		if gitDirErr != nil || byRoot.ID != byGitDir.ID || repositoryErr != nil || byRoot.ProjectID != byRepository.ID {
 			return storage.Project{}, false, workspaceIdentityConflict(registration, byRoot, byGitDir)
 		}
+		if _, err := connection.ExecContext(ctx, "UPDATE project_workspaces SET pruned = 0 WHERE workspace_id = ? AND pruned = 1", byRoot.ID); err != nil {
+			return storage.Project{}, false, err
+		}
 		project, err := loadProject(ctx, connection, byRepository.ID)
 		if err != nil {
 			return storage.Project{}, false, projectStorageError("read idempotent project registration", err)
@@ -175,7 +178,7 @@ func (database *ProjectDatabase) RegisterProject(ctx context.Context, registrati
 		}
 		if _, err := connection.ExecContext(ctx, `
 			UPDATE project_workspaces
-			SET root_path = ?, root_path_relative = ?, updated_at = ?
+			SET root_path = ?, root_path_relative = ?, updated_at = ?, pruned = 0
 			WHERE workspace_id = ?`, registration.WorkspaceRoot.Value, boolInt(registration.WorkspaceRoot.Relative), timestamp, byGitDir.ID); err != nil {
 			return storage.Project{}, false, projectStorageError("update moved workspace", err)
 		}
@@ -457,7 +460,7 @@ func (database *ProjectDatabase) ResolveProjectWorkspace(ctx context.Context, co
 		JOIN projects AS p USING (project_id)
 		WHERE p.git_common_dir_relative = ? AND p.git_common_dir = ?
 		  AND w.root_path_relative = ? AND w.root_path = ?
-		  AND w.git_dir_relative = ? AND w.git_dir = ?`,
+		  AND w.git_dir_relative = ? AND w.git_dir = ? AND w.pruned = 0`,
 		boolInt(commonDir.Relative), commonDir.Value,
 		boolInt(rootPath.Relative), rootPath.Value,
 		boolInt(gitDir.Relative), gitDir.Value))
@@ -532,7 +535,7 @@ func loadProject(ctx context.Context, query interface {
 }
 
 func loadWorkspaces(ctx context.Context, query rowsQuery, projectID int64) ([]storage.Workspace, error) {
-	rows, err := query.QueryContext(ctx, "SELECT "+workspaceColumns+" FROM project_workspaces WHERE project_id = ? ORDER BY workspace_id", projectID)
+	rows, err := query.QueryContext(ctx, "SELECT "+workspaceColumns+" FROM project_workspaces WHERE project_id = ? AND pruned = 0 ORDER BY workspace_id", projectID)
 	if err != nil {
 		return nil, err
 	}

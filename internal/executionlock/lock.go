@@ -172,14 +172,14 @@ type Lock struct {
 // Acquire never waits or steals. The persistent inode must never be removed:
 // unlinking it would allow two independent locks for the same worktree.
 func Acquire(gitDir string) (*Lock, error) {
-	return acquire(gitDir, false)
+	return acquire(gitDir, false, false)
 }
 
 // AcquireRecovery takes the same nonblocking OS lock but retains the recovery
 // receipt for inspection. It never clears it or starts work. On Unix the
 // custodian inherits this lock through process cleanup; obtaining it proves
 // that no participating owner or its custodian is still active.
-func AcquireRecovery(gitDir string) (*Lock, error) { return acquire(gitDir, true) }
+func AcquireRecovery(gitDir string) (*Lock, error) { return acquire(gitDir, true, false) }
 
 func (lock *Lock) Owner() *Owner {
 	if lock.owner == nil {
@@ -191,7 +191,11 @@ func (lock *Lock) Owner() *Owner {
 
 func (lock *Lock) RecoveryStopped() bool { return lock.owner == nil || runtime.GOOS != "windows" }
 
-func acquire(gitDir string, recovery bool) (*Lock, error) {
+// InspectRecovery locks an existing receipt without creating a file. A nil lock
+// means there was no lock file at inspection time; it is suitable for dry runs.
+func InspectRecovery(gitDir string) (*Lock, error) { return acquire(gitDir, true, true) }
+
+func acquire(gitDir string, recovery, existingOnly bool) (*Lock, error) {
 	canonical, err := filepath.EvalSymlinks(gitDir)
 	if err != nil {
 		return nil, err
@@ -202,7 +206,14 @@ func acquire(gitDir string, recovery bool) (*Lock, error) {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	flags := os.O_CREATE | os.O_RDWR
+	if existingOnly {
+		flags = os.O_RDWR
+	}
+	file, err := os.OpenFile(path, flags, 0600)
+	if existingOnly && errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("open workspace execution lock: %w", err)
 	}

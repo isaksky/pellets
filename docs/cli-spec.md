@@ -885,3 +885,21 @@ There are no `block`, `unblock`, `dependency`, `graph`, `ready`, `epic`, `tag`, 
 `--group` is intentionally singular. Groups have stable identity and shared context,
 but do not form tags, hierarchies, dependencies, or epics. There is no repeated
 group flag or many-to-many pellet membership.
+
+### `workspace prune`
+
+`pl [--project CODE] workspace prune [--dry-run]` removes registrations for
+confirmed missing linked checkouts. Without `--project`, it resolves the current
+registered project without bootstrapping a new workspace. `--json` uses the
+standard envelope with command `workspace prune`; data contains `dry_run`,
+`pruned` and `skipped` arrays. Each entry has an `id` and `path`; skipped entries
+also have a stable `reason`. In a dry run, `pruned` lists candidates and no
+registrations or lock files are changed. No confirmation flag is required.
+
+Pruning retains the main workspace, Git-locked worktrees, existing paths (including dangling symlinks),
+workspaces on unavailable storage, owned pellets, active
+schedules/execution and pending recovery. It rechecks workspace identity and
+ownership transactionally. It never removes files, branches, or Git worktrees.
+History retains its original workspace foreign keys and paths through an internal
+pruned marker. A returning exact checkout registers again with the same ID;
+pruned routing assignments are discarded. There is no archive/restore command.

@@ -32,7 +32,7 @@ func (database *ProjectDatabase) LoadWorkspaceRunSettings(ctx context.Context, w
 		return storage.SavedWorkspaceRunSettings{}, workspaceRunSettingsStorageError("load settings", err)
 	}
 	var exists bool
-	if err := database.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM project_workspaces WHERE workspace_id = ?)", workspaceID).Scan(&exists); err != nil {
+	if err := database.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM project_workspaces WHERE workspace_id = ? AND pruned = 0)", workspaceID).Scan(&exists); err != nil {
 		return storage.SavedWorkspaceRunSettings{}, workspaceRunSettingsStorageError("find workspace", err)
 	}
 	if !exists {
@@ -66,7 +66,7 @@ func (database *ProjectDatabase) SaveWorkspaceRunSettings(ctx context.Context, r
 	}
 	if errors.Is(loadErr, sql.ErrNoRows) {
 		var exists bool
-		if err := connection.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM project_workspaces WHERE workspace_id = ?)", request.WorkspaceID).Scan(&exists); err != nil {
+		if err := connection.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM project_workspaces WHERE workspace_id = ? AND pruned = 0)", request.WorkspaceID).Scan(&exists); err != nil {
 			return storage.SavedWorkspaceRunSettings{}, workspaceRunSettingsStorageError("find workspace", err)
 		}
 		if !exists {

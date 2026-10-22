@@ -1,0 +1,12 @@
+{{define "workspaces-area"}}<section id="workspaces-area" class="live-fragment" data-refresh-url="{{.CurrentURL}}">
+ {{template "workspaces-title" .}}
+ <form action="/projects/{{.Project.Code}}/workspaces/prune" method="post" data-on:submit="@pruneWorkspaces()" class="workspace-prune-form">
+ <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="execution" value="{{.ExecutionWorkspace}}">
+ <button id="prune-workspaces" type="submit" class="quiet-button">Prune missing workspaces</button>
+ <p class="muted">Removes missing checkouts from this list. Keeps history and work that needs attention.</p>
+ </form>
+ {{with .PruneResult}}<div class="workspace-prune-result" role="status"><p>Pruned {{len .Pruned}} workspace(s).</p>{{if .Skipped}}<details><summary>Kept {{len .Skipped}} workspace(s)</summary><ul>{{range .Skipped}}<li><code>{{.Path}}</code>: {{.ReasonLabel}}</li>{{end}}</ul></details>{{end}}</div>{{end}}
+ {{template "workspaces-list" .}}
+</section>{{end}}
+{{define "workspaces-title"}}<div id="workspaces-title" class="section-heading"><h1>All workspaces <small>({{len .RunWorkspaces}})</small></h1></div>{{end}}
+{{define "workspaces-list"}}<nav id="workspaces-list" aria-label="All workspaces" class="workspace-directory">{{range .RunWorkspaces}}<a class="workspace-link" href="{{.URL}}" title="{{.ActivityRoot}}" data-on:click="@navigate('app-content')"><span class="workspace-name">{{.Name}}<small>{{.ActivityRoot}}</small></span>{{if .Unavailable}}<small>Missing or unavailable</small>{{else}}{{with .ExecutionStatus}}<small>{{.Label}}</small>{{end}}{{end}}</a>{{end}}</nav>{{end}}

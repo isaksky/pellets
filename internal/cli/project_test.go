@@ -641,7 +641,7 @@ func projectTestApp(current *string, afterPelletOpen ...func(string) error) *App
 	}
 	application := New(
 		"test",
-		InitDBCommand(initializer), ProjectCommand(manager),
+		InitDBCommand(initializer), ProjectCommand(manager), WorkspaceCommand(manager),
 		GroupCommand(app.GroupManager{Projects: manager, Open: func(ctx context.Context, path string) (storage.GroupRepository, error) {
 			return sqlite.OpenGroupRepository(ctx, path)
 		}}),

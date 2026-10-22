@@ -356,6 +356,14 @@ import { action, actions } from "./datastar-1.0.3.js";
   }
 
   action({name: "navigate", apply: function (ctx, target) { return request(ctx, target, "navigate"); }});
+  action({name: "pruneWorkspaces", apply: async function (ctx) {
+    var returnFocus = ctx.el.contains(document.activeElement);
+    await request(ctx, "app-content", "submit");
+    // Disabling the submitter and replacing the directory can leave keyboard
+    // focus on the body. Preserve a later focus choice or an error inspector.
+    var button = document.getElementById("prune-workspaces");
+    if (returnFocus && document.activeElement === document.body && button) button.focus({preventScroll: true});
+  }});
   action({name: "saveLayout", apply: function (ctx) { return request(ctx, "app-content", "submit"); }});
   action({name: "submit", apply: function (ctx) { return request(ctx, ctx.el.matches("[data-pellet-create]") ? "task-list" : "inspector-host", "submit"); }});
   action({name: "queueMove", apply: function (ctx) { return request(ctx, "task-list", "queueMove"); }});

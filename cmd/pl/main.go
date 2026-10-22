@@ -113,6 +113,7 @@ func main() {
 	commands := []cli.Command{
 		cli.InitDBCommand(initializer),
 		cli.ProjectCommand(projectManager),
+		cli.WorkspaceCommand(projectManager),
 		cli.GroupCommand(groupManager),
 		cli.AddCommand(pelletManager),
 		cli.MoveCommand(pelletManager),

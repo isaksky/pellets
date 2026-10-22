@@ -391,11 +391,11 @@ func TestPlanningMigrationPreservesExistingQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	database := ProjectDatabase{db: legacy}
-	project, _, err := database.RegisterProject(ctx, projectRegistration("old", "repository/.git", "repository", "repository/.git"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Seed historical SQL directly: current registration reads the latest schema.
+	mustExec(t, legacy, `INSERT INTO projects(project_id,code,git_common_dir,git_common_dir_relative,created_at,updated_at) VALUES(1,'old','repository/.git',1,2460000,2460000);
+        INSERT INTO project_workspaces(workspace_id,project_id,root_path,root_path_relative,git_dir,git_dir_relative,created_at,updated_at) VALUES(1,1,'repository',1,'repository/.git',1,2460000,2460000);`)
+	project := storage.Project{ID: 1, Code: "old"}
+
 	// Seed the released schema directly; the current repository requires the
 	// current schema and must not be used to manufacture historical fixtures.
 	mustExec(t, legacy, `INSERT INTO pellets(project_id,number,title,description,priority,created_at,updated_at)

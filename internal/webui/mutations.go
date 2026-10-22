@@ -55,6 +55,8 @@ func (h *handler) serveMutation(response http.ResponseWriter, request *http.Requ
 	project := projectSummary.Project
 
 	switch {
+	case len(segments) == 4 && segments[2] == "workspaces" && segments[3] == "prune":
+		h.pruneWorkspaces(response, request, project)
 	case segments[2] == "groups":
 		h.mutateGroup(response, request, project, segments)
 	case len(segments) == 5 && segments[2] == "checkpoints":

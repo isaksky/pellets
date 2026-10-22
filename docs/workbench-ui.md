@@ -20,7 +20,8 @@ contains the full repository location; nonstandard Git directory names are
 retained rather than guessing a checkout from them.
 
 The first breadcrumb selects the project. The second selects the shared Queue,
-Memories, Groups, or a registered workspace. Workspace links appear in the left sidebar.
+Memories, Groups, or a visible workspace. Main, selected, and active workspaces
+appear in the left sidebar; **All workspaces** opens the complete registry.
 A workspace queue uses `/projects/CODE/tasks?workspace=ID`; existing
 `/projects/CODE/workspaces/ID` links still open that workspace queue. The execution
 sidebar always has an explicit project-local workspace, including while browsing
@@ -1028,3 +1029,15 @@ original states without applying the new presentation assertions. Pairs share
 crop metadata; runtime assertions also verify live wake, both stop controls,
 restart without replay, and explicit recovery. Go coverage includes ownership
 without execution and POSIX, drive-root, different-drive and UNC path labels.
+
+### Workspace list and pruning
+
+The sidebar and view switcher show the main workspace, the selected browsing and
+execution workspaces, and workspaces with owned work, active schedules, or
+unresolved execution/recovery state. Idle linked checkouts are available through
+**All workspaces (N)** at `/projects/CODE/workspaces`. The complete view preserves
+explicit workspace selection and offers **Prune missing workspaces**, using the
+same operation as `pl workspace prune`. The result reports removed registrations
+and reasons for retained entries; live directory refreshes preserve that receipt.
+Existing `/projects/CODE/workspaces/ID` links still select a workspace queue.
+Pruning preserves history and files and never clears ownership or recovery.

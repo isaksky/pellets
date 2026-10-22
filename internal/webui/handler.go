@@ -260,44 +260,46 @@ type pageData struct {
 	ResultPellets       int
 	ResultReviews       int
 
-	QueueOrderURL      string
-	ClearFiltersURL    string
-	DatabaseLabel      string
-	DatabasePath       string
-	WorkspacesURL      string
-	SelectedWorkspace  int64
-	WorkspaceAttention int
-	Nonce              string
-	UIRevision         string
-	CSRF               string
-	Projects           []projectView
-	Project            storage.Project
-	ProjectSummary     storage.WebProjectSummary
-	HasProject         bool
-	MultiProject       bool
-	RunWorkspaces      []runWorkspaceView
-	Area               string
-	TasksURL           string
-	MemoriesURL        string
-	CurrentURL         string
-	CloseURL           string
-	Pellets            []pelletView
-	Memories           []memoryView
-	Groups             []groupView
-	GroupRecords       []groupRecordView
-	GroupsURL          string
-	SelectedGroup      *groupRecordView
-	NewGroup           bool
-	RenameGroup        bool
-	Filters            filterView
-	SortHeaders        []sortHeaderView
-	SelectedPellet     *pelletView
-	SelectedMemory     *memoryView
-	MoveTargets        []pelletView
-	Flash              string
-	Conflict           *conflictView
-	Error              string
-	StatusCode         int
+	QueueOrderURL        string
+	ClearFiltersURL      string
+	DatabaseLabel        string
+	DatabasePath         string
+	WorkspacesURL        string
+	SelectedWorkspace    int64
+	WorkspaceAttention   int
+	Nonce                string
+	UIRevision           string
+	CSRF                 string
+	Projects             []projectView
+	Project              storage.Project
+	ProjectSummary       storage.WebProjectSummary
+	HasProject           bool
+	MultiProject         bool
+	RunWorkspaces        []runWorkspaceView
+	NavigationWorkspaces []runWorkspaceView
+	PruneResult          *app.WorkspacePruneResult
+	Area                 string
+	TasksURL             string
+	MemoriesURL          string
+	CurrentURL           string
+	CloseURL             string
+	Pellets              []pelletView
+	Memories             []memoryView
+	Groups               []groupView
+	GroupRecords         []groupRecordView
+	GroupsURL            string
+	SelectedGroup        *groupRecordView
+	NewGroup             bool
+	RenameGroup          bool
+	Filters              filterView
+	SortHeaders          []sortHeaderView
+	SelectedPellet       *pelletView
+	SelectedMemory       *memoryView
+	MoveTargets          []pelletView
+	Flash                string
+	Conflict             *conflictView
+	Error                string
+	StatusCode           int
 }
 
 type projectView struct {
@@ -324,6 +326,7 @@ type workspaceView struct {
 // remains authoritative after a browser reconnect or server restart.
 type runWorkspaceView struct {
 	ActiveTitle string
+	Unavailable bool
 
 	Name              string
 	URL               string
@@ -629,7 +632,7 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 			data.WorkspaceAttention++
 		}
 	}
-	if area == "workspaces" {
+	if area == "workspaces" && len(segments) == 4 {
 		area, data.Area = "tasks", "tasks"
 		if len(segments) == 4 {
 			query.Set("workspace", segments[3])
@@ -1309,7 +1312,7 @@ func (h *handler) renderUpdates(response *datastarResponse, status int, primary 
 	}
 	names = append(names, "project-counts", "area-tabs", "project-record", "project-rail", "breadcrumbs", "run-dashboard", "workspace-groups")
 	if data.Area == "workspaces" {
-		names = append(names, "run-dashboard")
+		names = append(names, "workspaces-title", "workspaces-list")
 	}
 	if data.Area == "tasks" {
 		names = append(names, "filter-summary", "clear-filters", "queue-order", "queue-title", "active-group-filter")

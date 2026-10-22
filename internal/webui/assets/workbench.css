@@ -3108,3 +3108,14 @@ pl-description-reader [data-markdown-heading]:focus-visible { outline: 2px solid
 }
 /* Keep the existing review text width while adding its background inset. */
 .review-disclosure > summary { margin-inline: -6px; max-width: calc(100% + 12px); }
+
+/* The complete registry is a separate view; routine navigation stays compact. */
+#workspaces-area { padding: 20px; }
+.workspace-prune-form { margin-bottom: 16px; }
+.workspace-prune-form p { margin-top: 8px; }
+.workspace-directory .workspace-link { min-height: 46px; height: auto; }
+.workspace-directory .workspace-name { min-width: 0; }
+.workspace-directory .workspace-name small { display: block; overflow: hidden; text-overflow: ellipsis; font-weight: normal; }
+.workspace-prune-result { margin: 12px 0; }
+
+.workspace-directory > .workspace-link > small { display: block; max-width: 45%; white-space: normal; }

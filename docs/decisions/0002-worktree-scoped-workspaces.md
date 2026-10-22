@@ -90,3 +90,16 @@ Related documents:
 - [CLI specification](../cli-spec.md)
 - [Memory](../memory.md)
 - [Implementation plan](../implementation-plan.md)
+
+### Amendment: explicit workspace pruning (2026-10-21)
+
+The earlier absence of cleanup is superseded by `pl workspace prune` and the
+matching **Prune missing workspaces** UI action. Both explicitly retire confirmed
+missing linked checkouts, keeping existing paths, the main workspace, owned work,
+active schedules/execution, and unresolved recovery. Unavailable repositories are not evidence of removal. A missing enclosing
+folder is eligible only when Git’s worktree metadata is also gone. No automatic cleanup is added.
+An internal pruned marker retains historical IDs, foreign keys and paths while
+excluding retired registrations from workspace selection. Exact returning
+checkouts can register again. Process-held schedule guards beside the database
+coordinate pruning with foreground schedules, including idle Watch; they are OS
+locks, not PID leases or persistent schedule records.

@@ -226,7 +226,7 @@ func validatePlanningWorkspace(ctx context.Context, conn *sql.Conn, project stor
 		return nil
 	}
 	var found int
-	if err := conn.QueryRowContext(ctx, "SELECT 1 FROM project_workspaces WHERE project_id=? AND workspace_id=?", project.ID, after).Scan(&found); err != nil {
+	if err := conn.QueryRowContext(ctx, "SELECT 1 FROM project_workspaces WHERE project_id=? AND workspace_id=? AND pruned=0", project.ID, after).Scan(&found); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return storage.InvalidPlanningState("the planning workspace does not belong to this project")
 		}

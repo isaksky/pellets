@@ -75,7 +75,12 @@ func (h *handler) prepareWorkbench(request *http.Request, data *pageData) error 
 	if data.ExecutionWorkspace == 0 && len(data.RunWorkspaces) > 0 {
 		data.ExecutionWorkspace = data.RunWorkspaces[0].ID
 		if h.application.Current != nil && h.application.Current.Project.ID == data.Project.ID {
-			data.ExecutionWorkspace = h.application.Current.Workspace.ID
+			for _, w := range data.RunWorkspaces {
+				if w.ID == h.application.Current.Workspace.ID {
+					data.ExecutionWorkspace = w.ID
+					break
+				}
+			}
 		}
 	}
 	clearQuery := url.Values{}
@@ -88,6 +93,7 @@ func (h *handler) prepareWorkbench(request *http.Request, data *pageData) error 
 	data.ClearFiltersURL = taskURL(data.Project.Code, clearQuery, "", storage.WebPelletSort{Column: storage.WebPelletSortColumn(data.Filters.Sort), Direction: storage.WebPelletSortDirection(data.Filters.Direction)})
 	if data.ExecutionWorkspace != 0 {
 		executionQuery := url.Values{"execution": {strconv.FormatInt(data.ExecutionWorkspace, 10)}}
+		data.WorkspacesURL += "?" + executionQuery.Encode()
 		data.TasksURL = taskURL(data.Project.Code, executionQuery, "", storage.WebPelletSort{Column: storage.WebPelletSortColumn(data.Filters.Sort), Direction: storage.WebPelletSortDirection(data.Filters.Direction)})
 		data.GroupsURL = "/projects/" + url.PathEscape(data.Project.Code) + "/groups?" + executionQuery.Encode()
 		data.MemoriesURL = "/projects/" + url.PathEscape(data.Project.Code) + "/memories?" + executionQuery.Encode()
@@ -108,6 +114,7 @@ func (h *handler) prepareWorkbench(request *http.Request, data *pageData) error 
 	}
 	for i := range data.RunWorkspaces {
 		w := &data.RunWorkspaces[i]
+		w.Unavailable = routing.EffectiveAssignment(w.ID).Unavailable
 		w.URL = data.TasksURL + "?workspace=" + strconv.FormatInt(w.ID, 10)
 		// TasksURL may include normalized sort settings.
 		u, _ := url.Parse(data.TasksURL)
@@ -117,6 +124,11 @@ func (h *handler) prepareWorkbench(request *http.Request, data *pageData) error 
 		w.URL = u.String()
 		if w.ID == data.SelectedWorkspace {
 			data.WorkspaceName, data.WorkspaceRoot = w.Name, w.Root
+		}
+	}
+	for _, w := range data.RunWorkspaces {
+		if w.ID == routing.MainWorkspaceID || w.ID == data.SelectedWorkspace || w.ID == data.ExecutionWorkspace || w.Busy || w.RecoveryAttention != "" || (w.Run != nil && (w.Run.Attention || w.Run.Interrupted || w.Run.CanResume || w.Run.UnownedActive)) {
+			data.NavigationWorkspaces = append(data.NavigationWorkspaces, w)
 		}
 	}
 	data.Assignment = routing.Assignment(data.SelectedWorkspace)
