@@ -34,6 +34,15 @@ func (application *WebApplication) WorkspaceRuns(ctx context.Context, workspaceI
 	return application.Executions.ListWorkspaceRuns(ctx, application.Database, workspaceID, 8)
 }
 
+// LatestProjectRuns loads only the run displayed for each workspace, using the
+// server's query-only reader rather than opening the execution writer per workspace.
+func (application *WebApplication) LatestProjectRuns(ctx context.Context, projectID int64) (map[int64]storage.ExecutionRun, error) {
+	if application.Executions == nil || application.Database.Path == "" {
+		return nil, nil
+	}
+	return application.Reader.LatestWebProjectRuns(ctx, projectID)
+}
+
 // StartSchedule resolves only an explicitly chosen already registered workspace.
 // It never uses Current as an implicit execution target or registers a worktree.
 func (application *WebApplication) StartSchedule(ctx context.Context, project storage.Project, workspaceID int64, request ScheduleRequest) (*ScheduleHandle, error) {

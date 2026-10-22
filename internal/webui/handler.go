@@ -737,6 +737,10 @@ func (h *handler) loadPage(request *http.Request, code, area string, segments []
 
 func (h *handler) runWorkspaceViews(request *http.Request, project storage.Project) ([]runWorkspaceView, error) {
 	views := make([]runWorkspaceView, 0, len(project.Workspaces))
+	latestRuns, err := h.application.LatestProjectRuns(request.Context(), project.ID)
+	if err != nil {
+		return nil, err
+	}
 	status := domain.PelletInProgress
 	inProgress, err := h.application.Pellets(request.Context(), project, storage.WebPelletFilters{Status: &status})
 	if err != nil {
@@ -761,26 +765,23 @@ func (h *handler) runWorkspaceViews(request *http.Request, project storage.Proje
 			view.ActivePellet = owned.Reference.String()
 			view.ActiveTitle = owned.Title
 		}
-		runs, err := h.application.WorkspaceRuns(request.Context(), workspace.ID)
-		if err != nil {
-			return nil, err
-		}
-		if len(runs) > 0 {
-			run := makeRunView(runs[0])
-			if storage.RunActive(runs[0].State) && h.application.Executions != nil && !h.application.Executions.OwnsRun(h.application.Database, runs[0].ID) {
-				run.UnownedActive, run.CanResume = true, runs[0].PelletPresent
+		latest, hasRun := latestRuns[workspace.ID]
+		if hasRun {
+			run := makeRunView(latest)
+			if storage.RunActive(latest.State) && h.application.Executions != nil && !h.application.Executions.OwnsRun(h.application.Database, latest.ID) {
+				run.UnownedActive, run.CanResume = true, latest.PelletPresent
 			}
-			if runs[0].State == "completed" && h.application.Executions != nil && h.application.Executions.RecoveryPending(h.application.Database, runs[0]) {
-				run.CanResume = runs[0].PelletPresent
+			if latest.State == "completed" && h.application.Executions != nil && h.application.Executions.RecoveryPending(h.application.Database, latest) {
+				run.CanResume = latest.PelletPresent
 			}
-			if !hasOwned && !storage.RunActive(runs[0].State) && run.State != "completed" {
+			if !hasOwned && !storage.RunActive(latest.State) && run.State != "completed" {
 				run.CanResume, run.Attention, run.Interrupted, run.Awaiting = false, false, false, false
 				run.State, run.Error, run.Outcome = "resolved", "", ""
 				run.AutoReview = false
 				run.Activity = "This attempt ended. The pellet is no longer active in this workspace."
 			}
 			view.Run = &run
-			view.Busy = storage.RunActive(runs[0].State)
+			view.Busy = storage.RunActive(latest.State)
 		}
 		if h.application.Scheduler != nil {
 			view.RecoveryAttention = h.application.Scheduler.WorkspaceAttention(workspace.ID)
@@ -798,7 +799,7 @@ func (h *handler) runWorkspaceViews(request *http.Request, project storage.Proje
 			view.RecoveryAttention = ""
 		}
 		if hasOwned {
-			currentGenerationRun := len(runs) > 0 && storage.RunMatchesPelletGeneration(runs[0], owned)
+			currentGenerationRun := hasRun && storage.RunMatchesPelletGeneration(latest, owned)
 			if view.Run != nil && !currentGenerationRun {
 				view.Run.CanResume = false
 			}

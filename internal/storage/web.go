@@ -90,6 +90,7 @@ type WebProjectSummary struct {
 // complete result and closes SQLite rows before it returns.
 type WebReader interface {
 	ListWebProjects(ctx context.Context) ([]WebProjectSummary, error)
+	LatestWebProjectRuns(ctx context.Context, projectID int64) (map[int64]ExecutionRun, error)
 	ListWebPellets(ctx context.Context, project Project, filters WebPelletFilters) ([]Pellet, error)
 	ReadWebPellet(ctx context.Context, project Project, reference domain.PelletReference) (Pellet, error)
 	ReadCheckpointOutcomes(ctx context.Context, identities []CheckpointIdentity) ([]CheckpointOutcome, error)
